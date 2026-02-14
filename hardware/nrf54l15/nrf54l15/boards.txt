@@ -96,9 +96,10 @@ xiao_nrf54l15.menu.clean_radio_profile.disabled.build.zephyr_dtc_overlay_radio=
 
 xiao_nrf54l15.menu.clean_radio_profile.ble_only=BLE Only
 xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.radio_profile_flags=-DARDUINO_XIAO_NRF54L15_RADIO_BLE_ONLY
-xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.radio_cpu_flags=
+xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.f_cpu_effective=128000000L
+xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.radio_cpu_flags=-DARDUINO_NRF54_CPU_128M
 xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.zephyr_conf_radio={runtime.platform.path}/zephyr/arduino_base/conf/radio_ble_only.conf
-xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.zephyr_dtc_overlay_radio=
+xiao_nrf54l15.menu.clean_radio_profile.ble_only.build.zephyr_dtc_overlay_radio={runtime.platform.path}/zephyr/arduino_base/boards/xiao_nrf54l15_cpu_128.overlay
 
 xiao_nrf54l15.menu.clean_radio_profile.ieee802154_only=802.15.4 Only
 xiao_nrf54l15.menu.clean_radio_profile.ieee802154_only.build.radio_profile_flags=-DARDUINO_XIAO_NRF54L15_RADIO_802154_ONLY

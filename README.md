@@ -143,7 +143,7 @@ The clean core exposes these Arduino IDE options:
 
 For lowest active current, keep **CPU Frequency = 64 MHz** and use `03.Board/LowPowerProfiles`.
 
-When **Radio Profile** is `802.15.4 Only` or `BLE + 802.15.4`, the build automatically enforces a 128 MHz radio-safe clock profile.
+When **Radio Profile** is `BLE Only`, `802.15.4 Only`, or `BLE + 802.15.4`, the build automatically enforces a 128 MHz radio-safe clock profile.
 
 `OpenOCD` is marked experimental for nRF54L15 because upstream flash support is incomplete.
 If OpenOCD upload fails, the uploader falls back to `pyOCD` automatically when available.

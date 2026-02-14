@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.3 - 2026-02-14
+
+- Fixed `Tools > Radio Profile > BLE Only` build failure on nRF54L15:
+  BLE profile now enforces 128 MHz CPU and applies the 128 MHz overlay, matching MPSL requirements.
+- Updated docs to clarify that BLE radio profiles use a 128 MHz radio-safe clock configuration.
+
 ## 1.1.2 - 2026-02-14
 
 - Added Linux host-tools fallback in `tools/get_toolchain.py`:
