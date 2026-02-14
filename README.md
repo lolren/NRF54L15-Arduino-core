@@ -107,12 +107,19 @@ python3 tools/check_release_reproducible.py
 
 ## Toolchain Requirements
 
-This core can bootstrap required NCS/Zephyr SDK components automatically on first build.
-If you prefer preinstalled toolchains, install ARM GCC via:
+This core bootstraps required NCS/Zephyr SDK components automatically on first build.
+No globally installed `arm-none-eabi-*` toolchain is required.
 
-- **Ubuntu/Debian**: `sudo apt-get install gcc-arm-none-eabi`
-- **macOS**: `brew install gcc-arm-none-eabi`
-- **Windows**: Download from [ARM Developer](https://developer.arm.com/downloads/-/gnu-rm)
+Host prerequisites:
+- Python 3
+- Git
+- Internet access for first-time bootstrap downloads
+
+Bootstrap cache behavior:
+- Changing Tools menu options (for example BLE enabled/disabled) reuses cached SDK/NCS data.
+- Updating the core version via Boards Manager reuses the same cache under
+  `<Arduino data>/packages/<vendor>/tools/` when possible.
+- Override cache location with `ARDUINO_NRF54L15_SHARED_TOOLS_DIR`.
 
 ## Uploading Firmware
 

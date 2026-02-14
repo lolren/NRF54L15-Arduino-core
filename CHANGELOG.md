@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.4 - 2026-02-14
+
+- Added shared bootstrap cache handling for Boards Manager installs:
+  NCS/Zephyr SDK payloads now live under the package vendor `tools/` directory,
+  so changing board options or updating core versions does not trigger full re-downloads.
+- Added cross-platform toolchain launcher wrappers (`toolchain-*` + `.cmd`) and
+  `toolchain_exec.py` so first compile on a clean machine can bootstrap the Zephyr SDK
+  before compiler invocation instead of failing with missing `arm-none-eabi-*` tools.
+- Updated installed-core discovery to include `packages/nrf54l15/...` layout in
+  addition to legacy vendor roots.
+- Expanded CI fresh-machine matrix to include `macos-latest`.
+- Updated documentation with cache behavior and `ARDUINO_NRF54L15_SHARED_TOOLS_DIR`.
+
 ## 1.1.3 - 2026-02-14
 
 - Fixed `Tools > Radio Profile > BLE Only` build failure on nRF54L15:

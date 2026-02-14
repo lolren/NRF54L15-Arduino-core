@@ -2,7 +2,7 @@
 # Licensed under the Apache License 2.0
 
 name=Seeed nRF54L15 (Bare-Metal)
-version=1.1.3
+version=1.1.4
 category=ARM
 
 # Python launcher used by upload helper (cross-platform)
@@ -15,14 +15,14 @@ tools.python3.args.macosx=
 
 # Toolchain commands
 compiler.exe.suffix=
-compiler.exe.suffix.windows=.exe
-compiler.path=
-compiler.c.cmd=arm-none-eabi-gcc{compiler.exe.suffix}
-compiler.cpp.cmd=arm-none-eabi-g++{compiler.exe.suffix}
-compiler.S.cmd=arm-none-eabi-gcc{compiler.exe.suffix}
-compiler.ar.cmd=arm-none-eabi-ar{compiler.exe.suffix}
-compiler.objcopy.cmd=arm-none-eabi-objcopy{compiler.exe.suffix}
-compiler.size.cmd=arm-none-eabi-size{compiler.exe.suffix}
+compiler.exe.suffix.windows=.cmd
+compiler.path={runtime.platform.path}/tools/
+compiler.c.cmd=toolchain-gcc{compiler.exe.suffix}
+compiler.cpp.cmd=toolchain-gpp{compiler.exe.suffix}
+compiler.S.cmd=toolchain-gcc{compiler.exe.suffix}
+compiler.ar.cmd=toolchain-ar{compiler.exe.suffix}
+compiler.objcopy.cmd=toolchain-objcopy{compiler.exe.suffix}
+compiler.size.cmd=toolchain-size{compiler.exe.suffix}
 
 # Compiler flags
 compiler.c.flags=-std=gnu17 -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -mfp16-format=ieee -Wall -Wextra -Os -g3 -ffunction-sections -fdata-sections

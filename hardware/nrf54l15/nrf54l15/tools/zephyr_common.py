@@ -90,7 +90,8 @@ def find_installed_seeed_platform_dir() -> Optional[Path]:
             return explicit_path
 
     for data_dir in _candidate_arduino_data_dirs():
-        for vendor in ("seeed", "Seeeduino"):
+        # Support both legacy vendor roots and this package's published root.
+        for vendor in ("nrf54l15", "seeed", "Seeeduino"):
             root = data_dir / "packages" / vendor / "hardware" / "nrf54l15"
             if not root.is_dir():
                 continue
@@ -112,6 +113,26 @@ def _first_existing_dir(candidates: Sequence[Optional[Path]]) -> Optional[Path]:
     return None
 
 
+def _shared_tools_dir_for_installed_core(platform_dir: Path) -> Optional[Path]:
+    override = os.environ.get("ARDUINO_NRF54L15_SHARED_TOOLS_DIR", "").strip()
+    if override:
+        return Path(override)
+
+    # Boards Manager layout:
+    #   <arduino-data>/packages/<vendor>/hardware/nrf54l15/<version>
+    arch_dir = platform_dir.parent
+    if arch_dir.name != "nrf54l15":
+        return None
+    hardware_dir = arch_dir.parent
+    if hardware_dir.name != "hardware":
+        return None
+    vendor_dir = hardware_dir.parent
+    packages_dir = vendor_dir.parent
+    if packages_dir.name != "packages":
+        return None
+    return vendor_dir / "tools"
+
+
 def core_paths(script_file: Path) -> Dict[str, Path]:
     script_dir = script_file.resolve().parent
     platform_dir = script_dir.parent
@@ -120,6 +141,7 @@ def core_paths(script_file: Path) -> Dict[str, Path]:
     local_sdk_dir = local_tools_dir / "zephyr-sdk"
     local_pydeps_dir = local_tools_dir / "pydeps"
     local_arduino_base_dir = platform_dir / "zephyr" / "arduino_base"
+    shared_tools_dir = _shared_tools_dir_for_installed_core(platform_dir)
 
     local_seeed_platform_dir = platform_dir.parent.parent / "seeed" / "nrf54l15"
     installed_seeed_platform_dir = find_installed_seeed_platform_dir()
@@ -143,27 +165,34 @@ def core_paths(script_file: Path) -> Dict[str, Path]:
     if tooling_platform_dir is None:
         tooling_platform_dir = platform_dir
 
-    tools_dir = _first_existing_dir(
-        [
-            local_tools_dir,
-            local_seeed_tools_dir,
-            installed_seeed_tools_dir,
-        ]
-    )
-    ncs_dir = _first_existing_dir(
-        [
-            local_ncs_dir,
-            local_seeed_tools_dir / "ncs",
-            (installed_seeed_tools_dir / "ncs") if installed_seeed_tools_dir else None,
-        ]
-    )
-    sdk_dir = _first_existing_dir(
-        [
-            local_sdk_dir,
-            local_seeed_tools_dir / "zephyr-sdk",
-            (installed_seeed_tools_dir / "zephyr-sdk") if installed_seeed_tools_dir else None,
-        ]
-    )
+    if shared_tools_dir is not None:
+        # Keep heavyweight bootstrap artifacts outside versioned core folders
+        # so switching board options or upgrading the core does not redownload.
+        tools_dir = shared_tools_dir
+        ncs_dir = shared_tools_dir / "ncs"
+        sdk_dir = shared_tools_dir / "zephyr-sdk"
+    else:
+        tools_dir = _first_existing_dir(
+            [
+                local_tools_dir,
+                local_seeed_tools_dir,
+                installed_seeed_tools_dir,
+            ]
+        )
+        ncs_dir = _first_existing_dir(
+            [
+                local_ncs_dir,
+                local_seeed_tools_dir / "ncs",
+                (installed_seeed_tools_dir / "ncs") if installed_seeed_tools_dir else None,
+            ]
+        )
+        sdk_dir = _first_existing_dir(
+            [
+                local_sdk_dir,
+                local_seeed_tools_dir / "zephyr-sdk",
+                (installed_seeed_tools_dir / "zephyr-sdk") if installed_seeed_tools_dir else None,
+            ]
+        )
     pydeps_dir = _first_existing_dir(
         [
             local_pydeps_dir,
@@ -187,6 +216,7 @@ def core_paths(script_file: Path) -> Dict[str, Path]:
         "app_platform_dir": app_platform_dir,
         "tooling_platform_dir": tooling_platform_dir,
         "fallback_platform_dir": fallback_platform_dir,
+        "shared_tools_dir": shared_tools_dir if shared_tools_dir is not None else local_tools_dir,
         "tools_dir": tools_dir,
         "ncs_dir": ncs_dir,
         "sdk_dir": sdk_dir,
