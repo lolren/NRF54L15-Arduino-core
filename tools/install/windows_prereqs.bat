@@ -50,9 +50,9 @@ if errorlevel 1 exit /b 1
 
 call :detect_arduino_ide
 if defined ARDUINO_IDE_EXE (
-  call :log Arduino IDE detected: "%ARDUINO_IDE_EXE%"
+  call :log Arduino IDE detected: "!ARDUINO_IDE_EXE!"
 ) else (
-  call :log Arduino IDE executable not detected (optional). Download: %ARDUINO_IDE_DOWNLOAD_PAGE%
+  call :log Arduino IDE executable not detected. Download: !ARDUINO_IDE_DOWNLOAD_PAGE!
 )
 
 call :detect_sketchbook
@@ -108,7 +108,7 @@ where python >nul 2>&1
 if errorlevel 1 (
   where py >nul 2>&1
   if not errorlevel 1 (
-    for /f "delims=" %%V in ('py --version 2^>nul') do call :log Installed %%V (py launcher detected)
+    for /f "delims=" %%V in ('py --version 2^>nul') do call :log Installed %%V - py launcher detected
     goto :eof
   )
   call :log WARNING: Python installed but not yet visible in this shell PATH. Reopen terminal if needed.
@@ -160,12 +160,12 @@ if errorlevel 1 goto :eof
 
 set "WINGET_ID=%~1"
 for /L %%I in (1,1,%WINGET_RETRIES%) do (
-  call :log Trying winget install %%I/%WINGET_RETRIES%: %WINGET_ID%
+  call :log Trying winget install %%I/%WINGET_RETRIES%: !WINGET_ID!
   winget install --id "%WINGET_ID%" --exact --accept-source-agreements --accept-package-agreements -h >nul 2>&1
   if not errorlevel 1 goto :eof
   timeout /t %WINGET_RETRY_DELAY_SECONDS% /nobreak >nul
 )
-call :log winget install failed for %WINGET_ID%; falling back to direct installer.
+call :log winget install failed for !WINGET_ID!; falling back to direct installer.
 goto :eof
 
 :download_file
@@ -182,7 +182,7 @@ if not errorlevel 1 exit /b 0
 
 where curl >nul 2>&1
 if not errorlevel 1 (
-  call :log PowerShell download failed (possible ECONNRESET). Trying curl fallback...
+  call :log PowerShell download failed due to network reset. Trying curl fallback...
   curl.exe -L --retry %DOWNLOAD_RETRIES% --retry-all-errors --connect-timeout 30 --output "%DL_OUT%" "%DL_URL%" >nul 2>&1
   if not errorlevel 1 exit /b 0
 )
