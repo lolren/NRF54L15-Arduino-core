@@ -70,7 +70,7 @@ def build_once(
     dist_dir: Path,
     index_path: Path,
 ) -> tuple[Path, Path]:
-    archive_name = f"nrf54l15-baremetal-{version}.tar.bz2"
+    archive_name = f"nrf54l15-zephyr-based-{version}.tar.bz2"
     run(
         [
             sys.executable,

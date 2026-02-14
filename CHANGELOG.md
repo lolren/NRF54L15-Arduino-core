@@ -2,11 +2,42 @@
 
 All notable changes to this project are documented in this file.
 
-## 1.1.10 - 2026-02-14
+## 0.1.0 - 2026-02-14
 
+- Reset release line to `0.1.0` and consolidate published artifacts to the
+  current working Zephyr-based implementation.
+- Updated user-facing naming from "Bare-Metal" to "Zephyr-Based" across
+  Boards Manager metadata and documentation.
+
+- Reworked `tools/install/windows_prereqs.bat` to provision a full first-run
+  Windows setup by default: dependency install (Python/Git), core copy to
+  sketchbook, NCS workspace bootstrap, Zephyr SDK bootstrap, and one-time
+  Zephyr warmup build.
+- Added automatic CMake dependency provisioning to
+  `tools/install/windows_prereqs.bat` to prevent `west zephyr-export` failures
+  on fresh Windows hosts.
+- Added clearer step-by-step progress logging in the Windows installer.
+- Updated Windows core copy behavior to preserve existing `tools/ncs` and
+  `tools/zephyr-sdk` caches on rerun, avoiding repeated bootstrap downloads.
+- Fixed `NameError: log is not defined` in `tools/get_toolchain.py`
+  `.7z` extraction fallback path.
+- Changed `KEEP_ZEPHYR_SDK_ARCHIVE` default to keep SDK archive (`1`) so
+  interrupted/failed setups can resume without re-downloading.
+- Added Windows installer flags `--skip-core-copy`, `--skip-bootstrap`,
+  and `--help`.
 - Added self-healing west Python dependency bootstrap in `tools/get_nrf_connect.py`:
   if bundled `pydeps` is missing `west`/`colorama` dependencies on fresh hosts,
   the script now installs fallback packages into `tools/pydeps` automatically.
+- Added automatic Zephyr Python build dependency bootstrap
+  (`zephyr/scripts/requirements-base.txt`) into `tools/pydeps` to prevent
+  missing-module failures (for example `jsonschema`) during first warmup builds.
+- Fixed Windows warmup build path-length failures by switching default Zephyr
+  build output to a shorter path under `%LOCALAPPDATA%\nrf54l15-build`
+  (override with `ARDUINO_ZEPHYR_BUILD_DIR` / `ARDUINO_NRF54L15_BUILD_ROOT`).
+- Updated toolchain bootstrap to accept a host `dtc` already on PATH, avoiding
+  unnecessary Zephyr SDK host-tools setup attempts on Windows reruns.
+- Added `tools/export_sync_bundle.py` to generate a clean sync folder (and
+  optional zip) without local SDK/cache payloads for manual GitHub uploads.
 - Improved `tools/get_toolchain.py` API-rate-limit fallback by synthesizing
   deterministic Zephyr SDK/host-tools asset URLs for the detected host when
   GitHub API metadata is unavailable.

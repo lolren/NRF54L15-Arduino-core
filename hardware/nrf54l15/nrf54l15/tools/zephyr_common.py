@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
+MIN_WEST_VERSION = (0, 14, 0)
+
 
 def is_windows() -> bool:
     return sys.platform.startswith("win")
@@ -229,6 +231,153 @@ def with_west_pythonpath(platform_dir: Path, env: Optional[Mapping[str, str]] = 
     pydeps = str(platform_dir / "tools" / "pydeps")
     current = out.get("PYTHONPATH", "")
     out["PYTHONPATH"] = f"{pydeps}{os.pathsep}{current}" if current else pydeps
+    return out
+
+
+def _parse_version_tuple(version: str) -> Tuple[int, int, int]:
+    numbers: List[int] = []
+    current = ""
+    for ch in version:
+        if ch.isdigit():
+            current += ch
+            continue
+        if current:
+            numbers.append(int(current))
+            current = ""
+    if current:
+        numbers.append(int(current))
+    while len(numbers) < 3:
+        numbers.append(0)
+    return tuple(numbers[:3])  # type: ignore[return-value]
+
+
+def _west_probe(env: Mapping[str, str]) -> Tuple[bool, str]:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import west,colorama;from west.version import __version__ as v;print(v,end='')",
+        ],
+        env=dict(env),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        return (False, "")
+    return (True, (probe.stdout or "").strip())
+
+
+def _west_version_supported(version: str) -> bool:
+    if not version:
+        return False
+    if version.startswith("0.0.0+bundled"):
+        return False
+    return _parse_version_tuple(version) >= MIN_WEST_VERSION
+
+
+def ensure_west_pydeps(platform_dir: Path, env: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    out: Dict[str, str] = dict(os.environ if env is None else env)
+    pydeps_dir = platform_dir / "tools" / "pydeps"
+    pydeps_dir.mkdir(parents=True, exist_ok=True)
+
+    ok, version = _west_probe(out)
+    if ok and _west_version_supported(version):
+        return out
+
+    pip_check = subprocess.run(
+        [sys.executable, "-m", "pip", "--version"],
+        env=out,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if pip_check.returncode != 0:
+        run([sys.executable, "-m", "ensurepip", "--upgrade"], env=out, check=True)
+
+    print("Installing Python west dependencies into tools/pydeps...")
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-input",
+            "--upgrade",
+            "--target",
+            str(pydeps_dir),
+            "west",
+            "colorama",
+        ],
+        env=out,
+        check=True,
+    )
+
+    ok, version = _west_probe(out)
+    if not ok or not _west_version_supported(version):
+        raise RuntimeError(
+            f"Unsupported west version after install: {version or 'not found'} "
+            "(requires >= 0.14.0)."
+        )
+
+    return out
+
+
+def ensure_zephyr_python_deps(
+    platform_dir: Path,
+    ncs_dir: Path,
+    env: Optional[Mapping[str, str]] = None,
+) -> Dict[str, str]:
+    out = ensure_west_pydeps(platform_dir, env)
+    pydeps_dir = platform_dir / "tools" / "pydeps"
+    requirements_base = ncs_dir / "zephyr" / "scripts" / "requirements-base.txt"
+
+    probe = subprocess.run(
+        [sys.executable, "-c", "import jsonschema,elftools"],
+        env=out,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        return out
+
+    if not requirements_base.is_file():
+        raise RuntimeError(f"Missing Zephyr requirements file: {requirements_base}")
+
+    print("Installing Zephyr Python build dependencies into tools/pydeps...")
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-input",
+            "--upgrade",
+            "--target",
+            str(pydeps_dir),
+            "-r",
+            str(requirements_base),
+        ],
+        env=out,
+        check=True,
+    )
+
+    probe = subprocess.run(
+        [sys.executable, "-c", "import jsonschema,elftools"],
+        env=out,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        raise RuntimeError(
+            "Zephyr Python dependency install failed; missing jsonschema/elftools "
+            "after requirements-base installation."
+        )
+
     return out
 
 

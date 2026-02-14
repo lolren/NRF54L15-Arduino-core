@@ -1,5 +1,5 @@
 /*
- * nRF54L15 Bare-Metal Compatibility Header
+ * nRF54L15 Zephyr-Based Compatibility Header
  *
  * Pulls in Nordic's source register/type definitions and provides
  * compatibility aliases expected by this Arduino core.

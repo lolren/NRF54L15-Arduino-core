@@ -50,13 +50,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--index-path",
-        default="package_nrf54l15_baremetal_index.json",
+        default="package_nrf54l15_zephyr_based_index.json",
         help="Package index JSON path to create/update.",
     )
     parser.add_argument(
         "--archive-name",
         default="",
-        help="Archive filename. Default: nrf54l15-baremetal-<version>.tar.bz2",
+        help="Archive filename. Default: nrf54l15-zephyr-based-<version>.tar.bz2",
     )
     parser.add_argument(
         "--archive-root",
@@ -70,8 +70,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--package-name", default="nrf54l15")
     parser.add_argument("--architecture", default="nrf54l15")
-    parser.add_argument("--platform-name", default="Seeed nRF54L15 (Bare-Metal)")
-    parser.add_argument("--board-name", default="XIAO nRF54L15 (Bare-Metal - NO BLE)")
+    parser.add_argument("--platform-name", default="Seeed nRF54L15 (Zephyr-Based)")
+    parser.add_argument("--board-name", default="XIAO nRF54L15 (Zephyr-Based - NO BLE)")
     parser.add_argument("--category", default="Arduino")
     parser.add_argument("--maintainer", default="Seeed Studio")
     parser.add_argument(
@@ -277,7 +277,7 @@ def main() -> int:
     if not source_root.is_dir():
         raise SystemExit(f"Missing core directory: {source_root}")
 
-    archive_name = args.archive_name.strip() or f"nrf54l15-baremetal-{version}.tar.bz2"
+    archive_name = args.archive_name.strip() or f"nrf54l15-zephyr-based-{version}.tar.bz2"
     archive_root = args.archive_root.strip() or archive_name.removesuffix(".tar.bz2")
     archive_path = Path(args.dist_dir).resolve() / archive_name
 

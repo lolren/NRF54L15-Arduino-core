@@ -1,6 +1,6 @@
-# Arduino Boards Configuration for XIAO nRF54L15 (Bare-Metal)
+# Arduino Boards Configuration for XIAO nRF54L15 (Zephyr-Based)
 # Licensed under the Apache License 2.0
-# Clean implementation without nrf-connect or Zephyr dependencies
+# Zephyr-based implementation with Arduino-compatible APIs
 
 menu.clean_upload_method=Upload Method
 menu.clean_cpu=CPU Frequency
@@ -13,7 +13,7 @@ menu.clean_ble6=BLE 6 Features
 # Seeed Studio XIAO nRF54L15
 #######################################
 
-xiao_nrf54l15.name=XIAO nRF54L15 (Bare-Metal - NO BLE)
+xiao_nrf54l15.name=XIAO nRF54L15 (Zephyr-Based - NO BLE)
 
 # USB VID/PID
 xiao_nrf54l15.vid.0=2886

@@ -1,4 +1,4 @@
-# CMake Build Configuration for nRF54L15 Bare-Metal Arduino Core
+# CMake Build Configuration for nRF54L15 Zephyr-Based Arduino Core
 # Licensed under the Apache License 2.0
 
 cmake_minimum_required(VERSION 3.20)

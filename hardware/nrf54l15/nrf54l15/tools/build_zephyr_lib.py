@@ -16,6 +16,7 @@ from typing import List, Sequence
 from zephyr_common import (
     detect_supported_host_for_sdk,
     core_paths,
+    ensure_zephyr_python_deps,
     exe_name,
     prepend_sdk_tool_paths,
     read_metadata,
@@ -349,7 +350,17 @@ def main() -> int:
 
     board = os.environ.get("ARDUINO_ZEPHYR_BOARD", "xiao_nrf54l15/nrf54l15/cpuapp")
     board_sanitized = board.replace("/", "_")
-    build_dir_default = platform_dir / "tools" / ".arduino-zephyr-build" / board_sanitized
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        build_root = Path(
+            os.environ.get(
+                "ARDUINO_NRF54L15_BUILD_ROOT",
+                str(Path(local_app_data) / "nrf54l15-build"),
+            )
+        )
+        build_dir_default = build_root / board_sanitized
+    else:
+        build_dir_default = platform_dir / "tools" / ".arduino-zephyr-build" / board_sanitized
     build_dir = Path(os.environ.get("ARDUINO_ZEPHYR_BUILD_DIR", str(build_dir_default)))
 
     candidate_roots = []
@@ -413,6 +424,7 @@ def main() -> int:
         ninja_bin = resolve_ninja(sdk_dir)
 
         env = with_west_pythonpath(tooling_platform_dir)
+        ensure_zephyr_python_deps(tooling_platform_dir, ncs_dir, env)
         env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
         env["ZEPHYR_BASE"] = str((ncs_dir / "zephyr").resolve())
         prepend_sdk_tool_paths(env, sdk_dir)

@@ -1,8 +1,8 @@
 /*
- * Arduino Header for nRF54L15 - Bare Metal Port
+ * Arduino Header for nRF54L15 - Zephyr-Based Port
  *
- * This is a clean, bare-metal implementation of the Arduino API
- * for the nRF54L15 microcontroller.
+ * This core exposes Arduino-compatible APIs while using a Zephyr-based
+ * build/runtime integration for the nRF54L15 microcontroller.
  *
  * Licensed under the Apache License 2.0
  * https://www.apache.org/licenses/LICENSE-2.0

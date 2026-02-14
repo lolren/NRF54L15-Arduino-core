@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arduino upload helper for XIAO nRF54L15 bare-metal core.
+"""Arduino upload helper for XIAO nRF54L15 Zephyr-based core.
 
 This wrapper keeps Arduino upload integration cross-platform while relying on
 pyOCD for CMSIS-DAP flashing.

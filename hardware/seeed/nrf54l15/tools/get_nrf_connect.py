@@ -16,7 +16,15 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from zephyr_common import core_paths, is_windows, run, west_cmd, with_west_pythonpath
+from zephyr_common import (
+    core_paths,
+    ensure_zephyr_python_deps,
+    ensure_west_pydeps,
+    is_windows,
+    run,
+    west_cmd,
+    with_west_pythonpath,
+)
 
 MINGIT_API_URL = "https://api.github.com/repos/git-for-windows/git/releases/latest"
 MINGIT_USER_AGENT = "xiao-nrf54l15-arduino-core-ncs-bootstrap/0.1.14"
@@ -572,6 +580,7 @@ def main() -> int:
     force_update = os.environ.get("NCS_FORCE_UPDATE", "0") == "1"
 
     env = with_west_pythonpath(platform_dir)
+    ensure_west_pydeps(platform_dir, env)
     env.setdefault("NO_COLOR", "1")
     west = west_cmd()
     lock_dir = ncs_dir.parent / ".get_nrf_connect.lock"
@@ -616,6 +625,7 @@ def main() -> int:
                 if not workspace_metadata_valid(west, env, ncs_dir):
                     raise
         elif workspace_ready(ncs_dir) and not force_update:
+            ensure_zephyr_python_deps(platform_dir, ncs_dir, env)
             print(f"nRF Connect SDK workspace already present: {ncs_dir}")
             print("Set NCS_FORCE_UPDATE=1 to fetch/update remotes.")
             return 0
@@ -637,6 +647,8 @@ def main() -> int:
 
         if not workspace_ready(ncs_dir):
             raise RuntimeError(f"Incomplete NCS workspace after bootstrap: {ncs_dir}")
+
+        ensure_zephyr_python_deps(platform_dir, ncs_dir, env)
 
         # Patch edtlib.py for PyYAML 6.0+ compatibility
         patch_edtlib_for_pyyaml(ncs_dir)

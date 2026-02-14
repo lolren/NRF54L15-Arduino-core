@@ -23,6 +23,33 @@ from zephyr_common import (
 GITHUB_API_USER_AGENT = "nrf54l15-arduino-core-toolchain-bootstrap/0.1.0"
 
 
+def log(message: str) -> None:
+    print(message)
+
+
+def ensure_cmake_on_windows_path() -> None:
+    if os.name != "nt":
+        return
+    if shutil.which("cmake"):
+        return
+
+    candidate_bins = [
+        Path(os.environ.get("ProgramFiles", "")) / "CMake" / "bin",
+        Path(os.environ.get("ProgramFiles(x86)", "")) / "CMake" / "bin",
+        Path(os.environ.get("LocalAppData", "")) / "Programs" / "CMake" / "bin",
+    ]
+    for bin_dir in candidate_bins:
+        if not str(bin_dir):
+            continue
+        cmake_exe = bin_dir / "cmake.exe"
+        if not cmake_exe.is_file():
+            continue
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + (os.pathsep + old_path if old_path else "")
+        log(f"Using CMake from {bin_dir}")
+        return
+
+
 def fallback_assets_for_host(version: str, host_os: str, host_arch: str) -> List[Dict[str, str]]:
     if not host_os or not host_arch:
         return []
@@ -271,6 +298,11 @@ def ensure_dtc_available(
     if dtc_tool and dtc_tool.is_file():
         return True
 
+    host_dtc = shutil.which("dtc")
+    if host_dtc:
+        print(f"Using host dtc from PATH: {host_dtc}")
+        return True
+
     print("DTC host tool missing, running setup script...")
     try:
         try_setup_script(sdk_dir)
@@ -498,8 +530,12 @@ def main() -> int:
     tools_dir = paths["tools_dir"]
     sdk_dir = paths["sdk_dir"]
 
+    ensure_cmake_on_windows_path()
+
     sdk_version = os.environ.get("SDK_VERSION", "0.16.8")
-    keep_archive = os.environ.get("KEEP_ZEPHYR_SDK_ARCHIVE", "0") == "1"
+    # Keep the downloaded SDK archive by default so failed/partial installs
+    # can resume without re-downloading multi-GB payloads.
+    keep_archive = os.environ.get("KEEP_ZEPHYR_SDK_ARCHIVE", "1") == "1"
     prune_sdk = os.environ.get("PRUNE_ZEPHYR_SDK", "1") == "1"
     prune_multilib = os.environ.get("PRUNE_ZEPHYR_SDK_MULTIARCH", "1") == "1"
     prune_sysroots = os.environ.get("PRUNE_ZEPHYR_SDK_SYSROOTS", "0") == "1"

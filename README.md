@@ -1,4 +1,8 @@
-# Arduino Core for nRF54L15 (Bare-Metal)
+<h1><font color="red">IMPORTANT: first-time installation + first compile can be slow and may look stalled. Let it finish.</font></h1>
+<h2><font color="red">Windows can be much slower because real-time protection scans large SDK/toolchain files. Recommended: use Linux. On Windows, add this core/tools path as an antivirus exception, or temporarily disable real-time protection only for first setup/compile.</font></h2>
+<h2><font color="red">Windows recommendation: use the script install method only (`install_windows.bat`). Arduino IDE/Boards Manager flows on Windows can be buggy and may fail with `ECONNRESET` during first bootstrap.</font></h2>
+
+# Arduino Core for nRF54L15 (Zephyr-Based)
 
 A clean, lightweight Arduino core for Nordic Semiconductor nRF54L15 microcontrollers.
 This repository intentionally keeps heavyweight SDK/toolchain content out of source control and release archives.
@@ -40,13 +44,13 @@ Build/runtime basis:
 
 ## Installation
 
-### Method 1: Manual Installation (Cross-platform)
+### Method 1: Manual Installation (Linux/macOS recommended)
 
 1. Download or clone this repository
 2. Copy the `nrf54l15` folder to your Arduino hardware directory:
    - **Linux**: `~/Arduino/hardware/`
    - **macOS**: `~/Documents/Arduino/hardware/`
-   - **Windows**: `My Documents/Arduino/hardware/`
+   - **Windows**: not recommended (use Method 3 script install instead)
 
 The folder structure should look like:
 ```
@@ -63,28 +67,30 @@ Arduino/
 ```
 
 3. Restart Arduino IDE
-4. Select **Tools > Board > XIAO nRF54L15 (Bare-Metal - NO BLE)**
+4. Select **Tools > Board > XIAO nRF54L15 (Zephyr-Based - NO BLE)**
 
-### Method 2: Arduino IDE (Boards Manager)
+### Method 2: Arduino IDE (Boards Manager, Linux/macOS recommended)
 
 1. Open **File > Preferences > Additional boards manager URLs**
 2. Add this package index URL (copy/paste as one line):
    ```text
-   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_baremetal_index.json
+   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_zephyr_based_index.json
    ```
 3. Open **Tools > Board > Boards Manager**
-4. Search for **Seeed nRF54L15 (Bare-Metal)** and install
-5. Select **Tools > Board > XIAO nRF54L15 (Bare-Metal - NO BLE)**
+4. Search for **Seeed nRF54L15 (Zephyr-Based)** and install
+5. Select **Tools > Board > XIAO nRF54L15 (Zephyr-Based - NO BLE)**
 
 Arduino IDE support:
 - Linux
-- Windows
 - macOS
 
-### Method 3: Optional Prerequisite Scripts (Standalone)
+Windows warning:
+- Prefer Method 3 (`install_windows.bat`) due Arduino IDE Windows instability (`ECONNRESET`) during first bootstrap/compile.
+
+### Method 3: Prerequisite Scripts (Standalone)
 
 These scripts are independent from Boards Manager installation.
-Use them when you want a guided host setup (dependencies first, optional core copy to sketchbook hardware path).
+Use them when you want guided host setup before IDE compile/upload.
 
 Linux:
 
@@ -105,13 +111,30 @@ Root launcher scripts:
 `tools/install/windows_prereqs.bat` has editable variables at the top for:
 - Python download/version and installer args
 - Git download/version and installer args
+- CMake download/version and installer args
 - Winget package IDs
 
 Both scripts:
 - Detect Arduino IDE (if installed)
 - Detect sketchbook folder
-- Prompt to copy the core into `<sketchbook>/hardware/nrf54l15/nrf54l15`
-- Windows script can also run a one-time Zephyr warmup build to avoid heavy first compile in IDE
+
+Windows script default behavior:
+- Ensures Python, Git, CMake, DTC, and Ninja are installed (auto-installs if missing)
+- Copies this core into `<sketchbook>/hardware/nrf54l15/nrf54l15`
+- Preserves existing `tools/ncs` and `tools/zephyr-sdk` cache content on reruns
+- Bootstraps NCS workspace + Zephyr SDK
+- Installs required Zephyr Python build dependencies into `tools/pydeps` automatically
+- Runs a one-time Zephyr warmup build so IDE compiles are sketch-focused
+- Uses a short default Zephyr build cache path on Windows (`%LOCALAPPDATA%\nrf54l15-build`) to avoid path-length build failures
+
+Windows script options:
+- `--skip-core-copy` to keep using the repo core path without copying
+- `--skip-bootstrap` to skip NCS/SDK download and warmup build
+- `--help` to print usage
+
+Windows build-path overrides:
+- `ARDUINO_ZEPHYR_BUILD_DIR` to set an explicit build directory
+- `ARDUINO_NRF54L15_BUILD_ROOT` to change the default short Windows build-root
 
 Troubleshooting if the core does not appear in Boards Manager:
 - Ensure the URL above is added as one full line.
@@ -126,7 +149,7 @@ Troubleshooting if the core does not appear in Boards Manager:
 To generate release archive + checksum + updated package index before publishing:
 
 ```bash
-python3 tools/release_boards_manager.py --version 1.1.0 --repo lolren/NRF54L15-Arduino-core
+python3 tools/release_boards_manager.py --version 0.1.0 --repo lolren/NRF54L15-Arduino-core
 ```
 
 To run a local fresh-machine Boards Manager smoke test:
@@ -141,6 +164,17 @@ To verify release reproducibility (deterministic archive + index content):
 python3 tools/check_release_reproducible.py
 ```
 
+To create a clean sync folder (without local SDK/cache artifacts) and zip it
+for manual GitHub upload:
+
+```bash
+python3 tools/export_sync_bundle.py --clean --zip
+```
+
+Default output:
+- Folder: `sync_export/NRF54L15-Arduino-core-sync`
+- Zip: `sync_export/NRF54L15-Arduino-core-sync.zip`
+
 ## Toolchain Requirements
 
 This core bootstraps required NCS/Zephyr SDK components automatically on first build.
@@ -149,6 +183,7 @@ No globally installed `arm-none-eabi-*` toolchain is required.
 Host prerequisites:
 - Python 3
 - Git
+- CMake
 - Internet access for first-time bootstrap downloads
 - Optional manual fallback toolchain page:
   https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads

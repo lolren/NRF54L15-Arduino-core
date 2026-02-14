@@ -1,7 +1,7 @@
 /*
  * System call stubs for newlib.
  *
- * Required for bare-metal ARM Cortex-M builds.
+ * Required for Arduino core builds on ARM Cortex-M.
  * Licensed under the Apache License 2.0
  */
 

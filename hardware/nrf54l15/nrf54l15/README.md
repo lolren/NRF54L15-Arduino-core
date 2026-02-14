@@ -1,4 +1,4 @@
-# XIAO nRF54L15 Bare-Metal Arduino Core
+# XIAO nRF54L15 Zephyr-Based Arduino Core
 
 A clean Arduino core port for the Seeed Studio XIAO nRF54L15 board with a lightweight, publishable source tree.
 
@@ -8,7 +8,7 @@ This project provides an Arduino-compatible core for nRF54L15 with direct Arduin
 
 ## Key Features
 
-- **Bare-metal implementation** - Direct register access to nRF54L15 peripherals
+- **Zephyr-based implementation** - Arduino APIs with Zephyr/NCS build integration
 - **No bundled SDK/toolchain payloads** - dependencies are bootstrapped by scripts when required
 - **Open-source licensed** - Apache 2.0 license
 - **Arduino API compatible** - Standard Arduino functions work out of the box
@@ -97,7 +97,7 @@ To use this core with the Arduino IDE:
 
 2. Restart the Arduino IDE
 
-3. Select "XIAO nRF54L15 (Bare-Metal)" from the Tools > Board menu
+3. Select "XIAO nRF54L15 (Zephyr-Based - NO BLE)" from the Tools > Board menu
 
 ## Flashing
 
@@ -128,6 +128,6 @@ Contributions are welcome! Please feel free to submit pull requests.
 ## Acknowledgments
 
 - Based on the nRF54L15 reference documentation from Nordic Semiconductor
-- Inspired by various bare-metal Arduino projects
+- Inspired by Arduino core portability patterns and prior embedded core work
 - CMSIS definitions adapted from ARM CMSIS-CORE specification
 - Build pipeline integrates Zephyr + NCS components while keeping release archives lightweight

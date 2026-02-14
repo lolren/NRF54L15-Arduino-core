@@ -88,7 +88,7 @@ def main() -> int:
         raise RuntimeError(f"Missing {RELEASE_SCRIPT}")
 
     version = read_core_version(PLATFORM_TXT)
-    package_name = f"nrf54l15-baremetal-{version}.tar.bz2"
+    package_name = f"nrf54l15-zephyr-based-{version}.tar.bz2"
 
     with tempfile.TemporaryDirectory(prefix="nrf54l15-smoke-") as temp_dir_str:
         temp_dir = Path(temp_dir_str)
@@ -97,7 +97,7 @@ def main() -> int:
 
         port = choose_free_port()
         archive_url = f"http://127.0.0.1:{port}/dist/{package_name}"
-        index_path = temp_dir / "package_nrf54l15_baremetal_test.json"
+        index_path = temp_dir / "package_nrf54l15_zephyr_based_test.json"
 
         run(
             [

@@ -1,5 +1,5 @@
 /*
- * Minimal system clock init for bare-metal nRF54L15 core.
+ * Minimal system clock init for nRF54L15 Arduino core.
  *
  * Keeps CPU domain at 64 MHz so Arduino timing APIs behave as expected.
  */

@@ -19,6 +19,31 @@ from zephyr_common import (
 )
 
 
+def log(message: str) -> None:
+    print(message)
+
+
+def ensure_cmake_on_windows_path() -> None:
+    if os.name != "nt":
+        return
+    if shutil.which("cmake"):
+        return
+
+    candidate_bins = [
+        Path(os.environ.get("ProgramFiles", "")) / "CMake" / "bin",
+        Path(os.environ.get("ProgramFiles(x86)", "")) / "CMake" / "bin",
+        Path(os.environ.get("LocalAppData", "")) / "Programs" / "CMake" / "bin",
+    ]
+    for bin_dir in candidate_bins:
+        cmake_exe = bin_dir / "cmake.exe"
+        if not cmake_exe.is_file():
+            continue
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + (os.pathsep + old_path if old_path else "")
+        log(f"Using CMake from {bin_dir}")
+        return
+
+
 def fetch_release_assets(version: str) -> List[Dict[str, str]]:
     url = f"https://api.github.com/repos/zephyrproject-rtos/sdk-ng/releases/tags/v{version}"
     with urllib.request.urlopen(url) as response:  # nosec B310 - fixed GitHub API endpoint
@@ -275,8 +300,12 @@ def main() -> int:
     tools_dir = paths["tools_dir"]
     sdk_dir = paths["sdk_dir"]
 
+    ensure_cmake_on_windows_path()
+
     sdk_version = os.environ.get("SDK_VERSION", "0.16.8")
-    keep_archive = os.environ.get("KEEP_ZEPHYR_SDK_ARCHIVE", "0") == "1"
+    # Keep the downloaded SDK archive by default so failed/partial installs
+    # can resume without re-downloading multi-GB payloads.
+    keep_archive = os.environ.get("KEEP_ZEPHYR_SDK_ARCHIVE", "1") == "1"
     prune_sdk = os.environ.get("PRUNE_ZEPHYR_SDK", "1") == "1"
     prune_multilib = os.environ.get("PRUNE_ZEPHYR_SDK_MULTIARCH", "1") == "1"
 
