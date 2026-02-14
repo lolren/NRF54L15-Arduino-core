@@ -19,6 +19,7 @@ set "WINGET_RETRY_DELAY_SECONDS=4"
 
 set "DOWNLOAD_RETRIES=4"
 set "DOWNLOAD_RETRY_DELAY_SECONDS=4"
+set "WARMUP_BUILD_RETRIES=2"
 
 set "PYTHON_DOWNLOAD_PAGE=https://www.python.org/downloads/windows/"
 set "GIT_DOWNLOAD_PAGE=https://git-scm.com/download/win"
@@ -62,6 +63,7 @@ if not defined SKETCHBOOK_DIR (
 set "SKETCHBOOK_DIR=%SKETCHBOOK_DIR:\"=%"
 call :log Detected sketchbook path: "%SKETCHBOOK_DIR%"
 set "DEFAULT_TARGET=%SKETCHBOOK_DIR%\hardware\nrf54l15\nrf54l15"
+set "WARMUP_CORE_DIR=%CORE_SOURCE_DIR%"
 
 choice /C YN /N /M "Install this core now to %DEFAULT_TARGET% ? [Y/N]: "
 if errorlevel 2 (
@@ -71,8 +73,20 @@ if errorlevel 2 (
 
 call :install_core "%SKETCHBOOK_DIR%"
 if errorlevel 1 exit /b 1
+set "WARMUP_CORE_DIR=%DEFAULT_TARGET%"
 
 :done
+choice /C YN /N /M "Run one-time Zephyr warmup build now to avoid first-compile IDE ECONNRESET? [Y/N]: "
+if errorlevel 2 goto :finish
+call :warmup_zephyr "%WARMUP_CORE_DIR%"
+if errorlevel 1 (
+  call :log WARNING: warmup build failed. You can retry later from Command Prompt.
+  call :log Run: python "!WARMUP_CORE_DIR!\tools\build_zephyr_lib.py"
+) else (
+  call :log Warmup build completed.
+)
+
+:finish
 call :log Done.
 exit /b 0
 
@@ -276,6 +290,46 @@ if %ROBO_RC% GEQ 8 (
 
 call :log Core installed to "%TARGET_DIR%"
 exit /b 0
+
+:warmup_zephyr
+set "WARMUP_CORE=%~1"
+set "WARMUP_CORE=%WARMUP_CORE:\"=%"
+set "BUILD_SCRIPT=%WARMUP_CORE%\tools\build_zephyr_lib.py"
+
+if not exist "%BUILD_SCRIPT%" (
+  call :log ERROR: warmup script not found at "%BUILD_SCRIPT%"
+  exit /b 1
+)
+
+set "PY_KIND="
+where python >nul 2>&1
+if not errorlevel 1 set "PY_KIND=python"
+if not defined PY_KIND (
+  where py >nul 2>&1
+  if not errorlevel 1 set "PY_KIND=py"
+)
+if not defined PY_KIND (
+  call :log ERROR: Python launcher not found for warmup build.
+  exit /b 1
+)
+
+set "OLD_ZEPHYR_BASE=%ZEPHYR_BASE%"
+set "ZEPHYR_BASE="
+for /L %%I in (1,1,%WARMUP_BUILD_RETRIES%) do (
+  call :log Warmup build attempt %%I/%WARMUP_BUILD_RETRIES% in "!WARMUP_CORE!"
+  if /I "!PY_KIND!"=="python" (
+    python "!BUILD_SCRIPT!" --quiet
+  ) else (
+    py -3 "!BUILD_SCRIPT!" --quiet
+  )
+  if not errorlevel 1 (
+    set "ZEPHYR_BASE=!OLD_ZEPHYR_BASE!"
+    exit /b 0
+  )
+  timeout /t 3 /nobreak >nul
+)
+set "ZEPHYR_BASE=!OLD_ZEPHYR_BASE!"
+exit /b 1
 
 :log
 echo [nrf54l15-setup] %*

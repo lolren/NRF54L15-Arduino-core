@@ -111,6 +111,7 @@ Both scripts:
 - Detect Arduino IDE (if installed)
 - Detect sketchbook folder
 - Prompt to copy the core into `<sketchbook>/hardware/nrf54l15/nrf54l15`
+- Windows script can also run a one-time Zephyr warmup build to avoid heavy first compile in IDE
 
 Troubleshooting if the core does not appear in Boards Manager:
 - Ensure the URL above is added as one full line.
