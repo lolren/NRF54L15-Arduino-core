@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.9 - 2026-02-14
+
+- Hardened Zephyr SDK asset resolution in `tools/get_toolchain.py`:
+  if GitHub API lookup is rate-limited/unavailable, the script now falls back to
+  parsing release-page asset links instead of failing immediately.
+- Disabled `sysroots` pruning by default (can be re-enabled with
+  `PRUNE_ZEPHYR_SDK_SYSROOTS=1`) to avoid missing C++ stdlib headers on Windows hosts.
+- Retained multiarch-prune support for optional SDK size reduction.
+
 ## 1.1.8 - 2026-02-14
 
 - Fixed clean-install dependency-discovery failures before `zephyr_lib` is generated:

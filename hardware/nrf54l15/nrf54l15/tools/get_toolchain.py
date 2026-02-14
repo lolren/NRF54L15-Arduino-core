@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,21 +20,69 @@ from zephyr_common import (
     sdk_tool,
 )
 
+GITHUB_API_USER_AGENT = "nrf54l15-arduino-core-toolchain-bootstrap/0.1.0"
+
 
 def fetch_release_assets(version: str) -> List[Dict[str, str]]:
     url = f"https://api.github.com/repos/zephyrproject-rtos/sdk-ng/releases/tags/v{version}"
-    with urllib.request.urlopen(url) as response:  # nosec B310 - fixed GitHub API endpoint
-        data = json.loads(response.read().decode("utf-8"))
-    assets = data.get("assets", [])
-    return [
-        {
-            "name": asset.get("name", ""),
-            "url": asset.get("browser_download_url", ""),
-            "size": str(asset.get("size", 0)),
-        }
-        for asset in assets
-        if asset.get("name") and asset.get("browser_download_url")
-    ]
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": GITHUB_API_USER_AGENT,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request) as response:  # nosec B310 - fixed GitHub API endpoint
+            data = json.loads(response.read().decode("utf-8"))
+        assets = data.get("assets", [])
+        parsed = [
+            {
+                "name": asset.get("name", ""),
+                "url": asset.get("browser_download_url", ""),
+                "size": str(asset.get("size", 0)),
+            }
+            for asset in assets
+            if asset.get("name") and asset.get("browser_download_url")
+        ]
+        if parsed:
+            return parsed
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (403, 429):
+            raise
+        print("GitHub API rate limit reached while resolving Zephyr SDK assets; falling back to release page parsing.")
+    except urllib.error.URLError:
+        print("GitHub API lookup failed; falling back to release page parsing.")
+
+    return fetch_release_assets_from_release_page(version)
+
+
+def fetch_release_assets_from_release_page(version: str) -> List[Dict[str, str]]:
+    tag_url = f"https://github.com/zephyrproject-rtos/sdk-ng/releases/tag/v{version}"
+    request = urllib.request.Request(tag_url, headers={"User-Agent": GITHUB_API_USER_AGENT})
+    with urllib.request.urlopen(request) as response:  # nosec B310 - fixed GitHub release page
+        html = response.read().decode("utf-8", errors="ignore")
+
+    pattern = re.compile(
+        rf'href="(/zephyrproject-rtos/sdk-ng/releases/download/v{re.escape(version)}/([^"?#]+))"'
+    )
+    seen: set[str] = set()
+    assets: List[Dict[str, str]] = []
+    for rel_href, name in pattern.findall(html):
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        assets.append(
+            {
+                "name": name,
+                "url": f"https://github.com{rel_href}",
+                "size": "0",
+            }
+        )
+
+    if not assets:
+        raise RuntimeError(f"Unable to resolve Zephyr SDK release assets for version {version}.")
+    return assets
 
 
 def pick_sdk_asset(version: str, host_os: str, host_arch: str, assets: List[Dict[str, str]]) -> Dict[str, str]:
@@ -399,15 +449,16 @@ def sdk_is_already_minimal_for_nrf54l15(sdk_dir: Path) -> bool:
     return True
 
 
-def apply_prune_policy(sdk_dir: Path, prune_sdk: bool, prune_multilib: bool) -> None:
+def apply_prune_policy(sdk_dir: Path, prune_sdk: bool, prune_multilib: bool, prune_sysroots: bool) -> None:
     if not prune_sdk:
         return
 
     before = dir_size_bytes(sdk_dir)
 
-    sysroots = sdk_dir / "sysroots"
-    if sysroots.is_dir():
-        shutil.rmtree(sysroots)
+    if prune_sysroots:
+        sysroots = sdk_dir / "sysroots"
+        if sysroots.is_dir():
+            shutil.rmtree(sysroots)
 
     if prune_multilib:
         marker = sdk_dir / ".nrf54l15-minimal-pruned"
@@ -429,6 +480,7 @@ def main() -> int:
     keep_archive = os.environ.get("KEEP_ZEPHYR_SDK_ARCHIVE", "0") == "1"
     prune_sdk = os.environ.get("PRUNE_ZEPHYR_SDK", "1") == "1"
     prune_multilib = os.environ.get("PRUNE_ZEPHYR_SDK_MULTIARCH", "1") == "1"
+    prune_sysroots = os.environ.get("PRUNE_ZEPHYR_SDK_SYSROOTS", "0") == "1"
     download_retries = parse_positive_int_env("ZEPHYR_SDK_DOWNLOAD_RETRIES", 10)
     host_os, host_arch = detect_supported_host_for_sdk()
 
@@ -445,7 +497,7 @@ def main() -> int:
                 "Warning: dtc tool not found in SDK hosttools; "
                 "build will rely on PATH/packaged host-tools."
             )
-        apply_prune_policy(sdk_dir, prune_sdk, prune_multilib)
+        apply_prune_policy(sdk_dir, prune_sdk, prune_multilib, prune_sysroots)
         print(f"Zephyr SDK already installed: {sdk_dir}")
         return 0
 
@@ -528,7 +580,7 @@ def main() -> int:
             "build will rely on PATH/packaged host-tools."
         )
 
-    apply_prune_policy(sdk_dir, prune_sdk, prune_multilib)
+    apply_prune_policy(sdk_dir, prune_sdk, prune_multilib, prune_sysroots)
 
     if not keep_archive:
         archive_path.unlink(missing_ok=True)
