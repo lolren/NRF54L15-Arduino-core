@@ -2,6 +2,38 @@
 
 #include <errno.h>
 
+#if defined(__has_include)
+#if __has_include(<generated/zephyr/autoconf.h>)
+#include <generated/zephyr/autoconf.h>
+#endif
+#if __has_include(<zephyr/device.h>)
+#include <zephyr/device.h>
+#endif
+#if __has_include(<zephyr/devicetree.h>)
+#include <zephyr/devicetree.h>
+#endif
+#if __has_include(<zephyr/drivers/hwinfo.h>)
+#include <zephyr/drivers/hwinfo.h>
+#endif
+#if __has_include(<zephyr/drivers/watchdog.h>)
+#include <zephyr/drivers/watchdog.h>
+#endif
+#if __has_include(<zephyr/kernel.h>)
+#include <zephyr/kernel.h>
+#endif
+#if __has_include(<zephyr/pm/pm.h>)
+#include <zephyr/pm/pm.h>
+#endif
+#if __has_include(<zephyr/pm/device.h>)
+#include <zephyr/pm/device.h>
+#endif
+#if __has_include(<zephyr/pm/state.h>)
+#include <zephyr/pm/state.h>
+#endif
+#if __has_include(<zephyr/sys/poweroff.h>)
+#include <zephyr/sys/poweroff.h>
+#endif
+#else
 #include <generated/zephyr/autoconf.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -12,6 +44,7 @@
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/state.h>
 #include <zephyr/sys/poweroff.h>
+#endif
 
 #include "nrf54l15.h"
 #include "variant.h"

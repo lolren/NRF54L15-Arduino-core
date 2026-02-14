@@ -6,8 +6,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if defined(__has_include)
+#if __has_include(<generated/zephyr/autoconf.h>)
 #include <generated/zephyr/autoconf.h>
-
+#endif
+#if __has_include(<zephyr/bluetooth/bluetooth.h>)
+#include <zephyr/bluetooth/bluetooth.h>
+#endif
+#if __has_include(<zephyr/bluetooth/conn.h>)
+#include <zephyr/bluetooth/conn.h>
+#endif
+#if __has_include(<zephyr/bluetooth/addr.h>)
+#include <zephyr/bluetooth/addr.h>
+#endif
+#if __has_include(<zephyr/bluetooth/gap.h>)
+#include <zephyr/bluetooth/gap.h>
+#endif
+#if __has_include(<zephyr/bluetooth/hci.h>)
+#include <zephyr/bluetooth/hci.h>
+#endif
+#if __has_include(<zephyr/bluetooth/uuid.h>)
+#include <zephyr/bluetooth/uuid.h>
+#endif
+#if __has_include(<zephyr/bluetooth/gatt.h>)
+#include <zephyr/bluetooth/gatt.h>
+#endif
+#if __has_include(<zephyr/kernel.h>)
+#include <zephyr/kernel.h>
+#endif
+#if __has_include(<zephyr/sys/util.h>)
+#include <zephyr/sys/util.h>
+#endif
+#else
+#include <generated/zephyr/autoconf.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/addr.h>
@@ -17,6 +48,7 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
+#endif
 
 // --- BLEUuid Implementation ---
 

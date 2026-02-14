@@ -4,18 +4,45 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__has_include)
+#if __has_include(<generated/zephyr/autoconf.h>)
 #include <generated/zephyr/autoconf.h>
+#endif
+#else
+#include <generated/zephyr/autoconf.h>
+#endif
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
+#if defined(__has_include)
+#if __has_include(<zephyr/kernel.h>)
+#include <zephyr/kernel.h>
+#endif
+#if __has_include(<zephyr/net/net_core.h>)
+#include <zephyr/net/net_core.h>
+#endif
+#if __has_include(<zephyr/net/ieee802154.h>)
+#include <zephyr/net/ieee802154.h>
+#endif
+#if __has_include(<zephyr/net/ieee802154_mgmt.h>)
+#include <zephyr/net/ieee802154_mgmt.h>
+#endif
+#if __has_include(<zephyr/net/net_if.h>)
+#include <zephyr/net/net_if.h>
+#endif
+#if __has_include(<zephyr/net/net_mgmt.h>)
+#include <zephyr/net/net_mgmt.h>
+#endif
+#else
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_core.h>
 #include <zephyr/net/ieee802154.h>
 #include <zephyr/net/ieee802154_mgmt.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_mgmt.h>
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif

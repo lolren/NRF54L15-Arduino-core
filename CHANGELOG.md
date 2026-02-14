@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.8 - 2026-02-14
+
+- Fixed clean-install dependency-discovery failures before `zephyr_lib` is generated:
+  Zephyr header includes in Bluetooth/XiaoNrf54L15/IEEE802154 library sources are now
+  guarded with `__has_include(...)` so Arduino preprocessor discovery can run before
+  first Zephyr bootstrap/build.
+- This allows BLE sketches to compile first on a fresh install without requiring a
+  prior Blink/default build.
+
 ## 1.1.7 - 2026-02-14
 
 - Fixed fresh-install BLE compile regression:
