@@ -1,4 +1,5 @@
 <h1><font color="red">IMPORTANT: first-time installation + first compile can be slow and may look stalled. Let it finish.</font></h1>
+<h2><font color="red">Disk usage warning: after first setup/compilation, required disk space is about 9 GB (SDK/toolchain/workspace + build cache).</font></h2>
 <h2><font color="red">Windows can be much slower because real-time protection scans large SDK/toolchain files. Recommended: use Linux. On Windows, add this core/tools path as an antivirus exception, or temporarily disable real-time protection only for first setup/compile.</font></h2>
 <h2><font color="red">Windows recommendation: use the script install method only (`install_windows.bat`). Arduino IDE/Boards Manager flows on Windows can be buggy and may fail with `ECONNRESET` during first bootstrap.</font></h2>
 
