@@ -117,6 +117,10 @@ Troubleshooting if the core does not appear in Boards Manager:
 - Search `seeed` (3 e's) or `nrf54l15` in Boards Manager.
 - If you previously installed this core manually, remove/rename
   `~/Arduino/hardware/nrf54l15` (or move it outside `hardware/`) and refresh Boards Manager.
+- If Zephyr build paths are mixed between your local repo and
+  `Arduino15/packages/...`, clear stale `ZEPHYR_BASE` and rerun:
+  Windows CMD: `set ZEPHYR_BASE=`
+  PowerShell: `Remove-Item Env:ZEPHYR_BASE -ErrorAction SilentlyContinue`
 
 To generate release archive + checksum + updated package index before publishing:
 

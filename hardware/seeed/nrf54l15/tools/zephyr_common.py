@@ -185,6 +185,14 @@ def west_cmd() -> List[str]:
     return [sys.executable, "-m", "west"]
 
 
+def west_cmd_with_zephyr_base(ncs_dir: Path) -> List[str]:
+    """
+    Pin west's Zephyr base to the active workspace to avoid stale global
+    zephyr.base/ZEPHYR_BASE values from unrelated Arduino installs.
+    """
+    return west_cmd() + ["-z", str((ncs_dir / "zephyr").resolve())]
+
+
 def ensure_parent_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 

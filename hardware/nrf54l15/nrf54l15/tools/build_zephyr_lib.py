@@ -22,7 +22,7 @@ from zephyr_common import (
     resolve_program,
     run,
     sdk_tool,
-    west_cmd,
+    west_cmd_with_zephyr_base,
     with_west_pythonpath,
     write_metadata,
 )
@@ -414,6 +414,7 @@ def main() -> int:
 
         env = with_west_pythonpath(tooling_platform_dir)
         env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
+        env["ZEPHYR_BASE"] = str((ncs_dir / "zephyr").resolve())
         prepend_sdk_tool_paths(env, sdk_dir)
 
         cmake_args = [f"-DDTC={dtc_bin}"]
@@ -424,7 +425,7 @@ def main() -> int:
 
         log(not args.quiet, "Building Zephyr base artifacts for Arduino core...")
 
-        cmd = west_cmd() + [
+        cmd = west_cmd_with_zephyr_base(ncs_dir) + [
             "build",
             "--build-dir",
             str(build_dir),

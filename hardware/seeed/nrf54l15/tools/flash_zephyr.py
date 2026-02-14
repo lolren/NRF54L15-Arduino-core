@@ -15,7 +15,7 @@ from zephyr_common import (
     resolve_program,
     run,
     sdk_tool,
-    west_cmd,
+    west_cmd_with_zephyr_base,
     with_west_pythonpath,
 )
 
@@ -121,17 +121,18 @@ def main() -> int:
 
     env = with_west_pythonpath(platform_dir)
     env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
+    env["ZEPHYR_BASE"] = str((ncs_dir / "zephyr").resolve())
     prepend_sdk_tool_paths(env, sdk_dir)
 
     # Ensure west import and command path are valid before flash.
-    run(west_cmd() + ["--version"], env=env, check=True, capture_output=True)
+    run(west_cmd_with_zephyr_base(ncs_dir) + ["--version"], env=env, check=True, capture_output=True)
 
     extra_args: List[str] = []
     dev_id = os.environ.get("ARDUINO_ZEPHYR_DEV_ID", "")
     if dev_id and runner in ("nrfjprog", "nrfutil", "jlink"):
         extra_args += ["--dev-id", dev_id]
 
-    flash_cmd = west_cmd() + ["flash", "-d", str(build_dir), "-r", runner, *extra_args]
+    flash_cmd = west_cmd_with_zephyr_base(ncs_dir) + ["flash", "-d", str(build_dir), "-r", runner, *extra_args]
     if os.environ.get("ARDUINO_ZEPHYR_FLASH_DRY_RUN", "0") == "1":
         print("Dry run command: " + " ".join([shlex_quote(x) for x in flash_cmd]))
         return 0

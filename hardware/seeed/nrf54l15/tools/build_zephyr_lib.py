@@ -17,7 +17,7 @@ from zephyr_common import (
     resolve_program,
     run,
     sdk_tool,
-    west_cmd,
+    west_cmd_with_zephyr_base,
     with_west_pythonpath,
     write_metadata,
 )
@@ -320,6 +320,7 @@ def main() -> int:
 
     env = with_west_pythonpath(platform_dir)
     env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
+    env["ZEPHYR_BASE"] = str((ncs_dir / "zephyr").resolve())
     prepend_sdk_tool_paths(env, sdk_dir)
 
     # No need to set WEST_PYTHON - the patch makes edtlib.py work with system Python
@@ -338,7 +339,7 @@ def main() -> int:
     if extra_dtc_overlay_file:
         log(not args.quiet, f"Extra DTC overlay: {extra_dtc_overlay_file}")
 
-    cmd = west_cmd() + [
+    cmd = west_cmd_with_zephyr_base(ncs_dir) + [
         "build",
         "--build-dir",
         str(build_dir),
