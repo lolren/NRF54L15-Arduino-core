@@ -3,7 +3,11 @@
 
 #include <Arduino.h>
 
+#if defined(__has_include)
+#if __has_include(<zephyr/types.h>)
 #include <zephyr/types.h>
+#endif
+#endif
 
 class BLEUuid {
 public:

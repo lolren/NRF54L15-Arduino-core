@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.7 - 2026-02-14
+
+- Fixed fresh-install BLE compile regression:
+  `libraries/Bluetooth/src/Bluetooth.h` now includes `<zephyr/types.h>`
+  only when available, so BLE sketches can compile on first run before
+  generated Zephyr headers are populated.
+- Kept 1.1.6 workspace/bootstrap lock hardening intact.
+
 ## 1.1.6 - 2026-02-14
 
 - Added cross-process build lock in `build_zephyr_lib.py` to avoid concurrent `west build`
