@@ -74,7 +74,7 @@ Arduino/
 1. Open **File > Preferences > Additional boards manager URLs**
 2. Add this package index URL (copy/paste as one line):
    ```text
-   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_zephyr_based_index.json
+   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_index.json
    ```
 3. Open **Tools > Board > Boards Manager**
 4. Search for **Seeed nRF54L15 (Zephyr-Based)** and install

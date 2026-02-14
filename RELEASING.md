@@ -20,7 +20,7 @@ python3 tools/release_boards_manager.py --version <new_version> --repo lolren/NR
 This generates:
 
 - `dist/nrf54l15-zephyr-based-<new_version>.tar.bz2`
-- updated `package_nrf54l15_zephyr_based_index.json`
+- updated `package_nrf54l15_zephyr_based_index.json` (and mirror `package_nrf54l15_index.json`)
 
 Optional local smoke check (simulates a fresh machine install through Boards Manager):
 
@@ -69,10 +69,11 @@ Create tag `v<new_version>` and upload:
 Commit and push:
 
 - `package_nrf54l15_zephyr_based_index.json`
+- `package_nrf54l15_index.json`
 
 Users can then add this URL in Arduino IDE:
 
-- `https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_zephyr_based_index.json`
+- `https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_index.json`
 
 ## CI checks
 
