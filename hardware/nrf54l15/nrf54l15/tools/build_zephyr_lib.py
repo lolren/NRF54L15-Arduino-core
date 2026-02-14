@@ -100,11 +100,26 @@ def should_rebuild_due_to_metadata(
 
 
 def ensure_ncs_workspace(script_dir: Path, ncs_dir: Path, quiet: bool) -> None:
-    if (ncs_dir / ".west").is_dir():
+    # A partially initialized workspace (for example missing .west/config)
+    # can exist after interrupted first-run bootstrap.
+    west_config = ncs_dir / ".west" / "config"
+    manifest_file = ncs_dir / "nrf" / "west.yml"
+    zephyr_commands = ncs_dir / "zephyr" / "scripts" / "west_commands"
+    if (
+        (ncs_dir / ".west").is_dir()
+        and west_config.is_file()
+        and manifest_file.is_file()
+        and zephyr_commands.is_dir()
+    ):
         return
-    log(not quiet, "nRF Connect SDK workspace not found, bootstrapping...")
+    log(not quiet, "nRF Connect SDK workspace missing/incomplete, bootstrapping...")
     run([sys.executable, str(script_dir / "get_nrf_connect.py")], check=True)
-    if not (ncs_dir / ".west").is_dir():
+    if not (
+        (ncs_dir / ".west").is_dir()
+        and west_config.is_file()
+        and manifest_file.is_file()
+        and zephyr_commands.is_dir()
+    ):
         raise RuntimeError(f"Failed to bootstrap NCS workspace at {ncs_dir}")
 
 

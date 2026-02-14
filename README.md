@@ -114,6 +114,8 @@ Host prerequisites:
 - Python 3
 - Git
 - Internet access for first-time bootstrap downloads
+- Optional manual fallback toolchain page:
+  https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
 
 Bootstrap cache behavior:
 - Changing Tools menu options (for example BLE enabled/disabled) reuses cached SDK/NCS data.

@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.5 - 2026-02-14
+
+- Fixed recovery from partially initialized shared NCS workspaces:
+  `build_zephyr_lib.py` now validates workspace integrity (`.west/config`,
+  `nrf/west.yml`, and Zephyr west command directory) and re-runs bootstrap when incomplete.
+  This prevents `west: unknown command "build"` errors after interrupted first-time setup.
+- Added official Arm GNU Toolchain downloads link in docs as an optional manual fallback reference.
+
 ## 1.1.4 - 2026-02-14
 
 - Added shared bootstrap cache handling for Boards Manager installs:
