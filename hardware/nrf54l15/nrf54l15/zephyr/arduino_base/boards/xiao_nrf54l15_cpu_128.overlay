@@ -1,0 +1,7 @@
+/*
+ * CPU clock profile: 128 MHz
+ */
+
+&hfpll {
+    clock-frequency = <DT_FREQ_M(128)>;
+};

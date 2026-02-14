@@ -1,0 +1,6 @@
+#ifndef ARDUINO_NRF54L15_CORE_HPFMSPI_REDIRECT_H
+#define ARDUINO_NRF54L15_CORE_HPFMSPI_REDIRECT_H
+
+#include "../../libraries/HPFMSPI/src/HPFMSPI.h"
+
+#endif

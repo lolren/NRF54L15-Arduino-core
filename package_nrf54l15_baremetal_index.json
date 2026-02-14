@@ -1,0 +1,37 @@
+{
+  "packages": [
+    {
+      "name": "nrf54l15",
+      "maintainer": "Seeed Studio",
+      "websiteURL": "https://github.com/lolren/NRF54L15-Arduino-core",
+      "email": "",
+      "help": {
+        "online": "https://github.com/lolren/NRF54L15-Arduino-core"
+      },
+      "platforms": [
+        {
+          "name": "Seeed nRF54L15 (Bare-Metal)",
+          "architecture": "nrf54l15",
+          "version": "1.1.0",
+          "category": "Arduino",
+          "url": "https://github.com/lolren/NRF54L15-Arduino-core/releases/download/v1.1.0/nrf54l15-baremetal-1.1.0.tar.bz2",
+          "archiveFileName": "nrf54l15-baremetal-1.1.0.tar.bz2",
+          "checksum": "SHA-256:e6300168d4a52776858b5b03404b11c25fc3f9a83be3b756df2dba713c667d16",
+          "size": "709227",
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 (Bare-Metal - NO BLE)"
+            }
+          ],
+          "help": {
+            "online": "https://github.com/lolren/NRF54L15-Arduino-core"
+          },
+          "toolsDependencies": [],
+          "discoveryDependencies": [],
+          "monitorDependencies": []
+        }
+      ],
+      "tools": []
+    }
+  ]
+}

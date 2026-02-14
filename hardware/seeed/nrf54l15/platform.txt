@@ -1,0 +1,46 @@
+name=Seeed XIAO nRF54L15 Zephyr Core
+version=1.1.0
+
+tools.python.cmd={runtime.platform.path}/tools/python_with_venv.sh
+tools.python.cmd.windows=py
+tools.python.cmd.macosx={runtime.platform.path}/tools/python_with_venv.sh
+tools.python.args=
+tools.python.args.windows=-3
+tools.python.args.macosx=
+
+compiler.exe.suffix=
+compiler.exe.suffix.windows=.exe
+
+compiler.path={runtime.platform.path}/tools/zephyr-sdk/arm-zephyr-eabi/bin/
+compiler.c.cmd=arm-zephyr-eabi-gcc{compiler.exe.suffix}
+compiler.cpp.cmd=arm-zephyr-eabi-g++{compiler.exe.suffix}
+compiler.S.cmd=arm-zephyr-eabi-gcc{compiler.exe.suffix}
+compiler.ar.cmd=arm-zephyr-eabi-ar{compiler.exe.suffix}
+compiler.objcopy.cmd=arm-zephyr-eabi-objcopy{compiler.exe.suffix}
+compiler.size.cmd=arm-zephyr-eabi-size{compiler.exe.suffix}
+
+compiler.c.flags=@{build.variant.path}/zephyr_lib/cflags.rsp -DARDUINO=10819 -DARDUINO_ARCH_NRF54L15
+compiler.cpp.flags=@{build.variant.path}/zephyr_lib/cppflags.rsp -DARDUINO=10819 -DARDUINO_ARCH_NRF54L15
+compiler.S.flags=@{build.variant.path}/zephyr_lib/cflags.rsp -x assembler-with-cpp -DARDUINO=10819 -DARDUINO_ARCH_NRF54L15
+compiler.c.extra_flags=
+compiler.cpp.extra_flags=
+compiler.S.extra_flags=
+compiler.ar.flags=rcs
+
+recipe.hooks.sketch.prebuild.1.pattern="{tools.python.cmd}" {tools.python.args} "{runtime.platform.path}/tools/build_zephyr_lib.py" --quiet --extra-conf "{build.zephyr_conf_radio}" --extra-conf "{build.zephyr_conf_bt_controller}" --extra-conf "{build.zephyr_conf_tx_power}" --extra-conf "{build.zephyr_conf_802154}" --extra-conf "{build.zephyr_conf_hpf}" --extra-dtc-overlay "{build.zephyr_dtc_overlay}" --extra-dtc-overlay "{build.zephyr_dtc_overlay_bt_controller}" --extra-dtc-overlay "{build.zephyr_dtc_overlay_hpf}"
+
+recipe.c.o.pattern="{compiler.path}{compiler.c.cmd}" {compiler.c.flags} {compiler.c.extra_flags} {build.extra_flags} {build.rf_antenna_flags} {build.radio_profile_flags} {build.bt_controller_flags} {build.bt_tx_power_flags} {build.hpf_mspi_flags} {includes} "{source_file}" -c -o "{object_file}"
+recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" {compiler.cpp.flags} {compiler.cpp.extra_flags} {build.extra_flags} {build.rf_antenna_flags} {build.radio_profile_flags} {build.bt_controller_flags} {build.bt_tx_power_flags} {build.hpf_mspi_flags} {includes} "{source_file}" -c -o "{object_file}"
+recipe.S.o.pattern="{compiler.path}{compiler.S.cmd}" {compiler.S.flags} {compiler.S.extra_flags} {build.extra_flags} {build.rf_antenna_flags} {build.radio_profile_flags} {build.bt_controller_flags} {build.bt_tx_power_flags} {build.hpf_mspi_flags} {includes} "{source_file}" -c -o "{object_file}"
+
+recipe.ar.pattern="{compiler.path}{compiler.ar.cmd}" {compiler.ar.flags} "{archive_file_path}" "{object_file}"
+
+recipe.c.combine.pattern="{tools.python.cmd}" {tools.python.args} "{runtime.platform.path}/tools/link_zephyr_arduino.py" "{build.variant.path}" "{build.path}" "{build.project_name}" "{object_files}" "{archive_file_path}"
+
+recipe.objcopy.hex.pattern="{compiler.path}{compiler.objcopy.cmd}" -O ihex "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.hex"
+recipe.objcopy.bin.pattern="{compiler.path}{compiler.objcopy.cmd}" -O binary "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.bin"
+
+recipe.size.pattern="{compiler.path}{compiler.size.cmd}" -A "{build.path}/{build.project_name}.elf"
+
+tools.zephyrflash.cmd.path={runtime.platform.path}/tools/flash_zephyr.py
+tools.zephyrflash.upload.pattern="{tools.python.cmd}" {tools.python.args} "{tools.zephyrflash.cmd.path}" "{build.variant.path}" "{upload.runner}"

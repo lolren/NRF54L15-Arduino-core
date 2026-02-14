@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_XIAO_NRF54L15
+
+config BOARD
+    default "xiao_nrf54l15"
+
+endif

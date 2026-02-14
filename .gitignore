@@ -1,0 +1,22 @@
+# Release outputs
+dist/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Generated Zephyr build artifacts (nrf54l15 core)
+hardware/nrf54l15/nrf54l15/tools/.arduino-zephyr-build/
+hardware/nrf54l15/nrf54l15/tools/ncs/
+hardware/nrf54l15/nrf54l15/tools/zephyr-sdk/
+hardware/nrf54l15/nrf54l15/tools/host-tools/
+hardware/nrf54l15/nrf54l15/tools/toolchain-bootstrap/
+hardware/nrf54l15/nrf54l15/variants/xiao_nrf54l15/zephyr_lib/
+
+# Generated Zephyr build artifacts (seeed core)
+hardware/seeed/nrf54l15/tools/.arduino-zephyr-build/
+hardware/seeed/nrf54l15/tools/ncs/
+hardware/seeed/nrf54l15/tools/zephyr-sdk/
+hardware/seeed/nrf54l15/tools/host-tools/
+hardware/seeed/nrf54l15/tools/toolchain-bootstrap/
+hardware/seeed/nrf54l15/variants/xiao_nrf54l15/zephyr_lib/

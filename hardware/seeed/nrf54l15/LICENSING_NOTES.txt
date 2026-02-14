@@ -1,0 +1,111 @@
+XIAO nRF54L15 Core - Licensing and Redistribution Notes
+Generated: 2026-02-08
+
+This file summarizes license observations for this repository layout:
+  hardware/seeed/nrf54l15
+
+Important:
+- This is an engineering summary, not legal advice.
+- Before public release, do a final legal/compliance review.
+
+----------------------------------------------------------------------
+1) High-level result
+----------------------------------------------------------------------
+
+You can publish this core on GitHub, with conditions.
+
+- Zephyr itself is permissive (Apache-2.0).
+- Nordic NCS and nrfxlib include LicenseRef-Nordic-5-Clause components.
+- Bundled Zephyr SDK/toolchain includes multiple third-party licenses,
+  including GPL/LGPL components in distributed tool binaries and libraries.
+
+The safest release pattern is:
+- Publish core source + scripts in GitHub.
+- Download Zephyr SDK/NCS at install time instead of shipping full bundled
+  toolchains in your repo or release archives.
+- If you need stricter OSS posture for BLE, use:
+  Tools -> BLE Controller -> Zephyr LL SW (Open Source, Experimental)
+  which avoids the SoftDevice Controller binary path.
+
+----------------------------------------------------------------------
+2) What was found locally
+----------------------------------------------------------------------
+
+Primary license files in this tree:
+- tools/ncs/zephyr/LICENSE
+- tools/ncs/nrf/LICENSE
+- tools/ncs/nrfxlib/LICENSE
+
+Examples of Nordic-specific licensing markers:
+- tools/ncs/nrf/LICENSE
+- tools/ncs/nrfxlib/LICENSE
+- tools/ncs/nrfxlib/softdevice_controller/license.txt
+- tools/ncs/nrfxlib/nrf_modem/license.txt
+
+Examples showing toolchain license mix:
+- tools/zephyr-sdk/arm-zephyr-eabi/share/licenses/gcc/COPYING3
+- tools/zephyr-sdk/arm-zephyr-eabi/share/licenses/newlib/COPYING
+- tools/zephyr-sdk/arm-zephyr-eabi/share/licenses/newlib-nano/COPYING
+- tools/zephyr-sdk/arm-zephyr-eabi/share/licenses/binutils/COPYING3
+- tools/zephyr-sdk/arm-zephyr-eabi/share/licenses/mpfr/COPYING.LESSER
+
+Observed SPDX mix in bundled dependency trees included Apache/BSD/Nordic and
+some GPL-family licenses in toolchain artifacts.
+
+----------------------------------------------------------------------
+3) Practical obligations checklist
+----------------------------------------------------------------------
+
+If you publish as-is with bundled dependencies:
+- Keep upstream LICENSE/NOTICE files intact.
+- Preserve copyright and attribution headers.
+- Do not remove Nordic license texts from NCS/nrfxlib parts.
+- Ensure redistribution terms for bundled tool binaries are met
+  (including GPL/LGPL obligations where applicable).
+
+If you publish with installer/bootstrap model (recommended):
+- Keep repository focused on Arduino core + integration scripts.
+- Fetch NCS/SDK/toolchain during setup.
+- Keep a THIRD_PARTY_NOTICES file listing fetched components and licenses.
+- This reduces legal and repository size complexity.
+
+----------------------------------------------------------------------
+4) Nordic-specific note (from included license text)
+----------------------------------------------------------------------
+
+NCS/nrfxlib include LicenseRef-Nordic-5-Clause text that allows
+redistribution with conditions and limits usage to Nordic IC contexts.
+Keep this in mind when describing scope of use in your README.
+
+In this core:
+- Nordic SDC mode uses nrfxlib `softdevice_controller` + `mpsl`
+  (LicenseRef-Nordic-5-Clause, includes prebuilt libraries).
+- Zephyr LL SW mode uses Zephyr's open-source Bluetooth controller
+  (`BT_LL_SW_SPLIT`, Apache-2.0 path) with board overlay switching
+  `zephyr,bt-hci` to `bt_hci_controller`.
+
+----------------------------------------------------------------------
+5) Suggested release hygiene
+----------------------------------------------------------------------
+
+Before creating a public GitHub release:
+1. Add a top-level LICENSE for your own original core code.
+2. Add THIRD_PARTY_LICENSES or THIRD_PARTY_NOTICES summary.
+3. Link to upstream project licenses.
+4. Avoid bundling full SDK/toolchain unless you are prepared to maintain full
+   binary redistribution compliance.
+
+----------------------------------------------------------------------
+6) Reference links used for verification
+----------------------------------------------------------------------
+
+Zephyr project licensing:
+- https://docs.zephyrproject.org/latest/project/licensing/index.html
+- https://github.com/zephyrproject-rtos/zephyr/blob/main/LICENSE
+
+Zephyr SDK:
+- https://github.com/zephyrproject-rtos/sdk-ng
+
+Nordic NCS/nrfxlib:
+- https://github.com/nrfconnect/sdk-nrf
+- https://github.com/nrfconnect/sdk-nrfxlib

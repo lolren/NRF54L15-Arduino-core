@@ -1,0 +1,106 @@
+menu.cpu=Processor
+menu.upload_method=Upload Method
+menu.antenna=Antenna
+menu.radio_profile=Radio Profile
+menu.bt_controller=BLE Controller
+menu.bt_tx_power=BLE TX Power
+menu.hpf_mspi=HPF MSPI
+
+################################################################################
+# Seeed Studio XIAO nRF54L15
+################################################################################
+xiao_nrf54l15.name=XIAO nRF54L15 (Blobless BLE Core)
+
+xiao_nrf54l15.upload.tool=zephyrflash
+xiao_nrf54l15.upload.protocol=zephyr
+xiao_nrf54l15.upload.maximum_size=1462272
+xiao_nrf54l15.upload.maximum_data_size=192512
+xiao_nrf54l15.upload.runner=auto
+
+xiao_nrf54l15.build.mcu=cortex-m33
+xiao_nrf54l15.build.f_cpu=128000000L
+xiao_nrf54l15.build.board=ARDUINO_XIAO_NRF54L15
+xiao_nrf54l15.build.core=nrf54l15
+xiao_nrf54l15.build.variant=xiao_nrf54l15
+xiao_nrf54l15.build.extra_flags=-DNRF54L15_XXAA -DARDUINO_XIAO_NRF54L15
+xiao_nrf54l15.build.rf_antenna_flags=
+xiao_nrf54l15.build.radio_profile_flags=
+xiao_nrf54l15.build.bt_controller_flags=-DARDUINO_XIAO_NRF54L15_BT_CONTROLLER_LL_SW
+xiao_nrf54l15.build.bt_tx_power_flags=
+xiao_nrf54l15.build.zephyr_conf_radio={runtime.platform.path}/zephyr/arduino_base/conf/radio_ble_only.conf
+xiao_nrf54l15.build.zephyr_conf_bt_controller={runtime.platform.path}/zephyr/arduino_base/conf/bt_controller_ll_sw.conf
+xiao_nrf54l15.build.zephyr_conf_tx_power=
+xiao_nrf54l15.build.zephyr_conf_802154=
+xiao_nrf54l15.build.zephyr_dtc_overlay=
+xiao_nrf54l15.build.zephyr_dtc_overlay_bt_controller={runtime.platform.path}/zephyr/arduino_base/boards/xiao_nrf54l15_bt_ll_sw.overlay
+xiao_nrf54l15.build.hpf_mspi_flags=
+xiao_nrf54l15.build.zephyr_conf_hpf=
+xiao_nrf54l15.build.zephyr_dtc_overlay_hpf=
+
+xiao_nrf54l15.menu.antenna.ceramic=On-board Ceramic (Recommended)
+xiao_nrf54l15.menu.antenna.ceramic.build.rf_antenna_flags=
+
+xiao_nrf54l15.menu.antenna.external=External U.FL
+xiao_nrf54l15.menu.antenna.external.build.rf_antenna_flags=-DARDUINO_XIAO_NRF54L15_EXT_ANTENNA
+
+xiao_nrf54l15.menu.radio_profile.ble_only=BLE Only (Recommended)
+xiao_nrf54l15.menu.radio_profile.ble_only.build.radio_profile_flags=-DARDUINO_XIAO_NRF54L15_RADIO_BLE_ONLY
+xiao_nrf54l15.menu.radio_profile.ble_only.build.zephyr_conf_radio={runtime.platform.path}/zephyr/arduino_base/conf/radio_ble_only.conf
+
+xiao_nrf54l15.menu.radio_profile.dual=BLE + 802.15.4 (Thread/Zigbee Base)
+xiao_nrf54l15.menu.radio_profile.dual.build.radio_profile_flags=-DARDUINO_XIAO_NRF54L15_RADIO_DUAL
+xiao_nrf54l15.menu.radio_profile.dual.build.zephyr_conf_radio={runtime.platform.path}/zephyr/arduino_base/conf/radio_dual.conf
+
+xiao_nrf54l15.menu.radio_profile.ieee802154_only=802.15.4 Only (No BLE)
+xiao_nrf54l15.menu.radio_profile.ieee802154_only.build.radio_profile_flags=-DARDUINO_XIAO_NRF54L15_RADIO_802154_ONLY
+xiao_nrf54l15.menu.radio_profile.ieee802154_only.build.zephyr_conf_radio={runtime.platform.path}/zephyr/arduino_base/conf/radio_802154_only.conf
+xiao_nrf54l15.menu.radio_profile.ieee802154_only.build.bt_controller_flags=
+xiao_nrf54l15.menu.radio_profile.ieee802154_only.build.zephyr_conf_bt_controller=
+xiao_nrf54l15.menu.radio_profile.ieee802154_only.build.zephyr_dtc_overlay_bt_controller=
+
+xiao_nrf54l15.menu.bt_controller.zephyr_ll_sw=Zephyr LL SW (Open Source)
+xiao_nrf54l15.menu.bt_controller.zephyr_ll_sw.build.bt_controller_flags=-DARDUINO_XIAO_NRF54L15_BT_CONTROLLER_LL_SW
+xiao_nrf54l15.menu.bt_controller.zephyr_ll_sw.build.zephyr_conf_bt_controller={runtime.platform.path}/zephyr/arduino_base/conf/bt_controller_ll_sw.conf
+xiao_nrf54l15.menu.bt_controller.zephyr_ll_sw.build.zephyr_dtc_overlay_bt_controller={runtime.platform.path}/zephyr/arduino_base/boards/xiao_nrf54l15_bt_ll_sw.overlay
+
+xiao_nrf54l15.menu.bt_controller.sdc=Nordic SDC (Binary Blob)
+xiao_nrf54l15.menu.bt_controller.sdc.build.bt_controller_flags=-DARDUINO_XIAO_NRF54L15_BT_CONTROLLER_SDC
+xiao_nrf54l15.menu.bt_controller.sdc.build.zephyr_conf_bt_controller={runtime.platform.path}/zephyr/arduino_base/conf/bt_controller_sdc.conf
+xiao_nrf54l15.menu.bt_controller.sdc.build.zephyr_dtc_overlay_bt_controller=
+
+xiao_nrf54l15.menu.bt_tx_power.dbm0=0 dBm (Recommended)
+xiao_nrf54l15.menu.bt_tx_power.dbm0.build.bt_tx_power_flags=-DARDUINO_XIAO_NRF54L15_BT_TX_PWR_DBM=0
+xiao_nrf54l15.menu.bt_tx_power.dbm0.build.zephyr_conf_tx_power=
+
+xiao_nrf54l15.menu.bt_tx_power.dbm8=+8 dBm
+xiao_nrf54l15.menu.bt_tx_power.dbm8.build.bt_tx_power_flags=-DARDUINO_XIAO_NRF54L15_BT_TX_PWR_DBM=8
+xiao_nrf54l15.menu.bt_tx_power.dbm8.build.zephyr_conf_tx_power={runtime.platform.path}/zephyr/arduino_base/conf/bt_tx_power_plus8.conf
+
+xiao_nrf54l15.menu.bt_tx_power.dbm_20=-20 dBm
+xiao_nrf54l15.menu.bt_tx_power.dbm_20.build.bt_tx_power_flags=-DARDUINO_XIAO_NRF54L15_BT_TX_PWR_DBM=-20
+xiao_nrf54l15.menu.bt_tx_power.dbm_20.build.zephyr_conf_tx_power={runtime.platform.path}/zephyr/arduino_base/conf/bt_tx_power_minus20.conf
+
+xiao_nrf54l15.menu.hpf_mspi.disabled=Disabled (Recommended)
+xiao_nrf54l15.menu.hpf_mspi.disabled.build.hpf_mspi_flags=
+xiao_nrf54l15.menu.hpf_mspi.disabled.build.zephyr_conf_hpf=
+xiao_nrf54l15.menu.hpf_mspi.disabled.build.zephyr_dtc_overlay_hpf=
+
+xiao_nrf54l15.menu.hpf_mspi.experimental=Experimental Enable
+xiao_nrf54l15.menu.hpf_mspi.experimental.build.hpf_mspi_flags=-DARDUINO_XIAO_NRF54L15_HPF_MSPI
+xiao_nrf54l15.menu.hpf_mspi.experimental.build.zephyr_conf_hpf={runtime.platform.path}/zephyr/arduino_base/conf/hpf_mspi_enable.conf
+xiao_nrf54l15.menu.hpf_mspi.experimental.build.zephyr_dtc_overlay_hpf={runtime.platform.path}/zephyr/arduino_base/boards/xiao_nrf54l15_nrf54l15_cpuapp_hpf_mspi.overlay
+
+xiao_nrf54l15.menu.upload_method.auto=Auto (Recommended)
+xiao_nrf54l15.menu.upload_method.auto.upload.runner=auto
+
+xiao_nrf54l15.menu.upload_method.openocd=OpenOCD (CMSIS-DAP)
+xiao_nrf54l15.menu.upload_method.openocd.upload.runner=openocd
+
+xiao_nrf54l15.menu.upload_method.jlink=SEGGER J-Link
+xiao_nrf54l15.menu.upload_method.jlink.upload.runner=jlink
+
+xiao_nrf54l15.menu.upload_method.nrfutil=nRF Util (Nordic)
+xiao_nrf54l15.menu.upload_method.nrfutil.upload.runner=nrfutil
+
+xiao_nrf54l15.menu.upload_method.nrfjprog=nrfjprog (Nordic)
+xiao_nrf54l15.menu.upload_method.nrfjprog.upload.runner=nrfjprog

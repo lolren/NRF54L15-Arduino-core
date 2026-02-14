@@ -1,0 +1,75 @@
+/ {
+    aliases {
+        arduino-adc = &arduino_adc_channels;
+        pwm0 = &arduino_pwm_d6;
+        pwm1 = &arduino_pwm_d7;
+        pwm2 = &arduino_pwm_d8;
+        pwm3 = &arduino_pwm_d9;
+        arduino-dmic = &pdm20;
+        arduino-counter = &grtc;
+    };
+
+    arduino_adc_channels: arduino_adc_channels {
+        io-channels = <&adc 0>,
+                      <&adc 1>,
+                      <&adc 2>,
+                      <&adc 3>,
+                      <&adc 4>,
+                      <&adc 5>,
+                      <&adc 6>,
+                      <&adc 7>;
+    };
+
+    arduino_pwm {
+        compatible = "pwm-leds";
+
+        arduino_pwm_d6: pwm_d6 {
+            pwms = <&pwm22 0 2000000 0>;
+        };
+
+        arduino_pwm_d7: pwm_d7 {
+            pwms = <&pwm22 1 2000000 0>;
+        };
+
+        arduino_pwm_d8: pwm_d8 {
+            pwms = <&pwm22 2 2000000 0>;
+        };
+
+        arduino_pwm_d9: pwm_d9 {
+            pwms = <&pwm22 3 2000000 0>;
+        };
+    };
+};
+
+&pwm22 {
+    status = "okay";
+    pinctrl-0 = <&pwm22_default>;
+    pinctrl-1 = <&pwm22_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&wdt31 {
+    status = "okay";
+};
+
+
+&pinctrl {
+    pwm22_default: pwm22_default {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 2, 8)>,
+                    <NRF_PSEL(PWM_OUT1, 2, 7)>,
+                    <NRF_PSEL(PWM_OUT2, 2, 1)>,
+                    <NRF_PSEL(PWM_OUT3, 2, 4)>;
+        };
+    };
+
+    pwm22_sleep: pwm22_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 2, 8)>,
+                    <NRF_PSEL(PWM_OUT1, 2, 7)>,
+                    <NRF_PSEL(PWM_OUT2, 2, 1)>,
+                    <NRF_PSEL(PWM_OUT3, 2, 4)>;
+            low-power-enable;
+        };
+    };
+};

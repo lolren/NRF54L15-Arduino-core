@@ -1,0 +1,71 @@
+/*
+ * Common definitions for Seeed Xiao nRF54L15
+ */
+
+/ {
+    leds {
+        compatible = "gpio-leds";
+        led0: led_0 {
+            gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;
+            label = "Red LED";
+        };
+    };
+
+    aliases {
+        led0 = &led0;
+    };
+
+    /* Xiao Connector Mappings */
+    xiao_d: xiao_connector {
+        compatible = "vnd,gpio-header";
+        #gpio-cells = <2>;
+        gpio-map-mask = <0xffffffff 0xffffffc0>;
+        gpio-map-pass-thru = <0 0x3f>;
+        gpio-map = 
+            <0 0 &gpio1 4 0>,  /* D0 */
+            <1 0 &gpio1 5 0>,  /* D1 */
+            <2 0 &gpio1 6 0>,  /* D2 */
+            <3 0 &gpio1 7 0>,  /* D3 */
+            <4 0 &gpio1 8 0>,  /* D4 (SDA) */
+            <5 0 &gpio1 9 0>,  /* D5 (SCL) */
+            <6 0 &gpio2 1 0>,  /* D6 (TX) */
+            <7 0 &gpio2 2 0>,  /* D7 (RX) */
+            <8 0 &gpio2 3 0>,  /* D8 (SCK) */
+            <9 0 &gpio2 4 0>,  /* D9 (MISO) */
+            <10 0 &gpio2 5 0>; /* D10 (MOSI) */
+    };
+    
+    xiao_adc: xiao_adc_connector {
+         compatible = "vnd,adc-header";
+         io-channels = 
+            <&adc 0>, /* A0 (D0) */
+            <&adc 1>, /* A1 (D1) */
+            <&adc 2>, /* A2 (D2) */
+            <&adc 3>; /* A3 (D3) */
+    };
+};
+
+&uart20 {
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&uart20_default>;
+    pinctrl-1 = <&uart20_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&pinctrl {
+    uart20_default: uart20_default {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 2, 1)>,
+                    <NRF_PSEL(UART_RX, 2, 2)>;
+        };
+    };
+
+    uart20_sleep: uart20_sleep {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 2, 1)>,
+                    <NRF_PSEL(UART_RX, 2, 2)>;
+            low-power-enable;
+        };
+    };
+};
