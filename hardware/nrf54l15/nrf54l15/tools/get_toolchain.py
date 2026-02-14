@@ -25,7 +25,11 @@ def fetch_release_assets(version: str) -> List[Dict[str, str]]:
         data = json.loads(response.read().decode("utf-8"))
     assets = data.get("assets", [])
     return [
-        {"name": asset.get("name", ""), "url": asset.get("browser_download_url", "")}
+        {
+            "name": asset.get("name", ""),
+            "url": asset.get("browser_download_url", ""),
+            "size": str(asset.get("size", 0)),
+        }
         for asset in assets
         if asset.get("name") and asset.get("browser_download_url")
     ]
@@ -72,8 +76,77 @@ def pick_sdk_asset(version: str, host_os: str, host_arch: str, assets: List[Dict
 
 def download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    curl = shutil.which("curl")
+    if curl:
+        run(
+            [
+                curl,
+                "-L",
+                "--fail",
+                "--retry",
+                "8",
+                "--retry-all-errors",
+                "--retry-delay",
+                "2",
+                "-C",
+                "-",
+                "-o",
+                str(dest),
+                url,
+            ],
+            check=True,
+        )
+        return
+
+    wget = shutil.which("wget")
+    if wget:
+        run(
+            [
+                wget,
+                "--continue",
+                "--tries=10",
+                "--retry-connrefused",
+                "-O",
+                str(dest),
+                url,
+            ],
+            check=True,
+        )
+        return
+
     with urllib.request.urlopen(url) as response, dest.open("wb") as out:  # nosec B310 - fixed URL from GitHub API
         shutil.copyfileobj(response, out)
+
+
+def parse_positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def expected_size(asset: Dict[str, str]) -> int:
+    raw = str(asset.get("size", "")).strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return value if value > 0 else 0
+
+
+def archive_size_matches(path: Path, expected_bytes: int) -> bool:
+    if expected_bytes <= 0:
+        return True
+    try:
+        return path.stat().st_size == expected_bytes
+    except OSError:
+        return False
 
 
 def safe_extract_tar(archive: Path, target_dir: Path) -> None:
@@ -255,9 +328,6 @@ def apply_prune_policy(sdk_dir: Path, prune_sdk: bool, prune_multilib: bool) -> 
     sysroots = sdk_dir / "sysroots"
     if sysroots.is_dir():
         shutil.rmtree(sysroots)
-    for installer in sdk_dir.glob("zephyr-sdk-*-hosttools-standalone-*"):
-        if installer.is_file():
-            installer.unlink(missing_ok=True)
 
     if prune_multilib:
         marker = sdk_dir / ".nrf54l15-minimal-pruned"
@@ -279,9 +349,20 @@ def main() -> int:
     keep_archive = os.environ.get("KEEP_ZEPHYR_SDK_ARCHIVE", "0") == "1"
     prune_sdk = os.environ.get("PRUNE_ZEPHYR_SDK", "1") == "1"
     prune_multilib = os.environ.get("PRUNE_ZEPHYR_SDK_MULTIARCH", "1") == "1"
+    download_retries = parse_positive_int_env("ZEPHYR_SDK_DOWNLOAD_RETRIES", 10)
 
     compiler = sdk_tool(sdk_dir, "arm-zephyr-eabi-gcc")
     if compiler and compiler.is_file():
+        dtc_tool = sdk_tool(sdk_dir, "dtc")
+        if not dtc_tool or not dtc_tool.is_file():
+            print("DTC host tool missing from existing SDK, running setup script...")
+            try_setup_script(sdk_dir)
+            dtc_tool = sdk_tool(sdk_dir, "dtc")
+            if not dtc_tool or not dtc_tool.is_file():
+                print(
+                    "Warning: dtc tool not found in SDK hosttools; "
+                    "build will rely on PATH/packaged host-tools."
+                )
         apply_prune_policy(sdk_dir, prune_sdk, prune_multilib)
         print(f"Zephyr SDK already installed: {sdk_dir}")
         return 0
@@ -293,23 +374,56 @@ def main() -> int:
     chosen = pick_sdk_asset(sdk_version, host_os, host_arch, assets)
     archive_name = chosen["name"]
     archive_url = chosen["url"]
+    archive_expected_size = expected_size(chosen)
     archive_path = tools_dir / archive_name
 
-    if not archive_path.is_file():
-        print(f"Downloading {archive_name} ...")
-        download_file(archive_url, archive_path)
-    else:
-        print(f"Using existing SDK archive: {archive_path}")
+    for attempt in range(1, download_retries + 1):
+        if archive_path.is_file():
+            if archive_size_matches(archive_path, archive_expected_size):
+                print(f"Using existing SDK archive: {archive_path}")
+            else:
+                print(
+                    "Existing SDK archive size mismatch, attempting resume/re-download: "
+                    f"{archive_path}"
+                )
 
-    with tempfile.TemporaryDirectory(prefix="zephyr-sdk-extract-", dir=str(tools_dir)) as temp_dir:
-        extract_root = Path(temp_dir)
-        print("Extracting Zephyr SDK...")
-        extract_archive(archive_path, extract_root)
-        extracted_dir = find_extracted_sdk_dir(extract_root, sdk_version)
+        if (not archive_path.is_file()) or (not archive_size_matches(archive_path, archive_expected_size)):
+            print(f"Downloading {archive_name} (attempt {attempt}/{download_retries}) ...")
+            download_file(archive_url, archive_path)
 
-        if sdk_dir.exists():
-            shutil.rmtree(sdk_dir)
-        shutil.move(str(extracted_dir), str(sdk_dir))
+        size_matches = archive_size_matches(archive_path, archive_expected_size)
+        if not size_matches:
+            actual_size = archive_path.stat().st_size if archive_path.is_file() else 0
+            print(
+                "Downloaded SDK archive size mismatch "
+                f"(expected {archive_expected_size}, got {actual_size}). "
+                "Attempting extraction anyway..."
+            )
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="zephyr-sdk-extract-", dir=str(tools_dir)) as temp_dir:
+                extract_root = Path(temp_dir)
+                print("Extracting Zephyr SDK...")
+                extract_archive(archive_path, extract_root)
+                extracted_dir = find_extracted_sdk_dir(extract_root, sdk_version)
+
+                if sdk_dir.exists():
+                    shutil.rmtree(sdk_dir)
+                shutil.move(str(extracted_dir), str(sdk_dir))
+            if not size_matches:
+                print("Extraction succeeded despite size mismatch.")
+            break
+        except (EOFError, tarfile.ReadError, OSError, RuntimeError) as exc:
+            archive_path.unlink(missing_ok=True)
+            if attempt >= download_retries:
+                raise RuntimeError(
+                    "Failed to extract Zephyr SDK archive after retries; "
+                    "download may be corrupted."
+                ) from exc
+            print(
+                "SDK archive extract failed; removing cached archive and retrying download. "
+                f"(attempt {attempt}/{download_retries})"
+            )
 
     compiler = sdk_tool(sdk_dir, "arm-zephyr-eabi-gcc")
     if not compiler or not compiler.is_file():
@@ -319,6 +433,17 @@ def main() -> int:
 
     if not compiler or not compiler.is_file():
         raise RuntimeError(f"Failed to provision arm-zephyr-eabi toolchain under {sdk_dir}")
+
+    dtc_tool = sdk_tool(sdk_dir, "dtc")
+    if not dtc_tool or not dtc_tool.is_file():
+        print("DTC host tool not present after extraction, running setup script...")
+        try_setup_script(sdk_dir)
+        dtc_tool = sdk_tool(sdk_dir, "dtc")
+        if not dtc_tool or not dtc_tool.is_file():
+            print(
+                "Warning: dtc tool not found in SDK hosttools; "
+                "build will rely on PATH/packaged host-tools."
+            )
 
     apply_prune_policy(sdk_dir, prune_sdk, prune_multilib)
 
