@@ -68,8 +68,10 @@ Arduino/
 ### Method 2: Arduino IDE (Boards Manager)
 
 1. Open **File > Preferences > Additional boards manager URLs**
-2. Add this package index URL:
-   - `https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_baremetal_index.json`
+2. Add this package index URL (copy/paste as one line):
+   ```text
+   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_baremetal_index.json
+   ```
 3. Open **Tools > Board > Boards Manager**
 4. Search for **Seeed nRF54L15 (Bare-Metal)** and install
 5. Select **Tools > Board > XIAO nRF54L15 (Bare-Metal - NO BLE)**
@@ -286,4 +288,7 @@ Apache License 2.0 - See LICENSE file for details
 - [nRF54L15 Product Page](https://www.nordicsemi.com/products/nrf54l15)
 - [XIAO nRF54L15 Wiki](https://wiki.seeedstudio.com/xiao_nrf54l15)
 - [Data Sheet](https://infocenter.nordicsemi.com/pdf/nRF54L15_PS_v1.0.pdf)
-- [Buy Me a Coffee](https://buymeacoffee.com/lolren)
+
+## Support
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/lolren)
