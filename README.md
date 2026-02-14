@@ -81,6 +81,37 @@ Arduino IDE support:
 - Windows
 - macOS
 
+### Method 3: Optional Prerequisite Scripts (Standalone)
+
+These scripts are independent from Boards Manager installation.
+Use them when you want a guided host setup (dependencies first, optional core copy to sketchbook hardware path).
+
+Linux:
+
+```bash
+bash ./install_linux.sh
+```
+
+Windows (Command Prompt):
+
+```bat
+install_windows.bat
+```
+
+Root launcher scripts:
+- `install_linux.sh` -> runs `tools/install/linux_prereqs.sh`
+- `install_windows.bat` -> runs `tools/install/windows_prereqs.bat`
+
+`tools/install/windows_prereqs.bat` has editable variables at the top for:
+- Python download/version and installer args
+- Git download/version and installer args
+- Winget package IDs
+
+Both scripts:
+- Detect Arduino IDE (if installed)
+- Detect sketchbook folder
+- Prompt to copy the core into `<sketchbook>/hardware/nrf54l15/nrf54l15`
+
 Troubleshooting if the core does not appear in Boards Manager:
 - Ensure the URL above is added as one full line.
 - Search `seeed` (3 e's) or `nrf54l15` in Boards Manager.
@@ -116,6 +147,7 @@ Host prerequisites:
 - Internet access for first-time bootstrap downloads
 - Optional manual fallback toolchain page:
   https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
+- Optional helper scripts: `tools/install/linux_prereqs.sh`, `tools/install/windows_prereqs.bat`
 
 Bootstrap cache behavior:
 - Changing Tools menu options (for example BLE enabled/disabled) reuses cached SDK/NCS data.
