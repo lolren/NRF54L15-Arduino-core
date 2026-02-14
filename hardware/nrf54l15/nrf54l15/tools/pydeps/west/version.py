@@ -7,7 +7,12 @@
 
 import importlib.metadata
 
-__version__ = importlib.metadata.version("west")
+try:
+    __version__ = importlib.metadata.version("west")
+except importlib.metadata.PackageNotFoundError:
+    # Bundled pydeps in this Arduino core may be used directly from source
+    # without an installed wheel/dist-info metadata entry.
+    __version__ = "0.0.0+bundled"
 #
 # MAINTAINERS:
 #
