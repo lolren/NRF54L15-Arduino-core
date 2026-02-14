@@ -7,6 +7,9 @@ import os
 import shlex
 import sys
 import shutil
+import subprocess
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Sequence
 
@@ -99,28 +102,101 @@ def should_rebuild_due_to_metadata(
     return False
 
 
+def ncs_workspace_complete(ncs_dir: Path) -> bool:
+    return (
+        (ncs_dir / ".west").is_dir()
+        and (ncs_dir / ".west" / "config").is_file()
+        and (ncs_dir / "nrf" / "west.yml").is_file()
+        and (ncs_dir / "zephyr" / "scripts" / "west_commands").is_dir()
+    )
+
+
 def ensure_ncs_workspace(script_dir: Path, ncs_dir: Path, quiet: bool) -> None:
     # A partially initialized workspace (for example missing .west/config)
     # can exist after interrupted first-run bootstrap.
-    west_config = ncs_dir / ".west" / "config"
-    manifest_file = ncs_dir / "nrf" / "west.yml"
-    zephyr_commands = ncs_dir / "zephyr" / "scripts" / "west_commands"
-    if (
-        (ncs_dir / ".west").is_dir()
-        and west_config.is_file()
-        and manifest_file.is_file()
-        and zephyr_commands.is_dir()
-    ):
+    if ncs_workspace_complete(ncs_dir):
         return
     log(not quiet, "nRF Connect SDK workspace missing/incomplete, bootstrapping...")
     run([sys.executable, str(script_dir / "get_nrf_connect.py")], check=True)
-    if not (
-        (ncs_dir / ".west").is_dir()
-        and west_config.is_file()
-        and manifest_file.is_file()
-        and zephyr_commands.is_dir()
-    ):
+    if not ncs_workspace_complete(ncs_dir):
         raise RuntimeError(f"Failed to bootstrap NCS workspace at {ncs_dir}")
+
+
+def parse_lock_owner_pid(lock_dir: Path) -> int | None:
+    owner_file = lock_dir / "owner.txt"
+    if not owner_file.is_file():
+        return None
+    try:
+        text = owner_file.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("pid="):
+            continue
+        try:
+            return int(line.split("=", 1)[1])
+        except ValueError:
+            return None
+    return None
+
+
+def pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+@contextmanager
+def build_lock(lock_dir: Path, quiet: bool, wait_timeout_sec: int = 60 * 60, stale_timeout_sec: int = 2 * 60 * 60):
+    lock_dir.parent.mkdir(parents=True, exist_ok=True)
+    start = time.monotonic()
+    last_notice = 0.0
+
+    while True:
+        try:
+            lock_dir.mkdir()
+            (lock_dir / "owner.txt").write_text(f"pid={os.getpid()}\n", encoding="utf-8")
+            break
+        except FileExistsError:
+            now = time.monotonic()
+            owner_pid = parse_lock_owner_pid(lock_dir)
+            if owner_pid is not None and not pid_is_running(owner_pid):
+                shutil.rmtree(lock_dir, ignore_errors=True)
+                continue
+
+            try:
+                age_sec = time.time() - lock_dir.stat().st_mtime
+            except OSError:
+                continue
+
+            if age_sec > stale_timeout_sec:
+                shutil.rmtree(lock_dir, ignore_errors=True)
+                continue
+
+            if not quiet and (now - last_notice) >= 5.0:
+                waited = int(now - start)
+                owner = f" pid={owner_pid}" if owner_pid is not None else ""
+                print(f"Another Zephyr artifact build is running ({waited}s){owner}, waiting...")
+                last_notice = now
+
+            if (now - start) >= wait_timeout_sec:
+                raise RuntimeError(f"Timed out waiting for build lock: {lock_dir}")
+
+            time.sleep(1.0)
+
+    try:
+        yield
+    finally:
+        shutil.rmtree(lock_dir, ignore_errors=True)
 
 
 def ensure_zephyr_sdk(script_dir: Path, sdk_dir: Path, quiet: bool) -> Path:
@@ -289,12 +365,6 @@ def main() -> int:
     extra_conf_file = join_semicolon(extra_conf_files)
     extra_dtc_overlay_file = join_semicolon(extra_dtc_overlays)
 
-    ensure_ncs_workspace(script_dir, ncs_dir, args.quiet)
-    ensure_standalone_git_markers(ncs_dir)
-    sdk_dir = ensure_zephyr_sdk(script_dir, sdk_dir, args.quiet)
-    dtc_bin = resolve_dtc(tools_dir, sdk_dir)
-    ninja_bin = resolve_ninja(sdk_dir)
-
     metadata_file = out_dir / "metadata.env"
     if not args.force and is_build_ready(out_dir, build_dir):
         prune_non_header_generated_sources(out_dir / "include")
@@ -312,32 +382,72 @@ def main() -> int:
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    env = with_west_pythonpath(tooling_platform_dir)
-    env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
-    prepend_sdk_tool_paths(env, sdk_dir)
+    dtc_bin = ""
+    ninja_bin = ""
+    env: dict[str, str] = {}
+    build_lock_dir = tools_dir / ".build_zephyr_lib.lock"
+    with build_lock(build_lock_dir, args.quiet):
+        # Recheck under lock to avoid stale decisions when concurrent compile
+        # processes race on first-run bootstrap/build state.
+        if not args.force and is_build_ready(out_dir, build_dir):
+            prune_non_header_generated_sources(out_dir / "include")
+            if should_rebuild_due_to_metadata(
+                metadata_file,
+                platform_dir,
+                build_dir,
+                extra_conf_file,
+                extra_dtc_overlay_file,
+            ):
+                log(
+                    not args.quiet,
+                    "Zephyr artifacts were generated from a different path/options, rebuilding...",
+                )
+            else:
+                log(not args.quiet, f"Zephyr artifacts are already prepared: {out_dir}")
+                return 0
 
-    cmake_args = [f"-DDTC={dtc_bin}"]
-    if extra_conf_file:
-        cmake_args.append(f"-DEXTRA_CONF_FILE={extra_conf_file}")
-    if extra_dtc_overlay_file:
-        cmake_args.append(f"-DEXTRA_DTC_OVERLAY_FILE={extra_dtc_overlay_file}")
+        ensure_ncs_workspace(script_dir, ncs_dir, args.quiet)
+        ensure_standalone_git_markers(ncs_dir)
+        sdk_dir = ensure_zephyr_sdk(script_dir, sdk_dir, args.quiet)
+        dtc_bin = resolve_dtc(tools_dir, sdk_dir)
+        ninja_bin = resolve_ninja(sdk_dir)
 
-    log(not args.quiet, "Building Zephyr base artifacts for Arduino core...")
-    
-    cmd = west_cmd() + [
-        "build",
-        "--build-dir",
-        str(build_dir),
-        "-p",
-        "always",
-        "-b",
-        board,
-        "--no-sysbuild",
-        str(app_dir),
-        "--",
-        *cmake_args,
-    ]
-    run(cmd, cwd=ncs_dir, env=env, check=True)
+        env = with_west_pythonpath(tooling_platform_dir)
+        env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
+        prepend_sdk_tool_paths(env, sdk_dir)
+
+        cmake_args = [f"-DDTC={dtc_bin}"]
+        if extra_conf_file:
+            cmake_args.append(f"-DEXTRA_CONF_FILE={extra_conf_file}")
+        if extra_dtc_overlay_file:
+            cmake_args.append(f"-DEXTRA_DTC_OVERLAY_FILE={extra_dtc_overlay_file}")
+
+        log(not args.quiet, "Building Zephyr base artifacts for Arduino core...")
+
+        cmd = west_cmd() + [
+            "build",
+            "--build-dir",
+            str(build_dir),
+            "-p",
+            "always",
+            "-b",
+            board,
+            "--no-sysbuild",
+            str(app_dir),
+            "--",
+            *cmake_args,
+        ]
+        try:
+            run(cmd, cwd=ncs_dir, env=env, check=True)
+        except subprocess.CalledProcessError:
+            # If workspace integrity degraded mid-run (interrupted update,
+            # mixed versions, etc.), heal once and retry.
+            if ncs_workspace_complete(ncs_dir):
+                raise
+            log(not args.quiet, "NCS workspace became incomplete, repairing and retrying build...")
+            ensure_ncs_workspace(script_dir, ncs_dir, args.quiet)
+            ensure_standalone_git_markers(ncs_dir)
+            run(cmd, cwd=ncs_dir, env=env, check=True)
 
     compile_commands = build_dir / "compile_commands.json"
     if not compile_commands.is_file():

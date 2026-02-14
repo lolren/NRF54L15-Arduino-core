@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.6 - 2026-02-14
+
+- Added cross-process build lock in `build_zephyr_lib.py` to avoid concurrent `west build`
+  collisions on the same Zephyr build directory.
+- Added automatic one-shot workspace integrity recovery retry when `west build` fails and
+  the shared NCS workspace is detected as incomplete mid-run.
+
 ## 1.1.5 - 2026-02-14
 
 - Fixed recovery from partially initialized shared NCS workspaces:
