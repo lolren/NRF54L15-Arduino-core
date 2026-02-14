@@ -59,6 +59,7 @@ call :detect_sketchbook
 if not defined SKETCHBOOK_DIR (
   set "SKETCHBOOK_DIR=%USERPROFILE%\Documents\Arduino"
 )
+set "SKETCHBOOK_DIR=%SKETCHBOOK_DIR:\"=%"
 call :log Detected sketchbook path: "%SKETCHBOOK_DIR%"
 set "DEFAULT_TARGET=%SKETCHBOOK_DIR%\hardware\nrf54l15\nrf54l15"
 
@@ -242,11 +243,26 @@ goto :eof
 
 :install_core
 set "SKETCHBOOK=%~1"
+set "SKETCHBOOK=%SKETCHBOOK:\"=%"
 set "TARGET_PARENT=%SKETCHBOOK%\hardware\nrf54l15"
 set "TARGET_DIR=%TARGET_PARENT%\nrf54l15"
 
-if not exist "%TARGET_PARENT%" mkdir "%TARGET_PARENT%"
-if errorlevel 1 (
+if not exist "%SKETCHBOOK%" (
+  mkdir "%SKETCHBOOK%" >nul 2>&1
+)
+if not exist "%SKETCHBOOK%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { New-Item -Path '%SKETCHBOOK%' -ItemType Directory -Force | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+)
+
+if not exist "%TARGET_PARENT%" (
+  mkdir "%TARGET_PARENT%" >nul 2>&1
+)
+if not exist "%TARGET_PARENT%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { New-Item -Path '%TARGET_PARENT%' -ItemType Directory -Force | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+)
+if not exist "%TARGET_PARENT%" (
   call :log ERROR: failed to create "%TARGET_PARENT%"
   exit /b 1
 )
