@@ -81,6 +81,12 @@ Arduino IDE support:
 - Windows
 - macOS
 
+Troubleshooting if the core does not appear in Boards Manager:
+- Ensure the URL above is added as one full line.
+- Search `seeed` (3 e's) or `nrf54l15` in Boards Manager.
+- If you previously installed this core manually, remove/rename
+  `~/Arduino/hardware/nrf54l15` (or move it outside `hardware/`) and refresh Boards Manager.
+
 To generate release archive + checksum + updated package index before publishing:
 
 ```bash
