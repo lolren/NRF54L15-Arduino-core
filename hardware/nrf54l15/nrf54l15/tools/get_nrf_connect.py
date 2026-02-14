@@ -556,6 +556,39 @@ def ensure_git_available(platform_tools_dir: Path, env: dict[str, str]) -> str:
     return str(git_exe)
 
 
+def ensure_west_python_deps(platform_dir: Path, env: dict[str, str]) -> None:
+    pydeps_dir = platform_dir / "tools" / "pydeps"
+    pydeps_dir.mkdir(parents=True, exist_ok=True)
+
+    probe = subprocess.run(
+        [sys.executable, "-c", "import west, colorama"],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        return
+
+    log("Bundled west Python dependencies missing, installing fallback Python packages (west, colorama)...")
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-input",
+            "--target",
+            str(pydeps_dir),
+            "west",
+            "colorama",
+        ],
+        env=env,
+        check=True,
+    )
+
+
 def main() -> int:
     paths = core_paths(Path(__file__))
     platform_dir = paths["platform_dir"]
@@ -586,6 +619,8 @@ def main() -> int:
 
         git_cmd = ensure_git_available(tools_dir, env)
         run([git_cmd, "--version"], env=env, check=True, capture_output=True)
+
+        ensure_west_python_deps(platform_dir, env)
 
         # Verify west imports correctly from bundled pydeps.
         run(west + ["--version"], env=env, check=True, capture_output=True)

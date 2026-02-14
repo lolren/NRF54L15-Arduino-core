@@ -23,7 +23,26 @@ from zephyr_common import (
 GITHUB_API_USER_AGENT = "nrf54l15-arduino-core-toolchain-bootstrap/0.1.0"
 
 
-def fetch_release_assets(version: str) -> List[Dict[str, str]]:
+def fallback_assets_for_host(version: str, host_os: str, host_arch: str) -> List[Dict[str, str]]:
+    if not host_os or not host_arch:
+        return []
+    bundle_ext = ".7z" if host_os == "windows" else ".tar.xz"
+    names = [
+        f"zephyr-sdk-{version}_{host_os}-{host_arch}{bundle_ext}",
+        f"zephyr-sdk-{version}_{host_os}-{host_arch}_minimal{bundle_ext}",
+        f"hosttools_{host_os}-{host_arch}.tar.xz",
+    ]
+    return [
+        {
+            "name": name,
+            "url": f"https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v{version}/{name}",
+            "size": "0",
+        }
+        for name in names
+    ]
+
+
+def fetch_release_assets(version: str, host_os: str = "", host_arch: str = "") -> List[Dict[str, str]]:
     url = f"https://api.github.com/repos/zephyrproject-rtos/sdk-ng/releases/tags/v{version}"
     request = urllib.request.Request(
         url,
@@ -50,10 +69,13 @@ def fetch_release_assets(version: str) -> List[Dict[str, str]]:
     except urllib.error.HTTPError as exc:
         if exc.code not in (403, 429):
             raise
-        print("GitHub API rate limit reached while resolving Zephyr SDK assets; falling back to release page parsing.")
+        print("GitHub API rate limit reached while resolving Zephyr SDK assets; using fallback resolver.")
     except urllib.error.URLError:
-        print("GitHub API lookup failed; falling back to release page parsing.")
+        print("GitHub API lookup failed; using fallback resolver.")
 
+    fallback = fallback_assets_for_host(version, host_os, host_arch)
+    if fallback:
+        return fallback
     return fetch_release_assets_from_release_page(version)
 
 
@@ -503,7 +525,7 @@ def main() -> int:
 
     print(f"Resolving Zephyr SDK for host {host_os}-{host_arch} (v{sdk_version})...")
 
-    assets = fetch_release_assets(sdk_version)
+    assets = fetch_release_assets(sdk_version, host_os, host_arch)
     chosen = pick_sdk_asset(sdk_version, host_os, host_arch, assets)
     archive_name = chosen["name"]
     archive_url = chosen["url"]

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.10 - 2026-02-14
+
+- Added self-healing west Python dependency bootstrap in `tools/get_nrf_connect.py`:
+  if bundled `pydeps` is missing `west`/`colorama` dependencies on fresh hosts,
+  the script now installs fallback packages into `tools/pydeps` automatically.
+- Improved `tools/get_toolchain.py` API-rate-limit fallback by synthesizing
+  deterministic Zephyr SDK/host-tools asset URLs for the detected host when
+  GitHub API metadata is unavailable.
+
 ## 1.1.9 - 2026-02-14
 
 - Hardened Zephyr SDK asset resolution in `tools/get_toolchain.py`:
