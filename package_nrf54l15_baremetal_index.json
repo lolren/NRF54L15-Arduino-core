@@ -12,6 +12,27 @@
         {
           "name": "Seeed nRF54L15 (Bare-Metal)",
           "architecture": "nrf54l15",
+          "version": "1.1.2",
+          "category": "Arduino",
+          "url": "https://github.com/lolren/NRF54L15-Arduino-core/releases/download/v1.1.2/nrf54l15-baremetal-1.1.2.tar.bz2",
+          "archiveFileName": "nrf54l15-baremetal-1.1.2.tar.bz2",
+          "checksum": "SHA-256:ed20c5edcb693da294e8ad834df29e8c6f78f6594276185e73ba812a5a266e40",
+          "size": "710152",
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 (Bare-Metal - NO BLE)"
+            }
+          ],
+          "help": {
+            "online": "https://github.com/lolren/NRF54L15-Arduino-core"
+          },
+          "toolsDependencies": [],
+          "discoveryDependencies": [],
+          "monitorDependencies": []
+        },
+        {
+          "name": "Seeed nRF54L15 (Bare-Metal)",
+          "architecture": "nrf54l15",
           "version": "1.1.1",
           "category": "Arduino",
           "url": "https://github.com/lolren/NRF54L15-Arduino-core/releases/download/v1.1.1/nrf54l15-baremetal-1.1.1.tar.bz2",

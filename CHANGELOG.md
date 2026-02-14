@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.2 - 2026-02-14
+
+- Added Linux host-tools fallback in `tools/get_toolchain.py`:
+  when `dtc` is missing, the script now fetches `hosttools_linux-<arch>.tar.xz`,
+  extracts the standalone installer into the SDK directory, and retries setup automatically.
+- Kept host-tools standalone installer files during prune to preserve recovery path for subsequent runs.
+
 ## 1.1.1 - 2026-02-14
 
 - Hardened `tools/get_toolchain.py` download flow for unstable networks:

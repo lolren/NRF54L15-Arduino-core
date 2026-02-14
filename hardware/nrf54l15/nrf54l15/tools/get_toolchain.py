@@ -74,6 +74,14 @@ def pick_sdk_asset(version: str, host_os: str, host_arch: str, assets: List[Dict
     return candidates[0][1]
 
 
+def pick_hosttools_asset(host_os: str, host_arch: str, assets: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    target = f"hosttools_{host_os}-{host_arch}.tar.xz"
+    for asset in assets:
+        if asset.get("name") == target:
+            return asset
+    return None
+
+
 def download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     curl = shutil.which("curl")
@@ -147,6 +155,78 @@ def archive_size_matches(path: Path, expected_bytes: int) -> bool:
         return path.stat().st_size == expected_bytes
     except OSError:
         return False
+
+
+def ensure_hosttools_installer_available(
+    *,
+    tools_dir: Path,
+    sdk_dir: Path,
+    host_os: str,
+    host_arch: str,
+    assets: List[Dict[str, str]],
+) -> bool:
+    if any(sdk_dir.glob("zephyr-sdk-*-hosttools-standalone-*")):
+        return True
+
+    asset = pick_hosttools_asset(host_os, host_arch, assets)
+    if not asset:
+        return False
+
+    archive_name = asset["name"]
+    archive_url = asset["url"]
+    archive_expected_size = expected_size(asset)
+    archive_path = tools_dir / archive_name
+
+    if (not archive_path.is_file()) or (not archive_size_matches(archive_path, archive_expected_size)):
+        print(f"Downloading host-tools installer archive: {archive_name}")
+        download_file(archive_url, archive_path)
+
+    print("Extracting host-tools installer archive...")
+    extract_archive(archive_path, sdk_dir)
+    return any(sdk_dir.glob("zephyr-sdk-*-hosttools-standalone-*"))
+
+
+def ensure_dtc_available(
+    *,
+    tools_dir: Path,
+    sdk_dir: Path,
+    sdk_version: str,
+    host_os: str,
+    host_arch: str,
+    assets: Optional[List[Dict[str, str]]] = None,
+) -> bool:
+    dtc_tool = sdk_tool(sdk_dir, "dtc")
+    if dtc_tool and dtc_tool.is_file():
+        return True
+
+    print("DTC host tool missing, running setup script...")
+    try:
+        try_setup_script(sdk_dir)
+    except Exception as exc:
+        print(f"Host-tools setup failed ({exc}), attempting host-tools installer fallback...")
+
+    dtc_tool = sdk_tool(sdk_dir, "dtc")
+    if dtc_tool and dtc_tool.is_file():
+        return True
+
+    loaded_assets = assets if assets is not None else fetch_release_assets(sdk_version)
+    if not ensure_hosttools_installer_available(
+        tools_dir=tools_dir,
+        sdk_dir=sdk_dir,
+        host_os=host_os,
+        host_arch=host_arch,
+        assets=loaded_assets,
+    ):
+        return False
+
+    print("Retrying setup script after host-tools installer extraction...")
+    try:
+        try_setup_script(sdk_dir)
+    except Exception as exc:
+        print(f"Host-tools setup retry failed ({exc}).")
+
+    dtc_tool = sdk_tool(sdk_dir, "dtc")
+    return bool(dtc_tool and dtc_tool.is_file())
 
 
 def safe_extract_tar(archive: Path, target_dir: Path) -> None:
@@ -350,24 +430,25 @@ def main() -> int:
     prune_sdk = os.environ.get("PRUNE_ZEPHYR_SDK", "1") == "1"
     prune_multilib = os.environ.get("PRUNE_ZEPHYR_SDK_MULTIARCH", "1") == "1"
     download_retries = parse_positive_int_env("ZEPHYR_SDK_DOWNLOAD_RETRIES", 10)
+    host_os, host_arch = detect_supported_host_for_sdk()
 
     compiler = sdk_tool(sdk_dir, "arm-zephyr-eabi-gcc")
     if compiler and compiler.is_file():
-        dtc_tool = sdk_tool(sdk_dir, "dtc")
-        if not dtc_tool or not dtc_tool.is_file():
-            print("DTC host tool missing from existing SDK, running setup script...")
-            try_setup_script(sdk_dir)
-            dtc_tool = sdk_tool(sdk_dir, "dtc")
-            if not dtc_tool or not dtc_tool.is_file():
-                print(
-                    "Warning: dtc tool not found in SDK hosttools; "
-                    "build will rely on PATH/packaged host-tools."
-                )
+        if not ensure_dtc_available(
+            tools_dir=tools_dir,
+            sdk_dir=sdk_dir,
+            sdk_version=sdk_version,
+            host_os=host_os,
+            host_arch=host_arch,
+        ):
+            print(
+                "Warning: dtc tool not found in SDK hosttools; "
+                "build will rely on PATH/packaged host-tools."
+            )
         apply_prune_policy(sdk_dir, prune_sdk, prune_multilib)
         print(f"Zephyr SDK already installed: {sdk_dir}")
         return 0
 
-    host_os, host_arch = detect_supported_host_for_sdk()
     print(f"Resolving Zephyr SDK for host {host_os}-{host_arch} (v{sdk_version})...")
 
     assets = fetch_release_assets(sdk_version)
@@ -434,16 +515,18 @@ def main() -> int:
     if not compiler or not compiler.is_file():
         raise RuntimeError(f"Failed to provision arm-zephyr-eabi toolchain under {sdk_dir}")
 
-    dtc_tool = sdk_tool(sdk_dir, "dtc")
-    if not dtc_tool or not dtc_tool.is_file():
-        print("DTC host tool not present after extraction, running setup script...")
-        try_setup_script(sdk_dir)
-        dtc_tool = sdk_tool(sdk_dir, "dtc")
-        if not dtc_tool or not dtc_tool.is_file():
-            print(
-                "Warning: dtc tool not found in SDK hosttools; "
-                "build will rely on PATH/packaged host-tools."
-            )
+    if not ensure_dtc_available(
+        tools_dir=tools_dir,
+        sdk_dir=sdk_dir,
+        sdk_version=sdk_version,
+        host_os=host_os,
+        host_arch=host_arch,
+        assets=assets,
+    ):
+        print(
+            "Warning: dtc tool not found in SDK hosttools; "
+            "build will rely on PATH/packaged host-tools."
+        )
 
     apply_prune_policy(sdk_dir, prune_sdk, prune_multilib)
 
