@@ -24,6 +24,7 @@ Build/runtime basis:
 - ✅ **CMSIS-DAP debug** - Works with built-in debugger on XIAO boards
 - ✅ **Cross-platform uploader** - `Auto` runner selects `pyOCD` then `OpenOCD`
 - ✅ **Board Tools menu** - Upload method, CPU frequency, antenna, radio profile
+- ✅ **Expanded example set** - Includes core examples plus legacy Seeed example folders in Arduino IDE
 
 ## Supported Boards
 
@@ -150,7 +151,7 @@ Troubleshooting if the core does not appear in Boards Manager:
 To generate release archive + checksum + updated package index before publishing:
 
 ```bash
-python3 tools/release_boards_manager.py --version 0.1.0 --repo lolren/NRF54L15-Arduino-core
+python3 tools/release_boards_manager.py --version 0.1.1 --repo lolren/NRF54L15-Arduino-core
 ```
 
 To run a local fresh-machine Boards Manager smoke test:

@@ -12,12 +12,12 @@
         {
           "name": "Seeed nRF54L15 (Zephyr-Based)",
           "architecture": "nrf54l15",
-          "version": "0.1.0",
+          "version": "0.1.1",
           "category": "Arduino",
-          "url": "https://github.com/lolren/NRF54L15-Arduino-core/releases/download/v0.1.0/nrf54l15-zephyr-based-0.1.0.tar.bz2",
-          "archiveFileName": "nrf54l15-zephyr-based-0.1.0.tar.bz2",
-          "checksum": "SHA-256:fdf99c4cd83b795969f90e6a31247543dbab7b87fa0c73c16ff65821cc3d6f29",
-          "size": "714593",
+          "url": "https://github.com/lolren/NRF54L15-Arduino-core/releases/download/v0.1.1/nrf54l15-zephyr-based-0.1.1.tar.bz2",
+          "archiveFileName": "nrf54l15-zephyr-based-0.1.1.tar.bz2",
+          "checksum": "SHA-256:c4bc5e7460596ccba90249dd7dab642576db06466e625a10d11b3cd9a23b216d",
+          "size": "722154",
           "boards": [
             {
               "name": "XIAO nRF54L15 (Zephyr-Based - NO BLE)"

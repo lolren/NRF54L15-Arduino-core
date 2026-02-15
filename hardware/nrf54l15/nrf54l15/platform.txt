@@ -2,7 +2,7 @@
 # Licensed under the Apache License 2.0
 
 name=Seeed nRF54L15 (Zephyr-Based)
-version=0.1.0
+version=0.1.1
 category=ARM
 
 # Python launcher used by upload helper (cross-platform)

@@ -1,5 +1,5 @@
 name=Seeed XIAO nRF54L15 Zephyr Core
-version=0.1.0
+version=0.1.1
 
 tools.python.cmd={runtime.platform.path}/tools/python_with_venv.sh
 tools.python.cmd.windows=py

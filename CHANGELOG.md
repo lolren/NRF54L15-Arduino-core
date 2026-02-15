@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.1 - 2026-02-15
+
+- Added legacy Seeed example sets from `hardware/seeed/nrf54l15/examples`
+  into the packaged core example tree at
+  `hardware/nrf54l15/nrf54l15/examples` so they appear in Arduino IDE for
+  Boards Manager installs.
+
 ## 0.1.0 - 2026-02-14
 
 - Reset release line to `0.1.0` and consolidate published artifacts to the
