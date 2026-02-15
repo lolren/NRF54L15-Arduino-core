@@ -1,7 +1,7 @@
 <h1><font color="red">IMPORTANT: first-time installation + first compile can be slow and may look stalled. Let it finish.</font></h1>
 <h2><font color="red">Disk usage warning: after first setup/compilation, required disk space is about 9 GB (SDK/toolchain/workspace + build cache).</font></h2>
 <h2><font color="red">Windows can be much slower because real-time protection scans large SDK/toolchain files. Recommended: use Linux. On Windows, add this core/tools path as an antivirus exception, or temporarily disable real-time protection only for first setup/compile.</font></h2>
-<h2><font color="red">Windows recommendation: use the script install method only (`install_windows.bat`). Arduino IDE/Boards Manager flows on Windows can be buggy and may fail with `ECONNRESET` during first bootstrap.</font></h2>
+<h2><font color="red">Windows recommendation: use the script install method only (`install_windows.bat`). Sometimes first compilation on Windows fails with `ECONNRESET` due to a bug in the Arduino IDE Windows client (Electron-based). After one successful first compilation, switching back to Arduino IDE usually works.</font></h2>
 
 # Arduino Core for nRF54L15 (Zephyr-Based)
 
@@ -87,7 +87,9 @@ Arduino IDE support:
 - macOS
 
 Windows warning:
-- Prefer Method 3 (`install_windows.bat`) due Arduino IDE Windows instability (`ECONNRESET`) during first bootstrap/compile.
+- Sometimes first compilation on Windows fails with `ECONNRESET` due to a bug in the Arduino IDE Windows client (Electron-based).
+- Workaround: run first setup + first compile with Method 3 (`install_windows.bat`) or with Rewritto IDE (Qt6): `https://github.com/lolren/rewritto-ide`.
+- After one successful first compilation, switching back to Arduino IDE usually works.
 
 ### Method 3: Prerequisite Scripts (Standalone)
 
