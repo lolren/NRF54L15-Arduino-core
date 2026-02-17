@@ -91,10 +91,10 @@ Windows warning:
 - Workaround: run first setup + first compile with Method 3 (`install_windows.bat`) or with Rewritto IDE (Qt6): `https://github.com/lolren/rewritto-ide`.
 - After one successful first compilation, switching back to Arduino IDE usually works.
 
-### Method 3: Prerequisite Scripts (Standalone)
+### Method 3: Setup Scripts (Standalone)
 
 These scripts are independent from Boards Manager installation.
-Use them when you want guided host setup before IDE compile/upload.
+Use them when you want guided host setup plus first-time SDK/bootstrap warmup before IDE compile/upload.
 
 Linux:
 
@@ -118,20 +118,20 @@ Root launcher scripts:
 - CMake download/version and installer args
 - Winget package IDs
 
-Both scripts:
-- Detect Arduino IDE (if installed)
-- Detect sketchbook folder
-
-Windows script default behavior:
+Both scripts default behavior:
 - Ensures Python, Git, CMake, DTC, and Ninja are installed (auto-installs if missing)
 - Copies this core into `<sketchbook>/hardware/nrf54l15/nrf54l15`
 - Preserves existing `tools/ncs` and `tools/zephyr-sdk` cache content on reruns
 - Bootstraps NCS workspace + Zephyr SDK
 - Installs required Zephyr Python build dependencies into `tools/pydeps` automatically
 - Runs a one-time Zephyr warmup build so IDE compiles are sketch-focused
+- Detects Arduino IDE (if installed)
+- Detects sketchbook folder
+
+Windows-only behavior:
 - Uses a short default Zephyr build cache path on Windows (`%LOCALAPPDATA%\nrf54l15-build`) to avoid path-length build failures
 
-Windows script options:
+Linux/Windows script options:
 - `--skip-core-copy` to keep using the repo core path without copying
 - `--skip-bootstrap` to skip NCS/SDK download and warmup build
 - `--help` to print usage
