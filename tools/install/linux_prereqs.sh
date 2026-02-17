@@ -18,14 +18,18 @@ Usage:
 
 Default behavior:
   1) Ensure required host dependencies are installed.
-  2) Copy this core into sketchbook hardware path.
+  2) Copy this core into Arduino15 packages hardware path.
   3) Download/bootstrap nRF Connect workspace and Zephyr SDK.
   4) Run a warmup Zephyr build so Arduino IDE compiles are sketch-focused.
 
 Options:
-  --skip-core-copy   Skip copying repo core into sketchbook.
+  --skip-core-copy   Skip copying repo core into Arduino15 packages path.
   --skip-bootstrap   Skip NCS/SDK bootstrap and warmup build.
   --help             Show this help text.
+
+Environment overrides:
+  ARDUINO_DATA_DIR        Arduino data root (default: ~/.arduino15)
+  ARDUINO_PACKAGE_VENDOR  Package vendor path (default: nrf54l15)
 EOF
 }
 
@@ -155,47 +159,43 @@ detect_arduino_ide() {
   done
 }
 
-detect_sketchbook_dir() {
-  python3 - <<'PY'
-import json
-from pathlib import Path
+detect_arduino_data_dir() {
+  if [[ -n "${ARDUINO_DATA_DIR:-}" ]]; then
+    printf '%s\n' "${ARDUINO_DATA_DIR}"
+    return
+  fi
 
-home = Path.home()
+  local candidate
+  for candidate in \
+    "${HOME}/.arduino15" \
+    "${HOME}/.var/app/cc.arduino.IDE2/data/arduino15"; do
+    if [[ -d "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return
+    fi
+  done
 
-def emit_if_valid(path_str: str) -> bool:
-    if not path_str:
-        return False
-    p = Path(path_str).expanduser()
-    if p.is_absolute():
-        print(str(p))
-        return True
-    return False
+  printf '%s\n' "${HOME}/.arduino15"
+}
 
-settings_json = home / ".arduinoIDE" / "settings.json"
-if settings_json.is_file():
-    try:
-        data = json.loads(settings_json.read_text(encoding="utf-8"))
-    except Exception:
-        data = {}
-    for key in ("sketchbook.path", "sketchbookPath"):
-        value = data.get(key)
-        if isinstance(value, str) and emit_if_valid(value):
-            raise SystemExit(0)
+detect_core_version() {
+  local platform_file="${CORE_SOURCE_DIR}/platform.txt"
+  local version
 
-prefs = home / ".arduino15" / "preferences.txt"
-if prefs.is_file():
-    for line in prefs.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if line.startswith("sketchbook.path="):
-            if emit_if_valid(line.split("=", 1)[1].strip()):
-                raise SystemExit(0)
+  version="$(awk -F= '/^[[:space:]]*version[[:space:]]*=/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}' "${platform_file}" || true)"
+  if [[ -z "${version}" ]]; then
+    version="dev"
+  fi
+  printf '%s\n' "${version}"
+}
 
-for candidate in (home / "Arduino", home / "Documents" / "Arduino"):
-    if candidate.exists():
-        print(str(candidate))
-        raise SystemExit(0)
-
-print(str(home / "Arduino"))
-PY
+resolve_package_vendor() {
+  local vendor="${ARDUINO_PACKAGE_VENDOR:-nrf54l15}"
+  vendor="${vendor//[[:space:]]/}"
+  if [[ -z "${vendor}" ]]; then
+    vendor="nrf54l15"
+  fi
+  printf '%s\n' "${vendor}"
 }
 
 resolve_python() {
@@ -216,12 +216,14 @@ PY
   return 1
 }
 
-install_core_to_sketchbook() {
-  local sketchbook="$1"
-  local target_parent="${sketchbook}/hardware/nrf54l15"
-  local target="${target_parent}/nrf54l15"
+install_core_to_arduino_packages() {
+  local arduino_data_dir="$1"
+  local package_vendor="$2"
+  local core_version="$3"
+  local target_parent="${arduino_data_dir}/packages/${package_vendor}/hardware/nrf54l15"
+  local target="${target_parent}/${core_version}"
 
-  mkdir -p "${sketchbook}"
+  mkdir -p "${arduino_data_dir}"
   mkdir -p "${target_parent}"
 
   if have_cmd rsync; then
@@ -336,18 +338,25 @@ main() {
     log "Step 3/7: Arduino IDE executable not detected (optional for setup)."
   fi
 
-  local sketchbook
-  sketchbook="$(detect_sketchbook_dir)"
-  log "Step 4/7: Detected sketchbook path: ${sketchbook}"
+  local arduino_data_dir
+  arduino_data_dir="$(detect_arduino_data_dir)"
+  arduino_data_dir="${arduino_data_dir%/}"
+  log "Step 4/7: Detected Arduino data path: ${arduino_data_dir}"
 
-  local default_target="${sketchbook}/hardware/nrf54l15/nrf54l15"
+  local package_vendor
+  package_vendor="$(resolve_package_vendor)"
+
+  local core_version
+  core_version="$(detect_core_version)"
+
+  local default_target="${arduino_data_dir}/packages/${package_vendor}/hardware/nrf54l15/${core_version}"
   local warmup_core_dir
   if [[ "${SKIP_CORE_COPY}" -eq 1 ]]; then
     warmup_core_dir="${CORE_SOURCE_DIR}"
     log "Step 5/7: Skipping core copy (using repo path): ${warmup_core_dir}"
   else
-    log "Step 5/7: Installing core into sketchbook hardware path..."
-    install_core_to_sketchbook "${sketchbook}"
+    log "Step 5/7: Installing core into Arduino packages path (vendor=${package_vendor}, version=${core_version})..."
+    install_core_to_arduino_packages "${arduino_data_dir}" "${package_vendor}" "${core_version}"
     warmup_core_dir="${default_target}"
   fi
 

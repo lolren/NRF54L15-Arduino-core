@@ -76,7 +76,7 @@ Arduino/
 1. Open **File > Preferences > Additional boards manager URLs**
 2. Add this package index URL (copy/paste as one line):
    ```text
-   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_index.json
+   https://raw.githubusercontent.com/lolren/NRF54L15-Arduino-core/main/package_nrf54l15_zephyr_based_index.json
    ```
 3. Open **Tools > Board > Boards Manager**
 4. Search for **Seeed nRF54L15 (Zephyr-Based)** and install
@@ -120,13 +120,13 @@ Root launcher scripts:
 
 Both scripts default behavior:
 - Ensures Python, Git, CMake, DTC, and Ninja are installed (auto-installs if missing)
-- Copies this core into `<sketchbook>/hardware/nrf54l15/nrf54l15`
+- Copies this core into `<Arduino data>/packages/<vendor>/hardware/nrf54l15/<version>`
 - Preserves existing `tools/ncs` and `tools/zephyr-sdk` cache content on reruns
 - Bootstraps NCS workspace + Zephyr SDK
 - Installs required Zephyr Python build dependencies into `tools/pydeps` automatically
 - Runs a one-time Zephyr warmup build so IDE compiles are sketch-focused
 - Detects Arduino IDE (if installed)
-- Detects sketchbook folder
+- Detects Arduino data folder (`Arduino15`)
 
 Windows-only behavior:
 - Uses a short default Zephyr build cache path on Windows (`%LOCALAPPDATA%\nrf54l15-build`) to avoid path-length build failures
@@ -135,6 +135,10 @@ Linux/Windows script options:
 - `--skip-core-copy` to keep using the repo core path without copying
 - `--skip-bootstrap` to skip NCS/SDK download and warmup build
 - `--help` to print usage
+
+Linux/Windows script env overrides:
+- `ARDUINO_DATA_DIR` to set explicit Arduino data directory
+- `ARDUINO_PACKAGE_VENDOR` to set package vendor folder (default: `nrf54l15`)
 
 Windows build-path overrides:
 - `ARDUINO_ZEPHYR_BUILD_DIR` to set an explicit build directory

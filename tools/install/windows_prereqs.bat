@@ -89,21 +89,33 @@ if defined ARDUINO_IDE_EXE (
   call :log Arduino IDE executable not detected. Download: !ARDUINO_IDE_DOWNLOAD_PAGE!
 )
 
-call :log Step 5/7: Detecting sketchbook path...
-call :detect_sketchbook
-if not defined SKETCHBOOK_DIR (
-  set "SKETCHBOOK_DIR=%USERPROFILE%\Documents\Arduino"
+call :log Step 5/7: Detecting Arduino data path...
+call :detect_arduino_data
+if not defined ARDUINO_DATA_DIR (
+  set "ARDUINO_DATA_DIR=%LOCALAPPDATA%\Arduino15"
 )
-set "SKETCHBOOK_DIR=%SKETCHBOOK_DIR:\"=%"
-call :log Detected sketchbook path: "%SKETCHBOOK_DIR%"
-set "DEFAULT_TARGET=%SKETCHBOOK_DIR%\hardware\nrf54l15\nrf54l15"
+set "ARDUINO_DATA_DIR=%ARDUINO_DATA_DIR:\"=%"
+
+set "PACKAGE_VENDOR=%ARDUINO_PACKAGE_VENDOR%"
+if not defined PACKAGE_VENDOR set "PACKAGE_VENDOR=nrf54l15"
+set "PACKAGE_VENDOR=%PACKAGE_VENDOR:\"=%"
+if "%PACKAGE_VENDOR%"=="" set "PACKAGE_VENDOR=nrf54l15"
+
+call :detect_core_version
+if not defined CORE_VERSION set "CORE_VERSION=dev"
+set "CORE_VERSION=%CORE_VERSION:\"=%"
+if "%CORE_VERSION%"=="" set "CORE_VERSION=dev"
+
+call :log Detected Arduino data path: "%ARDUINO_DATA_DIR%"
+call :log Core install vendor/version: "%PACKAGE_VENDOR%/%CORE_VERSION%"
+set "DEFAULT_TARGET=%ARDUINO_DATA_DIR%\packages\%PACKAGE_VENDOR%\hardware\nrf54l15\%CORE_VERSION%"
 
 if "%SKIP_CORE_COPY%"=="1" (
   call :log Step 6/7: Skipping core copy step. Flag --skip-core-copy is set.
   set "WARMUP_CORE_DIR=%CORE_SOURCE_DIR%"
 ) else (
-  call :log Step 6/7: Installing core into sketchbook hardware path...
-  call :install_core "%SKETCHBOOK_DIR%"
+  call :log Step 6/7: Installing core into Arduino packages hardware path...
+  call :install_core "%ARDUINO_DATA_DIR%" "%PACKAGE_VENDOR%" "%CORE_VERSION%"
   if errorlevel 1 exit /b 1
   set "WARMUP_CORE_DIR=%DEFAULT_TARGET%"
 )
@@ -158,14 +170,18 @@ echo   install_windows.bat [--skip-core-copy] [--skip-bootstrap]
 echo.
 echo Default behavior:
 echo   1^) Ensure Python, Git, CMake, DTC, and Ninja are installed.
-echo   2^) Copy core into sketchbook hardware path.
+echo   2^) Copy core into Arduino15 packages hardware path.
 echo   3^) Download/bootstrap NCS workspace and Zephyr SDK.
 echo   4^) Build Zephyr base artifacts so IDE compiles are sketch-focused.
 echo.
 echo Options:
-echo   --skip-core-copy   Skip copying repo core into sketchbook.
+echo   --skip-core-copy   Skip copying repo core into Arduino15 packages path.
 echo   --skip-bootstrap   Skip NCS/SDK download and warmup build.
 echo   --help             Show this help text.
+echo.
+echo Environment overrides:
+echo   ARDUINO_DATA_DIR        Arduino data root ^(default: %%LOCALAPPDATA%%\Arduino15^)
+echo   ARDUINO_PACKAGE_VENDOR  Package vendor path ^(default: nrf54l15^)
 echo.
 exit /b 0
 
@@ -463,40 +479,57 @@ for /f "delims=" %%P in ('where arduino-ide 2^>nul') do (
 
 goto :eof
 
-:detect_sketchbook
-set "SKETCHBOOK_DIR="
-set "SETTINGS_JSON=%USERPROFILE%\.arduinoIDE\settings.json"
-if exist "%SETTINGS_JSON%" (
-  for /f "usebackq delims=" %%S in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$j=Get-Content -Raw '%SETTINGS_JSON%' | ConvertFrom-Json; if($j.'sketchbook.path'){[Console]::Write($j.'sketchbook.path')} elseif($j.sketchbookPath){[Console]::Write($j.sketchbookPath)}} catch {}"`) do set "SKETCHBOOK_DIR=%%S"
-)
-if defined SKETCHBOOK_DIR goto :eof
+:detect_arduino_data
+if defined ARDUINO_DATA_DIR goto :eof
+if exist "%LOCALAPPDATA%\Arduino15" set "ARDUINO_DATA_DIR=%LOCALAPPDATA%\Arduino15"
+if defined ARDUINO_DATA_DIR goto :eof
+if exist "%APPDATA%\Arduino15" set "ARDUINO_DATA_DIR=%APPDATA%\Arduino15"
+if defined ARDUINO_DATA_DIR goto :eof
+set "ARDUINO_DATA_DIR=%LOCALAPPDATA%\Arduino15"
+goto :eof
 
-set "PREFS_TXT=%LOCALAPPDATA%\Arduino15\preferences.txt"
-if exist "%PREFS_TXT%" (
-  for /f "usebackq tokens=1,* delims==" %%A in (`findstr /B /C:"sketchbook.path=" "%PREFS_TXT%"`) do (
-    if /I "%%A"=="sketchbook.path" set "SKETCHBOOK_DIR=%%B"
+:detect_core_version
+set "CORE_VERSION="
+if not exist "%CORE_SOURCE_DIR%\platform.txt" (
+  set "CORE_VERSION=dev"
+  goto :eof
+)
+for /f "usebackq tokens=1,* delims==" %%A in (`findstr /B /C:"version=" "%CORE_SOURCE_DIR%\platform.txt"`) do (
+  if /I "%%A"=="version" (
+    set "CORE_VERSION=%%B"
+    goto :eof
   )
 )
-if defined SKETCHBOOK_DIR goto :eof
-
-if exist "%USERPROFILE%\Documents\Arduino" set "SKETCHBOOK_DIR=%USERPROFILE%\Documents\Arduino"
-if defined SKETCHBOOK_DIR goto :eof
-
-if exist "%USERPROFILE%\Arduino" set "SKETCHBOOK_DIR=%USERPROFILE%\Arduino"
+if not defined CORE_VERSION set "CORE_VERSION=dev"
 goto :eof
 
 :install_core
-set "SKETCHBOOK=%~1"
-set "SKETCHBOOK=%SKETCHBOOK:\"=%"
-set "TARGET_PARENT=%SKETCHBOOK%\hardware\nrf54l15"
-set "TARGET_DIR=%TARGET_PARENT%\nrf54l15"
+set "ARDUINO_DATA=%~1"
+set "PACKAGE_VENDOR=%~2"
+set "CORE_VERSION=%~3"
+set "ARDUINO_DATA=%ARDUINO_DATA:\"=%"
+set "PACKAGE_VENDOR=%PACKAGE_VENDOR:\"=%"
+set "CORE_VERSION=%CORE_VERSION:\"=%"
+if "%PACKAGE_VENDOR%"=="" set "PACKAGE_VENDOR=nrf54l15"
+if "%CORE_VERSION%"=="" set "CORE_VERSION=dev"
+set "PACKAGES_DIR=%ARDUINO_DATA%\packages"
+set "TARGET_PARENT=%PACKAGES_DIR%\%PACKAGE_VENDOR%\hardware\nrf54l15"
+set "TARGET_DIR=%TARGET_PARENT%\%CORE_VERSION%"
 
-if not exist "%SKETCHBOOK%" (
-  mkdir "%SKETCHBOOK%" >nul 2>&1
+if not exist "%ARDUINO_DATA%" (
+  mkdir "%ARDUINO_DATA%" >nul 2>&1
 )
-if not exist "%SKETCHBOOK%" (
+if not exist "%ARDUINO_DATA%" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { New-Item -Path '%SKETCHBOOK%' -ItemType Directory -Force | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+    "try { New-Item -Path '%ARDUINO_DATA%' -ItemType Directory -Force | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+)
+
+if not exist "%PACKAGES_DIR%" (
+  mkdir "%PACKAGES_DIR%" >nul 2>&1
+)
+if not exist "%PACKAGES_DIR%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { New-Item -Path '%PACKAGES_DIR%' -ItemType Directory -Force | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 )
 
 if not exist "%TARGET_PARENT%" (
