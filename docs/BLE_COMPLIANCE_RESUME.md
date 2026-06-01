@@ -64,6 +64,10 @@ not regress, and what to test first when resuming.
       Description (`0x2901`) descriptors can be written and read back when the
       parent characteristic write permission allows it; Presentation Format
       (`0x2904`) and Report Reference (`0x2908`) remain read-only.
+- [x] `Bluefruit52Lib > Diagnostics > gatt_edge_cases` exposes one manual
+      regression sketch for 244-byte long reads, queued prepare/execute writes,
+      MTU-sensitive reads, writable User Description descriptors, and readable
+      Presentation Format / Report Reference descriptors.
 - [x] Bonded CCCD persistence: CCCD writes are saved in the BLE bond storage
       page, restored only for the matching bonded peer/local identity, and
       cleared with the bond record. This covers Service Changed, Battery
@@ -157,8 +161,12 @@ Run these before changing BLE again:
       connection
 - [ ] Compile and run `Bluefruit52Lib > Diagnostics > bond_identity_probe`;
       pair with a phone/desktop host, confirm authenticated fixed-PIN pairing,
-      peer bond address logging, and `bonded_peer_irk_added=yes` when the host
-      distributes an IRK
+      peer bond address logging, and `bonded_peer_resolver_refreshed=yes` when
+      the host distributes an IRK
+- [ ] Compile and run `Bluefruit52Lib > Diagnostics > gatt_edge_cases`;
+      request MTU 23 and MTU 247, read the 244-byte characteristic, write a
+      244-byte value through prepare/execute write, read it back, and verify
+      the writable `0x2901` descriptor round-trips.
 - [ ] Reboot both boards and confirm bonded encrypted reconnect without clearing
       storage
 - [ ] Run BLEUart/NUS against Makerdiary Web Device CLI and verify RX and TX
