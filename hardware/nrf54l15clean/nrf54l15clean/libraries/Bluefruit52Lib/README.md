@@ -80,6 +80,13 @@ bool hasIrk = Bluefruit.Security.getBondPeerIrk(peerIrk);
 bool inResolver = Bluefruit.Security.addBondedPeerIrkToResolvingList();
 ```
 
+If you want the stored bonded peer IRK kept in the resolving list automatically
+after boot and after pairing completes:
+
+```cpp
+Bluefruit.Security.setBondedPeerResolvingEnabled(true);
+```
+
 Use `Diagnostics > bond_identity_probe` to pair with a phone or desktop host
 and print the saved peer address, identity address, IRK presence, and
 authenticated bond flag.

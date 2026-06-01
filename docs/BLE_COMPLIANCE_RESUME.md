@@ -38,6 +38,9 @@ not regress, and what to test first when resuming.
 - [x] Application-managed privacy resolving list: `Bluefruit.Security` can
       store up to eight peer IRKs and resolve scanned RPAs against that list
       using the hardware AAR path
+- [x] Opt-in bonded peer resolving: `Bluefruit.Security` can keep the stored
+      bonded peer IRK seeded into the application resolving list after boot and
+      after successful pairing with `setBondedPeerResolvingEnabled(true)`.
 - [x] Bond identity diagnostics: `Bluefruit.Security` can expose the stored
       peer address, peer identity address, peer IRK, authenticated bond flag,
       and add the bonded peer IRK into the application-managed resolving list
@@ -109,9 +112,9 @@ not regress, and what to test first when resuming.
 - [ ] SMP authenticated LE Secure Connections: passkey entry against non-core
       peers, one-way OOB/NFC/QR host flows, negative/error cases, and broader
       host interoperability
-- [ ] Identity/signing key distribution, automatic controller resolving-list
-      policy, peer identity selection for bonded reconnects, and bond database
-      behavior against phone/desktop hosts
+- [ ] Identity/signing key distribution, controller-side resolving-list
+      enforcement, peer identity selection for bonded reconnects, and bond
+      database behavior against phone/desktop hosts
 - [ ] Formal ATT/GATT edge cases: host-app interop for long read/write and
       prepare/execute write, descriptor host-app interop, and broader
       error-code coverage

@@ -36,6 +36,7 @@ void setup() {
   Bluefruit.setTxPower(0);
 
   Bluefruit.Security.setPIN(PAIRING_PIN);
+  Bluefruit.Security.setBondedPeerResolvingEnabled(true);
   Bluefruit.Security.setPairCompleteCallback(pairingCompleteCallback);
   Bluefruit.Security.setSecuredCallback(securedCallback);
 
@@ -106,11 +107,11 @@ void securedCallback(uint16_t conn_handle) {
   Serial.print("authenticated=");
   Serial.println(Bluefruit.Security.isAuthenticated(conn_handle) ? "yes" : "no");
 
-  if (Bluefruit.Security.addBondedPeerIrkToResolvingList()) {
-    Serial.print("bonded_peer_irk_added=yes count=");
+  if (Bluefruit.Security.refreshBondedPeerResolving()) {
+    Serial.print("bonded_peer_resolver_refreshed=yes count=");
     Serial.println(Bluefruit.Security.resolvingListCount());
   } else {
-    Serial.println("bonded_peer_irk_added=no");
+    Serial.println("bonded_peer_resolver_refreshed=no");
   }
 
   printBondState();
@@ -120,6 +121,10 @@ void pairingCompleteCallback(uint16_t conn_handle, uint8_t auth_status) {
   (void)conn_handle;
   if (auth_status == BLE_GAP_SEC_STATUS_SUCCESS) {
     Serial.println("Pairing succeeded");
+    if (Bluefruit.Security.refreshBondedPeerResolving()) {
+      Serial.print("bonded_peer_resolver_refreshed=yes count=");
+      Serial.println(Bluefruit.Security.resolvingListCount());
+    }
   } else {
     Serial.print("Pairing failed, status = 0x");
     Serial.println(auth_status, HEX);

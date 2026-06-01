@@ -769,6 +769,7 @@ class BluefruitCompatManager {
     radio_.setCentralPreferredDataLength(
         preferredBleDataLengthFromMtu(Bluefruit.central_requested_mtu_));
     radio_.setCustomGattWriteCallback(&BluefruitCompatManager::gattWriteThunk, this);
+    (void)Bluefruit.Security.refreshBondedPeerResolving();
 
     if (Bluefruit.auto_conn_led_) {
       pinMode(LED_BUILTIN, OUTPUT);
@@ -2391,6 +2392,9 @@ class BluefruitCompatManager {
         invokeBluefruitUserCallback(Bluefruit.Security.secured_callback_, 0U);
         security_secured_callback_fired_ = true;
       }
+      if (encrypted) {
+        (void)Bluefruit.Security.refreshBondedPeerResolving();
+      }
       if (Bluefruit.Security.pair_complete_callback_ != nullptr) {
         invokeBluefruitUserCallback(
             Bluefruit.Security.pair_complete_callback_, 0U,
@@ -2617,6 +2621,7 @@ BLESecurity::BLESecurity()
       oob_remote_r_{0},
       oob_remote_c_{0},
       oob_data_request_callback_(nullptr),
+      auto_bonded_peer_resolving_(false),
       resolving_list_count_(0),
       resolving_list_irks_{{0}} {}
 
@@ -2889,6 +2894,26 @@ bool BLESecurity::addBondedPeerIrkToResolvingList() {
     return false;
   }
   return addResolvingIrk(irk);
+}
+
+bool BLESecurity::setBondedPeerResolvingEnabled(bool enabled) {
+  auto_bonded_peer_resolving_ = enabled;
+  if (!enabled) {
+    return true;
+  }
+  (void)refreshBondedPeerResolving();
+  return true;
+}
+
+bool BLESecurity::bondedPeerResolvingEnabled() const {
+  return auto_bonded_peer_resolving_;
+}
+
+bool BLESecurity::refreshBondedPeerResolving() {
+  if (!auto_bonded_peer_resolving_) {
+    return false;
+  }
+  return addBondedPeerIrkToResolvingList();
 }
 
 bool BLESecurity::removeResolvingIrk(uint8_t index) {

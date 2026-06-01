@@ -539,8 +539,8 @@ class BLESecurity {
   bool getBondPeerAddress(ble_gap_addr_t* outAddress) const;
   bool getBondPeerIdentityAddress(ble_gap_addr_t* outAddress) const;
   bool getBondPeerIrk(uint8_t outIrk[16]) const;
-  // BLE privacy helpers. Local RPA rotation is opt-in; resolving-list policy
-  // and bonded identity decisions remain application-level for now.
+  // BLE privacy helpers. Local RPA rotation and bonded peer resolving are
+  // opt-in; full controller resolving-list policy remains application-level.
   bool getLocalIdentityRoot(uint8_t irk[16]) const;
   bool generateResolvablePrivateAddress(const uint8_t irk[16],
                                         uint8_t addressOut[6]) const;
@@ -566,6 +566,9 @@ class BLESecurity {
   uint8_t resolvingListCapacity() const;
   bool addResolvingIrk(const uint8_t irk[16]);
   bool addBondedPeerIrkToResolvingList();
+  bool setBondedPeerResolvingEnabled(bool enabled = true);
+  bool bondedPeerResolvingEnabled() const;
+  bool refreshBondedPeerResolving();
   bool removeResolvingIrk(uint8_t index);
   bool getResolvingIrk(uint8_t index, uint8_t irkOut[16]) const;
   bool resolveResolvablePrivateAddress(const uint8_t address[6],
@@ -593,6 +596,7 @@ class BLESecurity {
   uint8_t oob_remote_r_[16];
   uint8_t oob_remote_c_[16];
   oob_data_request_callback_t oob_data_request_callback_;
+  bool auto_bonded_peer_resolving_;
   uint8_t resolving_list_count_;
   uint8_t resolving_list_irks_[kResolvingListMaxEntries][16];
 

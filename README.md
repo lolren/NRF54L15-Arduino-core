@@ -323,9 +323,11 @@ Privacy helpers are exposed through `Bluefruit.Security`. Use
 manual control. Use `clearResolvingList()`, `addResolvingIrk()`, and the
 resolving-list overload of `resolveResolvablePrivateAddress()` when a sketch
 wants to resolve scan results against stored peer IRKs. Use
+`setBondedPeerResolvingEnabled(true)` to keep the bonded peer IRK seeded into
+that resolving list after boot and after successful pairing. Use
 `enableResolvablePrivateAddressRotation(intervalMs)` for opt-in local RPA
-rotation. Rotation is skipped while connected; automatic controller
-resolving-list policy and bonded identity policy are still not claimed.
+rotation. Rotation is skipped while connected; controller-side resolving-list
+enforcement and full bonded identity policy are still not claimed.
 
 ---
 
