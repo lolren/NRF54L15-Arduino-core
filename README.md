@@ -125,6 +125,7 @@ Full BLE-compliance work is paused while the remaining power and interoperabilit
 - [x] Bluefruit HID report plumbing — keyboard, mouse, consumer-control, and gamepad report characteristics now notify real HID payloads; host Protocol Mode writes switch between report/boot paths and are visible through `BLEHidAdafruit::setProtocolModeCallback()`; host keyboard LED output reports update `BLEHidAdafruit::keyboardLedState()` and can be handled with `setKeyboardLedCallback()`; central HID sketches can write Boot Keyboard Output LEDs with `BLEClientHidAdafruit::setKeyboardLedState()`
 - [x] L2CAP connection-oriented channels
 - [x] LE Ping and connection parameter update
+- [x] Bluefruit disconnect diagnostics — disconnect callbacks now receive common HCI-style reason codes, and sketches can inspect the last drop with `Bluefruit.getLastDisconnectReason()` / `Bluefruit.disconnectReasonName()`
 - [x] Simultaneous central and peripheral roles
 - [x] DPPI-driven background advertising — radio events scheduled via hardware without CPU intervention
 - [x] LE Secure Connections Just Works pairing/bonding — two-board fresh pair, bond persistence, bonded reconnect encryption, encrypted notifications, and encrypted writes

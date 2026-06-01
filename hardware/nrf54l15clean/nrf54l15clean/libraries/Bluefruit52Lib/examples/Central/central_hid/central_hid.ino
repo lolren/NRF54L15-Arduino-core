@@ -165,9 +165,14 @@ void connection_secured_callback(uint16_t conn_handle)
 void disconnect_callback(uint16_t conn_handle, uint8_t reason)
 {
   (void) conn_handle;
-  (void) reason;
   
-  Serial.print("Disconnected, reason = 0x"); Serial.println(reason, HEX);
+  bool remoteTerminated = false;
+  (void) Bluefruit.getLastDisconnectReason(&reason, &remoteTerminated);
+
+  Serial.print("Disconnected, reason = 0x"); Serial.print(reason, HEX);
+  Serial.print(" ("); Serial.print(Bluefruit.disconnectReasonName(reason));
+  Serial.print(remoteTerminated ? ", remote" : ", local/timeout");
+  Serial.println(")");
 }
 
 void loop()

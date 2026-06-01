@@ -125,6 +125,18 @@ if (hid.keyboardPresent()) {
 }
 ```
 
+Disconnect callbacks receive common HCI-style reason codes. The most recent
+drop can also be inspected later:
+
+```cpp
+uint8_t reason = 0;
+bool remote = false;
+if (Bluefruit.getLastDisconnectReason(&reason, &remote)) {
+  Serial.print(Bluefruit.disconnectReasonName(reason));
+  Serial.println(remote ? " from peer" : " local/timeout");
+}
+```
+
 The broader Bluefruit menus now ship the practical wrapper examples by role:
 
 - `Advertising`: `adv_advanced`, `beacon`, `eddystone_url`

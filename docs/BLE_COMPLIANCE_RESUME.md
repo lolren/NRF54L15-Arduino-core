@@ -76,6 +76,10 @@ not regress, and what to test first when resuming.
       `keyboardLedState()` before the optional `setKeyboardLedCallback()`
       callback fires, and central HID sketches can write Boot Keyboard Output
       LEDs through `BLEClientHidAdafruit::setKeyboardLedState()`.
+- [x] Bluefruit disconnect reason helpers: central/peripheral disconnect
+      callbacks now receive common HCI-style reason codes, and sketches can
+      inspect the last disconnect with `Bluefruit.getLastDisconnectReason()`
+      plus a readable `Bluefruit.disconnectReasonName()`.
 - [x] Low-power BLE advertising current is now close to the Zephyr reference
       for the msfujino AdvCurrent test from discussion #71
 
@@ -114,8 +118,8 @@ not regress, and what to test first when resuming.
 - [ ] HID host interop: phone/desktop pairing behavior, OS report parsing,
       boot-protocol switching against real hosts, and gamepad host behavior
       still need real-host validation.
-- [ ] LL control procedure collision handling and broader disconnect reason
-      mapping
+- [ ] LL control procedure collision handling under hostile/interleaved LL
+      procedure timing
 - [ ] Multi-link stress: simultaneous central/peripheral with mixed MTU/DLE/PHY
       settings
 - [ ] Extended advertising and scan-response interoperability beyond local

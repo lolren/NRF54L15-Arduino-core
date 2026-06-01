@@ -1185,6 +1185,10 @@ class AdafruitBluefruit {
   uint8_t getConnectedHandles(uint16_t* hdl_list, uint8_t max_count) const;
   uint16_t connHandle() const;
   bool disconnect(uint16_t conn_hdl);
+  bool getLastDisconnectReason(uint8_t* reason,
+                               bool* remote_terminated = nullptr) const;
+  uint8_t getLastDisconnectReason() const;
+  const char* disconnectReasonName(uint8_t reason) const;
   uint16_t getMaxMtu(uint8_t role);
   void setRssiCallback(void (*fp)(uint16_t conn_hdl, int8_t rssi));
   BLEConnection* Connection(uint16_t conn_hdl);
@@ -1201,6 +1205,9 @@ class AdafruitBluefruit {
   uint16_t central_requested_mtu_;
   bool central_request_data_length_;
   bool central_request_mtu_;
+  uint8_t last_disconnect_reason_;
+  bool last_disconnect_reason_valid_;
+  bool last_disconnect_reason_remote_;
   void (*rssi_callback_)(uint16_t conn_hdl, int8_t rssi);
 
   friend class BluefruitCompatManager;

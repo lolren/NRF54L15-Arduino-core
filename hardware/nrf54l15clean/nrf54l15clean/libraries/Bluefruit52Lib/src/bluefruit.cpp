@@ -618,18 +618,48 @@ static uint16_t preferredBleDataLengthFromMtu(uint16_t mtu_max);
 uint8_t disconnectReasonToHci(const BleDisconnectDebug& debug) {
   switch (static_cast<BleDisconnectReason>(debug.reason)) {
     case BleDisconnectReason::kApi:
-      return 0x16U;
+      return BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION;
     case BleDisconnectReason::kSupervisionTimeout:
-      return 0x08U;
+      return BLE_HCI_CONNECTION_TIMEOUT;
     case BleDisconnectReason::kPeerTerminate:
-      return (debug.errorCode != 0U) ? debug.errorCode : 0x13U;
+      return (debug.errorCode != 0U) ? debug.errorCode
+                                     : BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION;
     case BleDisconnectReason::kMicFailure:
-      return 0x3DU;
+      return BLE_HCI_CONNECTION_TERMINATED_DUE_TO_MIC_FAILURE;
     case BleDisconnectReason::kInternalTerminate:
-      return (debug.errorCode != 0U) ? debug.errorCode : 0x13U;
+      return (debug.errorCode != 0U) ? debug.errorCode
+                                     : BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION;
     case BleDisconnectReason::kNone:
     default:
-      return 0x13U;
+      return BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION;
+  }
+}
+
+bool disconnectDebugRemoteTerminated(const BleDisconnectDebug& debug) {
+  return static_cast<BleDisconnectReason>(debug.reason) ==
+         BleDisconnectReason::kPeerTerminate;
+}
+
+const char* disconnectReasonNameFromHci(uint8_t reason) {
+  switch (reason) {
+    case BLE_HCI_STATUS_CODE_SUCCESS:
+      return "success";
+    case BLE_HCI_CONNECTION_TIMEOUT:
+      return "connection timeout";
+    case BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION:
+      return "remote user terminated";
+    case BLE_HCI_REMOTE_DEV_TERMINATION_DUE_TO_LOW_RESOURCES:
+      return "remote low resources";
+    case BLE_HCI_REMOTE_DEV_TERMINATION_DUE_TO_POWER_OFF:
+      return "remote power off";
+    case BLE_HCI_LOCAL_HOST_TERMINATED_CONNECTION:
+      return "local host terminated";
+    case BLE_HCI_CONNECTION_TERMINATED_DUE_TO_MIC_FAILURE:
+      return "MIC failure";
+    case BLE_HCI_CONNECTION_FAILED_TO_BE_ESTABLISHED:
+      return "connection failed";
+    default:
+      return "unknown";
   }
 }
 
@@ -2472,10 +2502,15 @@ class BluefruitCompatManager {
     radio_.setBackgroundConnectionServiceEnabled(false);
     nrf54l15_ble_background_radio_release();
     BleDisconnectDebug debug{};
-    uint8_t reason = 0x13U;
+    uint8_t reason = BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION;
+    bool remoteTerminated = false;
     if (radio_.getDisconnectDebug(&debug)) {
       reason = disconnectReasonToHci(debug);
+      remoteTerminated = disconnectDebugRemoteTerminated(debug);
     }
+    Bluefruit.last_disconnect_reason_ = reason;
+    Bluefruit.last_disconnect_reason_valid_ = true;
+    Bluefruit.last_disconnect_reason_remote_ = remoteTerminated;
     g_bluefruitBleIdleDiagLastDisconnectReason = reason;
     rssi_monitor_enabled_ = false;
     rssi_monitor_threshold_ = 0xFFU;
@@ -6351,6 +6386,9 @@ AdafruitBluefruit::AdafruitBluefruit()
       central_requested_mtu_(23U),
       central_request_data_length_(false),
       central_request_mtu_(false),
+      last_disconnect_reason_(BLE_HCI_STATUS_CODE_SUCCESS),
+      last_disconnect_reason_valid_(false),
+      last_disconnect_reason_remote_(false),
       rssi_callback_(nullptr) {
   strncpy(device_name_, "XIAO nRF54L15", sizeof(device_name_) - 1U);
 }
@@ -6607,6 +6645,27 @@ bool AdafruitBluefruit::disconnect(uint16_t conn_hdl) {
     return false;
   }
   return manager().radio().disconnect();
+}
+
+bool AdafruitBluefruit::getLastDisconnectReason(
+    uint8_t* reason, bool* remote_terminated) const {
+  if (reason == nullptr || !last_disconnect_reason_valid_) {
+    return false;
+  }
+  *reason = last_disconnect_reason_;
+  if (remote_terminated != nullptr) {
+    *remote_terminated = last_disconnect_reason_remote_;
+  }
+  return true;
+}
+
+uint8_t AdafruitBluefruit::getLastDisconnectReason() const {
+  return last_disconnect_reason_valid_ ? last_disconnect_reason_
+                                       : BLE_HCI_STATUS_CODE_SUCCESS;
+}
+
+const char* AdafruitBluefruit::disconnectReasonName(uint8_t reason) const {
+  return disconnectReasonNameFromHci(reason);
 }
 
 uint16_t AdafruitBluefruit::getMaxMtu(uint8_t role) {
