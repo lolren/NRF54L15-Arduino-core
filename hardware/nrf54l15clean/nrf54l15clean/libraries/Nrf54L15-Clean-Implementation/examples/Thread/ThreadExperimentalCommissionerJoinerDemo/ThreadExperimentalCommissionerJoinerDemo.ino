@@ -28,18 +28,49 @@ enum class DeviceRole : uint8_t {
 constexpr DeviceRole kMyRole = DeviceRole::kCommissioner;
 
 constexpr uint32_t kStatusPrintIntervalMs = 3000U;
+constexpr uint32_t kJoinerStartRetryMs = 2000U;
+constexpr uint32_t kJoinerAddRetryMs = 2000U;
+constexpr uint32_t kJoinerRefreshMs = 60000U;
+constexpr uint32_t kJoinerEntryTimeoutSeconds = 300U;
 constexpr uint16_t kDemoUdpPort = 12345U;
 
 xiao_nrf54l15::Nrf54ThreadExperimental g_thread;
 uint32_t g_lastStatusPrintMs = 0U;
+uint32_t g_lastJoinerStartAttemptMs = 0U;
+uint32_t g_lastJoinerAddAttemptMs = 0U;
 xiao_nrf54l15::Nrf54ThreadExperimental::Role g_lastRole =
     xiao_nrf54l15::Nrf54ThreadExperimental::Role::kUnknown;
 bool g_commissionerStarted = false;
+bool g_joinerEntryAdded = false;
 bool g_joinerStarted = false;
 bool g_joinerComplete = false;
 bool g_udpOpened = false;
 char g_lastUdpPayload[128] = {0};
 uint16_t g_lastUdpLength = 0U;
+
+void tryAddJoinerEntry(const char* reason, bool refresh = false) {
+  if ((!refresh && g_joinerEntryAdded) || !g_thread.commissionerActive()) {
+    return;
+  }
+
+  g_thread.setCommissionerProvisioningUrl("https://nrf54l15.local");
+  const bool added =
+      g_thread.addJoinerToCommissioner(kCommissionerPskd,
+                                       kJoinerEntryTimeoutSeconds);
+  Serial.print("thread_cj_demo joiner_entry_added=");
+  Serial.println(added ? 1 : 0);
+  Serial.print("thread_cj_demo joiner_add_reason=");
+  Serial.println(reason);
+  if (!added) {
+    Serial.print("thread_cj_demo joiner_add_error=");
+    Serial.println(static_cast<int>(g_thread.lastError()));
+    g_joinerEntryAdded = false;
+    return;
+  }
+
+  g_joinerEntryAdded = true;
+  Serial.println("thread_cj_demo Waiting for joiner with demo PSKd...");
+}
 
 // Commissioner callbacks
 void onCommissionerJoinerCallback(void* context,
@@ -63,7 +94,11 @@ void onCommissionerStateCallback(void* context,
   Serial.print("thread_cj_demo commissioner_state=");
   Serial.println(g_thread.commissionerStateName());
   if (state == OT_COMMISSIONER_STATE_ACTIVE) {
-    g_thread.setCommissionerProvisioningUrl("https://nrf54l15.local");
+    g_commissionerStarted = true;
+    tryAddJoinerEntry("commissioner-active");
+  } else if (state == OT_COMMISSIONER_STATE_DISABLED) {
+    g_commissionerStarted = false;
+    g_joinerEntryAdded = false;
   }
 }
 
@@ -75,6 +110,7 @@ void onJoinerCallback(void* context, otError error) {
     g_joinerComplete = true;
     Serial.println("thread_cj_demo JOIN_SUCCESS");
   } else {
+    g_joinerStarted = false;
     Serial.println("thread_cj_demo JOIN_FAILED");
   }
 }
@@ -107,11 +143,6 @@ void onStateChanged(void* context, otChangedFlags flags,
     Serial.println(ok ? 1 : 0);
     if (ok) {
       g_commissionerStarted = true;
-      g_thread.setCommissionerStateCallback(onCommissionerStateCallback, nullptr);
-      g_thread.setCommissionerJoinerCallback(onCommissionerJoinerCallback, nullptr);
-      const bool added = g_thread.addJoinerToCommissioner(kCommissionerPskd);
-      Serial.print("thread_cj_demo joiner_entry_added=");
-      Serial.println(added ? 1 : 0);
     }
   }
 }
@@ -197,6 +228,8 @@ void printStatus(const char* reason) {
     Serial.println(g_thread.commissionerActive() ? 1 : 0);
     Serial.print("thread_cj_demo commissioner_state=");
     Serial.println(g_thread.commissionerStateName());
+    Serial.print("thread_cj_demo joiner_entry_added=");
+    Serial.println(g_joinerEntryAdded ? 1 : 0);
     uint16_t sessionId = 0U;
     if (g_thread.commissionerSessionId(&sessionId)) {
       Serial.print("thread_cj_demo commissioner_session_id=");
@@ -236,7 +269,9 @@ void setup() {
                      ? 1
                      : 0);
 
-  const bool beginOk = g_thread.begin(false);
+  const bool beginOk =
+      (kMyRole == DeviceRole::kCommissioner) ? g_thread.beginAsRouter(true)
+                                             : g_thread.beginJoinerOnly(true);
   Serial.print("thread_cj_demo begin=");
   Serial.println(beginOk ? 1 : 0);
   if (!beginOk) {
@@ -244,6 +279,10 @@ void setup() {
   }
 
   g_thread.setStateChangedCallback(onStateChanged, nullptr);
+  if (kMyRole == DeviceRole::kCommissioner) {
+    g_thread.setCommissionerStateCallback(onCommissionerStateCallback, nullptr);
+    g_thread.setCommissionerJoinerCallback(onCommissionerJoinerCallback, nullptr);
+  }
 
   if (kMyRole == DeviceRole::kCommissioner) {
     // Board A: form network with demo dataset
@@ -266,6 +305,33 @@ void setup() {
       return;
     }
 
+    Serial.println("thread_cj_demo Waiting for OpenThread joiner interface...");
+  }
+
+  printStatus("boot");
+}
+
+void loop() {
+  g_thread.process();
+
+  if (kMyRole == DeviceRole::kCommissioner && g_thread.commissionerActive()) {
+    const uint32_t nowMs = millis();
+    const bool refresh =
+        g_joinerEntryAdded &&
+        ((nowMs - g_lastJoinerAddAttemptMs) >= kJoinerRefreshMs);
+    const bool retry =
+        !g_joinerEntryAdded &&
+        ((nowMs - g_lastJoinerAddAttemptMs) >= kJoinerAddRetryMs);
+    if (refresh || retry) {
+      g_lastJoinerAddAttemptMs = nowMs;
+      tryAddJoinerEntry(refresh ? "refresh-loop" : "retry-loop", refresh);
+    }
+  }
+
+  if (kMyRole == DeviceRole::kJoiner && !g_joinerStarted &&
+      !g_joinerComplete && g_thread.rawInstance() != nullptr &&
+      (millis() - g_lastJoinerStartAttemptMs) >= kJoinerStartRetryMs) {
+    g_lastJoinerStartAttemptMs = millis();
     const bool joinerOk = g_thread.startJoiner(kCommissionerPskd, nullptr,
                                                onJoinerCallback, nullptr);
     Serial.print("thread_cj_demo joiner_start=");
@@ -278,12 +344,6 @@ void setup() {
       Serial.println("thread_cj_demo Waiting for commissioner...");
     }
   }
-
-  printStatus("boot");
-}
-
-void loop() {
-  g_thread.process();
 
   // After join complete on joiner side, open UDP for testing
   if (kMyRole == DeviceRole::kJoiner && g_joinerComplete) {

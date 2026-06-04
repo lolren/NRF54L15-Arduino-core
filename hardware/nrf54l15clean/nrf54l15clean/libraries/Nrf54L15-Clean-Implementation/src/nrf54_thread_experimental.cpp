@@ -68,6 +68,10 @@ bool Nrf54ThreadExperimental::beginChildFirst(bool wipeSettings) {
   return begin(wipeSettings, AttachPolicy::kChildFirst);
 }
 
+bool Nrf54ThreadExperimental::beginJoinerOnly(bool wipeSettings) {
+  return begin(wipeSettings, AttachPolicy::kJoinerOnly);
+}
+
 bool Nrf54ThreadExperimental::begin(bool wipeSettings, AttachPolicy policy) {
   if (beginCalled_) {
     return false;
@@ -101,6 +105,10 @@ bool Nrf54ThreadExperimental::begin(bool wipeSettings, AttachPolicy policy) {
   stateChangedCallbackRegistered_ = false;
   commissionerStarted_ = false;
   joinerStarted_ = false;
+  lastCommissionerJoinerEvent_ = OT_COMMISSIONER_JOINER_REMOVED;
+  commissionerJoinerEventCount_ = 0U;
+  commissionerJoinerFinalizeCount_ = 0U;
+  commissionerJoinerRemovedCount_ = 0U;
   return true;
 }
 
@@ -209,6 +217,10 @@ bool Nrf54ThreadExperimental::restart(bool wipeSettings) {
   childFirstFallbackDelayMs_ = computeChildFirstFallbackDelayMs();
   commissionerStarted_ = false;
   joinerStarted_ = false;
+  lastCommissionerJoinerEvent_ = OT_COMMISSIONER_JOINER_REMOVED;
+  commissionerJoinerEventCount_ = 0U;
+  commissionerJoinerFinalizeCount_ = 0U;
+  commissionerJoinerRemovedCount_ = 0U;
   if (wipeSettings_) {
     datasetRestoredFromSettings_ = false;
   }
@@ -252,25 +264,34 @@ void Nrf54ThreadExperimental::process() {
     }
   }
 
-  if (instance_ != nullptr && !wipeSettings_ && !datasetConfigured_ &&
+  const bool joinerOnly = (attachPolicy_ == AttachPolicy::kJoinerOnly);
+
+  if (instance_ != nullptr && !joinerOnly && !wipeSettings_ && !datasetConfigured_ &&
       !datasetApplied_ && !datasetRestoreAttempted_) {
     datasetRestoreAttempted_ = true;
     (void)restoreDatasetFromSettings();
   }
 
-  if (instance_ != nullptr && datasetConfigured_ && !datasetApplied_ &&
+  if (instance_ != nullptr && !joinerOnly && datasetConfigured_ && !datasetApplied_ &&
       elapsedMs >= kStageDatasetApplyDelayMs) {
-    if (attachPolicy_ != AttachPolicy::kRouterEligible) {
-      dataset_.mActiveTimestamp.mAuthoritative = false;
-      dataset_.mActiveTimestamp.mSeconds = 0;
-    }
     lastError_ = otDatasetSetActive(instance_, &dataset_);
     if (lastError_ == OT_ERROR_NONE) {
       datasetApplied_ = true;
     }
   }
 
-  if (instance_ != nullptr && datasetApplied_ && !linkConfigured_ &&
+  if (instance_ != nullptr && joinerOnly && !linkConfigured_ &&
+      elapsedMs >= kStageIp6EnableDelayMs) {
+    const otLinkModeConfig mode = {true, false, true};
+    lastError_ = otThreadSetLinkMode(instance_, mode);
+    if (lastError_ == OT_ERROR_NONE) {
+      linkConfigured_ = true;
+      lastError_ = otIp6SetEnabled(instance_, true);
+      ip6Enabled_ = (lastError_ == OT_ERROR_NONE);
+    }
+  }
+
+  if (instance_ != nullptr && !joinerOnly && datasetApplied_ && !linkConfigured_ &&
       elapsedMs >= kStageIp6EnableDelayMs) {
     // Child-first uses non-sleepy MTD mode first. If no parent appears, the
     // deterministic fallback below flips back to FTD/router-eligible mode.
@@ -285,13 +306,13 @@ void Nrf54ThreadExperimental::process() {
     }
   }
 
-  if (instance_ != nullptr && ip6Enabled_ && !threadEnabled_ &&
+  if (instance_ != nullptr && !joinerOnly && ip6Enabled_ && !threadEnabled_ &&
       elapsedMs >= kStageThreadEnableDelayMs) {
     lastError_ = otThreadSetEnabled(instance_, true);
     threadEnabled_ = (lastError_ == OT_ERROR_NONE);
   }
 
-  if (instance_ != nullptr && threadEnabled_) {
+  if (instance_ != nullptr && !joinerOnly && threadEnabled_) {
     (void)maybePromoteChildFirstFallback(elapsedMs);
   }
 
@@ -599,6 +620,11 @@ bool Nrf54ThreadExperimental::addJoinerToCommissioner(
     return false;
   }
 
+  if (otCommissionerGetState(instance_) != OT_COMMISSIONER_STATE_ACTIVE) {
+    lastError_ = OT_ERROR_INVALID_STATE;
+    return false;
+  }
+
   lastError_ =
       otCommissionerAddJoiner(instance_, nullptr, pskd, timeoutSeconds);
   return lastError_ == OT_ERROR_NONE;
@@ -641,6 +667,13 @@ bool Nrf54ThreadExperimental::setCommissionerJoinerCallback(
   return true;
 }
 
+bool Nrf54ThreadExperimental::setCommissionerJoinerEventCallback(
+    CommissionerJoinerEventCallback callback, void* callbackContext) {
+  commissionerJoinerEventCallback_ = callback;
+  commissionerJoinerEventCallbackContext_ = callbackContext;
+  return true;
+}
+
 bool Nrf54ThreadExperimental::startJoiner(const char* pskd,
                                           const char* provisioningUrl,
                                           JoinerCallback callback,
@@ -652,6 +685,27 @@ bool Nrf54ThreadExperimental::startJoiner(const char* pskd,
   if (instance_ == nullptr || pskd == nullptr) {
     lastError_ = OT_ERROR_INVALID_ARGS;
     return false;
+  }
+
+  if (!attachPolicyConfigured_ && !configureAttachPolicy()) {
+    return false;
+  }
+
+  if (!linkConfigured_) {
+    const otLinkModeConfig mode = {true, false, true};
+    lastError_ = otThreadSetLinkMode(instance_, mode);
+    if (lastError_ != OT_ERROR_NONE) {
+      return false;
+    }
+    linkConfigured_ = true;
+  }
+
+  if (!ip6Enabled_) {
+    lastError_ = otIp6SetEnabled(instance_, true);
+    if (lastError_ != OT_ERROR_NONE) {
+      return false;
+    }
+    ip6Enabled_ = true;
   }
 
   lastError_ = otJoinerStart(instance_, pskd, provisioningUrl, nullptr, nullptr,
@@ -962,6 +1016,7 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
   }
 
   const uint32_t elapsedMs = millis() - beginMs_;
+  const bool joinerOnly = (attachPolicy_ == AttachPolicy::kJoinerOnly);
   AttachDebugState debugState = {};
   const bool haveDebugState = getAttachDebugState(&debugState);
 
@@ -969,6 +1024,29 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
     setText(outSummary->phaseName, sizeof(outSummary->phaseName), "bootstrap");
     setText(outSummary->blockerName, sizeof(outSummary->blockerName),
             "waiting_instance_init");
+    return true;
+  }
+
+  if (joinerOnly && (!linkConfigured_ || !ip6Enabled_)) {
+    outSummary->waitingForIp6Enable = true;
+    setText(outSummary->phaseName, sizeof(outSummary->phaseName),
+            "joiner_ip6_enable");
+    if (elapsedMs < kStageIp6EnableDelayMs) {
+      setText(outSummary->blockerName, sizeof(outSummary->blockerName),
+              "waiting_joiner_ip6_delay");
+    } else {
+      setText(outSummary->blockerName, sizeof(outSummary->blockerName),
+              "waiting_joiner_ip6_enable");
+    }
+    return true;
+  }
+
+  if (joinerOnly && !threadEnabled_) {
+    setText(outSummary->phaseName, sizeof(outSummary->phaseName),
+            joinerStarted_ ? "joiner_active" : "joiner_ready");
+    setText(outSummary->blockerName, sizeof(outSummary->blockerName),
+            joinerStarted_ ? "commissioning_in_progress"
+                           : "waiting_start_joiner");
     return true;
   }
 
@@ -1380,6 +1458,27 @@ bool Nrf54ThreadExperimental::commissionerSessionId(
   return false;
 }
 
+otCommissionerJoinerEvent
+Nrf54ThreadExperimental::lastCommissionerJoinerEvent() const {
+  return lastCommissionerJoinerEvent_;
+}
+
+const char* Nrf54ThreadExperimental::lastCommissionerJoinerEventName() const {
+  return commissionerJoinerEventName(lastCommissionerJoinerEvent_);
+}
+
+uint32_t Nrf54ThreadExperimental::commissionerJoinerEventCount() const {
+  return commissionerJoinerEventCount_;
+}
+
+uint32_t Nrf54ThreadExperimental::commissionerJoinerFinalizeCount() const {
+  return commissionerJoinerFinalizeCount_;
+}
+
+uint32_t Nrf54ThreadExperimental::commissionerJoinerRemovedCount() const {
+  return commissionerJoinerRemovedCount_;
+}
+
 bool Nrf54ThreadExperimental::joinerSupported() const {
   return NRF54_THREAD_JOINER_COMPILED != 0;
 }
@@ -1578,6 +1677,8 @@ const char* Nrf54ThreadExperimental::attachPolicyName(AttachPolicy policy) {
       return "child-only";
     case AttachPolicy::kRouterEligible:
       return "router-eligible";
+    case AttachPolicy::kJoinerOnly:
+      return "joiner-only";
     default:
       return "unknown";
   }
@@ -1592,6 +1693,24 @@ const char* Nrf54ThreadExperimental::commissionerStateName(
       return "petition";
     case OT_COMMISSIONER_STATE_ACTIVE:
       return "active";
+    default:
+      return "unknown";
+  }
+}
+
+const char* Nrf54ThreadExperimental::commissionerJoinerEventName(
+    otCommissionerJoinerEvent event) {
+  switch (event) {
+    case OT_COMMISSIONER_JOINER_START:
+      return "start";
+    case OT_COMMISSIONER_JOINER_CONNECTED:
+      return "connected";
+    case OT_COMMISSIONER_JOINER_FINALIZE:
+      return "finalize";
+    case OT_COMMISSIONER_JOINER_END:
+      return "end";
+    case OT_COMMISSIONER_JOINER_REMOVED:
+      return "removed";
     default:
       return "unknown";
   }
@@ -1910,22 +2029,38 @@ void Nrf54ThreadExperimental::handleCommissionerJoiner(
     otCommissionerJoinerEvent event,
     const otJoinerInfo* joinerInfo,
     const otExtAddress* joinerId) {
-  (void)joinerInfo;
+  lastCommissionerJoinerEvent_ = event;
+  ++commissionerJoinerEventCount_;
+  if (event == OT_COMMISSIONER_JOINER_FINALIZE) {
+    ++commissionerJoinerFinalizeCount_;
+  } else if (event == OT_COMMISSIONER_JOINER_REMOVED) {
+    ++commissionerJoinerRemovedCount_;
+  }
+
+  if (commissionerJoinerEventCallback_ != nullptr) {
+    commissionerJoinerEventCallback_(commissionerJoinerEventCallbackContext_,
+                                     event, joinerInfo, joinerId);
+  }
 
   if (commissionerJoinerCallback_ == nullptr) {
     return;
   }
 
-  otError error = OT_ERROR_NONE;
-  if (event == OT_COMMISSIONER_JOINER_REMOVED) {
-    error = OT_ERROR_ABORT;
+  if (event == OT_COMMISSIONER_JOINER_FINALIZE) {
+    commissionerJoinerCallback_(commissionerJoinerCallbackContext_, joinerId,
+                                OT_ERROR_NONE);
+  } else if (event == OT_COMMISSIONER_JOINER_REMOVED) {
+    commissionerJoinerCallback_(commissionerJoinerCallbackContext_, joinerId,
+                                OT_ERROR_ABORT);
   }
-  commissionerJoinerCallback_(commissionerJoinerCallbackContext_, joinerId,
-                              error);
 }
 
 void Nrf54ThreadExperimental::handleJoiner(otError error) {
   joinerStarted_ = false;
+  if (error == OT_ERROR_NONE && instance_ != nullptr && !threadEnabled_) {
+    lastError_ = otThreadSetEnabled(instance_, true);
+    threadEnabled_ = (lastError_ == OT_ERROR_NONE);
+  }
   if (joinerCallback_ != nullptr) {
     joinerCallback_(joinerCallbackContext_, error);
   }

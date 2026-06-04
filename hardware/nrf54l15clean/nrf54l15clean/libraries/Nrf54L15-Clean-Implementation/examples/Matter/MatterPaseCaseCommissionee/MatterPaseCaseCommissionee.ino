@@ -161,7 +161,12 @@ void setup(){
   Serial.println();Serial.print("=== PC ");Serial.println(ROLE==DemoRole::COMMISSIONER?"COMM":"COMME");
   
   otOperationalDataset ds={};Nrf54ThreadExperimental::buildDemoDataset(&ds);
-  g_thread.setActiveDataset(ds);g_thread.begin();
+  g_thread.setActiveDataset(ds);
+  if (ROLE == DemoRole::COMMISSIONER) {
+    g_thread.beginAsRouter();
+  } else {
+    g_thread.beginAsChild();
+  }
   g_thread.openUdp(kPort,onUdp,nullptr);
   
   if(ROLE==DemoRole::COMMISSIONER){for(int i=0;i<32;i++)g_salt[i]=(uint8_t)(i*7+13);unsigned long t0=millis();deriveWS(kPin,g_salt,g_iters,g_w0,g_w1);Serial.print("verifier ");Serial.print(millis()-t0);Serial.println("ms");}

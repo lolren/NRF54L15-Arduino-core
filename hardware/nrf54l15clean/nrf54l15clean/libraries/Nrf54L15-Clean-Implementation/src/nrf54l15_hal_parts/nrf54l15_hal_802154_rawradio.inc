@@ -4,9 +4,23 @@ ZigbeeRadio::ZigbeeRadio(uint32_t radioBase)
       initialized_(false),
       rfPathOwnedByZigbee_(false),
       receiverArmed_(false),
+      bufferedReceiveArmed_(false),
+      bufferedRxPacketIndex_(0U),
+      bufferedRxQueueHead_(0U),
+      bufferedRxQueueTail_(0U),
+      bufferedRxQueueCount_(0U),
+      bufferedRxOverflowCount_(0U),
+      bufferedRxAckPrepared_(false),
+      bufferedRxAckSequence_(0U),
+      bufferedRxAckFramePending_(false),
+      macAckRequestMode_(ZigbeeMacAcknowledgementRequestMode::kForceForDirectUnicast),
+      macAckResponseEnabled_(true),
       channel_(15U),
       txPacket_{0},
-      rxPacket_{0} {}
+      rxPacket_{0},
+      bufferedRxAckPacket_{0},
+      bufferedRxPackets_{0},
+      bufferedRxFrames_{} {}
 
 bool ZigbeeRadio::configureIeee802154() {
   if (radio_ == nullptr) {
@@ -139,6 +153,8 @@ bool ZigbeeRadio::begin(uint8_t channel, int8_t txPowerDbm) {
 
   initialized_ = true;
   receiverArmed_ = false;
+  bufferedReceiveArmed_ = false;
+  resetBufferedReceiveQueue();
   return true;
 }
 
@@ -149,6 +165,7 @@ void ZigbeeRadio::end() {
     return;
   }
 
+  cancelBufferedReceive(200000UL);
   radio_->SHORTS = 0U;
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
   waitRadioDisabledBudgeted(radio_, 0U, 200000UL);
@@ -161,6 +178,7 @@ void ZigbeeRadio::end() {
   radio_->EVENTS_CCASTOPPED = 0U;
   initialized_ = false;
   receiverArmed_ = false;
+  bufferedReceiveArmed_ = false;
   if (rfPathOwnedByZigbee_) {
     (void)BoardControl::collapseRfPathIdle();
     rfPathOwnedByZigbee_ = false;
@@ -170,6 +188,10 @@ void ZigbeeRadio::end() {
 bool ZigbeeRadio::setChannel(uint8_t channel) {
   if (radio_ == nullptr || !ieee802154ChannelValid(channel)) {
     return false;
+  }
+
+  if (channel_ != channel && (receiverArmed_ || bufferedReceiveArmed_)) {
+    cancelReceive();
   }
 
   const uint8_t freq = ieee802154ChannelToFrequency(channel);
@@ -274,8 +296,9 @@ bool ZigbeeRadio::frameRequestsMacAcknowledgement(const uint8_t* psdu,
   return true;
 }
 
-bool ZigbeeRadio::enableMacAcknowledgementRequest(uint8_t* psdu, uint8_t length,
-                                                  uint8_t* outSequence) {
+bool ZigbeeRadio::prepareMacAcknowledgementRequest(
+    uint8_t* psdu, uint8_t length, uint8_t* outSequence,
+    ZigbeeMacAcknowledgementRequestMode mode) {
   if (outSequence != nullptr) {
     *outSequence = 0U;
   }
@@ -300,8 +323,23 @@ bool ZigbeeRadio::enableMacAcknowledgementRequest(uint8_t* psdu, uint8_t length,
     }
   }
 
-  frameControl |= (1U << 5U);
-  writeLe16(&psdu[0], frameControl);
+  const bool ackRequested = ((frameControl >> 5U) & 0x1U) != 0U;
+  if (mode == ZigbeeMacAcknowledgementRequestMode::kDisabled) {
+    if (ackRequested) {
+      frameControl &= ~(1U << 5U);
+      writeLe16(&psdu[0], frameControl);
+    }
+    return false;
+  }
+  if (mode == ZigbeeMacAcknowledgementRequestMode::kRespectFrame &&
+      !ackRequested) {
+    return false;
+  }
+  if (mode == ZigbeeMacAcknowledgementRequestMode::kForceForDirectUnicast &&
+      !ackRequested) {
+    frameControl |= (1U << 5U);
+    writeLe16(&psdu[0], frameControl);
+  }
   if (outSequence != nullptr) {
     *outSequence = psdu[2];
   }
@@ -398,6 +436,136 @@ bool ZigbeeRadio::sendMacAcknowledgement(uint8_t sequence, bool framePending,
   return endSeen && disabled;
 }
 
+bool ZigbeeRadio::sendMacAcknowledgementAfterRxEnd(uint8_t sequence,
+                                                   bool framePending,
+                                                   uint32_t spinLimit) {
+  if (!initialized_ || radio_ == nullptr) {
+    return false;
+  }
+
+  uint8_t ackLength = 0U;
+  if (!buildMacAcknowledgement(sequence, &txPacket_[1], &ackLength,
+                               framePending)) {
+    return false;
+  }
+  txPacket_[0] = ieee802154PhrLengthFromMacPayloadLength(ackLength);
+  if (txPacket_[0] == 0U) {
+    return false;
+  }
+
+  radio_->PACKETPTR = reinterpret_cast<uint32_t>(txPacket_);
+  radio_->EVENTS_READY = 0U;
+  radio_->EVENTS_TXREADY = 0U;
+  radio_->EVENTS_END = 0U;
+  radio_->EVENTS_PHYEND = 0U;
+  radio_->EVENTS_DISABLED = 0U;
+  radio_->SHORTS =
+      ((RADIO_SHORTS_DISABLED_TXEN_Enabled << RADIO_SHORTS_DISABLED_TXEN_Pos) &
+       RADIO_SHORTS_DISABLED_TXEN_Msk) |
+      ((RADIO_SHORTS_TXREADY_START_Enabled << RADIO_SHORTS_TXREADY_START_Pos) &
+       RADIO_SHORTS_TXREADY_START_Msk) |
+      ((RADIO_SHORTS_PHYEND_DISABLE_Enabled << RADIO_SHORTS_PHYEND_DISABLE_Pos) &
+       RADIO_SHORTS_PHYEND_DISABLE_Msk);
+
+  radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+  const bool endSeen = waitRadioEndBudgeted(radio_, 3000U, spinLimit);
+  const bool disabled = waitRadioDisabledBudgeted(radio_, 3000U, spinLimit);
+  radio_->SHORTS = 0U;
+  clearRadioCoreEvents(radio_);
+  return endSeen && disabled;
+}
+
+void ZigbeeRadio::clearBufferedRxMacAcknowledgementState() {
+  bufferedRxAckPrepared_ = false;
+  bufferedRxAckSequence_ = 0U;
+  bufferedRxAckFramePending_ = false;
+}
+
+bool ZigbeeRadio::prepareBufferedRxMacAcknowledgementFromPrefix(
+    const uint8_t* packet) {
+  clearBufferedRxMacAcknowledgementState();
+  if (!macAckResponseEnabled_ || packet == nullptr) {
+    return false;
+  }
+
+  const uint8_t length = ieee802154MacPayloadLengthFromPhr(packet[0]);
+  if (length < 3U || length > 127U) {
+    return false;
+  }
+
+  const uint8_t* psdu = &packet[1];
+  const uint16_t frameControl = readLe16(&psdu[0]);
+  const uint8_t frameType = static_cast<uint8_t>(frameControl & 0x0007U);
+  const bool ackRequested = ((frameControl >> 5U) & 0x1U) != 0U;
+  const uint8_t destinationMode =
+      static_cast<uint8_t>((frameControl >> 10U) & 0x03U);
+  if (!ackRequested || (frameType != 0x01U && frameType != 0x03U) ||
+      destinationMode == 0U) {
+    return false;
+  }
+
+  if (!shouldAcceptReceivedMacFrame(psdu, length)) {
+    return false;
+  }
+
+  const bool framePending = shouldSetMacAckFramePending(psdu, length);
+  uint8_t ackLength = 0U;
+  if (!buildMacAcknowledgement(psdu[2], &bufferedRxAckPacket_[1], &ackLength,
+                               framePending)) {
+    return false;
+  }
+  bufferedRxAckPacket_[0] = ieee802154PhrLengthFromMacPayloadLength(ackLength);
+  if (bufferedRxAckPacket_[0] == 0U) {
+    return false;
+  }
+
+  bufferedRxAckSequence_ = psdu[2];
+  bufferedRxAckFramePending_ = framePending;
+  bufferedRxAckPrepared_ = true;
+  return true;
+}
+
+bool ZigbeeRadio::sendPreparedBufferedRxMacAcknowledgementAfterRxEnd(
+    bool framePending, uint32_t spinLimit) {
+  if (!initialized_ || radio_ == nullptr || !bufferedRxAckPrepared_) {
+    return false;
+  }
+  if (framePending != bufferedRxAckFramePending_) {
+    uint8_t ackLength = 0U;
+    if (!buildMacAcknowledgement(bufferedRxAckSequence_,
+                                 &bufferedRxAckPacket_[1], &ackLength,
+                                 framePending)) {
+      return false;
+    }
+    bufferedRxAckPacket_[0] = ieee802154PhrLengthFromMacPayloadLength(ackLength);
+    if (bufferedRxAckPacket_[0] == 0U) {
+      return false;
+    }
+    bufferedRxAckFramePending_ = framePending;
+  }
+
+  radio_->PACKETPTR = reinterpret_cast<uint32_t>(bufferedRxAckPacket_);
+  radio_->EVENTS_READY = 0U;
+  radio_->EVENTS_TXREADY = 0U;
+  radio_->EVENTS_END = 0U;
+  radio_->EVENTS_PHYEND = 0U;
+  radio_->EVENTS_DISABLED = 0U;
+  radio_->SHORTS =
+      ((RADIO_SHORTS_DISABLED_TXEN_Enabled << RADIO_SHORTS_DISABLED_TXEN_Pos) &
+       RADIO_SHORTS_DISABLED_TXEN_Msk) |
+      ((RADIO_SHORTS_TXREADY_START_Enabled << RADIO_SHORTS_TXREADY_START_Pos) &
+       RADIO_SHORTS_TXREADY_START_Msk) |
+      ((RADIO_SHORTS_PHYEND_DISABLE_Enabled << RADIO_SHORTS_PHYEND_DISABLE_Pos) &
+       RADIO_SHORTS_PHYEND_DISABLE_Msk);
+
+  radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+  const bool endSeen = waitRadioEndBudgeted(radio_, 3000U, spinLimit);
+  const bool disabled = waitRadioDisabledBudgeted(radio_, 3000U, spinLimit);
+  radio_->SHORTS = 0U;
+  clearRadioCoreEvents(radio_);
+  return endSeen && disabled;
+}
+
 bool ZigbeeRadio::shouldAcceptReceivedMacFrame(const uint8_t* psdu,
                                                uint8_t length) const {
   if (macFrameReceiveFilterCallback_ == nullptr) {
@@ -407,9 +575,286 @@ bool ZigbeeRadio::shouldAcceptReceivedMacFrame(const uint8_t* psdu,
                                         macFrameReceiveFilterContext_);
 }
 
+void ZigbeeRadio::resetBufferedReceiveQueue() {
+  bufferedRxPacketIndex_ = 0U;
+  bufferedRxQueueHead_ = 0U;
+  bufferedRxQueueTail_ = 0U;
+  bufferedRxQueueCount_ = 0U;
+  bufferedRxOverflowCount_ = 0U;
+  clearBufferedRxMacAcknowledgementState();
+  memset(bufferedRxAckPacket_, 0, sizeof(bufferedRxAckPacket_));
+  memset(bufferedRxPackets_, 0, sizeof(bufferedRxPackets_));
+  memset(bufferedRxFrames_, 0, sizeof(bufferedRxFrames_));
+}
+
+bool ZigbeeRadio::pushBufferedReceiveFrameFromPacket(const uint8_t* packet,
+                                                     int8_t rssiDbm) {
+  if (packet == nullptr) {
+    return false;
+  }
+
+  const uint8_t length = ieee802154MacPayloadLengthFromPhr(packet[0]);
+  lastReceiveDebug_.lastPhr = packet[0];
+  if (length == 0U || length > 127U) {
+    lastReceiveDebug_.invalidLengthCount++;
+    lastReceiveDebug_.lastLength = length;
+    return false;
+  }
+
+  if (!shouldAcceptReceivedMacFrame(&packet[1], length)) {
+    lastReceiveDebug_.filteredCount++;
+    lastReceiveDebug_.lastLength = length;
+    return false;
+  }
+
+  if (bufferedRxQueueCount_ >= kBufferedRxFrameQueueDepth) {
+    bufferedRxOverflowCount_++;
+    return false;
+  }
+
+  ZigbeeFrame& queued = bufferedRxFrames_[bufferedRxQueueTail_];
+  queued.channel = channel_;
+  queued.rssiDbm = rssiDbm;
+  queued.length = length;
+  memcpy(queued.psdu, &packet[1], length);
+
+  bufferedRxQueueTail_ = static_cast<uint8_t>(
+      (bufferedRxQueueTail_ + 1U) % kBufferedRxFrameQueueDepth);
+  bufferedRxQueueCount_++;
+  lastReceiveDebug_.rxDoneCount++;
+  lastReceiveDebug_.lastLength = length;
+  return true;
+}
+
+bool ZigbeeRadio::beginBufferedReceive(uint32_t spinLimit) {
+  if (!initialized_ || radio_ == nullptr) {
+    return false;
+  }
+  if (bufferedReceiveArmed_) {
+    return true;
+  }
+
+  receiverArmed_ = false;
+  forceRadioDisabled(radio_, spinLimit);
+  resetBufferedReceiveQueue();
+  setIeee802154CrcLengthMode(radio_, true);
+  clearRadioCoreEvents(radio_);
+  radio_->EVENTS_FRAMESTART = 0U;
+  radio_->EVENTS_BCMATCH = 0U;
+  radio_->BCC = static_cast<uint32_t>(kBufferedRxAckBccBytes) * 8UL;
+  radio_->PACKETPTR =
+      reinterpret_cast<uint32_t>(bufferedRxPackets_[bufferedRxPacketIndex_]);
+  radio_->SHORTS =
+      ((RADIO_SHORTS_RXREADY_START_Enabled << RADIO_SHORTS_RXREADY_START_Pos) &
+       RADIO_SHORTS_RXREADY_START_Msk) |
+      ((RADIO_SHORTS_ADDRESS_BCSTART_Enabled
+        << RADIO_SHORTS_ADDRESS_BCSTART_Pos) &
+       RADIO_SHORTS_ADDRESS_BCSTART_Msk) |
+      ((RADIO_SHORTS_ADDRESS_RSSISTART_Enabled
+        << RADIO_SHORTS_ADDRESS_RSSISTART_Pos) &
+       RADIO_SHORTS_ADDRESS_RSSISTART_Msk);
+
+  bufferedReceiveArmed_ = true;
+  receiverArmed_ = true;
+  g_activeZigbeeRadioIrq = this;
+  radio_->INTENCLR00 = 0xFFFFFFFFUL;
+  radio_->INTENSET00 = RADIO_INTENSET00_BCMATCH_Msk | RADIO_INTENSET00_END_Msk;
+  NVIC_ClearPendingIRQ(RADIO_0_IRQn);
+  NVIC_SetPriority(RADIO_0_IRQn, 3U);
+  NVIC_EnableIRQ(RADIO_0_IRQn);
+  radio_->TASKS_RXEN = RADIO_TASKS_RXEN_TASKS_RXEN_Trigger;
+  return true;
+}
+
+bool ZigbeeRadio::pollBufferedReceive(ZigbeeFrame* frame) {
+  if (frame == nullptr) {
+    return false;
+  }
+
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  if (bufferedRxQueueCount_ == 0U) {
+    __set_PRIMASK(primask);
+    return false;
+  }
+
+  const uint8_t head = bufferedRxQueueHead_;
+  *frame = bufferedRxFrames_[head];
+  bufferedRxQueueHead_ =
+      static_cast<uint8_t>((head + 1U) % kBufferedRxFrameQueueDepth);
+  bufferedRxQueueCount_--;
+  __set_PRIMASK(primask);
+  return true;
+}
+
+void ZigbeeRadio::cancelBufferedReceive(uint32_t spinLimit) {
+  if (radio_ == nullptr) {
+    bufferedReceiveArmed_ = false;
+    receiverArmed_ = false;
+    if (g_activeZigbeeRadioIrq == this) {
+      g_activeZigbeeRadioIrq = nullptr;
+    }
+    return;
+  }
+  if (!bufferedReceiveArmed_ && g_activeZigbeeRadioIrq != this) {
+    return;
+  }
+
+  bufferedReceiveArmed_ = false;
+  if (g_activeZigbeeRadioIrq == this) {
+    g_activeZigbeeRadioIrq = nullptr;
+  }
+  radio_->INTENCLR00 = 0xFFFFFFFFUL;
+  NVIC_ClearPendingIRQ(RADIO_0_IRQn);
+  radio_->TASKS_BCSTOP = RADIO_TASKS_BCSTOP_TASKS_BCSTOP_Trigger;
+  radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+  (void)waitRadioDisabledBudgeted(radio_, 3000U, spinLimit);
+  radio_->SHORTS = 0U;
+  clearRadioCoreEvents(radio_);
+  receiverArmed_ = false;
+}
+
+bool ZigbeeRadio::bufferedReceiveArmed() const {
+  return bufferedReceiveArmed_;
+}
+
+bool ZigbeeRadio::serviceBufferedReceiveIrq() {
+  if (!bufferedReceiveArmed_ || radio_ == nullptr ||
+      g_activeZigbeeRadioIrq != this) {
+    return false;
+  }
+  bool handled = false;
+  if (radio_->EVENTS_BCMATCH != 0U) {
+    radio_->EVENTS_BCMATCH = 0U;
+    radio_->INTENCLR00 = RADIO_INTENCLR00_BCMATCH_Msk;
+    (void)prepareBufferedRxMacAcknowledgementFromPrefix(
+        bufferedRxPackets_[bufferedRxPacketIndex_]);
+    handled = true;
+  }
+  if (radio_->EVENTS_END == 0U && radio_->EVENTS_PHYEND == 0U) {
+    if (radio_->EVENTS_DISABLED != 0U) {
+      radio_->EVENTS_DISABLED = 0U;
+      handled = true;
+    }
+    return handled;
+  }
+
+  radio_->INTENCLR00 = RADIO_INTENCLR00_BCMATCH_Msk |
+                       RADIO_INTENCLR00_END_Msk | RADIO_INTENCLR00_PHYEND_Msk |
+                       RADIO_INTENCLR00_DISABLED_Msk;
+  const uint8_t packetIndex = bufferedRxPacketIndex_;
+  const uint8_t* packet = bufferedRxPackets_[packetIndex];
+  const int8_t rssiDbm = radioRssiDbm(radio_);
+  const uint32_t crcStatus =
+      (radio_->CRCSTATUS & RADIO_CRCSTATUS_CRCSTATUS_Msk) >>
+      RADIO_CRCSTATUS_CRCSTATUS_Pos;
+  const bool crcOkEvent = (radio_->EVENTS_CRCOK != 0U);
+  const bool crcOk =
+      crcOkEvent || (crcStatus == RADIO_CRCSTATUS_CRCSTATUS_CRCOk);
+
+  bool radioSettledForRearm = false;
+  if (crcOk) {
+    const uint8_t length = ieee802154MacPayloadLengthFromPhr(packet[0]);
+    lastReceiveDebug_.lastPhr = packet[0];
+    if (length == 0U || length > 127U) {
+      lastReceiveDebug_.invalidLengthCount++;
+      lastReceiveDebug_.lastLength = length;
+    } else {
+      uint8_t acknowledgementSequence = 0U;
+      const bool acknowledgementRequested =
+          macAckResponseEnabled_ &&
+          frameRequestsMacAcknowledgement(&packet[1], length,
+                                          &acknowledgementSequence);
+      const bool preparedAcknowledgementMatches =
+          acknowledgementRequested && bufferedRxAckPrepared_ &&
+          bufferedRxAckSequence_ == acknowledgementSequence;
+
+      if (preparedAcknowledgementMatches) {
+        (void)sendPreparedBufferedRxMacAcknowledgementAfterRxEnd(
+            bufferedRxAckFramePending_, 12000UL);
+        radioSettledForRearm = true;
+      }
+
+      if (!shouldAcceptReceivedMacFrame(&packet[1], length)) {
+        lastReceiveDebug_.filteredCount++;
+        lastReceiveDebug_.lastLength = length;
+      } else {
+        if (acknowledgementRequested && !preparedAcknowledgementMatches) {
+          const bool framePending =
+              shouldSetMacAckFramePending(&packet[1], length);
+          (void)sendMacAcknowledgementAfterRxEnd(acknowledgementSequence,
+                                                 framePending, 12000UL);
+          radioSettledForRearm = true;
+        }
+
+        if (bufferedRxQueueCount_ >= kBufferedRxFrameQueueDepth) {
+          bufferedRxOverflowCount_++;
+        } else {
+          ZigbeeFrame& queued = bufferedRxFrames_[bufferedRxQueueTail_];
+          queued.channel = channel_;
+          queued.rssiDbm = rssiDbm;
+          queued.length = length;
+          memcpy(queued.psdu, &packet[1], length);
+          bufferedRxQueueTail_ = static_cast<uint8_t>(
+              (bufferedRxQueueTail_ + 1U) % kBufferedRxFrameQueueDepth);
+          bufferedRxQueueCount_++;
+          lastReceiveDebug_.rxDoneCount++;
+          lastReceiveDebug_.lastLength = length;
+        }
+      }
+    }
+  } else {
+    lastReceiveDebug_.crcErrorCount++;
+    lastReceiveDebug_.lastPhr = packet[0];
+  }
+
+  if (!radioSettledForRearm) {
+    radio_->EVENTS_DISABLED = 0U;
+    radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    (void)waitRadioDisabledBudgeted(radio_, 3000U, 12000UL);
+    radio_->SHORTS = 0U;
+    clearRadioCoreEvents(radio_);
+    radioSettledForRearm = true;
+  }
+
+  if (!bufferedReceiveArmed_) {
+    clearRadioCoreEvents(radio_);
+    return true;
+  }
+
+  const uint8_t nextPacketIndex = static_cast<uint8_t>(
+      (packetIndex + 1U) % kBufferedRxPacketCount);
+  bufferedRxPacketIndex_ = nextPacketIndex;
+  memset(bufferedRxPackets_[nextPacketIndex], 0,
+         sizeof(bufferedRxPackets_[nextPacketIndex]));
+  clearRadioCoreEvents(radio_);
+  radio_->EVENTS_FRAMESTART = 0U;
+  radio_->EVENTS_BCMATCH = 0U;
+  radio_->BCC = static_cast<uint32_t>(kBufferedRxAckBccBytes) * 8UL;
+  clearBufferedRxMacAcknowledgementState();
+  radio_->PACKETPTR =
+      reinterpret_cast<uint32_t>(bufferedRxPackets_[nextPacketIndex]);
+  radio_->SHORTS =
+      ((RADIO_SHORTS_RXREADY_START_Enabled << RADIO_SHORTS_RXREADY_START_Pos) &
+       RADIO_SHORTS_RXREADY_START_Msk) |
+      ((RADIO_SHORTS_ADDRESS_BCSTART_Enabled
+        << RADIO_SHORTS_ADDRESS_BCSTART_Pos) &
+       RADIO_SHORTS_ADDRESS_BCSTART_Msk) |
+      ((RADIO_SHORTS_ADDRESS_RSSISTART_Enabled
+        << RADIO_SHORTS_ADDRESS_RSSISTART_Pos) &
+       RADIO_SHORTS_ADDRESS_RSSISTART_Msk);
+  radio_->INTENSET00 = RADIO_INTENSET00_BCMATCH_Msk | RADIO_INTENSET00_END_Msk;
+  NVIC_ClearPendingIRQ(RADIO_0_IRQn);
+  radio_->TASKS_RXEN = RADIO_TASKS_RXEN_TASKS_RXEN_Trigger;
+  return true;
+}
+
 bool ZigbeeRadio::beginReceive(uint32_t spinLimit) {
   if (!initialized_ || radio_ == nullptr) {
     return false;
+  }
+  if (bufferedReceiveArmed_) {
+    cancelBufferedReceive(spinLimit);
   }
   if (receiverArmed_) {
     return true;
@@ -497,7 +942,7 @@ bool ZigbeeRadio::pollReceive(ZigbeeFrame* frame, uint32_t spinLimit) {
   memcpy(frame->psdu, &rxPacket_[1], length);
   lastReceiveDebug_.rxDoneCount++;
   lastReceiveDebug_.lastLength = length;
-  if (sendAcknowledgement) {
+  if (sendAcknowledgement && macAckResponseEnabled_) {
     const bool framePending =
         shouldSetMacAckFramePending(&rxPacket_[1], length);
     (void)sendMacAcknowledgement(acknowledgementSequence, framePending,
@@ -510,6 +955,11 @@ bool ZigbeeRadio::pollReceive(ZigbeeFrame* frame, uint32_t spinLimit) {
 void ZigbeeRadio::cancelReceive(uint32_t spinLimit) {
   if (radio_ == nullptr) {
     receiverArmed_ = false;
+    bufferedReceiveArmed_ = false;
+    return;
+  }
+  if (bufferedReceiveArmed_) {
+    cancelBufferedReceive(spinLimit);
     return;
   }
   if (receiverArmed_) {
@@ -532,6 +982,9 @@ bool ZigbeeRadio::transmit(const uint8_t* psdu, uint8_t length, bool performCca,
     return false;
   }
 
+  if (bufferedReceiveArmed_) {
+    cancelBufferedReceive(spinLimit);
+  }
   lastTransmitDebug_ = {};
   lastTransmitDebug_.txLength = length;
 
@@ -546,8 +999,8 @@ bool ZigbeeRadio::transmit(const uint8_t* psdu, uint8_t length, bool performCca,
   txPacket_[0] = ieee802154PhrLengthFromMacPayloadLength(length);
   memcpy(&txPacket_[1], psdu, length);
   uint8_t acknowledgementSequence = 0U;
-  const bool waitForAck = enableMacAcknowledgementRequest(
-      &txPacket_[1], length, &acknowledgementSequence);
+  const bool waitForAck = prepareMacAcknowledgementRequest(
+      &txPacket_[1], length, &acknowledgementSequence, macAckRequestMode_);
   lastTransmitDebug_.ackRequested = waitForAck;
   lastTransmitDebug_.ackSequence = acknowledgementSequence;
 
@@ -596,6 +1049,9 @@ bool ZigbeeRadio::transmitThenReceive(const uint8_t* psdu, uint8_t length,
     return false;
   }
 
+  if (bufferedReceiveArmed_) {
+    cancelBufferedReceive(spinLimit);
+  }
   lastTransmitDebug_ = {};
   lastTransmitDebug_.txLength = length;
 
@@ -611,8 +1067,8 @@ bool ZigbeeRadio::transmitThenReceive(const uint8_t* psdu, uint8_t length,
   memcpy(&txPacket_[1], psdu, length);
   memset(rxPacket_, 0, sizeof(rxPacket_));
   uint8_t acknowledgementSequence = 0U;
-  bool awaitingMacAcknowledgement = enableMacAcknowledgementRequest(
-      &txPacket_[1], length, &acknowledgementSequence);
+  bool awaitingMacAcknowledgement = prepareMacAcknowledgementRequest(
+      &txPacket_[1], length, &acknowledgementSequence, macAckRequestMode_);
   lastTransmitDebug_.ackRequested = awaitingMacAcknowledgement;
   lastTransmitDebug_.ackSequence = acknowledgementSequence;
 
@@ -840,7 +1296,7 @@ bool ZigbeeRadio::transmitThenReceive(const uint8_t* psdu, uint8_t length,
     if (rxLength >= 3U) {
       lastTransmitDebug_.rxSequence = rxPacket_[3];
     }
-    if (sendAcknowledgement) {
+    if (sendAcknowledgement && macAckResponseEnabled_) {
       const bool framePending =
           shouldSetMacAckFramePending(&rxPacket_[1], rxLength);
       (void)sendMacAcknowledgement(responseAckSequence, framePending, spinLimit);
@@ -885,6 +1341,9 @@ bool ZigbeeRadio::sampleEnergyDetect(uint8_t* outEdLevel, uint32_t spinLimit) {
     return false;
   }
 
+  if (bufferedReceiveArmed_) {
+    cancelBufferedReceive(spinLimit);
+  }
   receiverArmed_ = false;
   clearRadioCoreEvents(radio_);
   radio_->EVENTS_EDEND = 0U;
@@ -928,6 +1387,24 @@ ZigbeeReceiveDebug ZigbeeRadio::lastReceiveDebug() const {
   return lastReceiveDebug_;
 }
 
+void ZigbeeRadio::setMacAcknowledgementRequestMode(
+    ZigbeeMacAcknowledgementRequestMode mode) {
+  macAckRequestMode_ = mode;
+}
+
+ZigbeeMacAcknowledgementRequestMode
+ZigbeeRadio::macAcknowledgementRequestMode() const {
+  return macAckRequestMode_;
+}
+
+void ZigbeeRadio::setMacAcknowledgementResponseEnabled(bool enabled) {
+  macAckResponseEnabled_ = enabled;
+}
+
+bool ZigbeeRadio::macAcknowledgementResponseEnabled() const {
+  return macAckResponseEnabled_;
+}
+
 void ZigbeeRadio::setMacDataRequestPendingCallback(
     MacDataRequestPendingCallback callback, void* context) {
   macDataRequestPendingCallback_ = callback;
@@ -953,7 +1430,7 @@ bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
   }
 
   if (macDataRequestPendingCallback_ == nullptr) {
-    return true;
+    return false;
   }
 
   const bool panCompression = ((frameControl >> 6U) & 0x1U) != 0U;
@@ -965,7 +1442,7 @@ bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
   size_t index = 3U;
   if (destinationMode != 0U) {
     if (length < (index + 2U)) {
-      return true;
+      return false;
     }
     index += 2U;
     if (destinationMode == 0x02U) {
@@ -973,7 +1450,7 @@ bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
     } else if (destinationMode == 0x03U) {
       index += 8U;
     } else {
-      return true;
+      return false;
     }
   }
 
@@ -986,15 +1463,15 @@ bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
   } else if (sourceMode == 0x03U) {
     index += 8U;
   } else {
-    return true;
+    return false;
   }
 
   if (length < (index + 1U)) {
-    return true;
+    return false;
   }
 
   if (psdu[index] != 0x04U) {
-    return true;
+    return false;
   }
 
   return macDataRequestPendingCallback_(psdu, length,

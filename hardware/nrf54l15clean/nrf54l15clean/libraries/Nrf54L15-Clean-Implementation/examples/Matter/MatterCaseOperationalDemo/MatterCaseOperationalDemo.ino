@@ -71,7 +71,12 @@ void setup(){
   Serial.println("CTRL) ===");
 #endif
   otOperationalDataset ds={};Nrf54ThreadExperimental::buildDemoDataset(&ds);
-  g_thread.setActiveDataset(ds);g_thread.begin();
+  g_thread.setActiveDataset(ds);
+#if MATTER_DEMO_ROLE==0
+  g_thread.beginAsRouter();
+#else
+  g_thread.beginAsChild();
+#endif
   g_thread.openUdp(kPort,onRx,nullptr);
   ps();
 }

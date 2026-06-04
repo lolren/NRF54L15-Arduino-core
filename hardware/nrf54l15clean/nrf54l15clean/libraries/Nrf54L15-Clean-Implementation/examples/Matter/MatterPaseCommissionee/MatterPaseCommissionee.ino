@@ -192,7 +192,8 @@ void onUdp(void*, const uint8_t* data, uint16_t len, const otMessageInfo& info) 
       Serial.print("pase commit done in "); Serial.print(millis()-tB); Serial.println("ms"); Serial.flush();
       uint8_t msg[128] = {kSpake2p1};
       memcpy(msg + 1, X, 65);
-      memcpy(msg + 66, g_sessionId, 2); // include session ID
+      msg[66] = static_cast<uint8_t>(g_sessionId & 0xFFU);
+      msg[67] = static_cast<uint8_t>((g_sessionId >> 8U) & 0xFFU);
       g_thread.sendUdp(info.mPeerAddr, info.mPeerPort, msg, 68);
       Serial.println("pase spake2p1 sent"); Serial.flush();
     } else {

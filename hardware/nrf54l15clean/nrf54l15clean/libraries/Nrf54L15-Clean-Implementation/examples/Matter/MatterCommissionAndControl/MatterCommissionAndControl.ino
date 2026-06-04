@@ -351,7 +351,7 @@ void setup() {
   if (ROLE == Role::COMMISSIONER) {
     gThread.beginAsRouter();
   } else {
-    gThread.begin(false);
+    gThread.beginAsChild(false);
   }
   gThread.openUdp(kCommissionPort, onCommissionUdp, nullptr);
   if (ROLE == Role::COMMISSIONER) {

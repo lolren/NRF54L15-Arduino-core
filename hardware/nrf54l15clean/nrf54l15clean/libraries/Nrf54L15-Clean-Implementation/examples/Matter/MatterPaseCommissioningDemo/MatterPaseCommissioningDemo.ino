@@ -164,7 +164,7 @@ void onUdp(void*, const uint8_t* data, uint16_t len, const otMessageInfo& info) 
     if (computeSpake2pCommit(true, g_w0, X)) {
       uint8_t msg[128] = {kSpake2p1};
       memcpy(msg + 1, X, 65);
-      memcpy(msg + 66, g_sessionId, 2); // include session ID
+      memcpy(msg + 66, &g_sessionId, 2); // include session ID
       g_thread.sendUdp(info.mPeerAddr, info.mPeerPort, msg, 68);
       Serial.println("pase spake2p1 sent"); Serial.flush();
     }
@@ -290,7 +290,11 @@ void setup() {
   otOperationalDataset ds = {};
   Nrf54ThreadExperimental::buildDemoDataset(&ds);
   g_thread.setActiveDataset(ds);
-  g_thread.begin();
+  if (ROLE == DemoRole::COMMISSIONER) {
+    g_thread.beginAsRouter();
+  } else {
+    g_thread.beginAsChild();
+  }
   g_thread.openUdp(kPort, onUdp, nullptr);
   
   Serial.print("pase thread="); Serial.print(g_thread.started()?1:0);

@@ -123,6 +123,7 @@ struct OpenThreadPlatformSkeletonSnapshot {
   uint32_t txRequestCount = 0;
   uint32_t radioTxDoneCount = 0;
   uint32_t radioRxDoneCount = 0;
+  uint32_t radioRxQueueOverflowCount = 0;
   uint32_t radioEnergyScanCount = 0;
   uint32_t radioReceivePollCount = 0;
   uint32_t radioReceiveAtScheduleCount = 0;
@@ -141,6 +142,8 @@ struct OpenThreadPlatformSkeletonSnapshot {
   uint64_t radioNowUs = 0;
   uint32_t radioReceiveAtStartUs = 0;
   uint32_t radioReceiveAtDurationUs = 0;
+  uint8_t radioRxQueueDepth = 0;
+  uint8_t radioRxQueueHighWater = 0;
   uint8_t radioLastTxHeader[10] = {0};
   uint8_t radioLastRxHeader[10] = {0};
   uint8_t radioLastRxPhr = 0;

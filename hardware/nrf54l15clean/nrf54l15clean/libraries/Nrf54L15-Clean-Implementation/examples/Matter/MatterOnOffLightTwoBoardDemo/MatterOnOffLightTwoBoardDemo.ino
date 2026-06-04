@@ -394,7 +394,7 @@ void setup() {
   if (ROLE == DemoRole::LIGHT_NODE) {
     gThread.beginAsRouter();
   } else {
-    gThread.begin();
+    gThread.beginAsChild();
   }
 
   Serial.print("matter_light thread_begin=");

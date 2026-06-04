@@ -1613,6 +1613,12 @@ struct ZigbeeMacAcknowledgementView {
   uint8_t sequence;
 };
 
+enum class ZigbeeMacAcknowledgementRequestMode : uint8_t {
+  kForceForDirectUnicast = 0,
+  kRespectFrame = 1,
+  kDisabled = 2,
+};
+
 struct ZigbeeTransmitDebug {
   bool endSeen = false;
   bool disabledSeen = false;
@@ -1680,11 +1686,21 @@ class ZigbeeRadio {
   bool pollReceive(ZigbeeFrame* frame, uint32_t spinLimit = 1400000UL);
   void cancelReceive(uint32_t spinLimit = 1400000UL);
   bool receiverArmed() const;
+  bool beginBufferedReceive(uint32_t spinLimit = 1400000UL);
+  bool pollBufferedReceive(ZigbeeFrame* frame);
+  void cancelBufferedReceive(uint32_t spinLimit = 1400000UL);
+  bool bufferedReceiveArmed() const;
+  bool serviceBufferedReceiveIrq();
   bool receive(ZigbeeFrame* frame, uint32_t listenWindowUs = 7000U,
                uint32_t spinLimit = 1400000UL);
   bool sampleEnergyDetect(uint8_t* outEdLevel, uint32_t spinLimit = 300000UL);
   ZigbeeTransmitDebug lastTransmitDebug() const;
   ZigbeeReceiveDebug lastReceiveDebug() const;
+  void setMacAcknowledgementRequestMode(
+      ZigbeeMacAcknowledgementRequestMode mode);
+  ZigbeeMacAcknowledgementRequestMode macAcknowledgementRequestMode() const;
+  void setMacAcknowledgementResponseEnabled(bool enabled);
+  bool macAcknowledgementResponseEnabled() const;
   void setMacDataRequestPendingCallback(MacDataRequestPendingCallback callback,
                                         void* context = nullptr);
   void setMacFrameReceiveFilterCallback(MacFrameReceiveFilterCallback callback,
@@ -1722,22 +1738,51 @@ class ZigbeeRadio {
                                  uint32_t spinLimit);
   bool sendMacAcknowledgement(uint8_t sequence, bool framePending,
                               uint32_t spinLimit);
+  bool sendMacAcknowledgementAfterRxEnd(uint8_t sequence, bool framePending,
+                                        uint32_t spinLimit);
+  bool prepareBufferedRxMacAcknowledgementFromPrefix(const uint8_t* packet);
+  bool sendPreparedBufferedRxMacAcknowledgementAfterRxEnd(bool framePending,
+                                                         uint32_t spinLimit);
+  void clearBufferedRxMacAcknowledgementState();
   bool shouldAcceptReceivedMacFrame(const uint8_t* psdu,
                                     uint8_t length) const;
   bool shouldSetMacAckFramePending(const uint8_t* psdu, uint8_t length) const;
   static bool frameRequestsMacAcknowledgement(const uint8_t* psdu,
                                               uint8_t length,
                                               uint8_t* outSequence);
-  static bool enableMacAcknowledgementRequest(uint8_t* psdu, uint8_t length,
-                                              uint8_t* outSequence);
+  static bool prepareMacAcknowledgementRequest(
+      uint8_t* psdu, uint8_t length, uint8_t* outSequence,
+      ZigbeeMacAcknowledgementRequestMode mode);
+  void resetBufferedReceiveQueue();
+  bool pushBufferedReceiveFrameFromPacket(const uint8_t* packet,
+                                          int8_t rssiDbm);
+
+  static constexpr uint8_t kBufferedRxPacketCount = 4U;
+  static constexpr uint8_t kBufferedRxFrameQueueDepth = 8U;
+  // PHR + FCF + sequence + short destination + short source + command ID.
+  static constexpr uint8_t kBufferedRxAckBccBytes = 11U;
 
   NRF_RADIO_Type* radio_;
   bool initialized_;
   bool rfPathOwnedByZigbee_;
   bool receiverArmed_;
+  volatile bool bufferedReceiveArmed_;
+  volatile uint8_t bufferedRxPacketIndex_;
+  volatile uint8_t bufferedRxQueueHead_;
+  volatile uint8_t bufferedRxQueueTail_;
+  volatile uint8_t bufferedRxQueueCount_;
+  volatile uint32_t bufferedRxOverflowCount_;
+  volatile bool bufferedRxAckPrepared_;
+  volatile uint8_t bufferedRxAckSequence_;
+  volatile bool bufferedRxAckFramePending_;
+  ZigbeeMacAcknowledgementRequestMode macAckRequestMode_;
+  bool macAckResponseEnabled_;
   uint8_t channel_;
   alignas(4) uint8_t txPacket_[1 + 127];
   alignas(4) uint8_t rxPacket_[1 + 127];
+  alignas(4) uint8_t bufferedRxAckPacket_[1 + 3];
+  alignas(4) uint8_t bufferedRxPackets_[kBufferedRxPacketCount][1 + 127];
+  ZigbeeFrame bufferedRxFrames_[kBufferedRxFrameQueueDepth];
   ZigbeeTransmitDebug lastTransmitDebug_{};
   ZigbeeReceiveDebug lastReceiveDebug_{};
   MacDataRequestPendingCallback macDataRequestPendingCallback_ = nullptr;

@@ -38,6 +38,7 @@ class Nrf54ThreadExperimental {
     kChildFirst = 0U,
     kChildOnly = 1U,
     kRouterEligible = 2U,
+    kJoinerOnly = 3U,
   };
   using StateChangedCallback = void (*)(void* context,
                                         otChangedFlags flags,
@@ -47,6 +48,11 @@ class Nrf54ThreadExperimental {
   using CommissionerJoinerCallback = void (*)(void* context,
                                               const otExtAddress* joinerId,
                                               otError error);
+  using CommissionerJoinerEventCallback = void (*)(
+      void* context,
+      otCommissionerJoinerEvent event,
+      const otJoinerInfo* joinerInfo,
+      const otExtAddress* joinerId);
   using JoinerCallback = void (*)(void* context, otError error);
 
   struct AttachDiagnostics {
@@ -123,6 +129,7 @@ class Nrf54ThreadExperimental {
   bool beginAsChild(bool wipeSettings = true);
   bool beginAsRouter(bool wipeSettings = true);
   bool beginChildFirst(bool wipeSettings = true);
+  bool beginJoinerOnly(bool wipeSettings = true);
   bool stop();
   bool restart(bool wipeSettings = false);
   void process();
@@ -149,6 +156,9 @@ class Nrf54ThreadExperimental {
                                     void* callbackContext = nullptr);
   bool setCommissionerJoinerCallback(CommissionerJoinerCallback callback,
                                      void* callbackContext = nullptr);
+  bool setCommissionerJoinerEventCallback(
+      CommissionerJoinerEventCallback callback,
+      void* callbackContext = nullptr);
   bool startJoiner(const char* pskd,
                    const char* provisioningUrl = nullptr,
                    JoinerCallback callback = nullptr,
@@ -193,6 +203,11 @@ class Nrf54ThreadExperimental {
   otCommissionerState commissionerState() const;
   const char* commissionerStateName() const;
   bool commissionerSessionId(uint16_t* outSessionId) const;
+  otCommissionerJoinerEvent lastCommissionerJoinerEvent() const;
+  const char* lastCommissionerJoinerEventName() const;
+  uint32_t commissionerJoinerEventCount() const;
+  uint32_t commissionerJoinerFinalizeCount() const;
+  uint32_t commissionerJoinerRemovedCount() const;
   bool joinerSupported() const;
   bool joinerActive() const;
   otJoinerState joinerState() const;
@@ -212,6 +227,8 @@ class Nrf54ThreadExperimental {
   static const char* roleName(Role role);
   static const char* attachPolicyName(AttachPolicy policy);
   static const char* commissionerStateName(otCommissionerState state);
+  static const char* commissionerJoinerEventName(
+      otCommissionerJoinerEvent event);
   static const char* joinerStateName(otJoinerState state);
   static void buildDemoDataset(otOperationalDataset* outDataset);
   static otError generatePskc(const char* passPhrase,
@@ -273,10 +290,10 @@ class Nrf54ThreadExperimental {
   static bool hexToBytes(const char* text, uint8_t* outData,
                          size_t outCapacity, size_t* outLength = nullptr);
 
-  static constexpr uint32_t kStageInitDelayMs = 2000UL;
-  static constexpr uint32_t kStageDatasetApplyDelayMs = 4000UL;
-  static constexpr uint32_t kStageIp6EnableDelayMs = 5000UL;
-  static constexpr uint32_t kStageThreadEnableDelayMs = 6000UL;
+  static constexpr uint32_t kStageInitDelayMs = 0UL;
+  static constexpr uint32_t kStageDatasetApplyDelayMs = 0UL;
+  static constexpr uint32_t kStageIp6EnableDelayMs = 0UL;
+  static constexpr uint32_t kStageThreadEnableDelayMs = 0UL;
   static constexpr uint32_t kChildFirstFallbackBaseMs = 12000UL;
   static constexpr uint32_t kChildFirstFallbackJitterMs = 12000UL;
 
@@ -289,6 +306,8 @@ class Nrf54ThreadExperimental {
   void* commissionerStateCallbackContext_ = nullptr;
   CommissionerJoinerCallback commissionerJoinerCallback_ = nullptr;
   void* commissionerJoinerCallbackContext_ = nullptr;
+  CommissionerJoinerEventCallback commissionerJoinerEventCallback_ = nullptr;
+  void* commissionerJoinerEventCallbackContext_ = nullptr;
   JoinerCallback joinerCallback_ = nullptr;
   void* joinerCallbackContext_ = nullptr;
 
@@ -317,6 +336,11 @@ class Nrf54ThreadExperimental {
   bool stateChangedCallbackRegistered_ = false;
   bool commissionerStarted_ = false;
   bool joinerStarted_ = false;
+  otCommissionerJoinerEvent lastCommissionerJoinerEvent_ =
+      OT_COMMISSIONER_JOINER_REMOVED;
+  uint32_t commissionerJoinerEventCount_ = 0U;
+  uint32_t commissionerJoinerFinalizeCount_ = 0U;
+  uint32_t commissionerJoinerRemovedCount_ = 0U;
   uint32_t childFirstFallbackDelayMs_ = kChildFirstFallbackBaseMs;
 };
 

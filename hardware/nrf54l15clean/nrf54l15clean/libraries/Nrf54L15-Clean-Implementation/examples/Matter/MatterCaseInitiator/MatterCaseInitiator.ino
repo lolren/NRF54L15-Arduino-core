@@ -207,7 +207,8 @@ void processSigma1(const uint8_t* data, uint16_t len, const otMessageInfo& info)
 
   // Encrypted test payload
   uint8_t iv[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
-  uint8_t plain[16] = "CASERESPONDER_OK";
+  const uint8_t plain[16] = {'C', 'A', 'S', 'E', 'R', 'E', 'S', 'P',
+                             'O', 'N', 'D', 'E', 'R', '_', 'O', 'K'};
   aesCtrCrypt(g_sessionKey, iv, plain, msg + 195, 16);
 
   sendFrag(kSigma2, msg + 1, 210, info.mPeerAddr);
@@ -361,7 +362,11 @@ void setup() {
   otOperationalDataset ds = {};
   Nrf54ThreadExperimental::buildDemoDataset(&ds);
   g_thread.setActiveDataset(ds);
-  g_thread.begin();
+  if (ROLE == DemoRole::RESPONDER) {
+    g_thread.beginAsRouter();
+  } else {
+    g_thread.beginAsChild();
+  }
   g_thread.openUdp(kPort, onUdp, nullptr);
 
   Serial.print("case thread="); Serial.print(g_thread.started() ? 1 : 0);

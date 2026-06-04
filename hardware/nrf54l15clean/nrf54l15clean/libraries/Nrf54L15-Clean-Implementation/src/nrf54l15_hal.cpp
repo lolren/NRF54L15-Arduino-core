@@ -27,6 +27,7 @@ namespace {
 xiao_nrf54l15::Pwm* g_activePwm20 = nullptr;
 xiao_nrf54l15::Pwm* g_activePwm21 = nullptr;
 xiao_nrf54l15::Pwm* g_activePwm22 = nullptr;
+xiao_nrf54l15::ZigbeeRadio* g_activeZigbeeRadioIrq = nullptr;
 
 xiao_nrf54l15::Pwm** pwmActiveSlotForBase(uint32_t base) {
   switch (base) {
@@ -158,6 +159,10 @@ extern "C" void nrf54l15_ble_grtc_irq_service(void) {
 }
 
 extern "C" void RADIO_0_IRQHandler(void) {
+  if (g_activeZigbeeRadioIrq != nullptr &&
+      g_activeZigbeeRadioIrq->serviceBufferedReceiveIrq()) {
+    return;
+  }
   bleScanSleepWaitHandleRadioIrq(NRF_RADIO);
 }
 

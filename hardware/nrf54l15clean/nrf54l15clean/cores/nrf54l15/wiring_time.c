@@ -753,7 +753,21 @@ unsigned long millis(void)
 #if defined(NRF54L15_CLEAN_POWER_LOW)
     return (unsigned long)(nrf54l15_core_monotonic_time_us() / 1000ULL);
 #else
-    return (unsigned long)g_millis_ticks;
+    uint32_t ticks = g_millis_ticks;
+    if (ticks == 0U) {
+        /* SysTick_Handler not firing - read counter directly with wrap tracking */
+        uint32_t load = SysTick->LOAD;
+        uint32_t val = SysTick->VAL;
+        uint32_t count = load - val;
+        static uint32_t s_last = (uint32_t)-1;
+        static uint32_t s_ms = 0;
+        if (s_last != (uint32_t)-1 && count < s_last) {
+            s_ms++; /* one more ms tick */
+        }
+        s_last = count;
+        return s_ms;
+    }
+    return (unsigned long)ticks;
 #endif
 }
 

@@ -277,13 +277,12 @@ void setup() {
   otOperationalDataset ds = {};
   Nrf54ThreadExperimental::buildDemoDataset(&ds);
   
-  if (ROLE == DemoRole::JOINER) {
-    // Don't claim authority — attach as child to existing network
-    ds.mActiveTimestamp.mAuthoritative = false;
-    ds.mActiveTimestamp.mSeconds = 0;
-  }
   g_thread.setActiveDataset(ds);
-  g_thread.begin();
+  if (ROLE == DemoRole::COMMISSIONER) {
+    g_thread.beginAsRouter();
+  } else {
+    g_thread.beginAsChild();
+  }
   
   // Give OpenThread time to scan and attach (joiner needs to find commissioner)
   for (int i = 0; i < 50; i++) { g_thread.process(); delay(100); }

@@ -29,10 +29,10 @@ These are the items most likely to matter for users or product work.
 
 | Box | Area | Current state | What remains |
 |---|---|---|---|
-| [x] | Matter end-to-end | On-network on/off-light, encrypted IM over Thread (2-board), PASE SPAKE2+ commissioning (2-board ~45s), CASE Sigma protocol with fragmentation. Software secp256r1 ECC with Jacobian + 4-bit windowed optimization now measures about 0.84s sign / 1.76s verify on board. | Discovery, control, Home Assistant integration. |
+| [x] | Matter end-to-end | On-network on/off-light, encrypted IM over Thread (2-board), PASE SPAKE2+ commissioning (2-board ~45s), CASE Sigma protocol with fragmentation, Matter platform dataset/readiness diagnostics, and Preferences-backed factory data. Software secp256r1 ECC with Jacobian + 4-bit windowed optimization now measures about 0.84s sign / 1.76s verify on board. | Discovery, control, Home Assistant integration. |
 | [ ] | BLE production controller parity | Legacy advertising, scanning, connect, GATT, MTU, PHY requests, extended advertising/scanning, and many Bluefruit-compatible flows exist. | Full controller conformance, robust pairing/bonding across hosts, multi-role stress, periodic advertising, ISO, and full interop matrix. |
 | [ ] | Bluetooth Channel Sounding product support | Real two-board CS bring-up, DFE/RTT helpers, HCI-style parsing, and VPR CS transport scaffolding exist. | Production BLE controller runtime behind CS and Bluetooth CS interoperability. |
-| [ ] | Thread production support | Experimental staged OpenThread: leader/child/router, UDP, PSK Joiner/Commissioner (MAC verified), CSL PAL, restore diagnostics/probes, 2-board PASE verified. | Reference-network attach, DTLS joiner, reboot recovery validation, production API. |
+| [ ] | Thread production support | Experimental staged OpenThread: leader/child/router, UDP, PSK Joiner/Commissioner (MAC verified), staged MeshCoP Joiner/Commissioner two-board leader/child smoke, CSL PAL, restore diagnostics/probes, 2-board PASE verified, and all Thread examples compiling in stage mode. | Reference-network attach, MeshCoP wrong-PSKd/reboot-persistence validation, long soak, sleepy-device validation, production API. |
 | [ ] | Zigbee production stack | IEEE 802.15.4 MAC-lite, role demos, HA-ish examples, ZCL codec/security pieces exist. | Certified/full Zigbee stack behavior: robust commissioning, NWK/APS/ZDO/ZCL/security profile completeness. |
 | [ ] | VPR softperipheral/runtime | VPR boot/control, shared transport, lifecycle probes, ticker/offload demos, and CS service scaffolding exist. | General VPR runtime, reusable softperipheral framework, sQSPI, production controller-service ownership. |
 | [ ] | Security product path | CRACEN RNG/AAR/ECB/CCM, KMU wrapper, TAMPC wrapper, and some proofs exist. | Reusable KMU-to-CRACEN key consumers, CRACEN PKE/ECDSA, secure/non-secure policy docs, external tamper reset characterization. |
@@ -146,15 +146,15 @@ This section tracks user-facing Arduino behavior.
 | [x] | Router promotion | Implemented in experimental stage mode; public router eligibility and router-request wrappers are available. | Broader router behavior validation. |
 | [x] | UDP send/receive wrapper | Implemented in experimental stage mode; two-board checked payload smoke passes through 63-byte single-frame UDP payloads. | Larger fragmented UDP payloads, multicast, and longer soak. |
 | [x] | PSKc/passphrase dataset build | Implemented. | More compatibility vectors. |
-| [ ] | Standard MeshCoP Joiner | API surface now exists and examples compile, but runtime reports unsupported while `OPENTHREAD_CONFIG_JOINER_ENABLE=0`. | Enable secure transport/DTLS and validate against a real commissioner. |
-| [ ] | Standard MeshCoP Commissioner | API surface now exists and examples compile, but runtime reports unsupported while `OPENTHREAD_CONFIG_COMMISSIONER_ENABLE=0`. | Enable secure transport/DTLS, add joiner table validation, then two-board commissioning soak. |
+| [ ] | Standard MeshCoP Joiner | API surface, staged mbedTLS/secure-transport wrappers, restore-only probe, wrong-PSKd negative-test probe, and examples compile; local two-board staged flow has produced a child joined to the commissioner/leader. | Run the wrong-PSKd negative probe on hardware, repeat clean settings-wipe success runs, prove reboot persistence with `ThreadExperimentalMeshcopRestoreProbe`, external commissioner/reference validation, and long soak. |
+| [ ] | Standard MeshCoP Commissioner | API surface, staged mbedTLS/secure-transport wrappers, joiner table path, and examples compile; local two-board staged flow has produced an active commissioner/leader with a joined child. | Repeat clean settings-wipe runs, wrong-PSKd negative, reboot-persistence proof, external joiner/reference validation, and long soak. |
 | [ ] | Border router | Missing / non-goal | Should likely remain external. |
 | [ ] | CSL / sleepy end device depth | Partial | CSL state tracking and `otPlatRadioReceiveAt()` scheduling now exist; hardware-timed low-power wake, secure enhanced-ACK CSL IE insertion, and sleepy-device soak still remain. |
 | [ ] | Coexistence metrics/control | Partial | OpenThread radio coex APIs are stateful and expose software request/grant metrics for the no-PTA-pin path. External PTA grant pins and real multi-radio arbitration remain unimplemented. |
 | [x] | Channel TX power constraints | Implemented | `otPlatRadioSetChannelMaxTransmitPower()`, target power, calibrated-power storage, raw setting readback, and per-frame effective TX power clamping are wired through the Thread PAL. |
 | [ ] | Link metrics / enhanced ACK probing | Partial | `otPlatRadioConfigureEnhAckProbing()` now accepts, clears, validates, and snapshots one probing initiator for LQI/link-margin/RSSI requests. Real secure Enhanced ACK vendor-IE insertion and multi-initiator support still remain. |
 | [ ] | Reference Thread network attach | Partial | Active-dataset TLV/hex import path, restart-without-reboot path, state-change/attach diagnostics, attach-state-machine snapshot, and dataset-restore diagnostics now exist in the experimental wrapper, but attach against a real external Thread network is still not validated enough to claim. |
-| [ ] | Reboot recovery | Partial | Settings-backed active-dataset restore path, public restore diagnostics, and self-contained Thread/Matter reboot probes now exist, but two-board reboot/rejoin validation is still required before removing "experimental". |
+| [ ] | Reboot recovery | Partial | Settings-backed active-dataset restore path, public restore diagnostics, self-contained Thread/Matter reboot probes, and a MeshCoP restore-only probe now exist, but two-board reboot/rejoin validation is still required before removing "experimental". |
 
 ## Matter Matrix
 
@@ -166,8 +166,8 @@ This section tracks user-facing Arduino behavior.
 | [x] | On-network bootstrap object | Implemented with readiness phase/blocker diagnostics. | Wire into real CHIP runtime. |
 | [x] | Manual/QR onboarding helper | Implemented. | Validate with real commissioner once runtime exists. |
 | [x] | Thread dataset TLV export/import seam | Implemented. | Validate against real controller-provided dataset flow. |
-| [x] | PASE commissioning protocol | CHIP message framing, PBKDF param exchange, SPAKE2+ protocol with real secp256r1 crypto implemented. | Hardware validation with two-board test and commissioner. |
-| [x] | Matter platform layer | `MatterPlatform` class implemented with UDP transport, factory data, and receive callbacks. | Hardware validation. |
+| [x] | Staged PASE/CASE protocol demos | CHIP-like message framing, PBKDF param exchange, SPAKE2+ demo flow, and CASE Sigma demo flow with real secp256r1 crypto are implemented for Arduino-side Thread UDP validation. | Replace with upstream CHIP secure-session integration before claiming production Matter commissioning. |
+| [x] | Matter platform layer | `MatterPlatform` class implemented with UDP transport, receive callbacks, configured/demo/restored/active Thread dataset source diagnostics, transport readiness blockers, dataset TLV/hex export, and Preferences-backed factory data. | Hardware validation against a real commissioner path. |
 | [ ] | BLE rendezvous commissioning | Not selected for first pass | Current plan is on-network Thread commissioning first. |
 | [ ] | Real commissioning | Missing | Required for product claim. |
 | [ ] | Discovery | Structured staged DNS-SD/SRP records and publish/unpublish lifecycle diagnostics now exist for commissionable `_matterc._udp` plus blocked operational `_matter._tcp`, but real mDNS/SRP registration is still disabled. | Enable and validate real discovery from a commissioner. |
@@ -251,6 +251,8 @@ fresh compile/install/hardware pass.
 | [ ] | BLE pair/bond smoke | Repeated cross-host evidence. |
 | [ ] | 802.15.4 two-board smoke | Zigbee or Thread radio pair evidence. |
 | [x] | Thread staged UDP smoke | Two-board `ThreadExperimentalUdpPing` evidence: same partition, child sent 4 checked payload sizes through 63 bytes, leader ACKed all, sender reported `done=1 fail=0`. |
+| [x] | Thread MeshCoP harness compile gate | `scripts/thread_meshcop_validation.py compile` builds commissioner, joiner, restore, and wrong-PSKd probes against the local checkout. |
+| [ ] | Thread MeshCoP full hardware gate | Three clean two-board `scripts/thread_meshcop_validation.py all` passes with saved logs for fresh join, restore, and wrong-PSKd negative test. |
 | [x] | Matter staged compile smoke | All Matter example folders compile for XIAO with `clean_thread=stage,clean_matter=stage`; loose stale sketch removed. |
 | [ ] | Matter real commission smoke | Commissioner/Home Assistant evidence. |
 | [ ] | Low-power current smoke | Measured current for selected board/profile. |
