@@ -296,9 +296,11 @@ class Nrf54ThreadExperimental {
   static constexpr uint32_t kStageThreadEnableDelayMs = 0UL;
   static constexpr uint32_t kChildFirstFallbackBaseMs = 12000UL;
   static constexpr uint32_t kChildFirstFallbackJitterMs = 12000UL;
+  static constexpr uint16_t kMaxUdpReceivePayload = 1280U;
 
   otInstance* instance_ = nullptr;
   UdpSocketSlot udpSockets_[kMaxUdpSockets] = {};
+  uint8_t udpRxBuffer_[kMaxUdpReceivePayload] = {};
   otOperationalDataset dataset_ = {};
   StateChangedCallback stateChangedCallback_ = nullptr;
   void* stateChangedCallbackContext_ = nullptr;

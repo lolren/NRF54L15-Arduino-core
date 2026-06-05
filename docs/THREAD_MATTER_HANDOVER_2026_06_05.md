@@ -134,6 +134,57 @@ File:
 Added `build/` because the validation harness writes compile/upload/serial logs
 there and those should not be committed.
 
+### 6. UDP Soak Validation Made Honest
+
+File:
+
+```text
+scripts/test_thread_udp_soak.py
+hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalUdpSoak/ThreadExperimentalUdpSoak.ino
+```
+
+The two-board UDP soak runner now:
+
+- tests the local checkout through a temporary Arduino sketchbook symlink
+  instead of silently using the installed Boards Manager package.
+- compiles and uploads through `arduino-cli compile --upload`.
+- writes compile/upload and serial logs under
+  `build/thread-udp-soak-validation/`.
+- requires explicit payload-size pass matrices instead of returning success
+  when any single unicast payload passes.
+- defaults to the currently safe gate:
+  unicast `8,16,31,63,95`, multicast `8,16,31,63`.
+- exposes `--require-fragmentation` to require the full
+  `8,16,31,63,95,127,191,255,512` sweep.
+- the example now attempts the full payload list instead of pre-failing
+  payloads above the old 95-byte unicast / 80-byte multicast caps.
+
+Reason:
+
+The old runner could report success after one passing packet. That was not a
+real reliability gate and could hide fragmentation or multicast regressions.
+
+### 7. Thread UDP Callback No Longer Truncates At 256 Bytes
+
+Files:
+
+```text
+hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54_thread_experimental.h
+hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54_thread_experimental.cpp
+```
+
+`Nrf54ThreadExperimental::handleUdpReceive()` now copies into a 1280-byte
+object-owned UDP receive buffer and drops packets larger than that with
+`OT_ERROR_NO_BUFS`. It no longer silently truncates received payloads to a
+256-byte stack buffer.
+
+Reason:
+
+A 512-byte UDP fragmentation/reassembly test could never pass through the old
+callback path because the packet was truncated before the sketch parsed its
+declared length/checksum. Matter will also need larger UDP payload handling, so
+this belongs in the wrapper rather than in the example.
+
 ## Verified Commands And Evidence
 
 Boards present during validation:
@@ -189,6 +240,29 @@ That run showed the same important on-board behavior:
 - Wrong-PSKd Joiner printed `expected_join_failure=1`,
   `unexpected_success=0`, and `active_dataset=0`.
 
+UDP soak compile check against the local checkout:
+
+```bash
+mkdir -p /tmp/nrf54-thread-udp-soak-sketchbook/hardware
+ln -sfn /home/lolren/Desktop/test_pi_nrf54/NRF54L15-Clean-Arduino-core/hardware/nrf54l15clean \
+  /tmp/nrf54-thread-udp-soak-sketchbook/hardware/nrf54l15clean
+ARDUINO_DIRECTORIES_USER=/tmp/nrf54-thread-udp-soak-sketchbook \
+  arduino-cli compile \
+  --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15:clean_thread=stage \
+  --build-path build/check-thread-udp-soak-local \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalUdpSoak
+```
+
+Result:
+
+```text
+Sketch uses 310340 bytes (19%) of program storage space.
+Global variables use 40644 bytes (26%) of dynamic memory, leaving 115004 bytes.
+```
+
+Two-board UDP soak was not run in this slice because `arduino-cli board list`
+reported no connected boards.
+
 ## How To Reproduce
 
 Use the local checkout, not the installed Boards Manager package:
@@ -206,6 +280,41 @@ python3 scripts/thread_meshcop_validation.py all \
   --joiner-port /dev/ttyACM1 \
   --timeout 180 \
   --dump-lines
+```
+
+Two-board UDP safe-size soak:
+
+```bash
+python3 scripts/test_thread_udp_soak.py \
+  --port1 /dev/ttyACM0 \
+  --port2 /dev/ttyACM1 \
+  --timeout 180 \
+  --dump-lines
+```
+
+Two-board UDP fragmentation-required soak:
+
+```bash
+python3 scripts/test_thread_udp_soak.py \
+  --port1 /dev/ttyACM0 \
+  --port2 /dev/ttyACM1 \
+  --timeout 240 \
+  --require-fragmentation \
+  --dump-lines
+```
+
+Expected safe-size pass matrix:
+
+```text
+Unicast required:   8, 16, 31, 63, 95
+Multicast required: 8, 16, 31, 63
+```
+
+Expected fragmentation pass matrix when this slice is complete:
+
+```text
+Unicast required:   8, 16, 31, 63, 95, 127, 191, 255, 512
+Multicast required: 8, 16, 31, 63, 95, 127, 191, 255, 512
 ```
 
 Short no-upload negative-test check when the wrong-PSKd sketches are already
@@ -320,6 +429,8 @@ because MeshCoP passes.
 
 Required:
 
+- Run `scripts/test_thread_udp_soak.py` safe-size mode on two boards.
+- Run `scripts/test_thread_udp_soak.py --require-fragmentation` on two boards.
 - Sweep unicast UDP payload sizes both directions.
 - Include payloads that force 6LoWPAN fragmentation.
 - Run repeated attach/reconnect cycles.

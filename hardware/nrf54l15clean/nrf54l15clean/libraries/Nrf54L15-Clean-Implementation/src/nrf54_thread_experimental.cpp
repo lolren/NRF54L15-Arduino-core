@@ -1997,16 +1997,21 @@ void Nrf54ThreadExperimental::handleUdpReceive(
   }
 
   const uint16_t length = otMessageGetLength(message);
-  uint8_t buffer[256] = {0};
-  uint16_t copyLength = length;
-  if (copyLength > sizeof(buffer)) {
-    copyLength = sizeof(buffer);
-  }
-  if (copyLength != 0U) {
-    otMessageRead(message, 0, buffer, copyLength);
+  if (length > sizeof(udpRxBuffer_)) {
+    lastUdpError_ = OT_ERROR_NO_BUFS;
+    return;
   }
 
-  slot->callback(slot->callbackContext, buffer, copyLength, *messageInfo);
+  if (length != 0U) {
+    const uint16_t readLength = otMessageRead(message, 0, udpRxBuffer_, length);
+    if (readLength != length) {
+      lastUdpError_ = OT_ERROR_FAILED;
+      return;
+    }
+  }
+
+  lastUdpError_ = OT_ERROR_NONE;
+  slot->callback(slot->callbackContext, udpRxBuffer_, length, *messageInfo);
 }
 
 void Nrf54ThreadExperimental::handleStateChanged(otChangedFlags flags) {

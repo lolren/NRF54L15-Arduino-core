@@ -33,8 +33,6 @@ constexpr uint32_t kAckTimeoutMs = 4000UL;
 constexpr uint32_t kStatusIntervalMs = 2000UL;
 constexpr uint8_t kMaxRetriesPerPayload = 3U;
 constexpr uint16_t kMaxPayloadLength = 512U;
-constexpr uint16_t kMaxSafeUnicastPayload = 95U;
-constexpr uint16_t kMaxSafeMulticastPayload = 80U;
 constexpr uint8_t kMagic = 0x54U;
 constexpr uint8_t kPingType = 0x50U;
 constexpr uint8_t kAckType = 0x41U;
@@ -296,29 +294,6 @@ bool sendCurrentPing(bool multicast) {
   const size_t idx = multicast ? gMulticastIndex : gUnicastIndex;
   if (idx >= kPayloadSizeCount) return false;
   const uint16_t payloadLength = kPayloadSizes[idx];
-  const uint16_t safeLimit =
-      multicast ? kMaxSafeMulticastPayload : kMaxSafeUnicastPayload;
-
-  if (payloadLength > safeLimit) {
-    recordResult(multicast, idx, 2U);
-    ++gCurrentSeq;
-    gRetryCount = 0U;
-    gWaitingForAck = false;
-    if (multicast) {
-      ++gMulticastIndex;
-      if (gMulticastIndex >= kPayloadSizeCount) {
-        gMulticastDone = true;
-        printDone();
-      }
-    } else {
-      ++gUnicastIndex;
-      if (gUnicastIndex >= kPayloadSizeCount) {
-        gUnicastDone = true;
-        printStatus("unicast-complete");
-      }
-    }
-    return false;
-  }
 
   otIp6Address destAddr = {};
   if (multicast) {
