@@ -40,6 +40,7 @@ DEFAULT_SKETCHBOOK = pathlib.Path("/tmp/nrf54-thread-udp-soak-sketchbook")
 DEFAULT_LOG_ROOT = REPO_ROOT / "build" / "thread-udp-soak-validation"
 PAYLOAD_SIZES = [8, 16, 31, 63, 95, 127, 191, 255, 512]
 SAFE_UNICAST_SIZES = [8, 16, 31, 63, 95]
+SAFE_DOWNLINK_SIZES = [8, 16, 31, 63, 95]
 SAFE_MULTICAST_SIZES = [8, 16, 31, 63]
 
 
@@ -52,6 +53,7 @@ class BoardResults:
     multicast_subscribed: Optional[bool] = None
     dataset_hex: Optional[str] = None
     unicast: Dict[int, str] = field(default_factory=dict)
+    downlink: Dict[int, str] = field(default_factory=dict)
     multicast: Dict[int, str] = field(default_factory=dict)
     done: bool = False
     lines: List[str] = field(default_factory=list)
@@ -161,6 +163,33 @@ def parse_line(line: str, result: BoardResults) -> None:
     match = re.search(r"soak_mcast_fail\s+len=(\d+)\s+mode=([A-Za-z0-9_]+)", line)
     if match:
         result.multicast[int(match.group(1))] = f"fail_{match.group(2)}"
+    match = re.search(r"soak_downlink_pass\s+len=(\d+)", line)
+    if match:
+        result.downlink[int(match.group(1))] = "pass"
+    match = re.search(r"soak_downlink_fail\s+len=(\d+)\s+mode=([A-Za-z0-9_]+)", line)
+    if match:
+        result.downlink[int(match.group(1))] = f"fail_{match.group(2)}"
+    match = re.search(
+        r"soak_result\s+len=(\d+)\s+uplink=([A-Za-z0-9_]+)\s+downlink=([A-Za-z0-9_]+)\s+multicast=([A-Za-z0-9_]+)",
+        line,
+    )
+    if match:
+        length = int(match.group(1))
+        uplink_state = match.group(2)
+        downlink_state = match.group(3)
+        multicast_state = match.group(4)
+        if uplink_state != "unknown":
+            result.unicast[length] = (
+                "pass" if uplink_state == "pass" else f"fail_{uplink_state}"
+            )
+        if downlink_state != "unknown":
+            result.downlink[length] = (
+                "pass" if downlink_state == "pass" else f"fail_{downlink_state}"
+            )
+        if multicast_state != "unknown":
+            result.multicast[length] = (
+                "pass" if multicast_state == "pass" else f"fail_{multicast_state}"
+            )
     match = re.search(
         r"soak_result\s+len=(\d+)\s+unicast=([A-Za-z0-9_]+)\s+multicast=([A-Za-z0-9_]+)",
         line,
@@ -169,12 +198,14 @@ def parse_line(line: str, result: BoardResults) -> None:
         length = int(match.group(1))
         unicast_state = match.group(2)
         multicast_state = match.group(3)
-        result.unicast[length] = (
-            "pass" if unicast_state == "pass" else f"fail_{unicast_state}"
-        )
-        result.multicast[length] = (
-            "pass" if multicast_state == "pass" else f"fail_{multicast_state}"
-        )
+        if unicast_state != "unknown":
+            result.unicast[length] = (
+                "pass" if unicast_state == "pass" else f"fail_{unicast_state}"
+            )
+        if multicast_state != "unknown":
+            result.multicast[length] = (
+                "pass" if multicast_state == "pass" else f"fail_{multicast_state}"
+            )
     if line.startswith("soak_done"):
         result.done = True
 
@@ -235,6 +266,15 @@ def validate_required(title: str, values: Dict[int, str], required: List[int]) -
     return ok
 
 
+def merge_results(*results: Dict[int, str]) -> Dict[int, str]:
+    merged: Dict[int, str] = {}
+    for values in results:
+        for size, state in values.items():
+            if state == "pass" or size not in merged:
+                merged[size] = state
+    return merged
+
+
 def write_serial_logs(log_dir: pathlib.Path, board1: BoardResults, board2: BoardResults) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     for board in (board1, board2):
@@ -260,6 +300,11 @@ def main() -> int:
         help="Required unicast payload sizes: safe, all, none, or comma list.",
     )
     parser.add_argument(
+        "--require-downlink",
+        default="safe",
+        help="Required leader-to-child payload sizes: safe, all, none, or comma list.",
+    )
+    parser.add_argument(
         "--require-multicast",
         default="safe",
         help="Required multicast payload sizes: safe, all, none, or comma list.",
@@ -279,6 +324,11 @@ def main() -> int:
         list(PAYLOAD_SIZES)
         if args.require_fragmentation
         else parse_size_list(args.require_unicast, SAFE_UNICAST_SIZES)
+    )
+    required_downlink = (
+        list(PAYLOAD_SIZES)
+        if args.require_fragmentation
+        else parse_size_list(args.require_downlink, SAFE_DOWNLINK_SIZES)
     )
     required_multicast = (
         list(PAYLOAD_SIZES)
@@ -315,23 +365,25 @@ def main() -> int:
         ser2.close()
 
     write_serial_logs(run_dir, board1, board2)
-    sender = max(
-        (board1, board2),
-        key=lambda board: len(board.unicast) + len(board.multicast),
-    )
-    receiver = board2 if sender is board1 else board1
-    print(f"\nsender={sender.port} role={sender.role} rloc16=0x{sender.rloc16}")
-    print(f"receiver={receiver.port} role={receiver.role} rloc16=0x{receiver.rloc16}")
-    print(f"logs={run_dir}")
-    print_matrix("Unicast", sender.unicast)
-    print_matrix("Multicast", sender.multicast)
-    if sender.dataset_hex:
-        print(f"\ndataset_hex={sender.dataset_hex}")
+    unicast = merge_results(board1.unicast, board2.unicast)
+    downlink = merge_results(board1.downlink, board2.downlink)
+    multicast = merge_results(board1.multicast, board2.multicast)
 
-    unicast_ok = validate_required("Unicast", sender.unicast, required_unicast)
-    multicast_ok = validate_required("Multicast", sender.multicast, required_multicast)
-    boot_ok = sender.begin_ok is not False and receiver.begin_ok is not False
-    return 0 if boot_ok and unicast_ok and multicast_ok else 2
+    print(f"\nboard1={board1.port} role={board1.role} rloc16=0x{board1.rloc16}")
+    print(f"board2={board2.port} role={board2.role} rloc16=0x{board2.rloc16}")
+    print(f"logs={run_dir}")
+    print_matrix("Uplink child-to-leader", unicast)
+    print_matrix("Downlink leader-to-child", downlink)
+    print_matrix("Multicast", multicast)
+    dataset_hex = board1.dataset_hex or board2.dataset_hex
+    if dataset_hex:
+        print(f"\ndataset_hex={dataset_hex}")
+
+    unicast_ok = validate_required("Uplink child-to-leader", unicast, required_unicast)
+    downlink_ok = validate_required("Downlink leader-to-child", downlink, required_downlink)
+    multicast_ok = validate_required("Multicast", multicast, required_multicast)
+    boot_ok = board1.begin_ok is not False and board2.begin_ok is not False
+    return 0 if boot_ok and unicast_ok and downlink_ok and multicast_ok else 2
 
 
 if __name__ == "__main__":

@@ -134,7 +134,7 @@ File:
 Added `build/` because the validation harness writes compile/upload/serial logs
 there and those should not be committed.
 
-### 6. UDP Soak Validation Made Honest
+### 6. UDP Soak Validation Made Bidirectional
 
 File:
 
@@ -151,21 +151,27 @@ The two-board UDP soak runner now:
 - writes compile/upload and serial logs under
   `build/thread-udp-soak-validation/`.
 - requires explicit payload-size pass matrices instead of returning success
-  when any single unicast payload passes.
+  when any single UDP payload passes.
 - defaults to the currently safe gate:
-  unicast `8,16,31,63,95`, multicast `8,16,31,63`.
+  child-to-leader uplink `8,16,31,63,95`,
+  leader-to-child downlink `8,16,31,63,95`, and multicast `8,16,31,63`.
 - exposes `--require-fragmentation` to require the full
-  `8,16,31,63,95,127,191,255,512` sweep.
+  `8,16,31,63,95,127,191,255,512` sweep in all three directions.
 - the example now attempts the full payload list instead of pre-failing
   payloads above the old 95-byte unicast / 80-byte multicast caps.
+- the example now performs three phases: child/router to leader, leader back to
+  child/router, then multicast with ACK echo.
+- the example discards stale soak progress if the Thread partition changes
+  during two-board bring-up, avoiding false success on a transient partition.
 - the example emits repeated final `soak_result` matrix lines after completion
   so the runner can still validate exact payload sizes if serial capture starts
   after the earliest packet logs.
 
 Reason:
 
-The old runner could report success after one passing packet. That was not a
-real reliability gate and could hide fragmentation or multicast regressions.
+The old runner could report success after one passing packet and only proved one
+unicast direction. That was not a real reliability gate and could hide
+fragmentation, downlink, or multicast regressions.
 
 ### 7. Thread UDP Callback No Longer Truncates At 256 Bytes
 
@@ -222,10 +228,16 @@ MeshCoP restore: PASS
 wrong-PSKd MeshCoP negative test: PASS
 ```
 
-Log directory:
+Primary hardware validation log directory:
 
 ```text
 build/thread-meshcop-validation/20260605-193735/
+```
+
+Latest compile-only validation:
+
+```text
+build/thread-meshcop-validation/20260605-222123/
 ```
 
 Earlier same-session evidence before the validator adjustment:
@@ -259,8 +271,8 @@ ARDUINO_DIRECTORIES_USER=/tmp/nrf54-thread-udp-soak-sketchbook \
 Result:
 
 ```text
-Sketch uses 310768 bytes (19%) of program storage space.
-Global variables use 40668 bytes (26%) of dynamic memory, leaving 114980 bytes.
+Sketch uses 313288 bytes (20%) of program storage space.
+Global variables use 40748 bytes (26%) of dynamic memory, leaving 114900 bytes.
 ```
 
 Two-board UDP safe-size soak:
@@ -276,15 +288,16 @@ python3 scripts/test_thread_udp_soak.py \
 Result:
 
 ```text
-Unicast:   8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
-Multicast: 8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
+Uplink child-to-leader:   8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
+Downlink leader-to-child: 8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
+Multicast:                8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
 Required safe gate: PASS
 ```
 
 Log directory:
 
 ```text
-build/thread-udp-soak-validation/20260605-214851/
+build/thread-udp-soak-validation/20260605-221841/
 ```
 
 Two-board UDP fragmentation-required parser/gate check against the same
@@ -303,14 +316,15 @@ python3 scripts/test_thread_udp_soak.py \
 Result:
 
 ```text
-Unicast required:   8, 16, 31, 63, 95, 127, 191, 255, 512 all PASS
+Uplink required:    8, 16, 31, 63, 95, 127, 191, 255, 512 all PASS
+Downlink required:  8, 16, 31, 63, 95, 127, 191, 255, 512 all PASS
 Multicast required: 8, 16, 31, 63, 95, 127, 191, 255, 512 all PASS
 ```
 
 Log directory:
 
 ```text
-build/thread-udp-soak-validation/20260605-215054/
+build/thread-udp-soak-validation/20260605-222038/
 ```
 
 ## How To Reproduce
@@ -356,14 +370,16 @@ python3 scripts/test_thread_udp_soak.py \
 Expected safe-size pass matrix:
 
 ```text
-Unicast required:   8, 16, 31, 63, 95
+Uplink required:    8, 16, 31, 63, 95
+Downlink required:  8, 16, 31, 63, 95
 Multicast required: 8, 16, 31, 63
 ```
 
-Expected fragmentation pass matrix when this slice is complete:
+Expected fragmentation pass matrix:
 
 ```text
-Unicast required:   8, 16, 31, 63, 95, 127, 191, 255, 512
+Uplink required:    8, 16, 31, 63, 95, 127, 191, 255, 512
+Downlink required:  8, 16, 31, 63, 95, 127, 191, 255, 512
 Multicast required: 8, 16, 31, 63, 95, 127, 191, 255, 512
 ```
 
@@ -480,15 +496,18 @@ Thread reliability yet.
 
 Current status:
 
-- One child-to-leader unicast sweep passed all sizes through 512 bytes.
-- One multicast sweep with ACK echo passed all sizes through 512 bytes.
-- The runner now has a real full-matrix fragmentation gate.
+- Child/router-to-leader uplink passed all sizes through 512 bytes.
+- Leader-to-child/router downlink passed all sizes through 512 bytes.
+- Multicast with ACK echo passed all sizes through 512 bytes.
+- The runner now has a real full-matrix fragmentation gate for all three
+  directions.
+- The soak sketch now resets stale progress after partition changes during
+  two-board bring-up.
 
 Still required:
 
-- Sweep unicast UDP payload sizes both directions, including leader-to-child.
-- Include payloads that force 6LoWPAN fragmentation.
 - Run repeated attach/reconnect cycles.
+- Run long soak loops with repeated matrix passes, not only one pass per boot.
 - Track loss, retry, ACK, CRC, invalid-length, and reassembly timeout counters.
 - Compare against Zephyr behavior where possible.
 

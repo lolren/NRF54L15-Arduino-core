@@ -2,9 +2,10 @@
 //
 // Two-board staged Thread UDP reliability probe. Flash the same sketch to two
 // boards with Tools > Thread Core > Experimental Stage Core. One board should
-// become leader; the child/router sends payloads to the leader and expects an
-// ACK echo. The sketch also probes multicast delivery and exports the active
-// dataset hex so reboot/rejoin behavior can be checked from the serial log.
+// become leader. The child/router sends payloads to the leader, the leader
+// sends the same payload matrix back, then the child/router probes multicast
+// delivery. The sketch also exports the active dataset hex so reboot/rejoin
+// behavior can be checked from the serial log.
 
 #include <nrf54_all.h>
 
@@ -52,27 +53,47 @@ Nrf54ThreadExperimental gThread;
 Nrf54ThreadExperimental::Role gLastRole =
     Nrf54ThreadExperimental::Role::kUnknown;
 
+enum class SoakTxPhase : uint8_t {
+  kUplink = 0U,
+  kDownlink = 1U,
+  kMulticast = 2U,
+};
+
 uint8_t gTxBuffer[kMaxPayloadLength] = {0};
 uint16_t gCurrentSeq = 1U;
-size_t gUnicastIndex = 0U;
+size_t gUplinkIndex = 0U;
+size_t gDownlinkIndex = 0U;
+size_t gDownlinkRxIndex = 0U;
+size_t gObservedUplinkIndex = 0U;
 size_t gMulticastIndex = 0U;
 uint32_t gLastSendMs = 0U;
 uint32_t gLastPrintMs = 0U;
 uint8_t gRetryCount = 0U;
+SoakTxPhase gCurrentTxPhase = SoakTxPhase::kUplink;
 bool gWaitingForAck = false;
 bool gTestStarted = false;
-bool gUnicastDone = false;
-bool gMulticastPhase = false;
+bool gUplinkDone = false;
+bool gObservedUplinkDone = false;
+bool gDownlinkStarted = false;
+bool gDownlinkDone = false;
+bool gDownlinkReceiverDone = false;
+bool gMulticastStarted = false;
 bool gMulticastDone = false;
 bool gMulticastSubscribed = false;
 bool gDatasetExported = false;
+bool gPeerKnown = false;
+otIp6Address gPeerAddr = {};
+uint16_t gPeerPort = kUdpPort;
 
 uint32_t gPingTxCount = 0U;
 uint32_t gPingRxCount = 0U;
+uint32_t gDownlinkRxCount = 0U;
 uint32_t gAckTxCount = 0U;
 uint32_t gAckRxCount = 0U;
-uint32_t gPassCount = 0U;
-uint32_t gFailCount = 0U;
+uint32_t gUplinkPassCount = 0U;
+uint32_t gUplinkFailCount = 0U;
+uint32_t gDownlinkPassCount = 0U;
+uint32_t gDownlinkFailCount = 0U;
 uint32_t gMulticastPassCount = 0U;
 uint32_t gMulticastFailCount = 0U;
 uint32_t gRetryTotal = 0U;
@@ -80,7 +101,10 @@ uint32_t gInvalidRxCount = 0U;
 uint16_t gLastLength = 0U;
 uint16_t gLastAckSeq = 0U;
 uint32_t gLastFinalMatrixMs = 0U;
-uint8_t gUnicastResults[kPayloadSizeCount] = {0};
+uint32_t gLastPartitionId = 0U;
+bool gLastPartitionValid = false;
+uint8_t gUplinkResults[kPayloadSizeCount] = {0};
+uint8_t gDownlinkResults[kPayloadSizeCount] = {0};
 uint8_t gMulticastResults[kPayloadSizeCount] = {0};
 
 char gDatasetHex[(OT_OPERATIONAL_DATASET_MAX_LENGTH * 2U) + 1U] = {0};
@@ -144,62 +168,90 @@ const char* resultName(uint8_t result) {
   return result == 1U ? "pass" : failModeName(result);
 }
 
+const char* phaseName(SoakTxPhase phase) {
+  switch (phase) {
+    case SoakTxPhase::kUplink: return "uplink";
+    case SoakTxPhase::kDownlink: return "downlink";
+    case SoakTxPhase::kMulticast: return "multicast";
+    default: return "unknown";
+  }
+}
+
 void updateResults() {
   g_soak_results[0] = gThread.started() ? 1U : 0U;
   g_soak_results[1] = gThread.attached() ? 1U : 0U;
   g_soak_results[2] = static_cast<uint32_t>(gThread.role());
   g_soak_results[3] = gThread.rloc16();
-  g_soak_results[4] = gPassCount;
-  g_soak_results[5] = gFailCount;
-  g_soak_results[6] = gMulticastPassCount;
-  g_soak_results[7] = gMulticastFailCount;
-  g_soak_results[8] = gUnicastDone ? 1U : 0U;
-  g_soak_results[9] = gMulticastDone ? 1U : 0U;
-  g_soak_results[10] = gDatasetExported ? 1U : 0U;
-  g_soak_results[11] = gMulticastSubscribed ? 1U : 0U;
+  g_soak_results[4] = gUplinkPassCount;
+  g_soak_results[5] = gUplinkFailCount;
+  g_soak_results[6] = gDownlinkPassCount;
+  g_soak_results[7] = gDownlinkFailCount;
+  g_soak_results[8] = gMulticastPassCount;
+  g_soak_results[9] = gMulticastFailCount;
+  g_soak_results[10] = gUplinkDone ? 1U : 0U;
+  g_soak_results[11] = gDownlinkDone ? 1U : 0U;
+  g_soak_results[12] = gDownlinkReceiverDone ? 1U : 0U;
+  g_soak_results[13] = gMulticastDone ? 1U : 0U;
+  g_soak_results[14] = gDatasetExported ? 1U : 0U;
+  g_soak_results[15] = gMulticastSubscribed ? 1U : 0U;
+  g_soak_results[16] = gPeerKnown ? 1U : 0U;
 }
 
-void recordResult(bool multicast, size_t idx, uint8_t result) {
+void recordResult(SoakTxPhase phase, size_t idx, uint8_t result) {
   if (idx >= kPayloadSizeCount) return;
   const uint16_t len = kPayloadSizes[idx];
-  if (multicast) {
-    gMulticastResults[idx] = result;
-  } else {
-    gUnicastResults[idx] = result;
+  const bool pass = (result == 1U);
+  const char* prefix = "soak_fail len=";
+
+  switch (phase) {
+    case SoakTxPhase::kUplink:
+      gUplinkResults[idx] = result;
+      if (pass) {
+        ++gUplinkPassCount;
+        prefix = "soak_pass len=";
+      } else {
+        ++gUplinkFailCount;
+      }
+      break;
+    case SoakTxPhase::kDownlink:
+      gDownlinkResults[idx] = result;
+      if (pass) {
+        ++gDownlinkPassCount;
+        prefix = "soak_downlink_pass len=";
+      } else {
+        ++gDownlinkFailCount;
+        prefix = "soak_downlink_fail len=";
+      }
+      break;
+    case SoakTxPhase::kMulticast:
+      gMulticastResults[idx] = result;
+      if (pass) {
+        ++gMulticastPassCount;
+        prefix = "soak_mcast_pass len=";
+      } else {
+        ++gMulticastFailCount;
+        prefix = "soak_mcast_fail len=";
+      }
+      break;
   }
-  if (multicast) {
-    if (result == 1U) {
-      ++gMulticastPassCount;
-      SOAK_PRINT("soak_mcast_pass len=");
-      SOAK_PRINTLN(len);
-    } else {
-      ++gMulticastFailCount;
-      SOAK_PRINT("soak_mcast_fail len=");
-      SOAK_PRINT(len);
-      SOAK_PRINT(" mode=");
-      SOAK_PRINTLN(failModeName(result));
-    }
-  } else {
-    if (result == 1U) {
-      ++gPassCount;
-      SOAK_PRINT("soak_pass len=");
-      SOAK_PRINTLN(len);
-    } else {
-      ++gFailCount;
-      SOAK_PRINT("soak_fail len=");
-      SOAK_PRINT(len);
-      SOAK_PRINT(" mode=");
-      SOAK_PRINTLN(failModeName(result));
-    }
+
+  SOAK_PRINT(prefix);
+  SOAK_PRINT(len);
+  if (!pass) {
+    SOAK_PRINT(" mode=");
+    SOAK_PRINT(failModeName(result));
   }
+  SOAK_PRINTLN("");
 }
 
 void printResultMatrix() {
   for (size_t i = 0U; i < kPayloadSizeCount; ++i) {
     SOAK_PRINT("soak_result len=");
     SOAK_PRINT(kPayloadSizes[i]);
-    SOAK_PRINT(" unicast=");
-    SOAK_PRINT(resultName(gUnicastResults[i]));
+    SOAK_PRINT(" uplink=");
+    SOAK_PRINT(resultName(gUplinkResults[i]));
+    SOAK_PRINT(" downlink=");
+    SOAK_PRINT(resultName(gDownlinkResults[i]));
     SOAK_PRINT(" multicast=");
     SOAK_PRINTLN(resultName(gMulticastResults[i]));
   }
@@ -226,22 +278,42 @@ void printStatus(const char* reason) {
   SOAK_PRINT(gAckTxCount);
   SOAK_PRINT("/");
   SOAK_PRINT(gAckRxCount);
-  SOAK_PRINT(" pass=");
-  SOAK_PRINT(gPassCount);
-  SOAK_PRINT(" fail=");
-  SOAK_PRINT(gFailCount);
+  SOAK_PRINT(" phase=");
+  SOAK_PRINT(phaseName(gCurrentTxPhase));
+  SOAK_PRINT(" uplink=");
+  SOAK_PRINT(gUplinkPassCount);
+  SOAK_PRINT("/");
+  SOAK_PRINT(gUplinkFailCount);
+  SOAK_PRINT(" downlink=");
+  SOAK_PRINT(gDownlinkPassCount);
+  SOAK_PRINT("/");
+  SOAK_PRINT(gDownlinkFailCount);
+  SOAK_PRINT(" downlink_rx=");
+  SOAK_PRINT(gDownlinkRxCount);
+  SOAK_PRINT(" mcast=");
+  SOAK_PRINT(gMulticastPassCount);
+  SOAK_PRINT("/");
+  SOAK_PRINT(gMulticastFailCount);
   SOAK_PRINT(" retry=");
   SOAK_PRINT(gRetryTotal);
   SOAK_PRINT(" invalid=");
   SOAK_PRINT(gInvalidRxCount);
   SOAK_PRINT(" wait=");
   SOAK_PRINT(gWaitingForAck ? 1 : 0);
-  SOAK_PRINT(" unicast_done=");
-  SOAK_PRINT(gUnicastDone ? 1 : 0);
+  SOAK_PRINT(" uplink_done=");
+  SOAK_PRINT(gUplinkDone ? 1 : 0);
+  SOAK_PRINT(" observed_uplink_done=");
+  SOAK_PRINT(gObservedUplinkDone ? 1 : 0);
+  SOAK_PRINT(" downlink_done=");
+  SOAK_PRINT(gDownlinkDone ? 1 : 0);
+  SOAK_PRINT(" downlink_rx_done=");
+  SOAK_PRINT(gDownlinkReceiverDone ? 1 : 0);
   SOAK_PRINT(" mcast_done=");
   SOAK_PRINT(gMulticastDone ? 1 : 0);
   SOAK_PRINT(" mcast_sub=");
   SOAK_PRINT(gMulticastSubscribed ? 1 : 0);
+  SOAK_PRINT(" peer=");
+  SOAK_PRINT(gPeerKnown ? 1 : 0);
   SOAK_PRINT(" err=");
   SOAK_PRINT(static_cast<int>(gThread.lastError()));
   SOAK_PRINT("/");
@@ -249,15 +321,165 @@ void printStatus(const char* reason) {
 }
 
 void printDone() {
-  SOAK_PRINT("soak_done unicast_pass=");
-  SOAK_PRINT(gPassCount);
-  SOAK_PRINT(" unicast_fail=");
-  SOAK_PRINT(gFailCount);
+  SOAK_PRINT("soak_done uplink_pass=");
+  SOAK_PRINT(gUplinkPassCount);
+  SOAK_PRINT(" uplink_fail=");
+  SOAK_PRINT(gUplinkFailCount);
+  SOAK_PRINT(" downlink_pass=");
+  SOAK_PRINT(gDownlinkPassCount);
+  SOAK_PRINT(" downlink_fail=");
+  SOAK_PRINT(gDownlinkFailCount);
   SOAK_PRINT(" mcast_pass=");
   SOAK_PRINT(gMulticastPassCount);
   SOAK_PRINT(" mcast_fail=");
   SOAK_PRINTLN(gMulticastFailCount);
   printResultMatrix();
+}
+
+void resetSoakProgress(const char* reason) {
+  gCurrentSeq = 1U;
+  gUplinkIndex = 0U;
+  gDownlinkIndex = 0U;
+  gDownlinkRxIndex = 0U;
+  gObservedUplinkIndex = 0U;
+  gMulticastIndex = 0U;
+  gRetryCount = 0U;
+  gCurrentTxPhase = SoakTxPhase::kUplink;
+  gWaitingForAck = false;
+  gTestStarted = false;
+  gUplinkDone = false;
+  gObservedUplinkDone = false;
+  gDownlinkStarted = false;
+  gDownlinkDone = false;
+  gDownlinkReceiverDone = false;
+  gMulticastStarted = false;
+  gMulticastDone = false;
+  gPeerKnown = false;
+  gPeerPort = kUdpPort;
+
+  gPingTxCount = 0U;
+  gPingRxCount = 0U;
+  gDownlinkRxCount = 0U;
+  gAckTxCount = 0U;
+  gAckRxCount = 0U;
+  gUplinkPassCount = 0U;
+  gUplinkFailCount = 0U;
+  gDownlinkPassCount = 0U;
+  gDownlinkFailCount = 0U;
+  gMulticastPassCount = 0U;
+  gMulticastFailCount = 0U;
+  gRetryTotal = 0U;
+  gInvalidRxCount = 0U;
+  gLastLength = 0U;
+  gLastAckSeq = 0U;
+  gLastSendMs = millis();
+  gLastFinalMatrixMs = 0U;
+  memset(gUplinkResults, 0, sizeof(gUplinkResults));
+  memset(gDownlinkResults, 0, sizeof(gDownlinkResults));
+  memset(gMulticastResults, 0, sizeof(gMulticastResults));
+
+  SOAK_PRINT("soak_reset reason=");
+  SOAK_PRINTLN(reason);
+}
+
+void trackPartitionAndResetIfNeeded() {
+  if (!gThread.attached()) {
+    if (gTestStarted) {
+      resetSoakProgress("detached");
+    }
+    gLastPartitionValid = false;
+    return;
+  }
+
+  const uint32_t partitionId = gThread.partitionId();
+  if (!gLastPartitionValid) {
+    gLastPartitionId = partitionId;
+    gLastPartitionValid = true;
+    return;
+  }
+
+  if (partitionId != gLastPartitionId) {
+    gLastPartitionId = partitionId;
+    resetSoakProgress("partition-change");
+  }
+}
+
+void observeIncomingPing(uint16_t seq, uint16_t declaredLength,
+                         const otMessageInfo& messageInfo) {
+  const Nrf54ThreadExperimental::Role role = gThread.role();
+  if (role == Nrf54ThreadExperimental::Role::kLeader) {
+    memcpy(&gPeerAddr, &messageInfo.mPeerAddr, sizeof(gPeerAddr));
+    gPeerPort = messageInfo.mPeerPort != 0U ? messageInfo.mPeerPort : kUdpPort;
+    gPeerKnown = true;
+
+    if (!gObservedUplinkDone &&
+        gObservedUplinkIndex < kPayloadSizeCount &&
+        declaredLength == kPayloadSizes[gObservedUplinkIndex]) {
+      ++gObservedUplinkIndex;
+      if (gObservedUplinkIndex >= kPayloadSizeCount) {
+        gObservedUplinkDone = true;
+        SOAK_PRINT("soak_uplink_observed seq=");
+        SOAK_PRINT(seq);
+        SOAK_PRINTLN(" complete=1");
+      }
+    }
+    return;
+  }
+
+  if ((role == Nrf54ThreadExperimental::Role::kChild ||
+       role == Nrf54ThreadExperimental::Role::kRouter) &&
+      !gDownlinkReceiverDone &&
+      gDownlinkRxIndex < kPayloadSizeCount &&
+      declaredLength == kPayloadSizes[gDownlinkRxIndex]) {
+    ++gDownlinkRxCount;
+    ++gDownlinkRxIndex;
+    if (gDownlinkRxIndex >= kPayloadSizeCount) {
+      gDownlinkReceiverDone = true;
+      SOAK_PRINT("soak_downlink_rx seq=");
+      SOAK_PRINT(seq);
+      SOAK_PRINTLN(" complete=1");
+    }
+  }
+}
+
+size_t currentPhaseIndex(SoakTxPhase phase) {
+  switch (phase) {
+    case SoakTxPhase::kDownlink: return gDownlinkIndex;
+    case SoakTxPhase::kMulticast: return gMulticastIndex;
+    case SoakTxPhase::kUplink:
+    default:
+      return gUplinkIndex;
+  }
+}
+
+void advanceCurrentPhase(SoakTxPhase phase) {
+  ++gCurrentSeq;
+  gRetryCount = 0U;
+  gWaitingForAck = false;
+  switch (phase) {
+    case SoakTxPhase::kDownlink:
+      ++gDownlinkIndex;
+      if (gDownlinkIndex >= kPayloadSizeCount) {
+        gDownlinkDone = true;
+        printStatus("downlink-complete");
+      }
+      break;
+    case SoakTxPhase::kMulticast:
+      ++gMulticastIndex;
+      if (gMulticastIndex >= kPayloadSizeCount) {
+        gMulticastDone = true;
+        printDone();
+      }
+      break;
+    case SoakTxPhase::kUplink:
+    default:
+      ++gUplinkIndex;
+      if (gUplinkIndex >= kPayloadSizeCount) {
+        gUplinkDone = true;
+        printStatus("uplink-complete");
+      }
+      break;
+  }
 }
 
 void onUdp(void*, const uint8_t* payload, uint16_t length,
@@ -274,6 +496,7 @@ void onUdp(void*, const uint8_t* payload, uint16_t length,
     if (messageInfo.mMulticastLoop) return;
     ++gPingRxCount;
     gLastLength = declaredLength;
+    observeIncomingPing(seq, declaredLength, messageInfo);
     if (buildPayload(kAckType, seq, declaredLength) &&
         gThread.sendUdp(messageInfo.mPeerAddr, messageInfo.mPeerPort,
                         gTxBuffer, declaredLength)) {
@@ -288,73 +511,68 @@ void onUdp(void*, const uint8_t* payload, uint16_t length,
   gLastLength = declaredLength;
 
   if (!gWaitingForAck || seq != gCurrentSeq) return;
-  const size_t expectedIdx = gMulticastPhase ? gMulticastIndex : gUnicastIndex;
+  const size_t expectedIdx = currentPhaseIndex(gCurrentTxPhase);
   if (expectedIdx >= kPayloadSizeCount ||
       declaredLength != kPayloadSizes[expectedIdx]) {
     ++gInvalidRxCount;
     return;
   }
 
-  recordResult(gMulticastPhase, expectedIdx, 1U);
-  ++gCurrentSeq;
-  gRetryCount = 0U;
-  gWaitingForAck = false;
-  if (gMulticastPhase) {
-    ++gMulticastIndex;
-    if (gMulticastIndex >= kPayloadSizeCount) {
-      gMulticastDone = true;
-      printDone();
-    }
-  } else {
-    ++gUnicastIndex;
-    if (gUnicastIndex >= kPayloadSizeCount) {
-      gUnicastDone = true;
-      printStatus("unicast-complete");
-    }
-  }
+  recordResult(gCurrentTxPhase, expectedIdx, 1U);
+  advanceCurrentPhase(gCurrentTxPhase);
 }
 
-bool sendCurrentPing(bool multicast) {
-  const size_t idx = multicast ? gMulticastIndex : gUnicastIndex;
+bool sendCurrentPing(SoakTxPhase phase) {
+  const size_t idx = currentPhaseIndex(phase);
   if (idx >= kPayloadSizeCount) return false;
   const uint16_t payloadLength = kPayloadSizes[idx];
 
   otIp6Address destAddr = {};
-  if (multicast) {
+  if (phase == SoakTxPhase::kMulticast) {
     memcpy(destAddr.mFields.m8, kMulticastAddrBytes,
            sizeof(kMulticastAddrBytes));
+  } else if (phase == SoakTxPhase::kDownlink) {
+    if (!gPeerKnown) return false;
+    memcpy(&destAddr, &gPeerAddr, sizeof(destAddr));
   } else if (!gThread.getLeaderRloc(&destAddr)) {
     return false;
   }
 
   if (!buildPayload(kPingType, gCurrentSeq, payloadLength)) return false;
-  const bool ok = gThread.sendUdp(destAddr, kUdpPort, gTxBuffer, payloadLength);
+  gCurrentTxPhase = phase;
+  const uint16_t destPort =
+      (phase == SoakTxPhase::kDownlink) ? gPeerPort : kUdpPort;
+  const bool ok = gThread.sendUdp(destAddr, destPort, gTxBuffer, payloadLength);
   ++gPingTxCount;
   gLastLength = payloadLength;
   gLastSendMs = millis();
   gWaitingForAck = ok;
   if (!ok) {
-    recordResult(multicast, idx, 2U);
+    recordResult(phase, idx, 2U);
   }
   return ok;
 }
 
-void failCurrentTimeout(bool multicast) {
-  recordResult(multicast, multicast ? gMulticastIndex : gUnicastIndex, 4U);
-  ++gCurrentSeq;
-  gRetryCount = 0U;
-  gWaitingForAck = false;
-  if (multicast) {
-    ++gMulticastIndex;
-    if (gMulticastIndex >= kPayloadSizeCount) {
-      gMulticastDone = true;
-      printDone();
-    }
-  } else {
-    ++gUnicastIndex;
-    if (gUnicastIndex >= kPayloadSizeCount) {
-      gUnicastDone = true;
-      printStatus("unicast-complete");
+void failCurrentTimeout(SoakTxPhase phase) {
+  recordResult(phase, currentPhaseIndex(phase), 4U);
+  advanceCurrentPhase(phase);
+}
+
+void serviceTxPhase(SoakTxPhase phase) {
+  const uint32_t now = millis();
+  if (!gWaitingForAck && (now - gLastSendMs) >= kSendIntervalMs) {
+    (void)sendCurrentPing(phase);
+    return;
+  }
+
+  if (gWaitingForAck && gCurrentTxPhase == phase &&
+      (now - gLastSendMs) >= kAckTimeoutMs) {
+    if (gRetryCount >= kMaxRetriesPerPayload) {
+      failCurrentTimeout(phase);
+    } else {
+      ++gRetryCount;
+      ++gRetryTotal;
+      (void)sendCurrentPing(phase);
     }
   }
 }
@@ -420,51 +638,49 @@ void loop() {
     gLastRole = currentRole;
     printStatus("role");
   }
+  trackPartitionAndResetIfNeeded();
 
   const bool sender =
       currentRole == Nrf54ThreadExperimental::Role::kChild ||
       currentRole == Nrf54ThreadExperimental::Role::kRouter;
+  const bool leader = currentRole == Nrf54ThreadExperimental::Role::kLeader;
 
-  if (sender && !gTestStarted && gThread.attached() && gThread.udpOpened(kUdpPort)) {
+  if ((sender || leader) && !gTestStarted && gThread.attached() &&
+      gThread.udpOpened(kUdpPort)) {
     gTestStarted = true;
     printStatus("test-start");
   }
 
-  if (sender && gTestStarted && !gUnicastDone && !gMulticastPhase) {
-    const uint32_t now = millis();
-    if (!gWaitingForAck && (now - gLastSendMs) >= kSendIntervalMs) {
-      (void)sendCurrentPing(false);
-    } else if (gWaitingForAck && (now - gLastSendMs) >= kAckTimeoutMs) {
-      if (gRetryCount >= kMaxRetriesPerPayload) {
-        failCurrentTimeout(false);
-      } else {
-        ++gRetryCount;
-        ++gRetryTotal;
-        (void)sendCurrentPing(false);
-      }
-    }
+  if (sender && gTestStarted && !gUplinkDone && !gMulticastStarted) {
+    serviceTxPhase(SoakTxPhase::kUplink);
   }
 
-  if (sender && gUnicastDone && !gMulticastPhase && !gMulticastDone &&
-      !gWaitingForAck) {
-    gMulticastPhase = true;
+  if (leader && gTestStarted && gObservedUplinkDone && gPeerKnown &&
+      !gDownlinkStarted && !gDownlinkDone && !gWaitingForAck) {
+    gDownlinkStarted = true;
+    gCurrentTxPhase = SoakTxPhase::kDownlink;
+    printStatus("downlink-start");
+  }
+
+  if (leader && gDownlinkStarted && !gDownlinkDone) {
+    serviceTxPhase(SoakTxPhase::kDownlink);
+  }
+
+  if (sender && gUplinkDone && gDownlinkReceiverDone && !gMulticastStarted &&
+      !gMulticastDone && !gWaitingForAck) {
+    gMulticastStarted = true;
+    gCurrentTxPhase = SoakTxPhase::kMulticast;
     ++gCurrentSeq;
     printStatus("mcast-start");
   }
 
-  if (sender && gMulticastPhase && !gMulticastDone) {
-    const uint32_t now = millis();
-    if (!gWaitingForAck && (now - gLastSendMs) >= kSendIntervalMs) {
-      (void)sendCurrentPing(true);
-    } else if (gWaitingForAck && (now - gLastSendMs) >= kAckTimeoutMs) {
-      if (gRetryCount >= kMaxRetriesPerPayload) {
-        failCurrentTimeout(true);
-      } else {
-        ++gRetryCount;
-        ++gRetryTotal;
-        (void)sendCurrentPing(true);
-      }
-    }
+  if (sender && gMulticastStarted && !gMulticastDone) {
+    serviceTxPhase(SoakTxPhase::kMulticast);
+  }
+
+  if (sender && gUplinkDone && !gDownlinkReceiverDone && !gMulticastDone &&
+      !gWaitingForAck) {
+    gCurrentTxPhase = SoakTxPhase::kDownlink;
   }
 
   if ((millis() - gLastPrintMs) >= kStatusIntervalMs) {
@@ -472,7 +688,10 @@ void loop() {
     printStatus("tick");
   }
 
-  if (gUnicastDone && gMulticastDone &&
+  const bool localMatrixReady =
+      (sender && gUplinkDone && gDownlinkReceiverDone && gMulticastDone) ||
+      (leader && gDownlinkDone);
+  if (localMatrixReady &&
       ((millis() - gLastFinalMatrixMs) >= kStatusIntervalMs)) {
     gLastFinalMatrixMs = millis();
     printResultMatrix();
