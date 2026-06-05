@@ -687,6 +687,12 @@ bool Nrf54ThreadExperimental::startJoiner(const char* pskd,
     return false;
   }
 
+  if (joinerStarted_ || otJoinerGetState(instance_) != OT_JOINER_STATE_IDLE) {
+    joinerStarted_ = true;
+    lastError_ = OT_ERROR_NONE;
+    return true;
+  }
+
   if (!attachPolicyConfigured_ && !configureAttachPolicy()) {
     return false;
   }

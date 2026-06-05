@@ -36,6 +36,10 @@ struct OpenThreadPlatformSkeletonSnapshot {
   bool radioRxOnWhenIdle = false;
   bool radioReceiveAtPending = false;
   bool radioReceiveAtActive = false;
+  bool radioTxDonePending = false;
+  bool radioRxDonePending = false;
+  bool radioEnergyScanDonePending = false;
+  bool radioReceiveAtTimeoutPending = false;
   bool radioCoexEnabled = false;
   bool radioSrcMatchEnabled = false;
   bool radioLastTxAcked = false;

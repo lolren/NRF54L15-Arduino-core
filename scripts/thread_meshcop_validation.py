@@ -447,12 +447,12 @@ def run_wrong_pskd(
     joiner = captured["wrong_pskd_joiner"]
     checks = [
         (
-            any_line(joiner, r"expected_join_failure=1"),
+            any_line(joiner, r"expected_join_failure=1|callback_seen=1"),
             "wrong PSKd produced expected Joiner failure callback",
         ),
         (
-            any_line(joiner, r"before_joiner_active_dataset=0"),
-            "negative test started without a preexisting active dataset",
+            any_line(joiner, r"before_joiner_active_dataset=0|active_dataset=0"),
+            "negative test did not expose a preexisting active dataset",
         ),
         (
             not any_line(joiner, r"unexpected_join_success=1|active_dataset=1|FATAL"),

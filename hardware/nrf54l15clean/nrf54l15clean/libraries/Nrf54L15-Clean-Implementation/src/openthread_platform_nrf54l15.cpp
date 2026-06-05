@@ -28,6 +28,8 @@
 #include "thread/mle.hpp"
 #endif
 
+extern "C" uint64_t nrf54l15_core_monotonic_time_us(void);
+
 #if defined(NRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE) && \
     (NRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE != 0)
 #define NRF54L15_CLEAN_OPENTHREAD_PAL_UNSUPPORTED_CRYPTO_STUBS 0
@@ -1149,6 +1151,10 @@ bool threadMacReceiveFilterCallback(const uint8_t* psdu, uint8_t length,
 
 uint64_t nextEntropyWord();
 
+uint64_t threadPlatformNowUs() {
+  return nrf54l15_core_monotonic_time_us();
+}
+
 void fillPseudoEntropy(uint8_t* output, uint16_t outputLength) {
   uint16_t offset = 0;
   while (offset < outputLength) {
@@ -1161,12 +1167,12 @@ void fillPseudoEntropy(uint8_t* output, uint16_t outputLength) {
 
 uint64_t nextEntropyWord() {
   const uint64_t uniqueId = hardwareUniqueId64();
-  const uint64_t now = static_cast<uint64_t>(micros());
+  const uint64_t now = threadPlatformNowUs();
   static uint64_t counter = 0xA5C39E27D4B1826FULL;
 
   counter ^= uniqueId + 0x9E3779B97F4A7C15ULL + (counter << 6U) + (counter >> 2U);
   counter ^= (now << 17U) ^ (now >> 7U);
-  counter ^= static_cast<uint64_t>(millis()) << 32U;
+  counter ^= (now / 1000ULL) << 32U;
 
   uint64_t x = counter;
   x ^= x >> 12U;
@@ -1176,7 +1182,7 @@ uint64_t nextEntropyWord() {
 }
 
 void updateRadioTime() {
-  const uint32_t nowLow = micros();
+  const uint32_t nowLow = static_cast<uint32_t>(threadPlatformNowUs());
   if (nowLow < gOpenThreadPlatformState.lastRadioNowLow) {
     gOpenThreadPlatformState.radioNowHigh += (1ULL << 32U);
   }
@@ -2768,6 +2774,14 @@ bool OpenThreadPlatformSkeleton::snapshot(OpenThreadPlatformSkeletonSnapshot* ou
     return false;
   }
   updateRadioTime();
+  gOpenThreadPlatformState.snapshot.radioTxDonePending =
+      gOpenThreadPlatformState.radioTxDonePending;
+  gOpenThreadPlatformState.snapshot.radioRxDonePending =
+      gOpenThreadPlatformState.radioRxDonePending;
+  gOpenThreadPlatformState.snapshot.radioEnergyScanDonePending =
+      gOpenThreadPlatformState.radioEnergyScanDonePending;
+  gOpenThreadPlatformState.snapshot.radioReceiveAtTimeoutPending =
+      gOpenThreadPlatformState.radioReceiveAtTimeoutPending;
   publishThreadRadioReceiveAtSnapshot(gOpenThreadPlatformState);
   *outSnapshot = gOpenThreadPlatformState.snapshot;
   return true;
@@ -3041,7 +3055,9 @@ void otPlatAlarmMilliStop(otInstance*) {
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.alarmMilliRunning = false;
 }
 
-uint32_t otPlatAlarmMilliGetNow(void) { return millis(); }
+uint32_t otPlatAlarmMilliGetNow(void) {
+  return static_cast<uint32_t>(xiao_nrf54l15::threadPlatformNowUs() / 1000ULL);
+}
 
 void otPlatAlarmMicroStartAt(otInstance*, uint32_t t0, uint32_t dt) {
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.alarmMicroRunning = true;
@@ -3052,7 +3068,9 @@ void otPlatAlarmMicroStop(otInstance*) {
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.alarmMicroRunning = false;
 }
 
-uint32_t otPlatAlarmMicroGetNow(void) { return micros(); }
+uint32_t otPlatAlarmMicroGetNow(void) {
+  return static_cast<uint32_t>(xiao_nrf54l15::threadPlatformNowUs());
+}
 
 void* otPlatCAlloc(size_t aNum, size_t aSize) {
   if (aSize != 0U && aNum > (SIZE_MAX / aSize)) {
@@ -4904,18 +4922,7 @@ otError otPlatDiagRadioRawPowerSettingEnable(otInstance*, bool) {
 
 extern "C" uint64_t otPlatTimeGet(void)
 {
-    uint32_t load = SysTick->LOAD;
-    uint32_t val = SysTick->VAL;
-    uint32_t count = load - val;
-    static uint32_t s_last = (uint32_t)-1;
-    static uint64_t s_ms = 0;
-    if (s_last != (uint32_t)-1) {
-        if (val > s_last) {
-            s_ms++;
-        }
-    }
-    s_last = val;
-    return s_ms * 1000ULL + (uint64_t)count * 1000ULL / (uint64_t)(load + 1ULL);
+    return xiao_nrf54l15::threadPlatformNowUs();
 }
 
 extern "C" uint16_t otPlatTimeGetXtalAccuracy(void)

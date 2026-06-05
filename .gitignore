@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+build/
 
 # Local release artifacts (uploaded separately as GitHub release assets)
 dist/*.tar.bz2
