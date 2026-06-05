@@ -161,6 +161,20 @@ def parse_line(line: str, result: BoardResults) -> None:
     match = re.search(r"soak_mcast_fail\s+len=(\d+)\s+mode=([A-Za-z0-9_]+)", line)
     if match:
         result.multicast[int(match.group(1))] = f"fail_{match.group(2)}"
+    match = re.search(
+        r"soak_result\s+len=(\d+)\s+unicast=([A-Za-z0-9_]+)\s+multicast=([A-Za-z0-9_]+)",
+        line,
+    )
+    if match:
+        length = int(match.group(1))
+        unicast_state = match.group(2)
+        multicast_state = match.group(3)
+        result.unicast[length] = (
+            "pass" if unicast_state == "pass" else f"fail_{unicast_state}"
+        )
+        result.multicast[length] = (
+            "pass" if multicast_state == "pass" else f"fail_{multicast_state}"
+        )
     if line.startswith("soak_done"):
         result.done = True
 
@@ -239,6 +253,7 @@ def main() -> int:
     parser.add_argument("--log-root", type=pathlib.Path, default=DEFAULT_LOG_ROOT)
     parser.add_argument("--skip-flash", action="store_true")
     parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument("--post-upload-delay", type=float, default=0.5)
     parser.add_argument(
         "--require-unicast",
         default="safe",
@@ -276,13 +291,15 @@ def main() -> int:
             return 1
         if not flash_board(args.arduino_cli, args.port2, args.fqbn, args.example, env, run_dir):
             return 1
-        time.sleep(5)
+        time.sleep(args.post_upload_delay)
 
     board1 = BoardResults(args.port1)
     board2 = BoardResults(args.port2)
     ser1 = serial.Serial(args.port1, 115200, timeout=0.3)
     ser2 = serial.Serial(args.port2, 115200, timeout=0.3)
     try:
+        ser1.reset_input_buffer()
+        ser2.reset_input_buffer()
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             for line in read_available(ser1, board1, 0.5):

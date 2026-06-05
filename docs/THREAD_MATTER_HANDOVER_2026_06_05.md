@@ -158,6 +158,9 @@ The two-board UDP soak runner now:
   `8,16,31,63,95,127,191,255,512` sweep.
 - the example now attempts the full payload list instead of pre-failing
   payloads above the old 95-byte unicast / 80-byte multicast caps.
+- the example emits repeated final `soak_result` matrix lines after completion
+  so the runner can still validate exact payload sizes if serial capture starts
+  after the earliest packet logs.
 
 Reason:
 
@@ -256,12 +259,59 @@ ARDUINO_DIRECTORIES_USER=/tmp/nrf54-thread-udp-soak-sketchbook \
 Result:
 
 ```text
-Sketch uses 310340 bytes (19%) of program storage space.
-Global variables use 40644 bytes (26%) of dynamic memory, leaving 115004 bytes.
+Sketch uses 310768 bytes (19%) of program storage space.
+Global variables use 40668 bytes (26%) of dynamic memory, leaving 114980 bytes.
 ```
 
-Two-board UDP soak was not run in this slice because `arduino-cli board list`
-reported no connected boards.
+Two-board UDP safe-size soak:
+
+```bash
+python3 scripts/test_thread_udp_soak.py \
+  --port1 /dev/ttyACM0 \
+  --port2 /dev/ttyACM1 \
+  --timeout 180 \
+  --dump-lines
+```
+
+Result:
+
+```text
+Unicast:   8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
+Multicast: 8, 16, 31, 63, 95, 127, 191, 255, 512 all pass
+Required safe gate: PASS
+```
+
+Log directory:
+
+```text
+build/thread-udp-soak-validation/20260605-214851/
+```
+
+Two-board UDP fragmentation-required parser/gate check against the same
+already-flashed boards:
+
+```bash
+python3 scripts/test_thread_udp_soak.py \
+  --port1 /dev/ttyACM0 \
+  --port2 /dev/ttyACM1 \
+  --skip-flash \
+  --timeout 20 \
+  --require-fragmentation \
+  --dump-lines
+```
+
+Result:
+
+```text
+Unicast required:   8, 16, 31, 63, 95, 127, 191, 255, 512 all PASS
+Multicast required: 8, 16, 31, 63, 95, 127, 191, 255, 512 all PASS
+```
+
+Log directory:
+
+```text
+build/thread-udp-soak-validation/20260605-215054/
+```
 
 ## How To Reproduce
 
@@ -424,14 +474,19 @@ python3 scripts/thread_command_surface_attach_probe.py \
 
 ### Thread Slice 3: UDP Reliability And Fragmentation
 
-Matter will need larger and repeated payloads. Do not assume this is complete
-because MeshCoP passes.
+Matter will need larger and repeated payloads. The first two-board UDP gate now
+passes through 512-byte payloads, but do not treat this as complete production
+Thread reliability yet.
 
-Required:
+Current status:
 
-- Run `scripts/test_thread_udp_soak.py` safe-size mode on two boards.
-- Run `scripts/test_thread_udp_soak.py --require-fragmentation` on two boards.
-- Sweep unicast UDP payload sizes both directions.
+- One child-to-leader unicast sweep passed all sizes through 512 bytes.
+- One multicast sweep with ACK echo passed all sizes through 512 bytes.
+- The runner now has a real full-matrix fragmentation gate.
+
+Still required:
+
+- Sweep unicast UDP payload sizes both directions, including leader-to-child.
 - Include payloads that force 6LoWPAN fragmentation.
 - Run repeated attach/reconnect cycles.
 - Track loss, retry, ACK, CRC, invalid-length, and reassembly timeout counters.

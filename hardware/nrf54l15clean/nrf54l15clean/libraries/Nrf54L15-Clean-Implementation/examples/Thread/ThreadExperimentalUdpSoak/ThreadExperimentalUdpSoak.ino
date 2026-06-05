@@ -79,6 +79,9 @@ uint32_t gRetryTotal = 0U;
 uint32_t gInvalidRxCount = 0U;
 uint16_t gLastLength = 0U;
 uint16_t gLastAckSeq = 0U;
+uint32_t gLastFinalMatrixMs = 0U;
+uint8_t gUnicastResults[kPayloadSizeCount] = {0};
+uint8_t gMulticastResults[kPayloadSizeCount] = {0};
 
 char gDatasetHex[(OT_OPERATIONAL_DATASET_MAX_LENGTH * 2U) + 1U] = {0};
 
@@ -137,6 +140,10 @@ const char* failModeName(uint8_t result) {
   }
 }
 
+const char* resultName(uint8_t result) {
+  return result == 1U ? "pass" : failModeName(result);
+}
+
 void updateResults() {
   g_soak_results[0] = gThread.started() ? 1U : 0U;
   g_soak_results[1] = gThread.attached() ? 1U : 0U;
@@ -155,6 +162,11 @@ void updateResults() {
 void recordResult(bool multicast, size_t idx, uint8_t result) {
   if (idx >= kPayloadSizeCount) return;
   const uint16_t len = kPayloadSizes[idx];
+  if (multicast) {
+    gMulticastResults[idx] = result;
+  } else {
+    gUnicastResults[idx] = result;
+  }
   if (multicast) {
     if (result == 1U) {
       ++gMulticastPassCount;
@@ -179,6 +191,17 @@ void recordResult(bool multicast, size_t idx, uint8_t result) {
       SOAK_PRINT(" mode=");
       SOAK_PRINTLN(failModeName(result));
     }
+  }
+}
+
+void printResultMatrix() {
+  for (size_t i = 0U; i < kPayloadSizeCount; ++i) {
+    SOAK_PRINT("soak_result len=");
+    SOAK_PRINT(kPayloadSizes[i]);
+    SOAK_PRINT(" unicast=");
+    SOAK_PRINT(resultName(gUnicastResults[i]));
+    SOAK_PRINT(" multicast=");
+    SOAK_PRINTLN(resultName(gMulticastResults[i]));
   }
 }
 
@@ -234,6 +257,7 @@ void printDone() {
   SOAK_PRINT(gMulticastPassCount);
   SOAK_PRINT(" mcast_fail=");
   SOAK_PRINTLN(gMulticastFailCount);
+  printResultMatrix();
 }
 
 void onUdp(void*, const uint8_t* payload, uint16_t length,
@@ -446,5 +470,11 @@ void loop() {
   if ((millis() - gLastPrintMs) >= kStatusIntervalMs) {
     gLastPrintMs = millis();
     printStatus("tick");
+  }
+
+  if (gUnicastDone && gMulticastDone &&
+      ((millis() - gLastFinalMatrixMs) >= kStatusIntervalMs)) {
+    gLastFinalMatrixMs = millis();
+    printResultMatrix();
   }
 }
