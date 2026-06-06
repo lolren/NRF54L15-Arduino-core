@@ -6,6 +6,7 @@
 #include <openthread/message.h>
 #include <openthread/platform/radio.h>
 #include <openthread/platform/settings.h>
+#include <openthread/platform/time.h>
 
 #include <string.h>
 
@@ -72,6 +73,10 @@ bool Nrf54ThreadExperimental::beginJoinerOnly(bool wipeSettings) {
   return begin(wipeSettings, AttachPolicy::kJoinerOnly);
 }
 
+bool Nrf54ThreadExperimental::beginAsSleepyChild(bool wipeSettings) {
+  return begin(wipeSettings, AttachPolicy::kSleepyChild);
+}
+
 bool Nrf54ThreadExperimental::begin(bool wipeSettings, AttachPolicy policy) {
   if (beginCalled_) {
     return false;
@@ -87,7 +92,7 @@ bool Nrf54ThreadExperimental::begin(bool wipeSettings, AttachPolicy policy) {
   }
 #endif
   wipeSettings_ = wipeSettings;
-  beginMs_ = millis();
+  beginMs_ = (uint32_t)(otPlatTimeGet() / 1000ULL);
   beginCalled_ = true;
   attachPolicy_ = policy;
   lastError_ = OT_ERROR_NONE;
@@ -101,6 +106,9 @@ bool Nrf54ThreadExperimental::begin(bool wipeSettings, AttachPolicy policy) {
   attachPolicyConfigured_ = false;
   routerEligible_ = false;
   childFirstFallbackUsed_ = false;
+  sleepyModeActive_ = false;
+  sleepyChildObservedMs_ = 0U;
+  pollPeriodApplied_ = false;
   childFirstFallbackDelayMs_ = computeChildFirstFallbackDelayMs();
   stateChangedCallbackRegistered_ = false;
   commissionerStarted_ = false;
@@ -171,6 +179,9 @@ bool Nrf54ThreadExperimental::stop() {
   linkConfigured_ = false;
   ip6Enabled_ = false;
   threadEnabled_ = false;
+  sleepyModeActive_ = false;
+  sleepyChildObservedMs_ = 0U;
+  pollPeriodApplied_ = false;
   datasetApplied_ = false;
   attachPolicyConfigured_ = false;
   routerEligible_ = false;
@@ -203,7 +214,7 @@ bool Nrf54ThreadExperimental::restart(bool wipeSettings) {
 
   wipeSettings_ = wipeSettings;
   settingsWiped_ = wipeSettings;
-  beginMs_ = millis() - kStageInitDelayMs;
+  beginMs_ = (uint32_t)(otPlatTimeGet() / 1000ULL) - kStageInitDelayMs;
   lastError_ = OT_ERROR_NONE;
   lastUdpError_ = OT_ERROR_NONE;
   lastChangedFlags_ = 0U;
@@ -214,6 +225,9 @@ bool Nrf54ThreadExperimental::restart(bool wipeSettings) {
   attachPolicyConfigured_ = false;
   routerEligible_ = false;
   childFirstFallbackUsed_ = false;
+  sleepyModeActive_ = false;
+  sleepyChildObservedMs_ = 0U;
+  pollPeriodApplied_ = false;
   childFirstFallbackDelayMs_ = computeChildFirstFallbackDelayMs();
   commissionerStarted_ = false;
   joinerStarted_ = false;
@@ -239,7 +253,7 @@ void Nrf54ThreadExperimental::process() {
     return;
   }
 
-  const uint32_t elapsedMs = millis() - beginMs_;
+  const uint32_t elapsedMs = (uint32_t)(otPlatTimeGet() / 1000ULL) - beginMs_;
 
   if (instance_ == nullptr && elapsedMs >= kStageInitDelayMs) {
     instance_ = otInstanceInitSingle();
@@ -265,6 +279,17 @@ void Nrf54ThreadExperimental::process() {
   }
 
   const bool joinerOnly = (attachPolicy_ == AttachPolicy::kJoinerOnly);
+  const bool sleepyChild = (attachPolicy_ == AttachPolicy::kSleepyChild);
+
+  if (instance_ != nullptr && pollPeriodConfigured_ && !pollPeriodApplied_ &&
+      (!sleepyChild || sleepyModeActive_)) {
+    const otError pollError = otLinkSetPollPeriod(instance_, pollPeriodMs_);
+    if (pollError != OT_ERROR_NONE) {
+      lastError_ = pollError;
+      return;
+    }
+    pollPeriodApplied_ = true;
+  }
 
   if (instance_ != nullptr && !joinerOnly && !wipeSettings_ && !datasetConfigured_ &&
       !datasetApplied_ && !datasetRestoreAttempted_) {
@@ -291,7 +316,21 @@ void Nrf54ThreadExperimental::process() {
     }
   }
 
-  if (instance_ != nullptr && !joinerOnly && datasetApplied_ && !linkConfigured_ &&
+  // Sleepy child attaches first as receiver-on MTD so parent discovery can run
+  // normally. After OpenThread reaches child role, maybeSwitchToSleepyMode()
+  // changes the mode to rxOnWhenIdle=false.
+  if (instance_ != nullptr && sleepyChild && datasetApplied_ && !linkConfigured_ &&
+      elapsedMs >= kStageIp6EnableDelayMs) {
+    const otLinkModeConfig mode = {true, false, true};
+    lastError_ = otThreadSetLinkMode(instance_, mode);
+    if (lastError_ == OT_ERROR_NONE) {
+      linkConfigured_ = true;
+      lastError_ = otIp6SetEnabled(instance_, true);
+      ip6Enabled_ = (lastError_ == OT_ERROR_NONE);
+    }
+  }
+
+  if (instance_ != nullptr && !joinerOnly && !sleepyChild && datasetApplied_ && !linkConfigured_ &&
       elapsedMs >= kStageIp6EnableDelayMs) {
     // Child-first uses non-sleepy MTD mode first. If no parent appears, the
     // deterministic fallback below flips back to FTD/router-eligible mode.
@@ -314,6 +353,8 @@ void Nrf54ThreadExperimental::process() {
 
   if (instance_ != nullptr && !joinerOnly && threadEnabled_) {
     (void)maybePromoteChildFirstFallback(elapsedMs);
+    (void)maybeForceLeader(elapsedMs);
+    (void)maybeSwitchToSleepyMode();
   }
 
   if (instance_ != nullptr && ip6Enabled_) {
@@ -568,6 +609,45 @@ bool Nrf54ThreadExperimental::requestRouterRole() {
 
   lastError_ = otThreadBecomeRouter(instance_);
   return lastError_ == OT_ERROR_NONE;
+#endif
+}
+
+bool Nrf54ThreadExperimental::setPollPeriod(uint32_t pollPeriodMs) {
+#if !defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) || \
+    (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE == 0)
+  (void)pollPeriodMs;
+  lastError_ = OT_ERROR_INVALID_STATE;
+  return false;
+#else
+  if (pollPeriodMs < kMinPollPeriodMs || pollPeriodMs > kMaxPollPeriodMs) {
+    lastError_ = OT_ERROR_INVALID_ARGS;
+    return false;
+  }
+
+  pollPeriodMs_ = pollPeriodMs;
+  pollPeriodConfigured_ = true;
+  pollPeriodApplied_ = false;
+  if (instance_ == nullptr ||
+      (attachPolicy_ == AttachPolicy::kSleepyChild && !sleepyModeActive_)) {
+    lastError_ = OT_ERROR_NONE;
+    return true;
+  }
+
+  lastError_ = otLinkSetPollPeriod(instance_, pollPeriodMs_);
+  pollPeriodApplied_ = (lastError_ == OT_ERROR_NONE);
+  return pollPeriodApplied_;
+#endif
+}
+
+uint32_t Nrf54ThreadExperimental::getPollPeriod() const {
+#if !defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) || \
+    (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE == 0)
+  return 0U;
+#else
+  if (instance_ == nullptr) {
+    return pollPeriodConfigured_ ? pollPeriodMs_ : 0U;
+  }
+  return otLinkGetPollPeriod(instance_);
 #endif
 }
 
@@ -923,7 +1003,7 @@ bool Nrf54ThreadExperimental::getAttachDiagnostics(
   outDiagnostics->childFirstFallbackArmed = childFirstFallbackArmed();
   outDiagnostics->childFirstFallbackUsed = childFirstFallbackUsed_;
   if (outDiagnostics->childFirstFallbackArmed) {
-    const uint32_t elapsedMs = millis() - beginMs_;
+    const uint32_t elapsedMs = (uint32_t)(otPlatTimeGet() / 1000ULL) - beginMs_;
     outDiagnostics->childFirstFallbackRemainingMs =
         (elapsedMs >= childFirstFallbackDelayMs_)
             ? 0U
@@ -1021,7 +1101,7 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
     return true;
   }
 
-  const uint32_t elapsedMs = millis() - beginMs_;
+  const uint32_t elapsedMs = (uint32_t)(otPlatTimeGet() / 1000ULL) - beginMs_;
   const bool joinerOnly = (attachPolicy_ == AttachPolicy::kJoinerOnly);
   AttachDebugState debugState = {};
   const bool haveDebugState = getAttachDebugState(&debugState);
@@ -1410,7 +1490,7 @@ bool Nrf54ThreadExperimental::childFirstFallbackArmed() const {
       !threadEnabled_ || attached()) {
     return false;
   }
-  return (millis() - beginMs_) < childFirstFallbackDelayMs_;
+  return ((uint32_t)(otPlatTimeGet() / 1000ULL) - beginMs_) < childFirstFallbackDelayMs_;
 }
 
 bool Nrf54ThreadExperimental::childFirstFallbackUsed() const {
@@ -1658,6 +1738,122 @@ bool Nrf54ThreadExperimental::maybePromoteChildFirstFallback(uint32_t elapsedMs)
 #endif
 }
 
+bool Nrf54ThreadExperimental::maybeForceLeader(uint32_t elapsedMs) {
+#if !defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) || \
+    (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE == 0)
+  (void)elapsedMs;
+  lastError_ = OT_ERROR_INVALID_STATE;
+  return false;
+#else
+  /* Force leader formation when:
+     - Device has a configured dataset (commissioner forming its own network)
+     - Device is not already a leader
+     - Enough time has passed for beacon discovery
+     - Device is router-eligible */
+  if (attachPolicy_ != AttachPolicy::kRouterEligible || instance_ == nullptr ||
+      !datasetConfigured_ || !datasetApplied_ ||
+      elapsedMs < 3000U) {
+    return false;
+  }
+
+  // Allow force-leader even when already attached as router/child.
+  // The earlier attached() check prevented upgrade when the device
+  // attached to another network on the same channel before the 3 s
+  // beacon-discovery window elapsed.
+  otDeviceRole currentRole = otThreadGetDeviceRole(instance_);
+  if (currentRole == OT_DEVICE_ROLE_LEADER ||
+      currentRole == OT_DEVICE_ROLE_DISABLED ||
+      currentRole == OT_DEVICE_ROLE_DETACHED) {
+    // Already leader = nothing to do.
+    // Disabled / Detached = exit early so next call can retry.
+    return false;
+  }
+
+  otError leaderError = otThreadBecomeLeader(instance_);
+  if (leaderError == OT_ERROR_NONE || leaderError == OT_ERROR_ALREADY ||
+      leaderError == OT_ERROR_INVALID_STATE || leaderError == OT_ERROR_BUSY) {
+    lastError_ = OT_ERROR_NONE;
+    return true;
+  }
+
+  lastError_ = leaderError;
+  return false;
+#endif
+}
+
+bool Nrf54ThreadExperimental::maybeSwitchToSleepyMode() {
+#if !defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) || \
+    (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE == 0)
+  lastError_ = OT_ERROR_INVALID_STATE;
+  return false;
+#else
+  if (attachPolicy_ != AttachPolicy::kSleepyChild || instance_ == nullptr ||
+      !threadEnabled_) {
+    return false;
+  }
+
+  const otDeviceRole currentRole = otThreadGetDeviceRole(instance_);
+  if (currentRole != OT_DEVICE_ROLE_CHILD) {
+    sleepyChildObservedMs_ = 0U;
+    if (currentRole == OT_DEVICE_ROLE_DETACHED && linkConfigured_) {
+      const otLinkModeConfig currentMode = otThreadGetLinkMode(instance_);
+      if (!currentMode.mRxOnWhenIdle || currentMode.mDeviceType) {
+        const otLinkModeConfig attachMode = {true, false, true};
+        const otError modeError = otThreadSetLinkMode(instance_, attachMode);
+        if (modeError == OT_ERROR_NONE) {
+          sleepyModeActive_ = false;
+          pollPeriodApplied_ = false;
+          lastError_ = OT_ERROR_NONE;
+        } else {
+          lastError_ = modeError;
+        }
+      }
+    }
+    return false;
+  }
+
+  if (sleepyModeActive_) {
+    return false;
+  }
+
+  const uint32_t nowMs = static_cast<uint32_t>(otPlatTimeGet() / 1000ULL);
+  if (sleepyChildObservedMs_ == 0U) {
+    sleepyChildObservedMs_ = nowMs;
+    return false;
+  }
+  if ((nowMs - sleepyChildObservedMs_) < kSleepyChildAttachSettleMs) {
+    return false;
+  }
+
+  const otLinkModeConfig currentMode = otThreadGetLinkMode(instance_);
+  if (!currentMode.mRxOnWhenIdle && !currentMode.mDeviceType) {
+    sleepyModeActive_ = true;
+    lastError_ = OT_ERROR_NONE;
+    return true;
+  }
+
+  const otLinkModeConfig sleepyMode = {
+      false,
+      false,
+      currentMode.mNetworkData,
+  };
+  lastError_ = otThreadSetLinkMode(instance_, sleepyMode);
+  if (lastError_ != OT_ERROR_NONE) {
+    return false;
+  }
+
+  sleepyModeActive_ = true;
+  if (pollPeriodConfigured_ && !pollPeriodApplied_) {
+    lastError_ = otLinkSetPollPeriod(instance_, pollPeriodMs_);
+    if (lastError_ != OT_ERROR_NONE) {
+      return false;
+    }
+    pollPeriodApplied_ = true;
+  }
+  return true;
+#endif
+}
+
 const char* Nrf54ThreadExperimental::roleName(Role role) {
   switch (role) {
     case Role::kDisabled:
@@ -1685,6 +1881,8 @@ const char* Nrf54ThreadExperimental::attachPolicyName(AttachPolicy policy) {
       return "router-eligible";
     case AttachPolicy::kJoinerOnly:
       return "joiner-only";
+    case AttachPolicy::kSleepyChild:
+      return "sleepy-child";
     default:
       return "unknown";
   }

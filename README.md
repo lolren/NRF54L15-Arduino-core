@@ -165,8 +165,9 @@ The Thread stack is an early-stage port of OpenThread core that compiles, links,
 - [x] Public child-only / router-eligible mode control through the Arduino wrapper
 - [x] Settings-backed dataset restore diagnostics for reboot/rejoin bring-up
 - [x] Reboot recovery probe example that seeds once, then checks saved settings on reset
-- [x] UDP transport — checked single-frame payloads up to 63 bytes
+- [x] UDP transport — two-board soak passes 8, 16, 31, 63, 95, 127, 191, 255, and 512 byte payloads in uplink, downlink, and multicast staged tests
 - [x] Basic two-board ping/pong smoke tests
+- [x] Experimental sleepy-child wrapper API and fixed-dataset parent/child examples; initial attach now uses the dataset channel instead of remaining at channel 0
 - [x] Radio PAL support for source match, scheduled receive, CSL state, coex metrics, channel TX power limits, and one-peer enhanced-ACK probing configuration
 
 **What doesn't (yet):**
@@ -177,8 +178,8 @@ The Thread stack is an early-stage port of OpenThread core that compiles, links,
 - [ ] Border Agent / Router roles
 - [ ] DTLS / secure transport layer
 - [ ] Standard MeshCoP Joiner/Commissioner (disabled at compile time)
-- [ ] Fragmented UDP payloads (> 63 bytes) — experimental only
-- [ ] Power management (CSL sleepy end device and enhanced-ACK probing state are scaffolded, but secure Enhanced ACK IE insertion and sleepy-device validation are not complete)
+- [ ] Fragmented UDP payloads (> 63 bytes) — staged two-board soak passes through 512 bytes, but production retry/loss soak is still pending
+- [ ] Power management (sleepy-child API attaches on the correct channel, but stable rx-off polling/indirect traffic and measured SED current are still pending)
 - [ ] Production soak testing on reference networks
 
 **Known issues:**

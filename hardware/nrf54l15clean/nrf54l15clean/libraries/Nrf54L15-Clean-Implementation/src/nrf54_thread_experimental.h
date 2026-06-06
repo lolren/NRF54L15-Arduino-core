@@ -9,6 +9,7 @@
 #include <openthread/error.h>
 #include <openthread/instance.h>
 #include <openthread/ip6.h>
+#include <openthread/link.h>
 #include <openthread/thread.h>
 #include <openthread/thread_ftd.h>
 #include <openthread/udp.h>
@@ -39,6 +40,7 @@ class Nrf54ThreadExperimental {
     kChildOnly = 1U,
     kRouterEligible = 2U,
     kJoinerOnly = 3U,
+    kSleepyChild = 4U,
   };
   using StateChangedCallback = void (*)(void* context,
                                         otChangedFlags flags,
@@ -130,6 +132,7 @@ class Nrf54ThreadExperimental {
   bool beginAsRouter(bool wipeSettings = true);
   bool beginChildFirst(bool wipeSettings = true);
   bool beginJoinerOnly(bool wipeSettings = true);
+  bool beginAsSleepyChild(bool wipeSettings = true);
   bool stop();
   bool restart(bool wipeSettings = false);
   void process();
@@ -147,6 +150,8 @@ class Nrf54ThreadExperimental {
   bool wipePersistentSettings();
   bool setRouterEligible(bool eligible);
   bool requestRouterRole();
+  bool setPollPeriod(uint32_t pollPeriodMs);
+  uint32_t getPollPeriod() const;
   bool startCommissioner();
   bool stopCommissioner();
   bool addJoinerToCommissioner(const char* pskd,
@@ -265,6 +270,8 @@ class Nrf54ThreadExperimental {
   bool restoreDatasetFromSettings();
   bool configureAttachPolicy();
   bool maybePromoteChildFirstFallback(uint32_t elapsedMs);
+  bool maybeForceLeader(uint32_t elapsedMs);
+  bool maybeSwitchToSleepyMode();
 
   struct UdpSocketSlot {
     otUdpSocket socket = {};
@@ -296,6 +303,9 @@ class Nrf54ThreadExperimental {
   static constexpr uint32_t kStageThreadEnableDelayMs = 0UL;
   static constexpr uint32_t kChildFirstFallbackBaseMs = 12000UL;
   static constexpr uint32_t kChildFirstFallbackJitterMs = 12000UL;
+  static constexpr uint32_t kSleepyChildAttachSettleMs = 5000UL;
+  static constexpr uint32_t kMinPollPeriodMs = 15UL;
+  static constexpr uint32_t kMaxPollPeriodMs = 32768UL;
   static constexpr uint16_t kMaxUdpReceivePayload = 1280U;
 
   otInstance* instance_ = nullptr;
@@ -314,6 +324,8 @@ class Nrf54ThreadExperimental {
   void* joinerCallbackContext_ = nullptr;
 
   uint32_t beginMs_ = 0;
+  uint32_t sleepyChildObservedMs_ = 0;
+  uint32_t pollPeriodMs_ = 0;
   otError lastError_ = OT_ERROR_NONE;
   otError lastUdpError_ = OT_ERROR_NONE;
   otChangedFlags lastChangedFlags_ = 0U;
@@ -331,6 +343,9 @@ class Nrf54ThreadExperimental {
   bool attachPolicyConfigured_ = false;
   bool routerEligible_ = false;
   bool childFirstFallbackUsed_ = false;
+  bool sleepyModeActive_ = false;  // true after switching to rxOnWhenIdle=false
+  bool pollPeriodConfigured_ = false;
+  bool pollPeriodApplied_ = false;
   bool linkConfigured_ = false;
   bool ip6Enabled_ = false;
   bool threadEnabled_ = false;

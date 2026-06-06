@@ -367,6 +367,9 @@ Thread example organization:
     `ThreadExperimentalPskcUdpHello`
     `ThreadExperimentalCommandSurface`
     `ThreadExperimentalReferenceDatasetAttach`
+    `ThreadExperimentalSleepyParent`
+    `ThreadExperimentalSleepyChild`
+    `ThreadExperimentalReconnectStress`
   - the current wrapper-level hardware logs live at:
     `measurements/thread_phase4_latest/thread_udp_hello_board_a.log`
     `measurements/thread_phase4_latest/thread_udp_hello_board_b.log`
@@ -433,7 +436,13 @@ Thread example organization:
   active-dataset TLV/hex import/export, a staged stop/restart path, and
   settings-backed dataset restore for reboot/reference-network bring-up work, exposed in
   `ThreadExperimentalCommandSurface` and
-  `ThreadExperimentalReferenceDatasetAttach`. The wrapper now also surfaces
+  `ThreadExperimentalReferenceDatasetAttach`. `ThreadExperimentalSleepyParent`
+  and `ThreadExperimentalSleepyChild` provide a fixed-dataset SED bring-up
+  pair: the sleepy child starts as receiver-on MTD so it attaches on the
+  dataset channel, then switches to rx-off mode after child-role settle.
+  The rx-off data-poll/indirect-traffic path is still staged and needs
+  further hardware validation before this is a production low-power Thread
+  claim. The wrapper now also surfaces
   OpenThread state-change flags plus attach diagnostics
   (`attach duration`, `attach attempts`, `better parent/partition attempts`,
   `parent changes`) plus the hidden attach-state machine snapshot (`attach

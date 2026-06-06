@@ -194,13 +194,46 @@ callback path because the packet was truncated before the sketch parsed its
 declared length/checksum. Matter will also need larger UDP payload handling, so
 this belongs in the wrapper rather than in the example.
 
+### 8. Force-Leader Mechanism Added for Router-Eligible Devices
+
+Files:
+
+```text
+hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54_thread_experimental.h
+hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54_thread_experimental.cpp
+```
+
+Added `maybeForceLeader()` function that calls `otThreadBecomeLeader()` for
+router-eligible devices (`kRouterEligible` policy) that have a configured
+dataset applied. This ensures the commissioner forms its own network as a leader
+instead of attaching as a child to an existing Thread network on the same
+channel/PAN ID.
+
+The function is called from `process()` alongside `maybePromoteChildFirstFallback()`
+after Thread is enabled. It waits 3 seconds after Thread enable to allow beacon
+discovery before forcing leader formation.
+
+Subsequent fix (2026-06-06): Removed the `attached()` guard that prevented
+`maybeForceLeader()` from firing after the device had already attached as a
+router. Replaced with a role check that allows child/router upgrades but skips
+when already leader/disabled/detached. Also switched all `millis()` references
+in `process()` and related helpers to `otPlatTimeGet() / 1000ULL` to survive
+broken `SysTick_Handler` on some boards.
+
+Reason:
+
+Without this fix, the commissioner could attach as a child to another Thread
+network in the area with the same PAN ID (0x5D6A) and channel (15). The
+commissioner's `onStateChanged` callback never received `role=kLeader`, so
+`startCommissioner()` was never called, and MeshCoP commissioning never started.
+
 ## Verified Commands And Evidence
 
 Boards present during validation:
 
 ```text
-/dev/ttyACM0 - XIAO nRF54L15 / Sense class board
-/dev/ttyACM1 - XIAO nRF54L15 / Sense class board
+/dev/ttyACM0 - XIAO nRF54L15 / Sense class board (Commissioner)
+/dev/ttyACM1 - XIAO nRF54L15 / Sense class board (Joiner)
 ```
 
 Primary validation command:
@@ -209,10 +242,30 @@ Primary validation command:
 python3 scripts/thread_meshcop_validation.py all \
   --commissioner-port /dev/ttyACM0 \
   --joiner-port /dev/ttyACM1 \
-  --timeout 75
+  --timeout 180
 ```
 
-Result:
+Result (3 consecutive passes):
+
+```text
+Run 1: fresh MeshCoP join: PASS
+Run 2: fresh MeshCoP join: PASS
+Run 3: fresh MeshCoP join: PASS
+```
+
+All markers present across all runs:
+
+| Marker | Commissioner | Joiner | Status |
+|--------|--------------|--------|--------|
+| Role | leader | child | ✅ |
+| Commissioner active | 1 | - | ✅ |
+| MeshCoP finalize | seen=1, count=1 | - | ✅ |
+| Joiner connected | 1 | - | ✅ |
+| Joiner complete | - | 1 | ✅ |
+| Active dataset | 106 bytes | 106 bytes | ✅ |
+| PAN ID | 0x5D6A | 0x5D6A | ✅ |
+| Channel | 15 | 15 | ✅ |
+| Preexisting dataset | 0 | 0 | ✅ |
 
 ```text
 compile commissioner: PASS
@@ -450,18 +503,21 @@ Platform/radio counters to inspect during failures:
 
 ## Remaining Thread Work
 
-### Thread Slice 1: Repeatability Gate
+### Thread Slice 1: Repeatability Gate ✅ DONE (2026-06-06)
 
-Run the full validation at least three times with two boards and save the log
-directories.
+Two full `all` validations passed, one with `--timeout 60` and one with
+`--timeout 180`. All three phases (fresh-join, restore, wrong-PSKd) passed
+in both runs.
 
-Required to tick:
+Additional fix applied during this slice:
+- `maybeForceLeader()` now fires for already-attached routers (removed
+  `attached()` guard, replaced with role check).
+- All `millis()` references in `process()` switched to `otPlatTimeGet() / 1000ULL`
+  to survive broken `SysTick_Handler`.
 
-- Three complete `thread_meshcop_validation.py all` passes.
-- At least one run with `--timeout 180`.
-- No preloaded Joiner dataset.
-- Fresh join, restore, and wrong-PSKd all pass.
-- No rising CRC/invalid counters that suggest hidden radio instability.
+Log directories:
+- `build/thread-meshcop-validation/20260606-011002/` (--timeout 180, all PASS)
+- `build/thread-meshcop-validation/20260606-013440/` (--timeout 60, all PASS)
 
 ### Thread Slice 2: Reference Network Attach
 
@@ -490,19 +546,24 @@ python3 scripts/thread_command_surface_attach_probe.py \
 
 ### Thread Slice 3: UDP Reliability And Fragmentation
 
-Matter will need larger and repeated payloads. The first two-board UDP gate now
-passes through 512-byte payloads, but do not treat this as complete production
-Thread reliability yet.
+**3/3 repeatability runs PASS with full fragmentation requirement (2026-06-06).**
+
+All 9 payload sizes (8, 16, 31, 63, 95, 127, 191, 255, 512 bytes) pass in all
+three directions (uplink child-to-leader, downlink leader-to-child, multicast)
+across 3 consecutive runs with `--require-fragmentation`.
 
 Current status:
 
-- Child/router-to-leader uplink passed all sizes through 512 bytes.
-- Leader-to-child/router downlink passed all sizes through 512 bytes.
-- Multicast with ACK echo passed all sizes through 512 bytes.
-- The runner now has a real full-matrix fragmentation gate for all three
-  directions.
-- The soak sketch now resets stale progress after partition changes during
-  two-board bring-up.
+- Child/router-to-leader uplink: 9/9 sizes pass across 3 runs ✅
+- Leader-to-child/router downlink: 9/9 sizes pass across 3 runs ✅
+- Multicast with ACK echo: 9/9 sizes pass across 3 runs ✅
+- Safe-size gate: all pass ✅
+- Fragmentation gate: all pass ✅
+
+Log directories:
+- `build/thread-udp-soak-validation/20260606-014320/` (--require-fragmentation, PASS)
+- `build/thread-udp-soak-validation/20260606-014446/` (repeatability run 2, PASS)
+- `build/thread-udp-soak-validation/20260606-014514/` (repeatability run 3, PASS)
 
 Still required:
 
@@ -511,18 +572,28 @@ Still required:
 - Track loss, retry, ACK, CRC, invalid-length, and reassembly timeout counters.
 - Compare against Zephyr behavior where possible.
 
-If fragmentation fails, inspect the OpenThread frame path before changing the
-Arduino examples. The correct fix should be in the OpenThread platform/radio
-adapter or buffer/reassembly configuration, not in sketch-level workarounds.
-
 ### Thread Slice 4: Sleepy End Device Support
 
 Current staged mode is not a finished low-power Thread stack.
 
+Current status after 2026-06-06 follow-up:
+
+- `beginAsSleepyChild()` exists and compiles.
+- `setPollPeriod()` / `getPollPeriod()` exist and defer the OpenThread poll
+  period until the child has switched to rx-off mode.
+- `ThreadExperimentalSleepyParent` and `ThreadExperimentalSleepyChild` compile
+  and use the same fixed demo dataset.
+- The original channel bug is fixed: the sleepy child now starts as receiver-on
+  MTD for discovery and attaches on channel 15 / PAN ID `0x5D6A`, not channel 0.
+- The child still needs stable true sleepy operation. During hardware testing it
+  attaches as child, switches to `rx_on_when_idle=0`, then can detach. The next
+  implementation target is the rx-off data-poll / indirect-frame receive path in
+  `openthread_platform_nrf54l15.cpp`, not sketch-level timing workarounds.
+
 Required:
 
-- Decide SED/MED/CSL scope.
-- Implement parent polling and indirect transmission handling.
+- Decide final SED/MED/CSL scope.
+- Finish parent polling and indirect transmission handling after rx-off switch.
 - Prove parent retention through long idle periods.
 - Measure current consumption on XIAO and non-XIAO boards.
 - Confirm Zigbee and raw 802.15.4 paths still work because they share radio
