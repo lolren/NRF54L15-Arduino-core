@@ -1581,6 +1581,7 @@ struct ZigbeeFrame {
   uint8_t channel;
   int8_t rssiDbm;
   uint8_t length;
+  bool ackedWithFramePending;
   uint8_t psdu[127];
 };
 

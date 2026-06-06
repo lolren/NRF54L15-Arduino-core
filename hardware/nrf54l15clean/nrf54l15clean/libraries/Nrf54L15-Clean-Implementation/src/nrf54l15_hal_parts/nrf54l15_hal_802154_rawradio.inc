@@ -616,6 +616,7 @@ bool ZigbeeRadio::pushBufferedReceiveFrameFromPacket(const uint8_t* packet,
   queued.channel = channel_;
   queued.rssiDbm = rssiDbm;
   queued.length = length;
+  queued.ackedWithFramePending = false;
   memcpy(queued.psdu, &packet[1], length);
 
   bufferedRxQueueTail_ = static_cast<uint8_t>(
@@ -779,12 +780,16 @@ bool ZigbeeRadio::serviceBufferedReceiveIrq() {
         lastReceiveDebug_.filteredCount++;
         lastReceiveDebug_.lastLength = length;
       } else {
+        bool ackedWithFramePending = false;
         if (acknowledgementRequested && !preparedAcknowledgementMatches) {
           const bool framePending =
               shouldSetMacAckFramePending(&packet[1], length);
           (void)sendMacAcknowledgementAfterRxEnd(acknowledgementSequence,
                                                  framePending, 12000UL);
+          ackedWithFramePending = framePending;
           radioSettledForRearm = true;
+        } else if (preparedAcknowledgementMatches) {
+          ackedWithFramePending = bufferedRxAckFramePending_;
         }
 
         if (bufferedRxQueueCount_ >= kBufferedRxFrameQueueDepth) {
@@ -794,6 +799,7 @@ bool ZigbeeRadio::serviceBufferedReceiveIrq() {
           queued.channel = channel_;
           queued.rssiDbm = rssiDbm;
           queued.length = length;
+          queued.ackedWithFramePending = ackedWithFramePending;
           memcpy(queued.psdu, &packet[1], length);
           bufferedRxQueueTail_ = static_cast<uint8_t>(
               (bufferedRxQueueTail_ + 1U) % kBufferedRxFrameQueueDepth);
@@ -939,12 +945,14 @@ bool ZigbeeRadio::pollReceive(ZigbeeFrame* frame, uint32_t spinLimit) {
   frame->channel = channel_;
   frame->rssiDbm = rssiDbm;
   frame->length = length;
+  frame->ackedWithFramePending = false;
   memcpy(frame->psdu, &rxPacket_[1], length);
   lastReceiveDebug_.rxDoneCount++;
   lastReceiveDebug_.lastLength = length;
   if (sendAcknowledgement && macAckResponseEnabled_) {
     const bool framePending =
         shouldSetMacAckFramePending(&rxPacket_[1], length);
+    frame->ackedWithFramePending = framePending;
     (void)sendMacAcknowledgement(acknowledgementSequence, framePending,
                                  spinLimit);
   }
@@ -1289,6 +1297,7 @@ bool ZigbeeRadio::transmitThenReceive(const uint8_t* psdu, uint8_t length,
     frame->channel = channel_;
     frame->rssiDbm = rssiDbm;
     frame->length = rxLength;
+    frame->ackedWithFramePending = false;
     memcpy(frame->psdu, &rxPacket_[1], rxLength);
     lastTransmitDebug_.ackReceived =
         (!lastTransmitDebug_.ackRequested || !awaitingMacAcknowledgement);
@@ -1299,6 +1308,7 @@ bool ZigbeeRadio::transmitThenReceive(const uint8_t* psdu, uint8_t length,
     if (sendAcknowledgement && macAckResponseEnabled_) {
       const bool framePending =
           shouldSetMacAckFramePending(&rxPacket_[1], rxLength);
+      frame->ackedWithFramePending = framePending;
       (void)sendMacAcknowledgement(responseAckSequence, framePending, spinLimit);
     }
     clearRadioCoreEvents(radio_);
@@ -1417,6 +1427,53 @@ void ZigbeeRadio::setMacFrameReceiveFilterCallback(
   macFrameReceiveFilterContext_ = context;
 }
 
+namespace {
+constexpr uint16_t kMacFcfSecurityEnabled = 1U << 3U;
+constexpr uint16_t kMacFcfSequenceSuppression = 1U << 8U;
+constexpr uint8_t kMacSecurityLevelMask = 0x07U;
+constexpr uint8_t kMacKeyIdModeMask = 0x18U;
+constexpr uint8_t kMacKeyIdMode0 = 0U << 3U;
+constexpr uint8_t kMacKeyIdMode1 = 1U << 3U;
+constexpr uint8_t kMacKeyIdMode2 = 2U << 3U;
+constexpr uint8_t kMacKeyIdMode3 = 3U << 3U;
+
+bool skipMacAuxSecurityHeader(const uint8_t* psdu, uint8_t length,
+                              size_t* index) {
+  if (psdu == nullptr || index == nullptr || *index >= length) {
+    return false;
+  }
+
+  const uint8_t securityControl = psdu[*index];
+  if ((securityControl & kMacSecurityLevelMask) == 0U) {
+    return false;
+  }
+
+  size_t headerSize = 1U + 4U;
+  switch (securityControl & kMacKeyIdModeMask) {
+    case kMacKeyIdMode0:
+      break;
+    case kMacKeyIdMode1:
+      headerSize += 1U;
+      break;
+    case kMacKeyIdMode2:
+      headerSize += 4U + 1U;
+      break;
+    case kMacKeyIdMode3:
+      headerSize += 8U + 1U;
+      break;
+    default:
+      return false;
+  }
+
+  if ((length - *index) < headerSize) {
+    return false;
+  }
+
+  *index += headerSize;
+  return true;
+}
+}  // namespace
+
 bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
                                               uint8_t length) const {
   if (psdu == nullptr || length < 4U) {
@@ -1434,12 +1491,15 @@ bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
   }
 
   const bool panCompression = ((frameControl >> 6U) & 0x1U) != 0U;
+  const bool securityEnabled = (frameControl & kMacFcfSecurityEnabled) != 0U;
+  const bool sequenceSuppressed =
+      (frameControl & kMacFcfSequenceSuppression) != 0U;
   const uint8_t destinationMode =
       static_cast<uint8_t>((frameControl >> 10U) & 0x03U);
   const uint8_t sourceMode =
       static_cast<uint8_t>((frameControl >> 14U) & 0x03U);
 
-  size_t index = 3U;
+  size_t index = sequenceSuppressed ? 2U : 3U;
   if (destinationMode != 0U) {
     if (length < (index + 2U)) {
       return false;
@@ -1459,14 +1519,23 @@ bool ZigbeeRadio::shouldSetMacAckFramePending(const uint8_t* psdu,
   }
 
   if (sourceMode == 0x02U) {
+    if (length < (index + 2U)) {
+      return false;
+    }
     index += 2U;
   } else if (sourceMode == 0x03U) {
+    if (length < (index + 8U)) {
+      return false;
+    }
     index += 8U;
   } else {
     return false;
   }
 
-  if (length < (index + 1U)) {
+  if (securityEnabled && !skipMacAuxSecurityHeader(psdu, length, &index)) {
+    return false;
+  }
+  if (length <= index) {
     return false;
   }
 

@@ -76,6 +76,17 @@ constexpr otRadioCaps kThreadRadioCaps =
                              OT_RADIO_CAPS_ALT_SHORT_ADDR);
 constexpr uint8_t kIeee802154FrameTypeCommand = 0x03U;
 constexpr uint8_t kIeee802154MacCommandDataRequest = 0x04U;
+constexpr uint16_t kIeee802154FcfSecurityEnabled = 1U << 3U;
+constexpr uint16_t kIeee802154FcfSequenceSuppression = 1U << 8U;
+constexpr uint8_t kIeee802154SecurityLevelMask = 0x07U;
+constexpr uint8_t kIeee802154KeyIdModeMask = 0x18U;
+constexpr uint8_t kIeee802154KeyIdMode0 = 0U << 3U;
+constexpr uint8_t kIeee802154KeyIdMode1 = 1U << 3U;
+constexpr uint8_t kIeee802154KeyIdMode2 = 2U << 3U;
+constexpr uint8_t kIeee802154KeyIdMode3 = 3U << 3U;
+constexpr uint8_t kIeee802154SecurityControlSize = 1U;
+constexpr uint8_t kIeee802154FrameCounterSize = 4U;
+constexpr uint8_t kIeee802154KeyIndexSize = 1U;
 constexpr otPanId kDiagDefaultPanId = 0x1234U;
 constexpr otShortAddress kDiagBroadcastShort = 0xFFFFU;
 constexpr otShortAddress kDiagInvalidShort = OT_RADIO_INVALID_SHORT_ADDR;
@@ -941,6 +952,43 @@ otError clearThreadSrcMatchExt(OpenThreadPlatformState& state,
   return OT_ERROR_NO_ADDRESS;
 }
 
+bool skipThreadMacAuxSecurityHeader(const uint8_t* psdu, uint8_t length,
+                                    size_t* index) {
+  if (psdu == nullptr || index == nullptr || *index >= length) {
+    return false;
+  }
+
+  const uint8_t securityControl = psdu[*index];
+  if ((securityControl & kIeee802154SecurityLevelMask) == 0U) {
+    return false;
+  }
+
+  size_t headerSize =
+      kIeee802154SecurityControlSize + kIeee802154FrameCounterSize;
+  switch (securityControl & kIeee802154KeyIdModeMask) {
+    case kIeee802154KeyIdMode0:
+      break;
+    case kIeee802154KeyIdMode1:
+      headerSize += kIeee802154KeyIndexSize;
+      break;
+    case kIeee802154KeyIdMode2:
+      headerSize += 4U + kIeee802154KeyIndexSize;
+      break;
+    case kIeee802154KeyIdMode3:
+      headerSize += 8U + kIeee802154KeyIndexSize;
+      break;
+    default:
+      return false;
+  }
+
+  if ((length - *index) < headerSize) {
+    return false;
+  }
+
+  *index += headerSize;
+  return true;
+}
+
 bool parseThreadMacDataRequestSource(const uint8_t* psdu, uint8_t length,
                                      ThreadMacDataRequestSource* outSource) {
   if (outSource == nullptr) {
@@ -957,7 +1005,10 @@ bool parseThreadMacDataRequestSource(const uint8_t* psdu, uint8_t length,
   }
 
   const bool panCompression = ((frameControl >> 6U) & 0x1U) != 0U;
-  const bool sequenceSuppressed = ((frameControl >> 8U) & 0x1U) != 0U;
+  const bool securityEnabled =
+      (frameControl & kIeee802154FcfSecurityEnabled) != 0U;
+  const bool sequenceSuppressed =
+      (frameControl & kIeee802154FcfSequenceSuppression) != 0U;
   const uint8_t destinationMode =
       static_cast<uint8_t>((frameControl >> 10U) & 0x03U);
   const uint8_t sourceMode =
@@ -986,14 +1037,14 @@ bool parseThreadMacDataRequestSource(const uint8_t* psdu, uint8_t length,
   }
 
   if (sourceMode == 0x02U) {
-    if (length < (index + 2U + 1U)) {
+    if (length < (index + 2U)) {
       return false;
     }
     outSource->shortAddress = true;
     outSource->shortValue = readLe16(&psdu[index]);
     index += 2U;
   } else if (sourceMode == 0x03U) {
-    if (length < (index + sizeof(outSource->extValue.m8) + 1U)) {
+    if (length < (index + sizeof(outSource->extValue.m8))) {
       return false;
     }
     memcpy(outSource->extValue.m8, &psdu[index], sizeof(outSource->extValue.m8));
@@ -1002,6 +1053,12 @@ bool parseThreadMacDataRequestSource(const uint8_t* psdu, uint8_t length,
     return false;
   }
 
+  if (securityEnabled && !skipThreadMacAuxSecurityHeader(psdu, length, &index)) {
+    return false;
+  }
+  if (length <= index) {
+    return false;
+  }
   if (psdu[index] != kIeee802154MacCommandDataRequest) {
     return false;
   }
@@ -2313,7 +2370,8 @@ bool captureThreadRadioReceivedFrame(otInstance* instance,
   entry.frame.mChannel = frame.channel;
   entry.frame.mInfo.mRxInfo.mRssi = frame.rssiDbm;
   entry.frame.mInfo.mRxInfo.mLqi = 0U;
-  entry.frame.mInfo.mRxInfo.mAckedWithFramePending = false;
+  entry.frame.mInfo.mRxInfo.mAckedWithFramePending =
+      frame.ackedWithFramePending;
   entry.frame.mInfo.mRxInfo.mAckedWithSecEnhAck = false;
   entry.frame.mInfo.mRxInfo.mAckFrameCounter = 0U;
   entry.frame.mInfo.mRxInfo.mAckKeyId = 0U;

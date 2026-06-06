@@ -316,15 +316,16 @@ void Nrf54ThreadExperimental::process() {
     }
   }
 
-  // Sleepy child attaches first as receiver-on MTD so parent discovery can run
-  // normally. After OpenThread reaches child role, maybeSwitchToSleepyMode()
-  // changes the mode to rxOnWhenIdle=false.
+  // Sleepy children must attach as rx-off from the start. OpenThread records
+  // the initial child attach mode and intentionally re-attaches if a child that
+  // first attached as rx-on later switches to rx-off.
   if (instance_ != nullptr && sleepyChild && datasetApplied_ && !linkConfigured_ &&
       elapsedMs >= kStageIp6EnableDelayMs) {
-    const otLinkModeConfig mode = {true, false, true};
+    const otLinkModeConfig mode = {false, false, true};
     lastError_ = otThreadSetLinkMode(instance_, mode);
     if (lastError_ == OT_ERROR_NONE) {
       linkConfigured_ = true;
+      sleepyModeActive_ = true;
       lastError_ = otIp6SetEnabled(instance_, true);
       ip6Enabled_ = (lastError_ == OT_ERROR_NONE);
     }
@@ -1795,20 +1796,6 @@ bool Nrf54ThreadExperimental::maybeSwitchToSleepyMode() {
   const otDeviceRole currentRole = otThreadGetDeviceRole(instance_);
   if (currentRole != OT_DEVICE_ROLE_CHILD) {
     sleepyChildObservedMs_ = 0U;
-    if (currentRole == OT_DEVICE_ROLE_DETACHED && linkConfigured_) {
-      const otLinkModeConfig currentMode = otThreadGetLinkMode(instance_);
-      if (!currentMode.mRxOnWhenIdle || currentMode.mDeviceType) {
-        const otLinkModeConfig attachMode = {true, false, true};
-        const otError modeError = otThreadSetLinkMode(instance_, attachMode);
-        if (modeError == OT_ERROR_NONE) {
-          sleepyModeActive_ = false;
-          pollPeriodApplied_ = false;
-          lastError_ = OT_ERROR_NONE;
-        } else {
-          lastError_ = modeError;
-        }
-      }
-    }
     return false;
   }
 

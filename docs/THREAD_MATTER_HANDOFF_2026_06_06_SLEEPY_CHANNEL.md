@@ -8,11 +8,11 @@ child channel issue, and validating the nearby Thread examples.
 
 - Added/finished `Nrf54ThreadExperimental::beginAsSleepyChild()`.
 - Added `Nrf54ThreadExperimental::setPollPeriod()` and `getPollPeriod()`.
-- Sleepy child attach now starts as receiver-on MTD (`rxOnWhenIdle=true`,
-  `deviceType=false`, `networkData=true`) before IP6/Thread enable.
-- After the child reaches child role and remains there for the settle interval,
-  `maybeSwitchToSleepyMode()` switches to true sleepy MTD
-  (`rxOnWhenIdle=false`, `deviceType=false`).
+- Sleepy child attach now starts directly as true sleepy MTD
+  (`rxOnWhenIdle=false`, `deviceType=false`, `networkData=true`) before
+  IP6/Thread enable. This matches OpenThread's expected SED attach path and
+  avoids the intentional reattach behavior triggered when changing from rx-on
+  MTD to rx-off MTD after attachment.
 - The original report issue is fixed: the sleepy child no longer remains on
   radio channel 0. Hardware logs show it attaches on channel 15 with PAN ID
   `0x5D6A`.
@@ -29,6 +29,13 @@ child channel issue, and validating the nearby Thread examples.
   detach/reattach instead of `stop()` followed by a second `beginAsRouter()`.
   `stop()` intentionally does not clear `beginCalled_`, so the old example path
   failed to restart.
+- Propagated MAC ACK Frame Pending status from the nRF54 raw 802.15.4 receive
+  path into OpenThread's `mAckedWithFramePending` field. OpenThread depends on
+  this flag to enter its data-poll receive window.
+- Fixed secure MAC data-poll source matching in both the HAL ACK prefilter and
+  the OpenThread platform callback parser. OpenThread data polls are
+  security-enabled MAC command frames, so the command byte is after the aux
+  security header, not immediately after the source address.
 
 ## Validation Run
 
@@ -120,55 +127,51 @@ Child:
   attached=1 observed
   channel=15 observed
   pan=0x5D6A observed
-  rx_on_when_idle=1 during attach
-  rx_on_when_idle=0 after sleepy switch observed
+  rx_on_when_idle=0 observed
 ```
 
 The channel bug from the session report is therefore fixed.
 
-## Remaining Sleepy Child Issue
+## Sleepy Child Stability Status
 
-The API and channel attach path are fixed, but true SED operation is not yet
-production-stable. In hardware logs, the child attaches, later switches from
-mode `0x0d` to `0x05` (`rx-on:no`, `ftd:no`, `full-net:yes`), then can detach.
-
-Likely next target:
+The direct rx-off attach path is now hardware-tested. After the HAL and
+OpenThread platform source-match fixes, a two-board 90 second serial soak showed
+the child stable as:
 
 ```text
-hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/openthread_platform_nrf54l15.cpp
+role=child
+attached=1
+channel=15
+pan=0x5D6A
+short=0xC801
+rx_on_when_idle=0
 ```
 
-Spec and code path to inspect:
+The earlier failure mode was:
 
-- `openthread/platform/radio.h` says that after a Data Request ACK with Frame
-  Pending set, the radio platform should keep the receiver on until a bounded
-  data-poll timeout.
-- OpenThread uses `OPENTHREAD_CONFIG_MAC_DATA_POLL_TIMEOUT`, default 100 ms.
-- In `third_party/openthread-core/src/core/mac/mac.cpp`, data-poll TX done with
-  ACK frame pending calls `StartOperation(kOperationWaitingForData)`, then
-  `PerformNextOperation()` starts `mLinks.Receive(mRadioChannel)`.
-- In this platform, `otPlatRadioReceive()` can start a non-buffered receive when
-  `radioRxOnWhenIdle=false`, so the receive path exists.
-- The remaining work is to prove the platform catches the parent response during
-  that rx-off data-poll window and does not prematurely cancel or sleep the
-  radio.
+```text
+Mle: Send Child ID Request
+Mac: Sent data poll, fp:no
+Attach attempt N unsuccessful
+```
 
-Do not fix this by keeping rx-on forever or adding sketch delays. That would
-hide the bug and destroy SED power behavior.
+Root cause:
 
-Suggested next debug instrumentation:
+- The child was correctly sending secured MAC data-poll command frames.
+- The parent HAL prefilter rejected those frames because it expected command ID
+  `0x04` immediately after the source address.
+- OpenThread's MAC frame builder inserts the aux security header before the
+  command byte for the default Thread data-poll path.
+- Because the platform callback was not reached, source-match never set Frame
+  Pending in the parent ACK, so the child never received the pending Child ID
+  response.
 
-- Add snapshot counters for:
-  - data-poll TX frame detected
-  - TX ACK frame pending detected
-  - `kOperationWaitingForData` receive entered via `otPlatRadioReceive()`
-  - non-buffered rx-off receive start success/failure
-  - receive-at timeout versus normal poll timeout
-- Expose those counters in `OpenThreadPlatformSkeletonSnapshot`.
-- Add them to `ThreadExperimentalSleepyChild` serial print and optional
-  `.noinit` marker array.
-- Run parent/child for at least 10 minutes with Serial disconnected for power
-  and connected for one diagnostic run.
+Current caveat:
+
+- The 90 second soak proves attach and short-term retention, not production SED
+  retention. The next validation should be a 10+ minute Serial-disconnected
+  soak plus parent-to-child indirect UDP after the child is already attached.
+  Do not regress this by forcing rx-on mode or adding sketch delays.
 
 ## Matter Status
 
@@ -192,4 +195,3 @@ commissioning has been validated end-to-end.
 4. Harden radio ownership across Thread/Zigbee/raw 802.15.4/BLE stage modes.
 5. Continue Matter only after Thread attach/reconnect/SED retention are stable,
    because Matter-on-Thread depends on those lower layers.
-
