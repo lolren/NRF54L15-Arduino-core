@@ -327,8 +327,10 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
   peerAddr_ = peerAddr;
   peerPort_ = peerPort;
 
-  // Generate random salt for PBKDF2
-  generateRandom(session_.salt, sizeof(session_.salt));
+  // Generate random salt for PBKDF2.
+  if (!generateRandom(session_.salt, sizeof(session_.salt))) {
+    return false;
+  }
   session_.pbkdf2Iterations = kMatterSpake2pPbkdf2Iterations;
 
   // Derive w0 and w1 from passcode
@@ -354,7 +356,9 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
   verifier_.iterations = session_.pbkdf2Iterations;
   verifier_.valid = true;
 
-  generateRandom(session_.initiateRandom, sizeof(session_.initiateRandom));
+  if (!generateRandom(session_.initiateRandom, sizeof(session_.initiateRandom))) {
+    return false;
+  }
   session_.localSessionId = static_cast<uint16_t>(
       (session_.initiateRandom[0] << 8U) | session_.initiateRandom[1]);
   if (session_.localSessionId == 0U) {
@@ -406,7 +410,9 @@ bool MatterPaseCommissioning::sendPbkdfParamResponse(
     return false;
   }
 
-  generateRandom(session_.respondRandom, sizeof(session_.respondRandom));
+  if (!generateRandom(session_.respondRandom, sizeof(session_.respondRandom))) {
+    return false;
+  }
   session_.localSessionId = static_cast<uint16_t>(
       (session_.respondRandom[0] << 8U) | session_.respondRandom[1]);
   if (session_.localSessionId == 0U) {
@@ -462,19 +468,17 @@ bool MatterPaseCommissioning::initiateSpake2p(
   peerAddr_ = peerAddr;
   peerPort_ = peerPort;
 
-  // Compute X = x*G + w0*G = (x + w0)*G as commissionee (prover)
-  // But we're the commissioner (verifier), so compute Y
-  // Actually in Matter PASE:
-  // - Initiator (commissioner) sends spake2p1 with X
-  // - Responder (commissionee) sends spake2p2 with Y + cB
+  // Initiator (commissioner/verifier) computes X = (y + w0)*G
+  // In Matter PASE:
+  // - Initiator sends spake2p1 with X
+  // - Responder sends spake2p2 with Y + cB
   // - Initiator sends spake2p3 with cA
-  // Both sides must compute their contribution
 
-  if (!computeSpake2pY()) {
+  if (!computeSpake2pX()) {
     return false;
   }
 
-  // Build spake2p1 message containing Y
+  // Build spake2p1 message containing X
   MatterMessageHeader header = {};
   header.exchangeFlags =
       static_cast<uint8_t>(MatterMessageExchangeFlags::kInitiator) |
@@ -487,7 +491,7 @@ bool MatterPaseCommissioning::initiateSpake2p(
       static_cast<uint8_t>(MatterMessageType::kPaseSpake2p1);
 
   const bool ok = sendMessage(peerAddr, peerPort, header,
-                              session_.Y, sizeof(session_.Y));
+                              session_.X, sizeof(session_.X));
   if (ok) {
     session_.state = MatterCommissioningState::kPaseSpake2pInProgress;
   }
@@ -520,10 +524,7 @@ bool MatterPaseCommissioning::computeSpake2pX() {
   Secp256r1Scalar xScalar;
   Secp256r1::generateRandomScalar(&xScalar);
 
-  uint8_t xPadded[32] = {0};
-  memcpy(xPadded, xScalar.bytes, sizeof(xScalar.bytes));
-
-  // x + w0 (mod n)
+  // y + w0 (mod n)
   Secp256r1::BigNum256 xBn, w0Bn, sumBn;
   memcpy(xBn.w, xScalar.bytes, sizeof(xBn.w));
   memcpy(w0Bn.w, session_.w0, sizeof(w0Bn.w));
@@ -546,17 +547,20 @@ bool MatterPaseCommissioning::computeSpake2pX() {
     return false;
   }
 
+  // Store ephemeral scalar for later Z computation
+  memcpy(session_.ephemeralScalar, xScalar.bytes, sizeof(xScalar.bytes));
+
   Secp256r1::encodeUncompressed(Xpoint, session_.X);
   return true;
 }
 
 bool MatterPaseCommissioning::computeSpake2pY() {
-  // Verifier (commissioner) computes:
-  // Y = y*G + w0*G = (y + w0)*G
+  // Responder (commissionee/prover) computes:
+  // Y = (x + w0)*G
   Secp256r1Scalar yScalar;
   Secp256r1::generateRandomScalar(&yScalar);
 
-  // y + w0 (mod n)
+  // x + w0 (mod n)
   Secp256r1::BigNum256 yBn, w0Bn, sumBn;
   memcpy(yBn.w, yScalar.bytes, sizeof(yBn.w));
   memcpy(w0Bn.w, session_.w0, sizeof(w0Bn.w));
@@ -578,19 +582,24 @@ bool MatterPaseCommissioning::computeSpake2pY() {
     return false;
   }
 
+  // Store ephemeral scalar for later Z computation
+  memcpy(session_.ephemeralScalar, yScalar.bytes, sizeof(yScalar.bytes));
+
   Secp256r1::encodeUncompressed(Ypoint, session_.Y);
   return true;
 }
 
 bool MatterPaseCommissioning::computeSpake2pZ(bool prover) {
   // Both sides compute:
-  // Z = x * (Y - w0*G)  (prover using x, peer's Y)
-  // Z = y * (X - w0*G)  (verifier using y, peer's X)
-  // Since X = (x+w0)*G and Y = (y+w0)*G:
+  // Z = x * (X - w0*G)  (prover: x is prover's ephemeral, X is initiator's point)
+  // Z = y * (Y - w0*G)  (verifier: y is verifier's ephemeral, Y is responder's point)
+  // Since X = (y+w0)*G and Y = (x+w0)*G:
   //   Z = x*y*G = y*x*G (same for both!)
+  //
+  // V = w1 * (peerPoint - w0*G)
 
   // Decode peer's point
-  const uint8_t* peerPoint = prover ? session_.Y : session_.X;
+  const uint8_t* peerPoint = prover ? session_.X : session_.Y;
   Secp256r1Point peerP;
   if (!Secp256r1::decodeUncompressed(peerPoint, &peerP)) {
     return false;
@@ -604,11 +613,10 @@ bool MatterPaseCommissioning::computeSpake2pZ(bool prover) {
     return false;
   }
 
-  // Compute Y' = peerP - w0*G = peerP + (-w0*G)
-  // To negate: (x, y) -> (x, -y mod p)
+  // Compute peerMinusW0 = peerP - w0*G = peerP + (-w0*G)
+  // To negate: (x, y) -> (x, p - y)
   Secp256r1Point negW0G;
   memcpy(negW0G.x, w0G.x, sizeof(negW0G.x));
-  // negate y: -y mod p = p - y (if y != 0)
   Secp256r1::BigNum256 pVal = Secp256r1::primeP();
   Secp256r1::BigNum256 yNeg;
   memcpy(yNeg.w, w0G.y, sizeof(yNeg.w));
@@ -620,22 +628,27 @@ bool MatterPaseCommissioning::computeSpake2pZ(bool prover) {
     return false;
   }
 
-  // Z = secret * peerMinusW0
-  // Generate a new scalar for the ephemeral key. For simplicity, re-derive.
-  // Actually, we need to keep the same x/y from before.
-  // The protocol preserves the ephemeral through the randomness.
-  // For now, use a fresh random and verify later.
-  // In a real implementation, we'd keep the original x/y.
-  // Let me simplify: just use the session random for Z derivation.
-  Secp256r1Scalar zScalar;
-  Secp256r1::generateRandomScalar(&zScalar);
+  // Z = ephemeralScalar * peerMinusW0
+  // Reuse the ephemeral scalar (x or y) stored during X/Y computation
+  Secp256r1Scalar ephemeral;
+  memcpy(ephemeral.bytes, session_.ephemeralScalar, sizeof(ephemeral.bytes));
 
   Secp256r1Point Zpoint;
-  if (!Secp256r1::scalarMultiply(zScalar, peerMinusW0, &Zpoint)) {
+  if (!Secp256r1::scalarMultiply(ephemeral, peerMinusW0, &Zpoint)) {
     return false;
   }
-
   Secp256r1::encodeUncompressed(Zpoint, session_.Z);
+
+  // V = w1 * peerMinusW0 (same computation for both sides)
+  Secp256r1Scalar w1Scalar;
+  memcpy(w1Scalar.bytes, session_.w1, sizeof(w1Scalar.bytes));
+
+  Secp256r1Point Vpoint;
+  if (!Secp256r1::scalarMultiply(w1Scalar, peerMinusW0, &Vpoint)) {
+    return false;
+  }
+  Secp256r1::encodeUncompressed(Vpoint, session_.V);
+
   return true;
 }
 
@@ -664,23 +677,14 @@ bool MatterPaseCommissioning::deriveSharedSecret() {
 }
 
 bool MatterPaseCommissioning::generateConfirmationA() {
-  // cA = HMAC(ke, "SPAKE2P Key Confirmation" || Y || X)
+  // cA = HMAC(ke, "SPAKE2P Key Confirmation" || X || Y)
   const char* context = kSpake2pContextAlpha;
   size_t contextLen = strlen(context);
 
   uint8_t message[kMatterSpake2pPointSize * 2] = {0};
-  if (initiator_) {
-    memcpy(message, session_.Y, sizeof(session_.Y));
-    memcpy(message + sizeof(session_.Y), session_.X, sizeof(session_.X));
-  } else {
-    memcpy(message, session_.X, sizeof(session_.X));
-    memcpy(message + sizeof(session_.X), session_.Y, sizeof(session_.Y));
-  }
-
-  MatterPbkdf2::hmacSha256(session_.ke, sizeof(session_.ke),
-                            reinterpret_cast<const uint8_t*>(context),
-                            contextLen,
-                            session_.cA);
+  // Always: X (initiator's point) || Y (responder's point)
+  memcpy(message, session_.X, sizeof(session_.X));
+  memcpy(message + sizeof(session_.X), session_.Y, sizeof(session_.Y));
 
   // Full cA = HMAC(ke, context || message)
   uint8_t fullMsg[kMatterSpake2pPointSize * 2 + 32] = {0};
@@ -700,13 +704,9 @@ bool MatterPaseCommissioning::generateConfirmationB() {
   size_t contextLen = strlen(context);
 
   uint8_t message[kMatterSpake2pPointSize * 2] = {0};
-  if (initiator_) {
-    memcpy(message, session_.Y, sizeof(session_.Y));
-    memcpy(message + sizeof(session_.Y), session_.X, sizeof(session_.X));
-  } else {
-    memcpy(message, session_.X, sizeof(session_.X));
-    memcpy(message + sizeof(session_.X), session_.Y, sizeof(session_.Y));
-  }
+  // Always: X (initiator's point) || Y (responder's point)
+  memcpy(message, session_.X, sizeof(session_.X));
+  memcpy(message + sizeof(session_.X), session_.Y, sizeof(session_.Y));
 
   uint8_t fullMsg[kMatterSpake2pPointSize * 2 + 32] = {0};
   memcpy(fullMsg, context, contextLen);
@@ -720,17 +720,11 @@ bool MatterPaseCommissioning::generateConfirmationB() {
 }
 
 bool MatterPaseCommissioning::verifyConfirmationB() {
-  uint8_t expected[kMatterSpake2pConfirmationSize] = {0};
-  // Re-compute cB
-  if (!generateConfirmationB()) {
-    return false;
-  }
-  // We need expected = computed cB; session_.cB was set by generateConfirmationB
-  // Compare with received cB (stored in session_.cB before calling generateConfirmationB)
-  // Actually, session_.cB gets overwritten. Let me save it first.
+  // Save received cB before it gets overwritten by re-computation
   uint8_t receivedCB[kMatterSpake2pConfirmationSize] = {0};
   memcpy(receivedCB, session_.cB, sizeof(receivedCB));
 
+  // Re-compute cB
   if (!generateConfirmationB()) {
     return false;
   }
@@ -738,8 +732,8 @@ bool MatterPaseCommissioning::verifyConfirmationB() {
   uint8_t computedCB[kMatterSpake2pConfirmationSize] = {0};
   memcpy(computedCB, session_.cB, sizeof(computedCB));
 
-  // Restore received
-  memcpy(session_.cB, receivedCB, sizeof(session_.cB));
+  // Restore received cB
+  memcpy(session_.cB, receivedCB, sizeof(receivedCB));
 
   return memcmp(computedCB, receivedCB, sizeof(computedCB)) == 0;
 }
@@ -911,13 +905,13 @@ void MatterPaseCommissioning::handleSpake2p1(
     return;
   }
 
-  // Store peer's Y point (commissioner sent Y in spake2p1)
+  // Store peer's X point (commissioner sent X in spake2p1)
   if (length >= kMatterSpake2pPointSize) {
-    memcpy(session_.Y, payload, kMatterSpake2pPointSize);
+    memcpy(session_.X, payload, kMatterSpake2pPointSize);
   }
 
-  // Commissionee (prover): compute X and Z
-  if (!computeSpake2pX()) {
+  // Commissionee (prover): compute Y and Z
+  if (!computeSpake2pY()) {
     advanceState(MatterCommissioningState::kFailed);
     return;
   }
@@ -927,12 +921,7 @@ void MatterPaseCommissioning::handleSpake2p1(
     return;
   }
 
-  // Compute V (prover) = w1 * (Y - w0*G) for shared secret
-  // Actually for SPAKE2+:
-  // Both sides compute V differently:
-  // Prover: V = w1 * (Y - w0*G) — but w1 is the prover's secret
-  // Verifier: V = w1 * (X - w0*G) — but w1*G = L is known
-  // For shared secret, we just use Z for now.
+  // Z and V are already computed in computeSpake2pZ()
 
   if (!deriveSharedSecret()) {
     advanceState(MatterCommissioningState::kFailed);
@@ -944,11 +933,11 @@ void MatterPaseCommissioning::handleSpake2p1(
     return;
   }
 
-  // Send spake2p2: X || cB
+  // Send spake2p2: Y || cB
   uint8_t spake2p2Payload[kMatterSpake2pPointSize +
                           kMatterSpake2pConfirmationSize] = {0};
-  memcpy(spake2p2Payload, session_.X, sizeof(session_.X));
-  memcpy(spake2p2Payload + sizeof(session_.X), session_.cB,
+  memcpy(spake2p2Payload, session_.Y, sizeof(session_.Y));
+  memcpy(spake2p2Payload + sizeof(session_.Y), session_.cB,
          sizeof(session_.cB));
 
   MatterMessageHeader header = {};
@@ -978,9 +967,9 @@ void MatterPaseCommissioning::handleSpake2p2(
     return;
   }
 
-  // Parse X and cB
-  memcpy(session_.X, payload, sizeof(session_.X));
-  memcpy(session_.cB, payload + sizeof(session_.X), sizeof(session_.cB));
+  // Parse Y and cB
+  memcpy(session_.Y, payload, sizeof(session_.Y));
+  memcpy(session_.cB, payload + sizeof(session_.Y), sizeof(session_.cB));
 
   // Verifier (commissioner): compute Z
   if (!computeSpake2pZ(false)) {  // false = verifier
@@ -1192,24 +1181,14 @@ uint16_t MatterPaseCommissioning::nextMessageId() {
   return localMessageId_;
 }
 
-void MatterPaseCommissioning::generateRandom(uint8_t* output,
+bool MatterPaseCommissioning::generateRandom(uint8_t* output,
                                              size_t length) {
   if (output == nullptr) {
-    return;
+    return false;
   }
 
-  static uint64_t state = 0;
-  if (state == 0) {
-    state = static_cast<uint64_t>(micros()) ^
-            (static_cast<uint64_t>(millis()) << 32U) ^
-            (static_cast<uint64_t>(
-                 *reinterpret_cast<const volatile uint32_t*>(0xFFC000A0UL)));
-  }
-
-  for (size_t i = 0; i < length; ++i) {
-    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
-    output[i] = static_cast<uint8_t>((state >> 32U) & 0xFFU);
-  }
+  MatterRng rng;
+  return rng.getRandomBytes(output, length, 400000UL);
 }
 
 void MatterPaseCommissioning::advanceState(

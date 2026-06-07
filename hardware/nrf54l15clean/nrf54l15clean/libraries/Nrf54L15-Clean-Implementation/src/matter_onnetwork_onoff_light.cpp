@@ -278,6 +278,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
 }
 
 void Nrf54MatterOnNetworkOnOffLightNode::end() {
+  clearSrpDiscoveryPublication();
   if (lightReady_) {
     light_.end();
     lightReady_ = false;
@@ -639,7 +640,6 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoverySummary(
 
   memset(outSummary, 0, sizeof(*outSummary));
   outSummary->valid = true;
-  outSummary->stagedOnly = true;
   outSummary->serviceType = foundation_.commissionableServiceType();
   outSummary->port = Nrf54MatterOnOffLightFoundation::kMatterUdpPort;
   outSummary->discriminator = identity_.discriminator;
@@ -654,6 +654,8 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoverySummary(
           ? MatterDiscoveryCommissioningMode::kBasicCommissioning
           : MatterDiscoveryCommissioningMode::kNotCommissioning;
   (void)foundation_.discoveryCapabilities(&outSummary->capabilities);
+  outSummary->stagedOnly =
+      !outSummary->capabilities.canRegisterCommissionableNode;
 
   const uint32_t instanceHigh =
       0x4E35344CUL ^ identity_.setupPinCode ^
@@ -715,8 +717,17 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoveryPublicationState(
   memset(outState, 0, sizeof(*outState));
   outState->attempted = discoveryPublicationAttempted_;
   outState->active = discoveryPublicationActive_;
-  outState->stagedOnly = true;
+  outState->stagedOnly = !discoveryPublicationBackendAvailable_;
   outState->backendAvailable = discoveryPublicationBackendAvailable_;
+  MatterFoundationDiscoveryCapabilities capabilities = {};
+  (void)foundation_.discoveryCapabilities(&capabilities);
+  outState->srpClientEnabled =
+      capabilities.srpClientEnabled && capabilities.ecdsaEnabled;
+  outState->srpServiceQueued = discoverySrpServiceQueued_;
+  outState->srpAutoStartEnabled = discoverySrpAutoStartEnabled_;
+  outState->srpRemovePending = discoverySrpRemovePending_;
+  outState->srpHostRegistered = discoverySrpHostRegistered_;
+  outState->srpServiceRegistered = discoverySrpServiceRegistered_;
   outState->commissioningWindowOpen = commissioningWindowOpen();
   outState->threadAttached = thread_.attached();
   outState->windowState = discoveryPublicationWindowState_;
@@ -725,6 +736,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoveryPublicationState(
   outState->recordsActive = discoveryPublicationRecordsActive_;
   outState->publishAttempts = discoveryPublicationAttempts_;
   outState->unpublishCount = discoveryPublicationUnpublishCount_;
+  outState->srpLastError = discoverySrpLastError_;
   setFixedText(outState->blockerName, sizeof(outState->blockerName),
                discoveryPublicationBlockerName_);
   return true;
@@ -743,7 +755,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::buildCommissionableDiscoveryRecord(
 
   memset(outRecord, 0, sizeof(*outRecord));
   outRecord->valid = summary.valid;
-  outRecord->stagedOnly = true;
+  outRecord->stagedOnly = summary.stagedOnly;
   outRecord->readyToRegister = summary.readyToRegister;
   outRecord->kind = MatterOnNetworkDiscoveryRecordKind::kCommissionable;
   outRecord->serviceType = summary.serviceType;
@@ -838,6 +850,298 @@ bool Nrf54MatterOnNetworkOnOffLightNode::buildDiscoveryRecords(
          buildOperationalDiscoveryRecord(&outRecords[1]);
 }
 
+#if defined(OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE) && \
+    (OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE != 0)
+bool Nrf54MatterOnNetworkOnOffLightNode::prepareSrpTxtEntries(
+    const MatterOnNetworkDiscoveryRecord& record) {
+  memset(srpTxtEntries_, 0, sizeof(srpTxtEntries_));
+  memset(srpTxtKeys_, 0, sizeof(srpTxtKeys_));
+  memset(srpTxtValues_, 0, sizeof(srpTxtValues_));
+
+  if (record.textEntryCount >
+      MatterOnNetworkDiscoveryRecord::kMaxTextEntries) {
+    return false;
+  }
+
+  for (size_t i = 0; i < record.textEntryCount; ++i) {
+    const char* text = record.textEntries[i].value;
+    if (text == nullptr || text[0] == '\0') {
+      return false;
+    }
+
+    const char* separator = strchr(text, '=');
+    const size_t keyLength =
+        separator != nullptr ? static_cast<size_t>(separator - text)
+                             : strlen(text);
+    if (keyLength == 0U || keyLength >= sizeof(srpTxtKeys_[i])) {
+      return false;
+    }
+
+    memcpy(srpTxtKeys_[i], text, keyLength);
+    srpTxtKeys_[i][keyLength] = '\0';
+    srpTxtEntries_[i].mKey = srpTxtKeys_[i];
+
+    if (separator != nullptr) {
+      const char* value = separator + 1;
+      if (strlen(value) >= sizeof(srpTxtValues_[i])) {
+        return false;
+      }
+      setFixedText(srpTxtValues_[i], sizeof(srpTxtValues_[i]), value);
+      srpTxtEntries_[i].mValue =
+          reinterpret_cast<const uint8_t*>(srpTxtValues_[i]);
+      srpTxtEntries_[i].mValueLength =
+          static_cast<uint16_t>(strlen(srpTxtValues_[i]));
+    }
+  }
+
+  return true;
+}
+
+bool Nrf54MatterOnNetworkOnOffLightNode::prepareSrpSubtypes(
+    const MatterOnNetworkDiscoveryRecord& record) {
+  memset(srpSubtypePointers_, 0, sizeof(srpSubtypePointers_));
+  memset(srpSubtypeLabels_, 0, sizeof(srpSubtypeLabels_));
+
+  if (record.subtypeCount >
+      MatterOnNetworkDiscoveryRecord::kMaxSubtypes) {
+    return false;
+  }
+
+  for (size_t i = 0; i < record.subtypeCount; ++i) {
+    const char* subtype = record.subtypes[i].value;
+    if (subtype == nullptr || subtype[0] == '\0' ||
+        strlen(subtype) >= sizeof(srpSubtypeLabels_[i])) {
+      return false;
+    }
+    setFixedText(srpSubtypeLabels_[i], sizeof(srpSubtypeLabels_[i]), subtype);
+    srpSubtypePointers_[i] = srpSubtypeLabels_[i];
+  }
+
+  srpSubtypePointers_[record.subtypeCount] = nullptr;
+  return true;
+}
+
+bool Nrf54MatterOnNetworkOnOffLightNode::publishCommissionableDiscoveryRecord(
+    const MatterOnNetworkDiscoveryRecord& record) {
+  if (!record.valid || !record.readyToRegister ||
+      record.serviceType == nullptr || record.port == 0U) {
+    discoverySrpLastError_ = static_cast<int>(OT_ERROR_INVALID_ARGS);
+    return false;
+  }
+
+  otInstance* instance = thread_.rawInstance();
+  if (instance == nullptr) {
+    discoverySrpLastError_ = static_cast<int>(OT_ERROR_INVALID_STATE);
+    return false;
+  }
+
+  if (discoverySrpRemovePending_) {
+    discoverySrpLastError_ = static_cast<int>(OT_ERROR_BUSY);
+    return false;
+  }
+
+  if (discoverySrpServiceQueued_) {
+    return true;
+  }
+
+  if (strlen(record.hostName) >= sizeof(srpHostName_) ||
+      strlen(record.instanceName) >= sizeof(srpInstanceName_) ||
+      !prepareSrpTxtEntries(record) || !prepareSrpSubtypes(record)) {
+    discoverySrpLastError_ = static_cast<int>(OT_ERROR_INVALID_ARGS);
+    return false;
+  }
+
+  otSrpClientClearHostAndServices(instance);
+  memset(&srpCommissionableService_, 0, sizeof(srpCommissionableService_));
+  setFixedText(srpHostName_, sizeof(srpHostName_), record.hostName);
+  setFixedText(srpInstanceName_, sizeof(srpInstanceName_), record.instanceName);
+
+  otSrpClientSetCallback(instance, onSrpClientCallback, this);
+  otSrpClientEnableAutoStartMode(instance, onSrpAutoStart, this);
+
+  otError error = otSrpClientSetHostName(instance, srpHostName_);
+  if (error != OT_ERROR_NONE) {
+    discoverySrpLastError_ = static_cast<int>(error);
+    return false;
+  }
+
+  error = otSrpClientEnableAutoHostAddress(instance);
+  if (error != OT_ERROR_NONE) {
+    discoverySrpLastError_ = static_cast<int>(error);
+    return false;
+  }
+
+  srpCommissionableService_.mName = record.serviceType;
+  srpCommissionableService_.mInstanceName = srpInstanceName_;
+  srpCommissionableService_.mSubTypeLabels =
+      record.subtypeCount > 0U ? srpSubtypePointers_ : nullptr;
+  srpCommissionableService_.mTxtEntries = srpTxtEntries_;
+  srpCommissionableService_.mPort = record.port;
+  srpCommissionableService_.mPriority = 0U;
+  srpCommissionableService_.mWeight = 0U;
+  srpCommissionableService_.mNumTxtEntries =
+      static_cast<uint8_t>(record.textEntryCount);
+  srpCommissionableService_.mLease = 0U;
+  srpCommissionableService_.mKeyLease = 0U;
+
+  error = otSrpClientAddService(instance, &srpCommissionableService_);
+  discoverySrpLastError_ = static_cast<int>(error);
+  if (error == OT_ERROR_NONE || error == OT_ERROR_ALREADY) {
+    discoverySrpServiceQueued_ = true;
+    discoverySrpRemovePending_ = false;
+    return true;
+  }
+
+  return false;
+}
+
+void Nrf54MatterOnNetworkOnOffLightNode::resetSrpDiscoveryBuffers() {
+  discoverySrpServiceQueued_ = false;
+  discoverySrpAutoStartEnabled_ = false;
+  discoverySrpRemovePending_ = false;
+  discoverySrpHostRegistered_ = false;
+  discoverySrpServiceRegistered_ = false;
+  memset(&srpCommissionableService_, 0, sizeof(srpCommissionableService_));
+  memset(srpHostName_, 0, sizeof(srpHostName_));
+  memset(srpInstanceName_, 0, sizeof(srpInstanceName_));
+  memset(srpTxtEntries_, 0, sizeof(srpTxtEntries_));
+  memset(srpTxtKeys_, 0, sizeof(srpTxtKeys_));
+  memset(srpTxtValues_, 0, sizeof(srpTxtValues_));
+  memset(srpSubtypePointers_, 0, sizeof(srpSubtypePointers_));
+  memset(srpSubtypeLabels_, 0, sizeof(srpSubtypeLabels_));
+}
+
+bool Nrf54MatterOnNetworkOnOffLightNode::requestSrpDiscoveryUnpublish(
+    bool sendUnregisterToServer) {
+  otInstance* instance = thread_.rawInstance();
+  if (instance == nullptr) {
+    resetSrpDiscoveryBuffers();
+    discoverySrpLastError_ = static_cast<int>(OT_ERROR_INVALID_STATE);
+    return false;
+  }
+
+  if (discoverySrpRemovePending_) {
+    return true;
+  }
+
+  const bool haveSrpState =
+      discoverySrpServiceQueued_ || discoverySrpHostRegistered_ ||
+      discoverySrpServiceRegistered_;
+  if (!haveSrpState) {
+    otSrpClientClearHostAndServices(instance);
+    resetSrpDiscoveryBuffers();
+    discoverySrpLastError_ = 0;
+    return true;
+  }
+
+  const otError error =
+      otSrpClientRemoveHostAndServices(instance, false, sendUnregisterToServer);
+  discoverySrpLastError_ = static_cast<int>(error);
+  if (error == OT_ERROR_NONE) {
+    discoverySrpServiceQueued_ = false;
+    discoverySrpRemovePending_ = true;
+    return true;
+  }
+  if (error == OT_ERROR_ALREADY) {
+    otSrpClientClearHostAndServices(instance);
+    resetSrpDiscoveryBuffers();
+    return true;
+  }
+
+  return false;
+}
+
+void Nrf54MatterOnNetworkOnOffLightNode::clearSrpDiscoveryPublication() {
+  (void)requestSrpDiscoveryUnpublish(false);
+}
+
+void Nrf54MatterOnNetworkOnOffLightNode::onSrpClientCallback(
+    otError error,
+    const otSrpClientHostInfo* hostInfo,
+    const otSrpClientService* services,
+    const otSrpClientService* removedServices,
+    void* context) {
+  (void)hostInfo;
+  (void)services;
+  (void)removedServices;
+  Nrf54MatterOnNetworkOnOffLightNode* self =
+      static_cast<Nrf54MatterOnNetworkOnOffLightNode*>(context);
+  if (self == nullptr) {
+    return;
+  }
+
+  self->discoverySrpLastError_ = static_cast<int>(error);
+
+  if (hostInfo != nullptr) {
+    self->discoverySrpHostRegistered_ =
+        hostInfo->mState == OT_SRP_CLIENT_ITEM_STATE_REGISTERED;
+  }
+
+  bool serviceRegistered = false;
+  for (const otSrpClientService* service = services; service != nullptr;
+       service = service->mNext) {
+    if (service == &self->srpCommissionableService_ &&
+        service->mState == OT_SRP_CLIENT_ITEM_STATE_REGISTERED) {
+      serviceRegistered = true;
+      break;
+    }
+  }
+  self->discoverySrpServiceRegistered_ = serviceRegistered;
+
+  bool serviceRemoved = false;
+  for (const otSrpClientService* service = removedServices; service != nullptr;
+       service = service->mNext) {
+    if (service == &self->srpCommissionableService_) {
+      serviceRemoved = true;
+      break;
+    }
+  }
+
+  if (self->discoverySrpRemovePending_ && error == OT_ERROR_NONE &&
+      (serviceRemoved || services == nullptr)) {
+    self->resetSrpDiscoveryBuffers();
+  }
+}
+
+void Nrf54MatterOnNetworkOnOffLightNode::onSrpAutoStart(
+    const otSockAddr* serverSockAddr,
+    void* context) {
+  Nrf54MatterOnNetworkOnOffLightNode* self =
+      static_cast<Nrf54MatterOnNetworkOnOffLightNode*>(context);
+  if (self == nullptr) {
+    return;
+  }
+
+  self->discoverySrpAutoStartEnabled_ = serverSockAddr != nullptr;
+}
+#else
+bool Nrf54MatterOnNetworkOnOffLightNode::publishCommissionableDiscoveryRecord(
+    const MatterOnNetworkDiscoveryRecord& record) {
+  (void)record;
+  return false;
+}
+
+void Nrf54MatterOnNetworkOnOffLightNode::clearSrpDiscoveryPublication() {
+  resetSrpDiscoveryBuffers();
+}
+
+bool Nrf54MatterOnNetworkOnOffLightNode::requestSrpDiscoveryUnpublish(
+    bool sendUnregisterToServer) {
+  (void)sendUnregisterToServer;
+  resetSrpDiscoveryBuffers();
+  return true;
+}
+
+void Nrf54MatterOnNetworkOnOffLightNode::resetSrpDiscoveryBuffers() {
+  discoverySrpServiceQueued_ = false;
+  discoverySrpAutoStartEnabled_ = false;
+  discoverySrpRemovePending_ = false;
+  discoverySrpHostRegistered_ = false;
+  discoverySrpServiceRegistered_ = false;
+  discoverySrpLastError_ = 0;
+}
+#endif
+
 bool Nrf54MatterOnNetworkOnOffLightNode::updateDiscoveryPublication() {
   MatterOnNetworkDiscoveryRecord records[2] = {};
   size_t recordCount = 0U;
@@ -865,8 +1169,11 @@ bool Nrf54MatterOnNetworkOnOffLightNode::updateDiscoveryPublication() {
   }
 
   MatterOnNetworkDiscoverySummary summary = {};
+  bool srpBackendAvailable = false;
   if (discoverySummary(&summary)) {
     backendAvailable = summary.capabilities.canRegisterCommissionableNode;
+    srpBackendAvailable =
+        summary.capabilities.srpClientEnabled && summary.capabilities.ecdsaEnabled;
     if (!backendAvailable && windowOpen) {
       blocker = summary.capabilities.blockerName != nullptr
                     ? summary.capabilities.blockerName
@@ -875,9 +1182,12 @@ bool Nrf54MatterOnNetworkOnOffLightNode::updateDiscoveryPublication() {
   }
 
   if (!windowOpen) {
-    if (discoveryPublicationActive_) {
+    if (discoveryPublicationActive_ || discoverySrpServiceQueued_ ||
+        discoverySrpHostRegistered_ || discoverySrpServiceRegistered_ ||
+        discoverySrpRemovePending_) {
       ++discoveryPublicationUnpublishCount_;
     }
+    (void)requestSrpDiscoveryUnpublish(true);
     discoveryPublicationActive_ = false;
     discoveryPublicationRecordsActive_ = 0U;
     discoveryPublicationWindowState_ = windowState;
@@ -885,7 +1195,9 @@ bool Nrf54MatterOnNetworkOnOffLightNode::updateDiscoveryPublication() {
     discoveryPublicationRecordsTotal_ =
         recordsOk ? static_cast<uint16_t>(recordCount) : 0U;
     discoveryPublicationRecordsReady_ = recordsReady;
-    if (windowState == MatterCommissioningWindowState::kPendingReadiness) {
+    if (discoverySrpRemovePending_) {
+      blocker = "srp_unpublish_pending";
+    } else if (windowState == MatterCommissioningWindowState::kPendingReadiness) {
       blocker = "commissioning_window_pending_readiness";
     } else if (windowState == MatterCommissioningWindowState::kExpired) {
       blocker = "commissioning_window_expired";
@@ -897,7 +1209,24 @@ bool Nrf54MatterOnNetworkOnOffLightNode::updateDiscoveryPublication() {
     return false;
   }
 
-  const bool active = recordsOk && backendAvailable && recordsReady > 0U;
+  bool active = false;
+  if (recordsOk && backendAvailable && recordsReady > 0U) {
+    if (srpBackendAvailable) {
+      active = publishCommissionableDiscoveryRecord(records[0]);
+      if (!active) {
+        blocker = "srp_publish_failed";
+      }
+    } else {
+      (void)requestSrpDiscoveryUnpublish(false);
+      blocker = "platform_dnssd_adapter_missing";
+    }
+  } else {
+    (void)requestSrpDiscoveryUnpublish(false);
+    if (discoverySrpRemovePending_) {
+      blocker = "srp_unpublish_pending";
+    }
+  }
+
   const bool changed =
       discoveryPublicationWindowState_ != windowState ||
       discoveryPublicationBackendAvailable_ != backendAvailable ||
@@ -919,7 +1248,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::updateDiscoveryPublication() {
   discoveryPublicationRecordsActive_ = active ? recordsReady : 0U;
   setFixedText(discoveryPublicationBlockerName_,
                sizeof(discoveryPublicationBlockerName_),
-               active ? "staged_publication_ready" : blocker);
+               active ? "srp_publication_queued" : blocker);
   return active;
 }
 
@@ -928,6 +1257,7 @@ void Nrf54MatterOnNetworkOnOffLightNode::resetDiscoveryPublication(
   discoveryPublicationAttempted_ = false;
   discoveryPublicationActive_ = false;
   discoveryPublicationBackendAvailable_ = false;
+  resetSrpDiscoveryBuffers();
   discoveryPublicationRecordsTotal_ = 0U;
   discoveryPublicationRecordsReady_ = 0U;
   discoveryPublicationRecordsActive_ = 0U;
@@ -1113,10 +1443,10 @@ void Nrf54MatterOnNetworkOnOffLightNode::buildDefaultIdentity(
     return;
   }
 
-  outIdentity->setupPinCode = 20202021UL;
-  outIdentity->discriminator = 3840U;
-  outIdentity->vendorId = 12U;
-  outIdentity->productId = 1U;
+  outIdentity->setupPinCode = kDefaultSetupPinCode;
+  outIdentity->discriminator = kDefaultDiscriminator;
+  outIdentity->vendorId = kDefaultVendorId;
+  outIdentity->productId = kDefaultProductId;
   outIdentity->commissioningFlow = MatterCommissioningFlow::kStandard;
 }
 

@@ -104,6 +104,14 @@ void printDiscoverySummary(
   Serial.println(summary.instanceName);
   Serial.print("matter_node_demo discovery_mode=");
   Serial.println(static_cast<uint8_t>(summary.commissioningMode));
+  Serial.print("matter_node_demo discovery_staged_only=");
+  Serial.println(summary.stagedOnly ? 1 : 0);
+  Serial.print("matter_node_demo discovery_dns_client=");
+  Serial.println(summary.capabilities.dnsClientEnabled ? 1 : 0);
+  Serial.print("matter_node_demo discovery_ecdsa=");
+  Serial.println(summary.capabilities.ecdsaEnabled ? 1 : 0);
+  Serial.print("matter_node_demo discovery_srp_client=");
+  Serial.println(summary.capabilities.srpClientEnabled ? 1 : 0);
   Serial.print("matter_node_demo discovery_register_capable=");
   Serial.println(summary.capabilities.canRegisterCommissionableNode ? 1 : 0);
   Serial.print("matter_node_demo discovery_txt_d=");

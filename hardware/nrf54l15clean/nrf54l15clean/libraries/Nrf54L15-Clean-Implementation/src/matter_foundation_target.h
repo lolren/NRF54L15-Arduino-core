@@ -53,9 +53,11 @@ struct MatterFoundationDescriptorSummary {
 };
 
 struct MatterFoundationDiscoveryCapabilities {
+  bool dnsClientEnabled = false;
   bool mdnsCoreEnabled = false;
   bool mdnsPublicApiEnabled = false;
   bool platformDnssdEnabled = false;
+  bool ecdsaEnabled = false;
   bool srpClientEnabled = false;
   bool canRegisterCommissionableNode = false;
   const char* blockerName = nullptr;

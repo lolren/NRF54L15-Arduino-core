@@ -199,12 +199,16 @@ void printDiscoverySummary(
   Serial.println(summary.instanceName);
   Serial.print("matter_cmd_demo discovery_mode=");
   Serial.println(static_cast<uint8_t>(summary.commissioningMode));
+  Serial.print("matter_cmd_demo discovery_dns_client=");
+  Serial.println(summary.capabilities.dnsClientEnabled ? 1 : 0);
   Serial.print("matter_cmd_demo discovery_mdns_core=");
   Serial.println(summary.capabilities.mdnsCoreEnabled ? 1 : 0);
   Serial.print("matter_cmd_demo discovery_mdns_api=");
   Serial.println(summary.capabilities.mdnsPublicApiEnabled ? 1 : 0);
   Serial.print("matter_cmd_demo discovery_platform_dnssd=");
   Serial.println(summary.capabilities.platformDnssdEnabled ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_ecdsa=");
+  Serial.println(summary.capabilities.ecdsaEnabled ? 1 : 0);
   Serial.print("matter_cmd_demo discovery_srp_client=");
   Serial.println(summary.capabilities.srpClientEnabled ? 1 : 0);
   Serial.print("matter_cmd_demo discovery_register_capable=");
@@ -306,6 +310,20 @@ void printDiscoveryPublication(
   Serial.println(state.stagedOnly ? 1 : 0);
   Serial.print("matter_cmd_demo discovery_publish_backend=");
   Serial.println(state.backendAvailable ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_client=");
+  Serial.println(state.srpClientEnabled ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_queued=");
+  Serial.println(state.srpServiceQueued ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_autostart=");
+  Serial.println(state.srpAutoStartEnabled ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_remove_pending=");
+  Serial.println(state.srpRemovePending ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_host_registered=");
+  Serial.println(state.srpHostRegistered ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_service_registered=");
+  Serial.println(state.srpServiceRegistered ? 1 : 0);
+  Serial.print("matter_cmd_demo discovery_publish_srp_last_error=");
+  Serial.println(state.srpLastError);
   Serial.print("matter_cmd_demo discovery_publish_window=");
   Serial.println(xiao_nrf54l15::Nrf54MatterOnNetworkOnOffLightNode::
                      commissioningWindowStateName(state.windowState));

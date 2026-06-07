@@ -5,6 +5,7 @@
 
 #include "matter_secp256r1.h"
 #include "matter_pbkdf2.h"
+#include "matter_rng.h"
 
 namespace xiao_nrf54l15 {
 
@@ -143,7 +144,7 @@ class MatterCaseSession {
                       uint8_t* outPlaintext, uint16_t* outLen);
   bool verifyCertificate(const CaseCertificate& cert,
                          const Secp256r1Point& issuerPubKey);
-  void generateRandom(uint8_t* out, size_t len);
+  bool generateRandom(uint8_t* out, size_t len);
   void advanceState(CaseState newState);
 
   StateCallback callback_ = nullptr;

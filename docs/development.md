@@ -73,10 +73,12 @@ Current gap:
   remain open.
 - Matter is foundation-only. The repo has staged `connectedhomeip` support,
   onboarding-code helpers, an on/off-light model, and a Thread dataset export
-  seam. It can build structured staged DNS-SD/SRP records, expose Thread
-  restore diagnostics through the on-network node, run a reboot recovery probe,
-  and track publish/unpublish lifecycle diagnostics for the future discovery
-  backend, but real mDNS/SRP publication, commissioning, commissioner/Home
+  seam. It can build structured staged DNS-SD/SRP records, queue commissionable
+  `_matterc._udp` records through OpenThread SRP in Matter-stage builds, expose
+  Thread restore diagnostics through the on-network node, run a reboot recovery
+  probe, and track publish/unpublish lifecycle diagnostics including SRP
+  unregister-pending and registered-state reporting. Infrastructure
+  mDNS/DNS-SD, operational SRP registration, commissioning, commissioner/Home
   Assistant control, and Matter session recovery remain open.
 
 ## Current Validation And Planning Docs

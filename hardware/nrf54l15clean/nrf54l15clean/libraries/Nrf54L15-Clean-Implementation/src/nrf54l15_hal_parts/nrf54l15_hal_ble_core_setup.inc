@@ -644,14 +644,14 @@ void BleRadio::end() {
     latestConnectionRssiDbm_ = 0;
     latestConnectionRssiValid_ = false;
     connectionServiceBusy_ = false;
-  clearQueuedConnectionEvents();
-  clearCustomGattConnectionState();
-  if (g_activeBleRadio == this) {
-    g_activeBleRadio = nullptr;
+    clearQueuedConnectionEvents();
+    clearCustomGattConnectionState();
+    if (g_activeBleRadio == this) {
+      g_activeBleRadio = nullptr;
+    }
+    endUnconnectedRadioActivity();
+    return;
   }
-  endUnconnectedRadioActivity();
-  return;
-}
 
   radio_->SHORTS = 0U;
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;

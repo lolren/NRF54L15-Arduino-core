@@ -1,7 +1,7 @@
 /*
   ThreadExperimentalSleepyChild
 
-  Demonstrates sleepy end device (SED) behavior on nRF54L15.
+  Demonstrates sleepy end device (SED) behavior on nRF54L15 with UDP echo.
 
   SWD markers in gSleepyMarkers[]. Locate the symbol in the ELF/map before
   reading it with pyOCD; the absolute address depends on the linker layout.
@@ -31,9 +31,15 @@ namespace {
 
 constexpr uint32_t kStatusPrintIntervalMs = 3000U;
 constexpr uint32_t kPollPeriodMs = 3000U;
+constexpr uint16_t kUdpPort = 61631U;
 
 xiao_nrf54l15::Nrf54ThreadExperimental gThread;
 uint32_t gLastStatusPrintMs = 0U;
+uint32_t gUdpRxCount = 0U;
+uint32_t gUdpTxCount = 0U;
+bool gPeerKnown = false;
+otIp6Address gPeerAddr = {};
+uint16_t gPeerPort = kUdpPort;
 
 __attribute__((used, section(".noinit"))) volatile uint32_t gSleepyMarkers[16] = {0};
 
@@ -49,6 +55,38 @@ __attribute__((used, section(".noinit"))) volatile uint32_t gSleepyMarkers[16] =
 #define M_DATASET_CFG  gSleepyMarkers[9]
 #define M_LAST_ERR     gSleepyMarkers[10]
 #define M_RESTORE_ERR  gSleepyMarkers[11]
+
+void udpReceiveCallback(void* context, const uint8_t* payload, uint16_t length, const otMessageInfo& messageInfo) {
+  (void)context;
+  gUdpRxCount++;
+
+  uint8_t buffer[65];
+  uint16_t len = length;
+  if (len >= sizeof(buffer)) len = sizeof(buffer) - 1U;
+  if (len > 0U) {
+    memcpy(buffer, payload, len);
+  }
+  buffer[len] = '\0';
+
+  Serial.print("sleepy_child udp_rx len=");
+  Serial.print(len);
+  Serial.print(" data=");
+  Serial.println(reinterpret_cast<char*>(buffer));
+
+  // Learn peer address from incoming message
+  if (!gPeerKnown) {
+    memcpy(&gPeerAddr, &messageInfo.mPeerAddr, sizeof(gPeerAddr));
+    gPeerPort = messageInfo.mPeerPort;
+    gPeerKnown = true;
+    Serial.println("sleepy_child peer_learned=1");
+  }
+
+  // Echo response back to sender
+  char response[64];
+  snprintf(response, sizeof(response), "PONG %lu", gUdpRxCount);
+  gUdpTxCount++;
+  gThread.sendUdp(gPeerAddr, gPeerPort, response, strlen(response));
+}
 
 void updateMarkers() {
   M_STARTED = gThread.started() ? 1U : 0U;
@@ -137,6 +175,9 @@ void setup() {
   ok = gThread.setPollPeriod(kPollPeriodMs);
   M_SETUP_PHASE = ok ? 8 : 0xFD;
   updateMarkers();
+
+  // Open UDP socket for receiving pings
+  gThread.openUdp(kUdpPort, udpReceiveCallback, nullptr);
 }
 
 void loop() {
@@ -150,6 +191,12 @@ void loop() {
     Serial.println(gThread.roleName());
     Serial.print("sleepy_child attached=");
     Serial.println(gThread.attached() ? 1 : 0);
+    Serial.print("sleepy_child udp_tx=");
+    Serial.print(gUdpTxCount);
+    Serial.print(" udp_rx=");
+    Serial.print(gUdpRxCount);
+    Serial.print(" peer=");
+    Serial.println(gPeerKnown ? 1 : 0);
     xiao_nrf54l15::OpenThreadPlatformSkeletonSnapshot snap = {};
     if (xiao_nrf54l15::OpenThreadPlatformSkeleton::snapshot(&snap)) {
       Serial.print("sleepy_child channel=");

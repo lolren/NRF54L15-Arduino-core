@@ -116,12 +116,16 @@ void setup() {
   Serial.println(g_foundation.commissionableServiceType());
   Serial.print("matter_compile_target operational_service=");
   Serial.println(g_foundation.operationalServiceType());
+  Serial.print("matter_compile_target dns_client=");
+  Serial.println(discovery.dnsClientEnabled ? 1 : 0);
   Serial.print("matter_compile_target mdns_core=");
   Serial.println(discovery.mdnsCoreEnabled ? 1 : 0);
   Serial.print("matter_compile_target mdns_api=");
   Serial.println(discovery.mdnsPublicApiEnabled ? 1 : 0);
   Serial.print("matter_compile_target platform_dnssd=");
   Serial.println(discovery.platformDnssdEnabled ? 1 : 0);
+  Serial.print("matter_compile_target ecdsa=");
+  Serial.println(discovery.ecdsaEnabled ? 1 : 0);
   Serial.print("matter_compile_target srp_client=");
   Serial.println(discovery.srpClientEnabled ? 1 : 0);
   Serial.print("matter_compile_target discovery_register_capable=");

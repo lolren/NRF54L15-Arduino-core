@@ -8,6 +8,8 @@
 #include "matter_manual_pairing.h"
 #include "matter_secp256r1.h"
 #include "matter_pbkdf2.h"
+#include "matter_credentials.h"
+#include "matter_rng.h"
 
 namespace xiao_nrf54l15 {
 
@@ -142,6 +144,9 @@ struct MatterPaseSessionState {
   uint8_t Z[kMatterSpake2pPointSize] = {0};    // Shared: Z = x*(Y-w0*G) = y*(X-w0*G)
   uint8_t V[kMatterSpake2pPointSize] = {0};    // V = w1*(Y-w0*G) = w1*(X-w0*G)
 
+  // Ephemeral scalar (x for prover, y for verifier) must be reused for Z.
+  uint8_t ephemeralScalar[kMatterSpake2pWScalarSize] = {0};
+
   // Shared secret and keys
   uint8_t sharedSecret[kMatterSpake2pHashSize] = {0};
   uint8_t ke[kMatterSpake2pHashSize] = {0};     // Encryption key
@@ -249,7 +254,7 @@ class MatterPaseCommissioning {
 
   uint16_t nextExchangeId();
   uint16_t nextMessageId();
-  void generateRandom(uint8_t* output, size_t length);
+  bool generateRandom(uint8_t* output, size_t length);
   void advanceState(MatterCommissioningState newState,
                     uint32_t errorCode = 0U);
 
@@ -266,8 +271,8 @@ class MatterPaseCommissioning {
   otIp6Address peerAddr_ = {};
 
   MatterPaseSessionState session_ = {};
-  uint32_t setupPinCode_ = 20202021UL;
-  uint16_t discriminator_ = 3840U;
+  uint32_t setupPinCode_ = kDefaultSetupPinCode;
+  uint16_t discriminator_ = kDefaultDiscriminator;
 
   // Pre-computed verifier (commissioner side)
   MatterSpake2pVerifier verifier_ = {};

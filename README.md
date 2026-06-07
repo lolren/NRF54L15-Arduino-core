@@ -166,15 +166,15 @@ The Thread stack is an early-stage port of OpenThread core that compiles, links,
 - [x] Settings-backed dataset restore diagnostics for reboot/rejoin bring-up
 - [x] Reboot recovery probe example that seeds once, then checks saved settings on reset
 - [x] UDP transport — two-board soak passes 8, 16, 31, 63, 95, 127, 191, 255, and 512 byte payloads in uplink, downlink, and multicast staged tests
+- [x] Matter-stage DNS client / SRP client / ECDSA build path for commissionable Matter discovery
 - [x] Basic two-board ping/pong smoke tests
 - [x] Experimental sleepy-child wrapper API and fixed-dataset parent/child examples; initial attach now uses the dataset channel instead of remaining at channel 0
 - [x] Radio PAL support for source match, scheduled receive, CSL state, coex metrics, channel TX power limits, and one-peer enhanced-ACK probing configuration
 
 **What doesn't (yet):**
 - [ ] End-to-end validation against a real commissioner (Apple Home, Google Home, HA Matter Server)
-- [ ] SRP client / service registration (`OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE=0`)
-- [ ] mDNS / DNS-SD advertising (`OPENTHREAD_CONFIG_MULTICAST_DNS_ENABLE=0`)
-- [ ] DNS client (`OPENTHREAD_CONFIG_DNS_CLIENT_ENABLE=0`)
+- [ ] Generic Thread SRP service examples and runtime validation outside Matter
+- [ ] mDNS / infrastructure DNS-SD advertising (`OPENTHREAD_CONFIG_MULTICAST_DNS_ENABLE=0`)
 - [ ] Border Agent / Router roles
 - [ ] DTLS / secure transport layer
 - [ ] Standard MeshCoP Joiner/Commissioner (disabled at compile time)
@@ -204,12 +204,14 @@ The Matter support is a **compile-time and minimal-runtime smoke test**, not a f
 - [x] Structured staged DNS-SD/SRP record builder for commissionable
       `_matterc._udp` and blocked operational `_matter._tcp` records
 - [x] Staged discovery publish lifecycle with publish/unpublish diagnostics
+      and SRP unregister-pending / registered-state reporting
+- [x] OpenThread SRP client publisher for commissionable `_matterc._udp`
+      records when the commissioning window is open and Thread is attached
 - [x] Thread restore diagnostics surfaced through the on-network node snapshot
 - [x] On-network reboot recovery probe that shows Thread restore state inside Matter
 
 **What doesn't (yet):**
-- [ ] mDNS/DNS-SD commissioning advertisement (`_matterc._udp` record is
-      built locally but not published)
+- [ ] Infrastructure mDNS/DNS-SD commissioning advertisement
 - [ ] SRP operational service registration
 - [ ] Platform DNSSD bridge
 - [ ] Operational discovery responder
@@ -219,7 +221,7 @@ The Matter support is a **compile-time and minimal-runtime smoke test**, not a f
 - [ ] Cluster persistence across reboots
 - [ ] Multi-endpoint support (single On/Off Light endpoint only)
 
-**Honest assessment:** The build menu option is named "Experimental Compile Target" for a reason. It proves the code links and state machines initialize — nothing more. Commissioning window opens locally and the code can now build the DNS-SD/SRP records it would need to publish, but the device is still invisible on the network because mDNS/SRP service publication isn't compiled in. This is a compile-time smoke test, not a commissionable Matter device.
+**Honest assessment:** The build menu option is named "Experimental Compile Target" for a reason. It proves the code links and state machines initialize — nothing more. Commissioning window opens locally and staged Matter builds can now queue the commissionable `_matterc._udp` record through OpenThread SRP when a Thread SRP server is present. This is still not a production Matter device: infrastructure mDNS/DNS-SD, operational `_matter._tcp` registration, and end-to-end commissioner validation are still missing.
 
 ---
 

@@ -145,12 +145,15 @@ bool aeadDecrypt(const uint8_t key[16],
 // ─── Public API ──────────────────────────────────────────────────
 
 bool MatterCaseSession::beginAsInitiator(StateCallback callback,
-                                          void* context) {
+                                         void* context) {
   initiator_ = true;
   callback_ = callback;
   callbackContext_ = context;
   state_ = CaseState::kIdle;
-  localSessionId_ = (uint16_t)(micros() & 0xFFFFU);
+  if (!generateRandom(reinterpret_cast<uint8_t*>(&localSessionId_),
+                      sizeof(localSessionId_))) {
+    return false;
+  }
   if (localSessionId_ == 0U) localSessionId_ = 1U;
   return true;
 }
@@ -161,7 +164,11 @@ bool MatterCaseSession::beginAsResponder(StateCallback callback,
   callback_ = callback;
   callbackContext_ = context;
   state_ = CaseState::kIdle;
-  localSessionId_ = (uint16_t)(micros() & 0xFFFFU) | 1U;
+  if (!generateRandom(reinterpret_cast<uint8_t*>(&localSessionId_),
+                      sizeof(localSessionId_))) {
+    return false;
+  }
+  localSessionId_ |= 1U;
   return true;
 }
 
@@ -245,7 +252,9 @@ bool MatterCaseSession::buildSigma1(CaseSigma1* outMsg) {
   if (outMsg == nullptr) return false;
 
   memset(outMsg, 0, sizeof(*outMsg));
-  generateRandom(outMsg->initiatorRandom, kCaseRandomSize);
+  if (!generateRandom(outMsg->initiatorRandom, kCaseRandomSize)) {
+    return false;
+  }
   memcpy(initiatorRandom_, outMsg->initiatorRandom, kCaseRandomSize);
 
   outMsg->initiatorSessionId = localSessionId_;
@@ -280,7 +289,9 @@ bool MatterCaseSession::buildSigma2(CaseSigma2* outMsg) {
   if (outMsg == nullptr || initiator_) return false;
 
   memset(outMsg, 0, sizeof(*outMsg));
-  generateRandom(outMsg->responderRandom, kCaseRandomSize);
+  if (!generateRandom(outMsg->responderRandom, kCaseRandomSize)) {
+    return false;
+  }
   memcpy(responderRandom_, outMsg->responderRandom, kCaseRandomSize);
 
   outMsg->responderSessionId = localSessionId_;
@@ -571,11 +582,12 @@ bool MatterCaseSession::decryptWithKey(
                      outPlaintext, outLen);
 }
 
-void MatterCaseSession::generateRandom(uint8_t* out, size_t len) {
-  if (out == nullptr) return;
-  for (size_t i = 0; i < len; ++i) {
-    out[i] = (uint8_t)(micros() ^ (millis() >> (i % 8)));
+bool MatterCaseSession::generateRandom(uint8_t* out, size_t len) {
+  if (out == nullptr) {
+    return false;
   }
+  MatterRng rng;
+  return rng.getRandomBytes(out, len, 400000UL);
 }
 
 void MatterCaseSession::advanceState(CaseState newState) {

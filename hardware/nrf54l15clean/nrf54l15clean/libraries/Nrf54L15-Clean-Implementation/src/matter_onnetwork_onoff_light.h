@@ -7,6 +7,12 @@
 #include "matter_foundation_target.h"
 #include "matter_onoff_light.h"
 #include "matter_onoff_light_endpoint.h"
+#include "matter_credentials.h"
+
+#if defined(OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE) && \
+    (OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE != 0)
+#include <openthread/srp_client.h>
+#endif
 
 namespace xiao_nrf54l15 {
 
@@ -65,10 +71,10 @@ struct MatterOnNetworkDiscoveryRecord {
 };
 
 struct MatterOnNetworkIdentity {
-  uint32_t setupPinCode = 20202021UL;
-  uint16_t discriminator = 3840U;
-  uint16_t vendorId = 12U;
-  uint16_t productId = 1U;
+  uint32_t setupPinCode = kDefaultSetupPinCode;
+  uint16_t discriminator = kDefaultDiscriminator;
+  uint16_t vendorId = kDefaultVendorId;
+  uint16_t productId = kDefaultProductId;
   MatterCommissioningFlow commissioningFlow =
       MatterCommissioningFlow::kStandard;
 };
@@ -138,6 +144,12 @@ struct MatterOnNetworkDiscoveryPublicationState {
   bool active = false;
   bool stagedOnly = true;
   bool backendAvailable = false;
+  bool srpClientEnabled = false;
+  bool srpServiceQueued = false;
+  bool srpAutoStartEnabled = false;
+  bool srpRemovePending = false;
+  bool srpHostRegistered = false;
+  bool srpServiceRegistered = false;
   bool commissioningWindowOpen = false;
   bool threadAttached = false;
   MatterCommissioningWindowState windowState =
@@ -147,6 +159,7 @@ struct MatterOnNetworkDiscoveryPublicationState {
   uint16_t recordsActive = 0U;
   uint32_t publishAttempts = 0U;
   uint32_t unpublishCount = 0U;
+  int srpLastError = 0;
   char blockerName[48] = {0};
 };
 
@@ -336,6 +349,29 @@ class Nrf54MatterOnNetworkOnOffLightNode {
   bool threadDatasetExportable() const;
   bool updateDiscoveryPublication();
   void resetDiscoveryPublication(const char* blockerName);
+#if defined(OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE) && \
+    (OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE != 0)
+  bool publishCommissionableDiscoveryRecord(
+      const MatterOnNetworkDiscoveryRecord& record);
+  void clearSrpDiscoveryPublication();
+  bool requestSrpDiscoveryUnpublish(bool sendUnregisterToServer);
+  void resetSrpDiscoveryBuffers();
+  bool prepareSrpTxtEntries(const MatterOnNetworkDiscoveryRecord& record);
+  bool prepareSrpSubtypes(const MatterOnNetworkDiscoveryRecord& record);
+  static void onSrpClientCallback(otError error,
+                                  const otSrpClientHostInfo* hostInfo,
+                                  const otSrpClientService* services,
+                                  const otSrpClientService* removedServices,
+                                  void* context);
+  static void onSrpAutoStart(const otSockAddr* serverSockAddr,
+                             void* context);
+#else
+  bool publishCommissionableDiscoveryRecord(
+      const MatterOnNetworkDiscoveryRecord& record);
+  void clearSrpDiscoveryPublication();
+  bool requestSrpDiscoveryUnpublish(bool sendUnregisterToServer);
+  void resetSrpDiscoveryBuffers();
+#endif
 
   Preferences prefs_;
   bool storageOpen_ = false;
@@ -352,6 +388,12 @@ class Nrf54MatterOnNetworkOnOffLightNode {
   bool discoveryPublicationAttempted_ = false;
   bool discoveryPublicationActive_ = false;
   bool discoveryPublicationBackendAvailable_ = false;
+  bool discoverySrpServiceQueued_ = false;
+  bool discoverySrpAutoStartEnabled_ = false;
+  bool discoverySrpRemovePending_ = false;
+  bool discoverySrpHostRegistered_ = false;
+  bool discoverySrpServiceRegistered_ = false;
+  int discoverySrpLastError_ = 0;
   uint16_t discoveryPublicationRecordsTotal_ = 0U;
   uint16_t discoveryPublicationRecordsReady_ = 0U;
   uint16_t discoveryPublicationRecordsActive_ = 0U;
@@ -364,6 +406,19 @@ class Nrf54MatterOnNetworkOnOffLightNode {
   Nrf54MatterOnOffLightDevice light_;
   Nrf54MatterOnOffLightEndpoint endpoint_;
   Nrf54ThreadExperimental thread_;
+#if defined(OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE) && \
+    (OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE != 0)
+  otSrpClientService srpCommissionableService_ = {};
+  otDnsTxtEntry srpTxtEntries_[MatterOnNetworkDiscoveryRecord::kMaxTextEntries] =
+      {};
+  const char* srpSubtypePointers_[MatterOnNetworkDiscoveryRecord::kMaxSubtypes +
+                                  1U] = {};
+  char srpHostName_[32] = {0};
+  char srpInstanceName_[33] = {0};
+  char srpTxtKeys_[MatterOnNetworkDiscoveryRecord::kMaxTextEntries][10] = {};
+  char srpTxtValues_[MatterOnNetworkDiscoveryRecord::kMaxTextEntries][32] = {};
+  char srpSubtypeLabels_[MatterOnNetworkDiscoveryRecord::kMaxSubtypes][32] = {};
+#endif
 };
 
 }  // namespace xiao_nrf54l15

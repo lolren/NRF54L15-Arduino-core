@@ -1,6 +1,7 @@
 #include "matter_foundation_target.h"
 
 #include <string.h>
+#include "matter_credentials.h"
 
 namespace xiao_nrf54l15 {
 namespace {
@@ -56,9 +57,25 @@ constexpr bool kOpenThreadMdnsPublicApiEnabled =
     false;
 #endif
 
+constexpr bool kOpenThreadDnsClientEnabled =
+#if defined(OPENTHREAD_CONFIG_DNS_CLIENT_ENABLE) && \
+    (OPENTHREAD_CONFIG_DNS_CLIENT_ENABLE != 0)
+    true;
+#else
+    false;
+#endif
+
 constexpr bool kOpenThreadPlatformDnssdEnabled =
 #if defined(OPENTHREAD_CONFIG_PLATFORM_DNSSD_ENABLE) && \
     (OPENTHREAD_CONFIG_PLATFORM_DNSSD_ENABLE != 0)
+    true;
+#else
+    false;
+#endif
+
+constexpr bool kOpenThreadEcdsaEnabled =
+#if defined(OPENTHREAD_CONFIG_ECDSA_ENABLE) && \
+    (OPENTHREAD_CONFIG_ECDSA_ENABLE != 0)
     true;
 #else
     false;
@@ -265,19 +282,27 @@ bool Nrf54MatterOnOffLightFoundation::discoveryCapabilities(
   }
 
   memset(outCapabilities, 0, sizeof(*outCapabilities));
+  outCapabilities->dnsClientEnabled = kOpenThreadDnsClientEnabled;
   outCapabilities->mdnsCoreEnabled = kOpenThreadMdnsCoreEnabled;
   outCapabilities->mdnsPublicApiEnabled = kOpenThreadMdnsPublicApiEnabled;
   outCapabilities->platformDnssdEnabled = kOpenThreadPlatformDnssdEnabled;
+  outCapabilities->ecdsaEnabled = kOpenThreadEcdsaEnabled;
   outCapabilities->srpClientEnabled = kOpenThreadSrpClientEnabled;
+  const bool srpUsable =
+      outCapabilities->srpClientEnabled && outCapabilities->ecdsaEnabled;
   outCapabilities->canRegisterCommissionableNode =
       (outCapabilities->mdnsCoreEnabled &&
        outCapabilities->mdnsPublicApiEnabled) ||
       outCapabilities->platformDnssdEnabled ||
-      outCapabilities->srpClientEnabled;
-  outCapabilities->blockerName =
-      outCapabilities->canRegisterCommissionableNode
-          ? "none"
-          : "openthread_mdns_srp_disabled";
+      srpUsable;
+  if (outCapabilities->canRegisterCommissionableNode) {
+    outCapabilities->blockerName = "none";
+  } else if (outCapabilities->srpClientEnabled &&
+             !outCapabilities->ecdsaEnabled) {
+    outCapabilities->blockerName = "openthread_srp_requires_ecdsa";
+  } else {
+    outCapabilities->blockerName = "openthread_mdns_srp_disabled";
+  }
   return true;
 }
 
@@ -318,10 +343,10 @@ void Nrf54MatterOnOffLightFoundation::buildDefaultThreadOnNetworkQrPayload(
   }
 
   memset(outPayload, 0, sizeof(*outPayload));
-  outPayload->setupPinCode = 20202021UL;
-  outPayload->discriminator = 3840U;
-  outPayload->vendorId = 12U;
-  outPayload->productId = 1U;
+  outPayload->setupPinCode = kDefaultSetupPinCode;
+  outPayload->discriminator = kDefaultDiscriminator;
+  outPayload->vendorId = kDefaultVendorId;
+  outPayload->productId = kDefaultProductId;
   outPayload->rendezvousFlags =
       kMatterRendezvousOnNetwork | kMatterRendezvousThread;
   outPayload->commissioningFlow = MatterCommissioningFlow::kStandard;
@@ -334,8 +359,8 @@ void Nrf54MatterOnOffLightFoundation::buildDefaultThreadOnNetworkManualPayload(
   }
 
   memset(outPayload, 0, sizeof(*outPayload));
-  outPayload->setupPinCode = 20202021UL;
-  outPayload->discriminator = 3840U;
+  outPayload->setupPinCode = kDefaultSetupPinCode;
+  outPayload->discriminator = kDefaultDiscriminator;
   outPayload->commissioningFlow = MatterCommissioningFlow::kStandard;
 }
 

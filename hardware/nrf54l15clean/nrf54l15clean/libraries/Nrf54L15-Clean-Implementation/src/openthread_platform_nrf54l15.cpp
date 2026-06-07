@@ -4283,7 +4283,8 @@ otError otPlatRadioTransmit(otInstance* instance, otRadioFrame* frame) {
       state.txAckFrame.mInfo.mRxInfo.mTimestamp = otPlatRadioGetNow(instance);
       state.txAckFrame.mInfo.mRxInfo.mRssi = OT_RADIO_RSSI_INVALID;
       state.txAckFrame.mInfo.mRxInfo.mLqi = 0U;
-      state.txAckFrame.mInfo.mRxInfo.mAckedWithFramePending = false;
+      state.txAckFrame.mInfo.mRxInfo.mAckedWithFramePending =
+          txDebug.ackFramePending;
       state.txAckFrame.mInfo.mRxInfo.mAckedWithSecEnhAck = false;
       state.txAckFrame.mInfo.mRxInfo.mAckFrameCounter = 0U;
       state.txAckFrame.mInfo.mRxInfo.mAckKeyId = 0U;
