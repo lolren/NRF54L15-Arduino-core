@@ -100,7 +100,7 @@ xiao_nrf54l15.menu.clean_thread.off.build.thread_seam_flags=
 xiao_nrf54l15.menu.clean_thread.off.build.thread_crypto_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE=0
 
 xiao_nrf54l15.menu.clean_thread.stage=Experimental Stage Core (Leader/Child/Router + UDP)
-xiao_nrf54l15.menu.clean_thread.stage.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_MESHCOP_ENABLE=1 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
+xiao_nrf54l15.menu.clean_thread.stage.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_MESHCOP_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_SRP_CLIENT_ENABLE=1 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
 xiao_nrf54l15.menu.clean_thread.stage.build.thread_seam_flags=-DOPENTHREAD_CONFIG_CORE_USER_CONFIG_HEADER_ENABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/src/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/src/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/third_party/mbedtls/repo/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/third_party/mbedtls/repo/library
 xiao_nrf54l15.menu.clean_thread.stage.build.thread_crypto_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE=0
 
@@ -242,7 +242,7 @@ holyiot_25007_nrf54l15.menu.clean_thread.off.build.thread_seam_flags=
 holyiot_25007_nrf54l15.menu.clean_thread.off.build.thread_crypto_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE=0
 
 holyiot_25007_nrf54l15.menu.clean_thread.stage=Experimental Stage Core (Leader/Child/Router + UDP)
-holyiot_25007_nrf54l15.menu.clean_thread.stage.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_MESHCOP_ENABLE=1 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
+holyiot_25007_nrf54l15.menu.clean_thread.stage.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_MESHCOP_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_SRP_CLIENT_ENABLE=1 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
 holyiot_25007_nrf54l15.menu.clean_thread.stage.build.thread_seam_flags=-DOPENTHREAD_CONFIG_CORE_USER_CONFIG_HEADER_ENABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/src/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/src/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/third_party/mbedtls/repo/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/third_party/mbedtls/repo/library
 holyiot_25007_nrf54l15.menu.clean_thread.stage.build.thread_crypto_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE=0
 
