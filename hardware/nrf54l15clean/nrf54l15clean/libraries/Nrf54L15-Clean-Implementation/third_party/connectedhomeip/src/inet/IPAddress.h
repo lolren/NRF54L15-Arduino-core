@@ -17,7 +17,10 @@ public:
         return CHIP_NO_ERROR;
     }
 };
-inline constexpr InterfaceId InterfaceIdNull();
+struct InterfaceIdNullType {
+    constexpr InterfaceId operator()() const { return InterfaceId(0); }
+};
+constexpr InterfaceIdNullType InterfaceIdNull() { return InterfaceIdNullType(); }
 class IPAddress {
 public:
     static constexpr size_t kMaxStringLength = 45;
@@ -39,3 +42,7 @@ public:
     static InetInterface * GetPrimary() { return nullptr; }
 };
 }}
+namespace chip {
+using Inet::InterfaceIdNull;
+using Inet::InterfaceIdNullType;
+}
