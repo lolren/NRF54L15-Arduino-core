@@ -22,13 +22,15 @@ public:
 
     void Shutdown() override {
         while (!mTimerList.Empty()) {
-            TimerNode * t = mTimerList.Head();
-            mTimerList.PopFront();
+            auto it = mTimerList.begin();
+            TimerNode * t = &(*it);
+            mTimerList.Remove(t);
             delete t;
         }
         while (!mWorkList.Empty()) {
-            TimerNode * w = mWorkList.Head();
-            mWorkList.PopFront();
+            auto it = mWorkList.begin();
+            TimerNode * w = &(*it);
+            mWorkList.Remove(w);
             delete w;
         }
         mWorkScheduled = false;
@@ -40,12 +42,15 @@ public:
     CHIP_ERROR HandleEvents() override {
         VerifyOrReturnError(mLayerState.IsInitialized(), CHIP_ERROR_INCORRECT_STATE);
         uint32_t now = millis();
-        while (!mTimerList.Empty()) {
-            TimerNode * timer = mTimerList.Head();
+        for (auto it = mTimerList.begin(); it != mTimerList.end(); ) {
+            TimerNode * timer = &(*it);
             if (timer->mFireTime <= now) {
-                mTimerList.PopFront();
+                auto next = it;
+                ++next;
+                mTimerList.Remove(timer);
                 timer->mCallback(this, timer->mAppState);
                 delete timer;
+                it = next;
             } else {
                 break;
             }
@@ -53,8 +58,9 @@ public:
         if (mWorkScheduled) {
             mWorkScheduled = false;
             while (!mWorkList.Empty()) {
-                TimerNode * work = mWorkList.Head();
-                mWorkList.PopFront();
+                auto it = mWorkList.begin();
+                TimerNode * work = &(*it);
+                mWorkList.Remove(work);
                 work->mCallback(this, work->mAppState);
                 delete work;
             }
@@ -93,7 +99,8 @@ public:
     }
 
     CHIP_ERROR ExtendTimerTo(Clock::Timeout delay, TimerCompleteCallback onComplete, void * appState) override {
-        for (auto * node = mTimerList.Head(); node != nullptr; node = node->IntrusiveNext()) {
+        for (auto it = mTimerList.begin(); it != mTimerList.end(); ++it) {
+            TimerNode * node = &(*it);
             if (node->mCallback == onComplete && node->mAppState == appState) {
                 node->mFireTime = millis() + delay;
                 return CHIP_NO_ERROR;
@@ -103,7 +110,8 @@ public:
     }
 
     bool IsTimerActive(TimerCompleteCallback onComplete, void * appState) override {
-        for (auto * node = mTimerList.Head(); node != nullptr; node = node->IntrusiveNext()) {
+        for (auto it = mTimerList.begin(); it != mTimerList.end(); ++it) {
+            TimerNode * node = &(*it);
             if (node->mCallback == onComplete && node->mAppState == appState) {
                 return true;
             }
@@ -112,7 +120,8 @@ public:
     }
 
     Clock::Timeout GetRemainingTime(TimerCompleteCallback onComplete, void * appState) override {
-        for (auto * node = mTimerList.Head(); node != nullptr; node = node->IntrusiveNext()) {
+        for (auto it = mTimerList.begin(); it != mTimerList.end(); ++it) {
+            TimerNode * node = &(*it);
             if (node->mCallback == onComplete && node->mAppState == appState) {
                 uint32_t now = millis();
                 if (node->mFireTime > now)
@@ -124,7 +133,8 @@ public:
     }
 
     void CancelTimer(TimerCompleteCallback onComplete, void * appState) override {
-        for (auto * node = mTimerList.Head(); node != nullptr; node = node->IntrusiveNext()) {
+        for (auto it = mTimerList.begin(); it != mTimerList.end(); ++it) {
+            TimerNode * node = &(*it);
             if (node->mCallback == onComplete && node->mAppState == appState) {
                 mTimerList.Remove(node);
                 delete node;
@@ -134,16 +144,17 @@ public:
     }
 
 private:
-    struct TimerNode : public chip::IntrusiveLinkedListIntr<TimerNode> {
+    struct TimerNode : public IntrusiveListNodeBase<> {
         TimerCompleteCallback mCallback;
         void * mAppState;
         uint32_t mFireTime;
     };
 
     void InsertTimer(TimerNode * node) {
-        for (auto * cur = mTimerList.Head(); cur != nullptr; cur = cur->IntrusiveNext()) {
+        for (auto it = mTimerList.begin(); it != mTimerList.end(); ++it) {
+            TimerNode * cur = &(*it);
             if (cur->mFireTime >= node->mFireTime) {
-                mTimerList.InsertBefore(cur, node);
+                mTimerList.InsertBefore(it, node);
                 return;
             }
         }
@@ -151,8 +162,8 @@ private:
     }
 
     ObjectLifeCycle mLayerState;
-    chip::IntrusiveList<TimerNode> mTimerList;
-    chip::IntrusiveList<TimerNode> mWorkList;
+    IntrusiveList<TimerNode> mTimerList;
+    IntrusiveList<TimerNode> mWorkList;
     bool mWorkScheduled;
 };
 

@@ -25,6 +25,13 @@
 
 #pragma once
 
+#ifndef CHECK_RETURN_VALUE
+#define CHECK_RETURN_VALUE
+#endif
+#ifndef CHIP_SYSTEM_CONFIG_PACKETBUFFER_CAPACITY_MAX
+#define CHIP_SYSTEM_CONFIG_PACKETBUFFER_CAPACITY_MAX 1024
+#endif
+
 // Include configuration header
 #include <system/SystemPacketBufferInternal.h>
 

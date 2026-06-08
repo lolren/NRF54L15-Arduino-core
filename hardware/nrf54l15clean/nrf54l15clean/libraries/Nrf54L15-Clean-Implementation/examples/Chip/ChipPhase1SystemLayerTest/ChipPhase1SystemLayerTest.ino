@@ -57,7 +57,7 @@ void setup() {
     // Test 3: Get remaining time
     auto remaining = sSystemLayer.GetRemainingTime(TimerFired, nullptr);
     Serial.print("Remaining time: ");
-    Serial.println(remaining.count());
+    Serial.println(remaining);
     
     // Test 4: Cancel timer
     sSystemLayer.CancelTimer(TimerFired, nullptr);
