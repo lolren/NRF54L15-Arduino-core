@@ -30,7 +30,7 @@ TLV Reader/Writer headers compile inline.
 **Compile test:**
 - [ ] Build stub sketch using TransportManager → ✅ PASS
 
-## Phase 6: CHIP Messaging Layer
+## Phase 6: CHIP Messaging Layer ✅ COMPLETE
 **Goal:** Exchange messages over CHIP transport.
 
 ### Phase 6.1: Messaging
@@ -40,47 +40,40 @@ TLV Reader/Writer headers compile inline.
 - `messaging/ReliableMessageManager.h` / `.cpp` — reliable messaging
 
 **Compile test:**
-- [ ] Build stub sketch using ExchangeManager → ✅ PASS
+- [x] Build stub sketch using ExchangeManager → ✅ PASS
 
-## Phase 7: CHIP Protocols
-**Goal:** PASE, CASE, Interaction Model.
+---
 
-### Phase 7.1: PASE (Pairing)
-- `protocols/pase/PASESession.h` / `.cpp` — PASE session
+## ⛔ BLOCKED: Phases 7-12
 
-### Phase 7.2: CASE (Certificate Auth)
-- `protocols/case/CASESession.h` / `.cpp` — CASE session
+**Status:** Phases 7-12 are BLOCKED by cascading `.cpp` dependencies.
 
-### Phase 7.3: Interaction Model
-- `protocols/interaction_model/InteractionModelEngine.h` / `.cpp`
+**Root Cause:** `arduino-cli` does NOT compile library `.cpp` files. Only `.ino` sketches are compiled. Phases 7-12 require `.cpp` files from `credentials`, `asn1`, `app`, `session`, `protocols/pase`, `protocols/case`, `protocols/interaction_model`, and `app/server` — none of which can be made fully inline without rewriting the entire CHIP SDK.
 
-**Compile test:**
-- [ ] Build stub sketch using PASESession → ✅ PASS
+**Options:**
+1. **Custom Matter implementation** (recommended) — Build Matter protocol handlers from scratch using only inline headers, leveraging our working Thread UDP transport.
+2. **Custom build system** — Fork `arduino-cli` or create a CMake/Make build that compiles library `.cpp` files.
+3. **Pause CHIP SDK integration** — Focus on Thread features and custom Matter implementation.
 
-## Phase 8: CHIP App Layer
-**Goal:** Clusters (On/Off, etc.)
+**Recommendation:** Option 1 — custom Matter implementation.
 
-### Phase 8.1: App Basic
-- `app/DeviceLayer.h` — device layer
-- `app/server/Server.h` — server
+## Phase 7: CHIP Protocols ⛔ BLOCKED
+**Goal:** PASE, CASE, Interaction Model. (Requires `.cpp` files)
 
-### Phase 8.2: Clusters
-- `app/clusters/on-off-server/` — On/Off cluster
+## Phase 8: CHIP App Layer ⛔ BLOCKED
+**Goal:** Clusters (On/Off, etc.) (Requires `.cpp` files)
 
-**Compile test:**
-- [ ] Build stub sketch using OnOffCluster → ✅ PASS
+## Phase 9: CHIP Credentials & Access Control ⛔ BLOCKED
+**Goal:** Fabric management, credentials. (Requires `.cpp` files)
 
-## Phase 9: CHIP Credentials & Access Control
-**Goal:** Fabric management, credentials.
+## Phase 10: Setup Payload & DNS-SD ⛔ BLOCKED
+**Goal:** QR code setup payload, mDNS discovery. (Requires `.cpp` files)
 
-## Phase 10: Setup Payload & DNS-SD
-**Goal:** QR code setup payload, mDNS discovery.
+## Phase 11: BLE Commissioning (CHIPoBLE) ⛔ BLOCKED
+**Goal:** BLE pairing (optional for Thread-only devices). (Requires `.cpp` files)
 
-## Phase 11: BLE Commissioning (CHIPoBLE)
-**Goal:** BLE pairing (optional for Thread-only devices).
-
-## Phase 12: End-to-End Integration — Home Assistant Test
-**Goal:** Full Matter On/Off Light working with Home Assistant.
+## Phase 12: End-to-End Integration — Home Assistant Test ⛔ BLOCKED
+**Goal:** Full Matter On/Off Light working with Home Assistant. (Requires all above)
 
 ---
 
