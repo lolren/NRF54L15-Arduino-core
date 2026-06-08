@@ -372,9 +372,8 @@ void announceLightNode() {
 
 void setup() {
   Serial.begin(115200);
-  const uint32_t waitStart = millis();
-  while (!Serial && (millis() - waitStart) < 1500UL) {
-  }
+  Serial1.begin(115200);
+  // Serial may not connect on nRF54L15 - do not wait
 
 #if defined(LED_BUILTIN)
   pinMode(LED_BUILTIN, OUTPUT);
