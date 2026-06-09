@@ -306,6 +306,7 @@ void printStatus() {
 
 void setup() {
   Serial.begin(115200);
+  Serial1.begin(115200);
   { uint32_t t = millis(); while (!Serial && (millis()-t) < 1500) {} }
   
   Serial.println();

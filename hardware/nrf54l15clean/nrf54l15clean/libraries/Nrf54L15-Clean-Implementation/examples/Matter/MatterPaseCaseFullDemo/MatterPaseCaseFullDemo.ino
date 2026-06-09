@@ -157,7 +157,8 @@ void onUdp(void*,const uint8_t*d,uint16_t len,const otMessageInfo&info){
 } // namespace
 
 void setup(){
-  Serial.begin(115200);while(!Serial&&(millis()-1)<3000){}
+  Serial.begin(115200);
+  Serial1.begin(115200);// Serial may not connect on nRF54L15
   Serial.println();Serial.print("=== PC ");Serial.println(ROLE==DemoRole::COMMISSIONER?"COMM":"COMME");
   
   otOperationalDataset ds={};Nrf54ThreadExperimental::buildDemoDataset(&ds);

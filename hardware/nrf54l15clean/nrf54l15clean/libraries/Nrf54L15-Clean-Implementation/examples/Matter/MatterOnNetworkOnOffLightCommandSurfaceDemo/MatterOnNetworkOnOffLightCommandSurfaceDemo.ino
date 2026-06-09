@@ -837,9 +837,9 @@ void pollSerial() {
 
 void setup() {
   Serial.begin(115200);
+  Serial1.begin(115200);
   const uint32_t waitStart = millis();
-  while (!Serial && (millis() - waitStart) < 1500UL) {
-  }
+  // Serial may not connect on nRF54L15
 
 #if defined(LED_BUILTIN)
   pinMode(LED_BUILTIN, OUTPUT);
