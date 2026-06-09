@@ -40,9 +40,6 @@ void printHex(chip::ByteSpan bytes) {
 void setup() {
   Serial.begin(115200);
   Serial1.begin(115200);
-  const uint32_t waitStart = millis();
-  // Serial may not connect on nRF54L15
-  }
 
   Serial.print("matter_compile_target build=");
   Serial.println(xiao_nrf54l15::matterFoundationBuildMode());
