@@ -102,7 +102,8 @@ void udpReceiveCallback(void* context, const uint8_t* payload,
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) { delay(10); }
+  Serial1.begin(115200);
+  // Serial may not connect on nRF54L15 - use timeout instead
 
   Serial.print(F("=== Thread Ping Pong: "));
   Serial.println(ROLE == DemoRole::PONGER ? F("PONGER") : F("PINGER"));

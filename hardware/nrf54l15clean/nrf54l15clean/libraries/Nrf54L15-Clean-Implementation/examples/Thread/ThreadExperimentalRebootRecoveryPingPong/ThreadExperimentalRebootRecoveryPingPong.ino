@@ -100,7 +100,8 @@ void printPartitionId() {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) { delay(10); }
+  Serial1.begin(115200);
+  // Serial may not connect on nRF54L15 - use timeout instead
 
   Serial.print(F("=== Reboot Recovery: "));
   Serial.println(ROLE == DemoRole::PONGER ? F("PONGER") : F("PINGER"));

@@ -86,7 +86,8 @@ void handleCommand(const char* cmd) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) { delay(10); }
+  Serial1.begin(115200);
+  // Serial may not connect on nRF54L15 - use timeout instead
 
   Serial.println(F("=== Thread Reference Attach ==="));
   Serial.println(F("Send 'dataset-hex <tlv-hex>' to attach to external network."));

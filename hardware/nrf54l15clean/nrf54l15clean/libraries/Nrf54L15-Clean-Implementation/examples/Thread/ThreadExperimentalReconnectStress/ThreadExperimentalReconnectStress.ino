@@ -123,6 +123,7 @@ void onUdp(void*, const uint8_t* payload, uint16_t length,
 
 void setup() {
   Serial.begin(115200);
+  Serial1.begin(115200);
   const uint32_t waitStart = millis();
   while (!Serial && (millis() - waitStart) < 1500UL) {
   }
