@@ -41,6 +41,13 @@ constexpr uint16_t kBleCsHciOpCreateConfig = 0x2090U;
 constexpr uint16_t kBleCsHciOpRemoveConfig = 0x2091U;
 constexpr uint16_t kBleCsHciOpSetProcedureParameters = 0x2093U;
 constexpr uint16_t kBleCsHciOpProcedureEnable = 0x2094U;
+constexpr uint16_t kBleCsHciOpTest = 0x2095U;
+constexpr uint16_t kBleCsHciOpSetChannelClassification = 0x2096U;
+constexpr uint16_t kBleCsHciOpReadRemoteFaeTable = 0x2097U;
+constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilities = 0x2098U;
+constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2 = 0x2099U;
+constexpr uint16_t kBleCsHciOpWriteCachedRemoteFaeTable = 0x209AU;
+constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x33U;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
 constexpr uint8_t kBleCsHciEvtSecurityEnableComplete = 0x2EU;
@@ -378,6 +385,73 @@ struct BleCsProcedureEnableComplete {
   uint16_t maxProcedureLen = 0U;
 };
 
+// ─── Zephyr Parity: CS Test Mode ─────────────────────────────────
+
+struct BleCsTestParams {
+  uint16_t connHandle = 0U;
+  uint8_t configId = 0U;
+  uint8_t mainModeType = kBleCsMainMode2;
+  uint8_t subModeType = 0xFFU;
+  uint8_t minMainModeSteps = 3U;
+  uint8_t maxMainModeSteps = 5U;
+  uint8_t mainModeRepetition = 1U;
+  uint8_t mode0Steps = 0U;
+  uint8_t role = 2U;
+  uint8_t rttType = 0U;
+  uint8_t csSyncPhy = 1U;
+  uint8_t channelMap[kBleCsChannelMapBytes] = {0};
+  uint8_t channelMapRepetition = 1U;
+  uint8_t channelSelectionType = 1U;
+  uint8_t ch3cShape = 1U;
+  uint8_t ch3cJump = 3U;
+  uint8_t csEnhancements1 = 0x01U;
+  // Override config bitmask (bit 0-9 select which fields override)
+  uint16_t overrideConfig = 0U;
+  // Override fields (only used if corresponding bit is set in overrideConfig)
+  uint8_t overrideChannelList[37] = {0};
+  uint8_t overrideChannelListLen = 0U;
+  uint8_t overrideMainModeSteps = 0U;
+  uint16_t overrideTpmToneExtensionUs = 0U;
+  uint8_t overrideToneAntennaPermutationIndex = 0U;
+  uint32_t overrideCsSyncAccessAddress = 0U;
+  uint8_t overrideSsMarkerPositions[2] = {0};
+  uint32_t overrideSsMarkerValue = 0U;
+  uint8_t overrideCsSyncPayloadPattern = 0U;
+  bool overrideStablePhaseTest = false;
+};
+
+struct BleCsTestComplete {
+  uint8_t status = 0U;
+  uint16_t connHandle = 0U;
+  uint8_t configId = 0U;
+  uint8_t procedureCounter = 0U;
+};
+
+// ─── Zephyr Parity: Channel Classification ───────────────────────
+
+struct BleCsChannelClassification {
+  uint8_t channelMap[kBleCsChannelMapBytes] = {0};
+};
+
+// ─── Zephyr Parity: FAE Table ────────────────────────────────────
+
+struct BleCsFaeEntry {
+  uint8_t faeValue = 0U;
+};
+
+struct BleCsFaeTable {
+  uint16_t connHandle = 0U;
+  uint8_t numFaeValues = 0U;
+  BleCsFaeEntry entries[10] = {};
+};
+
+// ─── Zephyr Parity: Cached Capabilities ──────────────────────────
+
+struct BleCsCachedCapabilities {
+  uint16_t connHandle = 0U;
+  BleCsControllerCapabilities capabilities{};
+};
+
 enum class BleCsControllerWorkflowPhase : uint8_t {
   kIdle = 0U,
   kNeedReadRemoteCapabilities,
@@ -571,6 +645,38 @@ class BleChannelSoundingRadio {
       const uint8_t* eventData,
       size_t eventLen,
       BleCsProcedureEnableComplete* outEvent);
+
+  // ─── Zephyr Parity: CS Test Mode HCI ───────────────────────
+  static bool buildHciTestCommand(uint16_t connHandle,
+                                   const BleCsTestParams& params,
+                                   BleCsHciCommand* outCommand);
+  static bool parseHciTestCompleteEvent(const uint8_t* eventData,
+                                         size_t eventLen,
+                                         BleCsTestComplete* outEvent);
+
+  // ─── Zephyr Parity: Channel Classification HCI ─────────────
+  static bool buildHciSetChannelClassificationCommand(
+      const BleCsChannelClassification& classification,
+      BleCsHciCommand* outCommand);
+
+  // ─── Zephyr Parity: FAE Table HCI ──────────────────────────
+  static bool buildHciReadRemoteFaeTableCommand(uint16_t connHandle,
+                                                 BleCsHciCommand* outCommand);
+  static bool parseHciReadRemoteFaeTableCompleteEvent(
+      const uint8_t* eventData,
+      size_t eventLen,
+      BleCsFaeTable* outTable);
+
+  // ─── Zephyr Parity: Cached Capabilities HCI ────────────────
+  static bool buildHciWriteCachedRemoteSupportedCapabilitiesCommand(
+      uint16_t connHandle,
+      const BleCsControllerCapabilities& capabilities,
+      BleCsHciCommand* outCommand);
+  static bool buildHciWriteCachedRemoteSupportedCapabilitiesV2Command(
+      uint16_t connHandle,
+      const BleCsControllerCapabilities& capabilities,
+      BleCsHciCommand* outCommand);
+
   BleCsDfeCaptureInfo lastDfeCaptureInfo() const;
   bool copyLastDfePacket(uint8_t* outPacket,
                          size_t maxLen,
