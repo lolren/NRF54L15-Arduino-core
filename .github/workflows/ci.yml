@@ -67,16 +67,110 @@ jobs:
             options: clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeRouter
             options: clean_ble=off
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadCoreStageProbe
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadPlatformSkeletonProbe
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioDiagInitiator
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioDiagResponder
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioPacketInitiator
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioPacketResponder
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioSourceMatchRequester
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioSourceMatchResponder
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioTxAckPeer
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRadioTxAckResponder
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadRoleStageProbe
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadUdpStageProbe
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalCommandSurface
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalCommissioner
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalCommissionerJoinerDemo
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalJoiner
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalJoinerPSK
+            options: clean_thread=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalJoinerPSKCommissioner
             options: clean_thread=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalJoinerPSKJoiner
             options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalMeshcopRestoreProbe
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalMeshcopWrongPskdJoiner
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalPskcUdpHello
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalRebootRecoveryProbe
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalReconnectStress
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalReferenceDatasetAttach
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalRoleReporter
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalRouterPromotion
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalSleepyChild
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalSleepyParent
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalUdpHello
+            options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalUdpPing
+            options: clean_thread=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalUdpSoak
             options: clean_thread=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadUartTest
+            options: clean_thread=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterOnOffLightTwoBoardDemo
-            options: clean_thread=stage
+            options: clean_thread=stage,clean_matter=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterCommissionAndControl
-            options: clean_thread=stage
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterCaseInitiator
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterCaseOperationalDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterCaseResponder
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterCaseTwoBoardDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterFoundationProbe
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterOnNetworkOnOffLightCommandSurfaceDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterOnNetworkOnOffLightNodeDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterOnNetworkRebootRecoveryProbe
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterOnOffLightApiDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterOnOffLightFoundationCompileTarget
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCaseCommissionee
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCaseCommissioner
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCaseFullDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCommissionee
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCommissioner
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCommissioningDemo
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCryptoTest
+            options: clean_thread=stage,clean_matter=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Peripherals/SaadcDifferentialProbe
             options: clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Peripherals/VbatReadViaAnalogRead
