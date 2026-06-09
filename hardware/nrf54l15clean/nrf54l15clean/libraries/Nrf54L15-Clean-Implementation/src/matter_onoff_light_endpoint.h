@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "matter_onoff_light.h"
+#include "matter_access_control.h"
 
 namespace xiao_nrf54l15 {
 
@@ -47,6 +48,11 @@ struct MatterCommandRequest {
   MatterCommandPath path = {};
   bool hasUint16Value = false;
   uint16_t uint16Value = 0U;
+  uint8_t level = 0U;                    // For Level Control cluster
+  uint16_t transitionTimeDeciseconds = 0U;  // For Level Control cluster
+  const uint8_t* subjectId = nullptr;  // 8-byte subject (nullable for local)
+  const uint8_t* fabricId = nullptr;   // 8-byte fabric (nullable for local)
+  const uint8_t* nodeId = nullptr;     // 8-byte node (nullable for local)
 };
 
 struct MatterCommandResult {
@@ -77,10 +83,20 @@ class Nrf54MatterOnOffLightEndpoint {
   static constexpr uint32_t kToggleCommandId = 0x0002U;
   static constexpr uint32_t kIdentifyCommandId = 0x0000U;
 
+  // Level Control cluster + commands use Nrf54MatterOnOffLightDevice constants
+  static constexpr MatterClusterId kLevelControlClusterId =
+      Nrf54MatterOnOffLightDevice::kLevelControlClusterId;
+  static constexpr uint32_t kMoveToLevelCommandId =
+      Nrf54MatterOnOffLightDevice::kMoveToLevelCommandId;
+  static constexpr uint32_t kMoveToLevelWithOnOffCommandId =
+      Nrf54MatterOnOffLightDevice::kMoveToLevelWithOnOffCommandId;
+
   Nrf54MatterOnOffLightEndpoint() = default;
   explicit Nrf54MatterOnOffLightEndpoint(Nrf54MatterOnOffLightDevice* device);
 
   void attach(Nrf54MatterOnOffLightDevice* device);
+  void setAccessControl(MatterAccessControl* acl);
+  bool hasAccessControl() const;
   void detach();
   bool attached() const;
 
@@ -107,6 +123,7 @@ class Nrf54MatterOnOffLightEndpoint {
                   bool stateChanged) const;
 
   Nrf54MatterOnOffLightDevice* device_ = nullptr;
+  MatterAccessControl* accessControl_ = nullptr;
 };
 
 }  // namespace xiao_nrf54l15

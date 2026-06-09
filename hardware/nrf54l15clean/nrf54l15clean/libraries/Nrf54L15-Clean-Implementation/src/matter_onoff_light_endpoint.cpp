@@ -12,6 +12,14 @@ void Nrf54MatterOnOffLightEndpoint::attach(Nrf54MatterOnOffLightDevice* device) 
   device_ = device;
 }
 
+void Nrf54MatterOnOffLightEndpoint::setAccessControl(MatterAccessControl* acl) {
+  accessControl_ = acl;
+}
+
+bool Nrf54MatterOnOffLightEndpoint::hasAccessControl() const {
+  return accessControl_ != nullptr;
+}
+
 void Nrf54MatterOnOffLightEndpoint::detach() { device_ = nullptr; }
 
 bool Nrf54MatterOnOffLightEndpoint::attached() const {
@@ -91,6 +99,22 @@ bool Nrf54MatterOnOffLightEndpoint::invokeCommand(
     return false;
   }
 
+  // ACL check: deny if access control is configured and subject is not authorized
+  if (accessControl_ != nullptr &&
+      (request.subjectId != nullptr || request.fabricId != nullptr)) {
+    uint8_t defaultNodeId[8] = {0};
+    const uint8_t* fabricId = request.fabricId != nullptr ? request.fabricId : defaultNodeId;
+    const uint8_t* nodeId = request.nodeId != nullptr ? request.nodeId : defaultNodeId;
+    const uint8_t* subjectId = request.subjectId != nullptr ? request.subjectId : defaultNodeId;
+    if (!accessControl_->checkAccess(subjectId, fabricId, nodeId,
+                                     request.path.clusterId,
+                                     request.path.endpointId,
+                                     AclPrivilege::kOperate)) {
+      fillResult(outResult, MatterInteractionStatus::kUnsupportedCommand, false, false);
+      return false;
+    }
+  }
+
   MatterOnOffLightDeviceState before = {};
   (void)device_->snapshot(&before);
 
@@ -144,7 +168,8 @@ bool Nrf54MatterOnOffLightEndpoint::invokeCommand(
   (void)device_->snapshot(&after);
   const bool stateChanged =
       before.on != after.on || before.identifying != after.identifying ||
-      before.identifyTimeSeconds != after.identifyTimeSeconds;
+      before.identifyTimeSeconds != after.identifyTimeSeconds ||
+      before.level != after.level;
   fillResult(outResult, status, ok, stateChanged);
   return ok;
 }
@@ -178,6 +203,8 @@ const char* Nrf54MatterOnOffLightEndpoint::clusterName(
   switch (clusterId) {
     case kOnOffClusterId:
       return "OnOff";
+    case kLevelControlClusterId:
+      return "LevelControl";
     case kIdentifyClusterId:
       return "Identify";
     default:
@@ -196,6 +223,17 @@ const char* Nrf54MatterOnOffLightEndpoint::attributeName(
           return "GlobalSceneControl";
         default:
           return "UnknownOnOffAttribute";
+      }
+    case kLevelControlClusterId:
+      switch (attributeId) {
+        case Nrf54MatterOnOffLightDevice::kCurrentLevelAttributeId:
+          return "CurrentLevel";
+        case Nrf54MatterOnOffLightDevice::kMinLevelAttributeId:
+          return "MinLevel";
+        case Nrf54MatterOnOffLightDevice::kMaxLevelAttributeId:
+          return "MaxLevel";
+        default:
+          return "UnknownLevelControlAttribute";
       }
     case kIdentifyClusterId:
       switch (attributeId) {
@@ -222,6 +260,15 @@ const char* Nrf54MatterOnOffLightEndpoint::commandName(
           return "Toggle";
         default:
           return "UnknownOnOffCommand";
+      }
+    case kLevelControlClusterId:
+      switch (commandId) {
+        case kMoveToLevelCommandId:
+          return "MoveToLevel";
+        case kMoveToLevelWithOnOffCommandId:
+          return "MoveToLevelWithOnOff";
+        default:
+          return "UnknownLevelControlCommand";
       }
     case kIdentifyClusterId:
       switch (commandId) {

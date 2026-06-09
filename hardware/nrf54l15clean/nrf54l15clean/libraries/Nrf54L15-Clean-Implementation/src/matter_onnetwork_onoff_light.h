@@ -8,6 +8,8 @@
 #include "matter_onoff_light.h"
 #include "matter_onoff_light_endpoint.h"
 #include "matter_credentials.h"
+#include "matter_device_attestation.h"
+#include "matter_access_control.h"
 
 #if defined(OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE) && \
     (OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE != 0)
@@ -406,6 +408,10 @@ class Nrf54MatterOnNetworkOnOffLightNode {
   Nrf54MatterOnOffLightDevice light_;
   Nrf54MatterOnOffLightEndpoint endpoint_;
   Nrf54ThreadExperimental thread_;
+  MatterDeviceAttestation attestation_;
+  MatterAccessControl accessControl_;
+  bool attestationReady_ = false;
+  bool accessControlReady_ = false;
 #if defined(OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE) && \
     (OPENTHREAD_CONFIG_SRP_CLIENT_ENABLE != 0)
   otSrpClientService srpCommissionableService_ = {};

@@ -69,13 +69,26 @@ void Nrf54MatterOnOffLightDevice::end() {
 }
 
 void Nrf54MatterOnOffLightDevice::process() {
-  if (identifyEndMs_ == 0U) {
-    return;
-  }
-
-  if (remainingIdentifySeconds(identifyEndMs_) == 0U) {
+  // Handle identify timeout
+  if (identifyEndMs_ != 0U &&
+      remainingIdentifySeconds(identifyEndMs_) == 0U) {
     identifyEndMs_ = 0U;
     notifyIdentifyChange();
+  }
+
+  // Handle level transition
+  if (levelTransitionEndMs_ != 0U) {
+    const uint32_t nowMs = millis();
+    if (nowMs >= levelTransitionEndMs_) {
+      level_ = levelTarget_;
+      levelTransitionEndMs_ = 0U;
+    } else if (levelTransitionMs_ > 0U) {
+      const uint32_t elapsed = nowMs - (levelTransitionEndMs_ - levelTransitionMs_);
+      const int32_t diff = static_cast<int32_t>(levelTarget_) - static_cast<int32_t>(levelStart_);
+      const int32_t progress = (diff * static_cast<int32_t>(elapsed)) /
+                                static_cast<int32_t>(levelTransitionMs_);
+      level_ = static_cast<uint8_t>(static_cast<int32_t>(levelStart_) + progress);
+    }
   }
 }
 
@@ -98,6 +111,51 @@ bool Nrf54MatterOnOffLightDevice::toggle(bool persist) {
 
 bool Nrf54MatterOnOffLightDevice::on() const {
   return on_;
+}
+
+bool Nrf54MatterOnOffLightDevice::setLevel(uint8_t level, bool persist) {
+  if (level > kMaxLevel && level != 255U) {
+    return false;
+  }
+  if (level > kMaxLevel) level = kMaxLevel;
+  if (level < kMinLevel && level != 0U) level = kMinLevel;
+  level_ = level;
+  return !persist || savePersistentState();
+}
+
+uint8_t Nrf54MatterOnOffLightDevice::level() const {
+  return level_;
+}
+
+bool Nrf54MatterOnOffLightDevice::moveToLevel(uint8_t targetLevel, uint16_t transitionTimeMs) {
+  if (targetLevel > kMaxLevel && targetLevel != 255U) {
+    return false;
+  }
+  if (targetLevel > kMaxLevel) targetLevel = kMaxLevel;
+  if (targetLevel < kMinLevel && targetLevel != 0U) targetLevel = kMinLevel;
+  levelStart_ = level_;
+  levelTarget_ = targetLevel;
+  levelTransitionMs_ = transitionTimeMs;
+  levelTransitionEndMs_ = millis() + transitionTimeMs;
+  return true;
+}
+
+bool Nrf54MatterOnOffLightDevice::readLevelAttribute(uint8_t* outLevel) const {
+  if (outLevel == nullptr) return false;
+  *outLevel = level_;
+  return true;
+}
+
+bool Nrf54MatterOnOffLightDevice::readMinLevelAttribute(uint8_t* outLevel) const {
+  if (outLevel == nullptr) return false;
+  *outLevel = kMinLevel;
+  return true;
+}
+
+bool Nrf54MatterOnOffLightDevice::readMaxLevelAttribute(uint8_t* outLevel) const {
+  if (outLevel == nullptr) return false;
+  *outLevel = kMaxLevel;
+  return true;
 }
 
 bool Nrf54MatterOnOffLightDevice::setStartUpBehavior(
@@ -171,6 +229,7 @@ bool Nrf54MatterOnOffLightDevice::snapshot(
   outState->persistentStorageOpen = storageOpen_;
   outState->identifyTimeSeconds = identifyTimeSeconds();
   outState->startUpBehavior = startUpBehavior_;
+  outState->level = level_;
   return true;
 }
 

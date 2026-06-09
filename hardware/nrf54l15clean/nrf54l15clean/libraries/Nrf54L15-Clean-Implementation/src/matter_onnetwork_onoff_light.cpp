@@ -207,7 +207,17 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
   commissioningWindowDurationSeconds_ = 0U;
   commissioningWindowEndMs_ = 0U;
   endpoint_.attach(&light_);
+  endpoint_.setAccessControl(&accessControl_);
   buildDefaultIdentity(&identity_);
+
+  // Initialize DAC attestation chain
+  uint8_t serialNumber[32] = {0};
+  memcpy(serialNumber, "NRF54L15-ARC", 12);
+  attestationReady_ = attestation_.generateTestChain(
+      identity_.vendorId, identity_.productId, serialNumber);
+
+  // Initialize ACL with default view access
+  accessControlReady_ = accessControl_.addDefaultViewEntry();
 
   if (identityValid(effectiveConfig.identity)) {
     identity_ = effectiveConfig.identity;

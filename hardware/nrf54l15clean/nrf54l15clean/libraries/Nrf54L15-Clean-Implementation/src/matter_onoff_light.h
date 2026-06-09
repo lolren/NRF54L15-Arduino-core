@@ -19,6 +19,7 @@ struct MatterOnOffLightDeviceState {
   bool identifying = false;
   bool persistentStorageOpen = false;
   uint16_t identifyTimeSeconds = 0U;
+  uint8_t level = 255U;  // 0..255 brightness level (Matter 0..254 + 255=identify)
   MatterOnOffLightStartUpBehavior startUpBehavior =
       MatterOnOffLightStartUpBehavior::kRestorePrevious;
 };
@@ -42,9 +43,19 @@ class Nrf54MatterOnOffLightDevice {
       Nrf54MatterOnOffLightFoundation::kOnOffClusterId;
   static constexpr MatterClusterId kIdentifyClusterId =
       Nrf54MatterOnOffLightFoundation::kIdentifyClusterId;
+  static constexpr MatterClusterId kLevelControlClusterId = 0x0008U;
   static constexpr uint32_t kOnOffAttributeId = 0x0000U;
   static constexpr uint32_t kGlobalSceneControlAttributeId = 0x4000U;
   static constexpr uint32_t kIdentifyTimeAttributeId = 0x0000U;
+  static constexpr uint32_t kCurrentLevelAttributeId = 0x0000U;
+  static constexpr uint32_t kMinLevelAttributeId = 0x0002U;
+  static constexpr uint32_t kMaxLevelAttributeId = 0x0003U;
+  static constexpr uint32_t kMoveToLevelCommandId = 0x0000U;
+  static constexpr uint32_t kMoveCommandId = 0x0001U;
+  static constexpr uint32_t kStepCommandId = 0x0002U;
+  static constexpr uint32_t kMoveToLevelWithOnOffCommandId = 0x0004U;
+  static constexpr uint8_t kMinLevel = 1U;
+  static constexpr uint8_t kMaxLevel = 254U;
 
   Nrf54MatterOnOffLightDevice() = default;
 
@@ -56,6 +67,13 @@ class Nrf54MatterOnOffLightDevice {
   bool setOn(bool on, bool persist = true);
   bool toggle(bool persist = true);
   bool on() const;
+
+  bool setLevel(uint8_t level, bool persist = true);
+  uint8_t level() const;
+  bool moveToLevel(uint8_t targetLevel, uint16_t transitionTimeMs);
+  bool readLevelAttribute(uint8_t* outLevel) const;
+  bool readMinLevelAttribute(uint8_t* outLevel) const;
+  bool readMaxLevelAttribute(uint8_t* outLevel) const;
 
   bool setStartUpBehavior(MatterOnOffLightStartUpBehavior behavior,
                           bool persist = true);
@@ -100,6 +118,11 @@ class Nrf54MatterOnOffLightDevice {
   bool storageOpen_ = false;
   bool on_ = false;
   bool globalSceneControl_ = true;
+  uint8_t level_ = kMaxLevel;
+  uint32_t levelTransitionEndMs_ = 0U;
+  uint8_t levelTarget_ = kMaxLevel;
+  uint8_t levelStart_ = kMaxLevel;
+  uint32_t levelTransitionMs_ = 0U;
   uint32_t identifyEndMs_ = 0U;
   MatterOnOffLightStartUpBehavior startUpBehavior_ =
       MatterOnOffLightStartUpBehavior::kRestorePrevious;
