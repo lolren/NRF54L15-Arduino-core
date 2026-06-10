@@ -1014,12 +1014,8 @@ def _ensure_pyocd_targets():
             # Always copy/overwrite — ensures flash algo patch is applied
             try:
                 shutil.copy2(bundled, dest)
-            # Clear pyocd cache so the patched target takes effect immediately
-            import glob as _glob
-            for _d in _glob.glob(os.path.join(builtin_dir, "__pycache__")):
-                shutil.rmtree(_d, ignore_errors=True)
-            _parent = os.path.dirname(builtin_dir)
-            for _d in _glob.glob(os.path.join(_parent, "..", "__pycache__")):
+            import glob as _g
+            for _d in _g.glob(os.path.join(builtin_dir, "__pycache__")):
                 shutil.rmtree(_d, ignore_errors=True)
             except PermissionError:
                 sys.stderr.write("\npyOCD target needs write access.\n")
