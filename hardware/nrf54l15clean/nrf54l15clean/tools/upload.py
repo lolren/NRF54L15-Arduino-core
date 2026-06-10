@@ -1011,52 +1011,26 @@ def _ensure_pyocd_targets():
     
     if os.path.exists(bundled):
         try:
-            # Always copy/overwrite — ensures flash algo patch is applied
-            try:
-                shutil.copy2(bundled, dest)
+            shutil.copy2(bundled, dest)
             import glob as _g
             for _d in _g.glob(os.path.join(builtin_dir, "__pycache__")):
                 shutil.rmtree(_d, ignore_errors=True)
-            except PermissionError:
-                sys.stderr.write("\npyOCD target needs write access.\n")
-                sys.stderr.write("Run: pip install --user pyocd\n")
-                sys.stderr.write("Or re-run upload with admin/sudo once.\n\n")
-                return
-            
-            # If stock pyOCD target exists, overlay our working flash algorithm
-            if os.path.exists(dest):
-                try:
-                    with open(dest) as f:
-                        tgt = f.read()
-                    # Check if stock flash algo needs patching (has 0x5004e400 from stock)
-                    if '0x5004e400' in tgt.lower() or '0xe7fdbe00' in tgt.lower():
-                        import importlib.util
-                        spec = importlib.util.spec_from_file_location('target', bunded)
-                        # Simple approach: replace the file entirely
-                        pass  # shutil.copy2 above already replaced it
-                except Exception:
-                    pass
-            
-            # Also register in __init__.py if needed
+            # Register in __init__.py if needed
             init_py = os.path.join(builtin_dir, "__init__.py")
             if os.path.exists(init_py):
                 with open(init_py) as f:
-                    init = f.read()
-                if "target_nRF54LM20A" not in init:
-                    new_init = init.replace(
-                        "from . import target_nRF54L15",
-                        "from . import target_nRF54L15\nfrom . import target_nRF54LM20A"
-                    )
-                    if "nrf54lm20a" not in init:
-                        new_init = new_init.replace(
-                            "'nrf54l' : target_nRF54L15.NRF54L15,",
-                            "'nrf54l' : target_nRF54L15.NRF54L15,\n"
-                            "          'nrf54lm20a' : target_nRF54LM20A.NRF54LM20A,"
-                        )
+                    ic = f.read()
+                if "target_nRF54LM20A" not in ic:
+                    ic = ic.replace("from . import target_nRF54L15",
+                                    "from . import target_nRF54L15\nfrom . import target_nRF54LM20A")
+                    ic = ic.replace("'nrf54l' : target_nRF54L15.NRF54L15,",
+                                    "'nrf54l' : target_nRF54L15.NRF54L15,\n          'nrf54lm20a' : target_nRF54LM20A.NRF54LM20A,")
                     with open(init_py, 'w') as f:
-                        f.write(new_init)
-        except (OSError, PermissionError):
-            pass  # Read-only installation — target must be pre-installed
+                        f.write(ic)
+        except PermissionError:
+            sys.stderr.write("\npyOCD target needs write access.\n")
+            sys.stderr.write("Run: pip install --user pyocd\n\n")
+            return
 
 _ensure_pyocd_targets()
 
