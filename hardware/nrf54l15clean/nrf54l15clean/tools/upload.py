@@ -955,6 +955,17 @@ def pyocd_timeout_seconds() -> float:
 
 
 # ── Auto-install custom pyOCD targets ──────────────────────────
+
+# Delete old bundled pyOCD (< 0.44) so system pyOCD takes over
+_shim_site = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    "..", "..", "..", "tools", "nrf54l15hosttools",
+    "1.1.2", "runtime", "pyocd-site")
+_shim_site = os.path.normpath(_shim_site)
+if os.path.isdir(_shim_site):
+    _shim_tgt = os.path.join(_shim_site, "pyocd", "target", "builtin", "target_nRF54LM20A.py")
+    if not os.path.exists(_shim_tgt):
+        shutil.rmtree(_shim_site, ignore_errors=True)
+
 def _ensure_pyocd_targets():
     """Copy bundled nRF54LM20A target to pyOCD builtin dir. Tries multiple methods."""
     import shutil, subprocess, glob, site
