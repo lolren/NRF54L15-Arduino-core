@@ -1116,7 +1116,8 @@ static constexpr uint8_t kSerialPinDisconnected = 0xFFU;
 HardwareSerial Serial(NRF_UARTE21, kSerialPinDisconnected, kSerialPinDisconnected);
 HardwareSerial Serial1(NRF_UARTE20, kSerialPinDisconnected, kSerialPinDisconnected);
 #elif defined(ARDUINO_NRF54LM20B)
-/* LM20B: UART on D6(P1.08)=TX, D7(P1.09)=RX */
+/* LM20B: UART20 on P1.11/P1.10 (CDC-SAMD11), UART21 on P1.08/P1.09 (D6/D7 header)
+ * From Seeed Zephyr pinctrl: uart20=TX:P1.11/RX:P1.10, uart21=TX:P1.08/RX:P1.09 */
 HardwareSerial Serial(NRF_UARTE20, PIN_SERIAL_TX, PIN_SERIAL_RX);
 HardwareSerial Serial1(NRF_UARTE21, PIN_SERIAL1_TX, PIN_SERIAL1_RX);
 #elif defined(NRF54L15_CLEAN_SERIAL_ROUTE_HEADER)
