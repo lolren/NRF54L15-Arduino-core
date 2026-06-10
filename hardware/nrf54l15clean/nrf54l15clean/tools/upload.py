@@ -1094,7 +1094,7 @@ def flash_hex(
     # Inject registration script for LM20B target (no admin rights needed)
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "pyocd_register_lm20b.py")
-    cmd = append_uid([*pyocd_cmd])
+    cmd = append_uid([*pyocd_cmd], uid)
     if target == "nrf54lm20a" and os.path.exists(script):
         cmd.extend(["--script", script])
     cmd.extend(["load", "-W", "-t", target])
