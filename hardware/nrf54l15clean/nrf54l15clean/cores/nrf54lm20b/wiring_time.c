@@ -814,9 +814,12 @@ uint64_t nrf54lm20b_core_monotonic_time_us(void)
 #endif
 }
 
-// Compat wrapper: HAL library references nrf54l15_core_monotonic_time_us
+// Compat wrappers: HAL/Bluefruit libraries reference nrf54l15_core_monotonic_*
 uint64_t nrf54l15_core_monotonic_time_us(void) {
     return nrf54lm20b_core_monotonic_time_us();
+}
+uint32_t nrf54l15_core_monotonic_time_ms(void) {
+    return nrf54lm20b_core_monotonic_time_ms();
 }
 
 uint32_t nrf54lm20b_core_monotonic_time_ms(void)
