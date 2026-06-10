@@ -20,7 +20,7 @@ MEMORY
 {
     FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x1FC000
     FLASH_BOND (r)  : ORIGIN = 0x001FC000, LENGTH = 0x1000
-    RAM (rwx)       : ORIGIN = 0x20000000, LENGTH = 0x40000
+    RAM (rwx)       : ORIGIN = 0x20000000, LENGTH = 0x70000
 }
 
 __stack_size__ = 4K;
