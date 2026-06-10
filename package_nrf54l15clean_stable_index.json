@@ -16,11 +16,14 @@
           "category": "Arduino",
           "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.0/nrf54l15clean-0.9.0-0ab679159bd5.tar.bz2",
           "archiveFileName": "nrf54l15clean-0.9.0-0ab679159bd5.tar.bz2",
-          "checksum": "SHA-256:56aefa9797a7e49f47fe41663a34a12ae0b90757c5aab847d1218ada64e7b626",
-          "size": "126",
+          "checksum": "SHA-256:1c559c898eb1b3f4dc4a85f0434d48cec8ef1fe0e164fdeb3d0cf8025be90cf0",
+          "size": "3821587",
           "boards": [
             {
               "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
             },
             {
               "name": "HOLYIOT-25008 nRF54L15 Module"
@@ -33,9 +36,6 @@
             },
             {
               "name": "Nordic PCA10156 nRF54L15 DK"
-            },
-            {
-              "name": "XIAO nRF54LM20B"
             }
           ],
           "help": {
