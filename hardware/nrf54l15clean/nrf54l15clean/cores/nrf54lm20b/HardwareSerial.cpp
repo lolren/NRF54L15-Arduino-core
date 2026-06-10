@@ -395,6 +395,14 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
     reg32(base + U_PSEL_RXD) = make_psel(rxPort, rx);
     reg32(base + U_PSEL_CTS) = kPselDisconnected;
     reg32(base + U_PSEL_RTS) = kPselDisconnected;
+
+    /* nRF54L serial fabric: writing to the shared SPIM PSEL registers
+     * (0x51C/0x520) enables the serial fabric routing. Without this,
+     * the UARTE PSEL config is ignored and no data reaches the GPIO pins.
+     * Bit 31 must be set to actually trigger the fabric state change. */
+    reg32(base + 0x51CUL) = 0x80000000UL | ((uint32_t)txPort << 5) | tx;
+    reg32(base + 0x520UL) = 0x80000000UL | ((uint32_t)rxPort << 5) | rx;
+
     const UarteFormat fmt = decode_serial_format(config);
     _dataMask = fmt.dataMask;
     reg32(base + U_CONFIG) = fmt.configReg |
