@@ -1091,15 +1091,7 @@ def flash_hex(
     pyocd_cmd: list[str], target: str, uid: str | None, hex_path: str,
     *, auto_unlock: bool = True, connect_mode: str | None = None, safe_mode: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    # Inject registration script for LM20B target (no admin rights needed)
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "pyocd_register_lm20b.py")
     cmd = append_uid([*pyocd_cmd, "load", "-W", "-t", target], uid)
-    if target == "nrf54lm20a" and os.path.exists(script):
-        # --script goes AFTER the subcommand (load), before -t
-        load_idx = cmd.index("load")
-        cmd.insert(load_idx + 1, "--script")
-        cmd.insert(load_idx + 2, script)
     cmd = append_connect_mode(cmd, connect_mode)
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     if not auto_unlock:
