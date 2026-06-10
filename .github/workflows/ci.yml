@@ -202,7 +202,7 @@ jobs:
             --fqbn "nrf54l15clean:nrf54l15clean:xiao_nrf54l15:${{ matrix.options }}" \
           - board: xiao_nrf54lm20b
             artifact: xiao_nrf54lm20b-blink
-            sketch: examples/Board/XiaoRgbLed
+            sketch: examples/Board/Xiao_nRF54LM20B_RGB
             flags: ""
           - board: xiao_nrf54lm20b
             artifact: xiao_nrf54lm20b-ble
