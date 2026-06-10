@@ -1006,7 +1006,13 @@ def _ensure_pyocd_targets():
     if os.path.exists(bundled):
         try:
             # Always copy/overwrite — ensures flash algo patch is applied
-            shutil.copy2(bundled, dest)
+            try:
+                shutil.copy2(bundled, dest)
+            except PermissionError:
+                sys.stderr.write("\npyOCD target needs write access.\n")
+                sys.stderr.write("Run: pip install --user pyocd\n")
+                sys.stderr.write("Or re-run upload with admin/sudo once.\n\n")
+                return
             
             # If stock pyOCD target exists, overlay our working flash algorithm
             if os.path.exists(dest):
