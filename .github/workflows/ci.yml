@@ -200,6 +200,22 @@ jobs:
         run: |
           arduino-cli compile \
             --fqbn "nrf54l15clean:nrf54l15clean:xiao_nrf54l15:${{ matrix.options }}" \
+          - board: xiao_nrf54lm20b
+            artifact: xiao_nrf54lm20b-blink
+            sketch: examples/Board/XiaoRgbLed
+            flags: ""
+          - board: xiao_nrf54lm20b
+            artifact: xiao_nrf54lm20b-ble
+            sketch: examples/BLE/ChannelSounding/BleChannelSoundingInitiator
+            flags: clean_ble=on
+          - board: xiao_nrf54lm20b
+            artifact: xiao_nrf54lm20b-thread
+            sketch: examples/Thread/OpenThreadCoreStageProbe
+            flags: clean_thread=stage
+          - board: xiao_nrf54lm20b
+            artifact: xiao_nrf54lm20b-matter
+            sketch: examples/Matter/MatterOnOffLightTwoBoardDemo
+            flags: clean_matter=stage,clean_thread=stage
             "${GITHUB_WORKSPACE}/${{ matrix.sketch }}"
 
   package-consistency:

@@ -60,11 +60,6 @@ extern "C" {
 #define NRF_EGU10_NS_BASE      0x40087000UL
 #define NRF_EGU10_S_BASE       0x50087000UL
 
-// nRF54LM20B additional GPIO port (not present on nRF54L15)
-#if defined(NRF54LM20B_XXAA)
-#define NRF_P3_NS_BASE         0x400D8600UL
-#define NRF_P3_S_BASE          0x500D8600UL
-#endif
 #define NRF_SPIS20_NS_BASE     0x400C6000UL
 #define NRF_SPIM20_NS_BASE     0x400C6000UL
 #define NRF_TWIM20_NS_BASE     0x400C6000UL
