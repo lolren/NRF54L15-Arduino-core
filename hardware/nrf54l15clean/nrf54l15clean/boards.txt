@@ -156,6 +156,117 @@ xiao_nrf54l15.menu.clean_upload.uf2.upload.runner=uf2
 xiao_nrf54l15.menu.clean_upload.uf2.upload.use_1200bps_touch=false
 xiao_nrf54l15.menu.clean_upload.uf2.upload.wait_for_upload_port=false
 
+# ─── XIAO nRF54LM20B ────────────────────────────────────────────
+xiao_nrf54lm20b.name=XIAO nRF54LM20B
+
+xiao_nrf54lm20b.vid.0=0x2886
+xiao_nrf54lm20b.pid.0=0x0080
+xiao_nrf54lm20b.upload_port.0.vid=0x2886
+xiao_nrf54lm20b.upload_port.0.pid=0x0080
+
+xiao_nrf54lm20b.upload.tool=nrf54upload
+xiao_nrf54lm20b.upload.tool.serial=nrf54upload
+xiao_nrf54lm20b.upload.protocol=cmsis-dap
+xiao_nrf54lm20b.upload.maximum_size=2080768
+xiao_nrf54lm20b.upload.maximum_data_size=524288
+xiao_nrf54lm20b.upload.wait_for_upload_port=false
+xiao_nrf54lm20b.upload.use_1200bps_touch=false
+xiao_nrf54lm20b.upload.disable_flushing=true
+xiao_nrf54lm20b.upload.runner=auto
+xiao_nrf54lm20b.upload.target=nrf54l
+xiao_nrf54lm20b.upload.uid=
+xiao_nrf54lm20b.upload.pyocd_safe=auto
+xiao_nrf54lm20b.upload.openocd_script={runtime.platform.path}/tools/openocd/nrf54l15.cfg
+xiao_nrf54lm20b.upload.openocd_speed=4000
+xiao_nrf54lm20b.upload.openocd_bin={runtime.tools.openocd-0.11.0-arduino2.path}/bin/openocd
+
+xiao_nrf54lm20b.serial.disableDTR=false
+xiao_nrf54lm20b.serial.disableRTS=false
+
+xiao_nrf54lm20b.build.mcu=cortex-m33
+xiao_nrf54lm20b.build.f_cpu=64000000L
+xiao_nrf54lm20b.build.board=XIAO_NRF54LM20B_CLEAN
+xiao_nrf54lm20b.build.core=nrf54lm20b
+xiao_nrf54lm20b.build.variant=xiao_nrf54lm20b
+xiao_nrf54lm20b.build.ldscript=nrf54lm20b_linker_script.ld
+xiao_nrf54lm20b.build.uf2_family=0xADA54B20
+xiao_nrf54lm20b.build.uf2_base_address=0x00000000
+xiao_nrf54lm20b.build.cpu_flags=-DARDUINO_NRF54_CPU_64M
+xiao_nrf54lm20b.build.power_flags=-DNRF54L15_CLEAN_POWER_LOW
+xiao_nrf54lm20b.build.boot_flags=
+xiao_nrf54lm20b.build.auto_gate_flags=
+xiao_nrf54lm20b.build.security_flags=-DNRF_APPLICATION
+xiao_nrf54lm20b.build.ble_flags=-DNRF54L15_CLEAN_BLE_ENABLED=1
+xiao_nrf54lm20b.build.ble_tx_flags=
+xiao_nrf54lm20b.build.ble_timing_flags=
+xiao_nrf54lm20b.build.ble_trace_flags=
+xiao_nrf54lm20b.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0
+xiao_nrf54lm20b.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+xiao_nrf54lm20b.build.zigbee_channel_flags=
+xiao_nrf54lm20b.build.zigbee_pan_flags=
+xiao_nrf54lm20b.build.antenna_flags=
+xiao_nrf54lm20b.build.serial_flags=
+xiao_nrf54lm20b.build.extra_flags=-DARDUINO_NRF54LM20B -DNRF54LM20B_XXAA {build.cpu_flags} {build.power_flags} {build.boot_flags} {build.auto_gate_flags} {build.security_flags} {build.ble_flags} {build.ble_tx_flags} {build.ble_timing_flags} {build.ble_trace_flags} {build.vpr_flags} {build.zigbee_flags} {build.zigbee_channel_flags} {build.zigbee_pan_flags} {build.thread_flags} {build.thread_seam_flags} {build.thread_crypto_flags} {build.matter_flags} {build.matter_seam_flags} {build.antenna_flags} {build.serial_flags}
+
+xiao_nrf54lm20b.menu.clean_ble.on=Enabled (Default)
+xiao_nrf54lm20b.menu.clean_ble.on.build.ble_flags=-DNRF54L15_CLEAN_BLE_ENABLED=1
+
+xiao_nrf54lm20b.menu.clean_ble.off=Disabled
+xiao_nrf54lm20b.menu.clean_ble.off.build.ble_flags=-DNRF54L15_CLEAN_BLE_ENABLED=0 -DNRF54L15_CLEAN_BLE_DISABLED
+
+xiao_nrf54lm20b.menu.clean_ble_trace.off=Disabled (Default)
+xiao_nrf54lm20b.menu.clean_ble_trace.off.build.ble_trace_flags=
+
+xiao_nrf54lm20b.menu.clean_ble_trace.on=Enabled
+xiao_nrf54lm20b.menu.clean_ble_trace.on.build.ble_trace_flags=-DNRF54L15_CLEAN_BLE_TRACE=1
+
+xiao_nrf54lm20b.menu.clean_zigbee.on=Enabled (Default)
+xiao_nrf54lm20b.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+
+xiao_nrf54lm20b.menu.clean_zigbee.off=Disabled
+xiao_nrf54lm20b.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+xiao_nrf54lm20b.menu.clean_thread.off=Disabled (Default)
+xiao_nrf54lm20b.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
+xiao_nrf54lm20b.menu.clean_thread.off.build.thread_seam_flags=
+xiao_nrf54lm20b.menu.clean_thread.off.build.thread_crypto_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE=0
+
+xiao_nrf54lm20b.menu.clean_thread.stage=Experimental Stage Core (Leader/Child/Router + UDP)
+xiao_nrf54lm20b.menu.clean_thread.stage.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=1 -DNRF54L15_CLEAN_OPENTHREAD_MESHCOP_ENABLE=1 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
+xiao_nrf54lm20b.menu.clean_thread.stage.build.thread_seam_flags=-DOPENTHREAD_CONFIG_CORE_USER_CONFIG_HEADER_ENABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/src/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/src/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/third_party/mbedtls/repo/include -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core/third_party/mbedtls/repo/library
+xiao_nrf54lm20b.menu.clean_thread.stage.build.thread_crypto_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_CRYPTO_FALLBACK_ENABLE=0
+
+xiao_nrf54lm20b.menu.clean_matter.off=Disabled (Default)
+xiao_nrf54lm20b.menu.clean_matter.off.build.matter_flags=-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=0 -DNRF54L15_CLEAN_MATTER_TRANSPORT_THREAD=1 -DNRF54L15_CLEAN_MATTER_RENDEZVOUS_ON_NETWORK_ONLY=1 -DNRF54L15_CLEAN_MATTER_BLE_RENDEZVOUS=0 -DNRF54L15_CLEAN_MATTER_FIRST_DEVICE_ONOFF_LIGHT=1
+xiao_nrf54lm20b.menu.clean_matter.off.build.matter_seam_flags=
+
+xiao_nrf54lm20b.menu.clean_matter.stage=Experimental Compile Target (On-Network On/Off Light)
+xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_flags=-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1 -DNRF54L15_CLEAN_MATTER_TRANSPORT_THREAD=1 -DNRF54L15_CLEAN_MATTER_RENDEZVOUS_ON_NETWORK_ONLY=1 -DNRF54L15_CLEAN_MATTER_BLE_RENDEZVOUS=0 -DNRF54L15_CLEAN_MATTER_FIRST_DEVICE_ONOFF_LIGHT=1
+xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN_MATTER_HEADER_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_SUPPORT_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_ERROR_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_KEY_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_TIME_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_HEX_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_THREAD_DATASET_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_DATA_MODEL_SEED_AVAILABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/matter_core_stage -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src
+
+xiao_nrf54lm20b.menu.clean_upload.auto=Auto Recover (Default)
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool=nrf54upload
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool.serial=nrf54upload
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.runner=auto
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.use_1200bps_touch=false
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.wait_for_upload_port=false
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.pyocd_safe=auto
+
+xiao_nrf54lm20b.menu.clean_upload.pyocd=pyOCD Recovery (CMSIS-DAP)
+xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.tool=nrf54upload
+xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.tool.serial=nrf54upload
+xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.runner=pyocd
+xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.use_1200bps_touch=false
+xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.wait_for_upload_port=false
+xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.pyocd_safe=auto
+
+xiao_nrf54lm20b.menu.clean_upload.openocd_legacy=OpenOCD Direct (Experimental)
+xiao_nrf54lm20b.menu.clean_upload.openocd_legacy.upload.tool=nrf54openocd
+xiao_nrf54lm20b.menu.clean_upload.openocd_legacy.upload.tool.serial=nrf54openocd
+xiao_nrf54lm20b.menu.clean_upload.openocd_legacy.upload.runner=openocd
+xiao_nrf54lm20b.menu.clean_upload.openocd_legacy.upload.use_1200bps_touch=false
+
+
 holyiot_25007_nrf54l15.name=HOLYIOT-25007 nRF54L15 Module
 
 holyiot_25007_nrf54l15.upload.tool=nrf54upload

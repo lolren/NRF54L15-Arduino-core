@@ -5,8 +5,8 @@
  * aliases used by this Arduino core.
  */
 
-#ifndef NRF54L15_H
-#define NRF54L15_H
+#ifndef NRF54LM20B_H
+#define NRF54LM20B_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +23,7 @@ extern "C" {
 #undef DOMAIN
 #endif
 
-#include "nrf54l15_types.h"
+#include "nrf54lm20b_types.h"
 
 // ============================================================================
 // Peripheral base addresses used by this core
@@ -59,6 +59,10 @@ extern "C" {
 #define NRF_UARTE00_S_BASE     0x5004A000UL
 #define NRF_EGU10_NS_BASE      0x40087000UL
 #define NRF_EGU10_S_BASE       0x50087000UL
+
+// nRF54LM20B additional GPIO port (not present on nRF54L15)
+#define NRF_P3_NS_BASE         0x400D8600UL
+#define NRF_P3_S_BASE          0x500D8600UL
 
 // nRF54LM20B additional GPIO port (not present on nRF54L15)
 #if defined(NRF54LM20B_XXAA)
@@ -161,6 +165,7 @@ extern "C" {
 #define NRF_P0_BASE            NRF_P0_NS_BASE
 #define NRF_P1_BASE            NRF_P1_NS_BASE
 #define NRF_P2_BASE            NRF_P2_NS_BASE
+#define NRF_P3_BASE            NRF_P3_NS_BASE
 #define NRF_MEMCONF_BASE       NRF_MEMCONF_NS_BASE
 #define NRF_GRTC_BASE          NRF_GRTC_NS_BASE
 #define NRF_DPPIC20_BASE       NRF_DPPIC20_NS_BASE
@@ -222,6 +227,7 @@ extern "C" {
 #define NRF_P0_BASE            NRF_P0_S_BASE
 #define NRF_P1_BASE            NRF_P1_S_BASE
 #define NRF_P2_BASE            NRF_P2_S_BASE
+#define NRF_P3_BASE            NRF_P3_S_BASE
 #define NRF_MEMCONF_BASE       NRF_MEMCONF_S_BASE
 #define NRF_GRTC_BASE          NRF_GRTC_S_BASE
 #define NRF_DPPIC20_BASE       NRF_DPPIC20_S_BASE
@@ -288,6 +294,7 @@ extern "C" {
 #define NRF_P0        ((NRF_GPIO_Type *)NRF_P0_BASE)
 #define NRF_P1        ((NRF_GPIO_Type *)NRF_P1_BASE)
 #define NRF_P2        ((NRF_GPIO_Type *)NRF_P2_BASE)
+#define NRF_P3        ((NRF_GPIO_Type *)NRF_P3_BASE)
 #define NRF_MEMCONF   ((NRF_MEMCONF_Type *)NRF_MEMCONF_BASE)
 #define NRF_GRTC      ((NRF_GRTC_Type *)NRF_GRTC_BASE)
 #define NRF_DPPIC20   ((NRF_DPPIC_Type *)NRF_DPPIC20_BASE)
@@ -519,4 +526,4 @@ extern "C" {
 }
 #endif
 
-#endif // NRF54L15_H
+#endif // NRF54LM20B_H

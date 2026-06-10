@@ -64,6 +64,11 @@ class Ficr {
     return partCode() == PART_NRF54L05;
   }
 
+  // Returns true if this is an nRF54LM20A or nRF54LM20B.
+  inline static bool isNrf54lm20() {
+    return partCode() == PART_NRF54LM20A;
+  }
+
   // Variant string (up to 8 ASCII chars, null-terminated).
   // Returns true if variant data is valid (not all 0xFF).
   inline static bool variant(char* out, size_t outLen) {
@@ -226,9 +231,11 @@ class Ficr {
   static constexpr uint32_t OFFS_XOSC32KTRIM      = 0x624;
 
   // Part code constants.
-  static constexpr uint32_t PART_NRF54L15 = 0x00054B15UL;
-  static constexpr uint32_t PART_NRF54L10 = 0x00054B10UL;
-  static constexpr uint32_t PART_NRF54L05 = 0x00054B05UL;
+  static constexpr uint32_t PART_NRF54L15   = 0x00054B15UL;
+  static constexpr uint32_t PART_NRF54L10   = 0x00054B10UL;
+  static constexpr uint32_t PART_NRF54L05   = 0x00054B05UL;
+  static constexpr uint32_t PART_NRF54LM20A = 0x054BC20AUL;
+  static constexpr uint32_t PART_NRF54LM20B = 0x054BC20AUL;  // same die as LM20A
 
   // Address type constants.
   static constexpr uint32_t ADDR_TYPE_PUBLIC  = 0UL;
