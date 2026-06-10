@@ -17,7 +17,10 @@ import time
 from pathlib import Path
 
 CMSIS_DAP_VENDOR_ID = "2886"
-CMSIS_DAP_PRODUCT_ID = "0066"
+CMSIS_DAP_PRODUCT_IDS = {"0066", "0068"}  # L15=0066, LM20B=0068
+
+def _is_cmsis_dap_product(pid_str):
+    return pid_str in CMSIS_DAP_PRODUCT_IDS
 DEFAULT_PYOCD_TIMEOUT_SECONDS = 120.0
 DEFAULT_PYOCD_INSTALL_TIMEOUT_SECONDS = 300.0
 DEFAULT_UF2_LABELS = (
@@ -433,18 +436,17 @@ def matching_cmsis_dap_serial_ports(host_tools_path: Path | None = None) -> list
 
     matches: list[str] = []
     vid = int(CMSIS_DAP_VENDOR_ID, 16)
-    pid = int(CMSIS_DAP_PRODUCT_ID, 16)
     for info in list_ports.comports():
         info_vid = getattr(info, "vid", None)
         info_pid = getattr(info, "pid", None)
-        if info_vid == vid and info_pid == pid:
+        if info_vid == vid and _is_cmsis_dap_product(f"{info_pid:04x}"):
             device = getattr(info, "device", None)
             if device:
                 matches.append(str(device))
             continue
 
         hwid = (getattr(info, "hwid", None) or "").lower()
-        if f"vid:pid={CMSIS_DAP_VENDOR_ID.lower()}:{CMSIS_DAP_PRODUCT_ID.lower()}" in hwid:
+        if any(f"vid:pid={CMSIS_DAP_VENDOR_ID.lower()}:{pid}" in hwid for pid in CMSIS_DAP_PRODUCT_IDS):
             device = getattr(info, "device", None)
             if device:
                 matches.append(str(device))
@@ -732,7 +734,7 @@ def matching_probe_hidraw_nodes() -> list[Path]:
     matches: list[Path] = []
     for node in sorted(Path("/dev").glob("hidraw*")):
         vendor, product = _sysfs_usb_identity_for_hidraw(node)
-        if vendor == CMSIS_DAP_VENDOR_ID and product == CMSIS_DAP_PRODUCT_ID:
+        if vendor == CMSIS_DAP_VENDOR_ID and f"{int(product, 16):04x}" in CMSIS_DAP_PRODUCT_IDS:
             matches.append(node)
     return matches
 
@@ -750,7 +752,7 @@ def port_looks_like_probe_serial(port: str | None) -> bool:
         return False
 
     vendor, product = _sysfs_usb_identity_for_tty(Path(port_name))
-    return vendor == CMSIS_DAP_VENDOR_ID and product == CMSIS_DAP_PRODUCT_ID
+    return vendor == CMSIS_DAP_VENDOR_ID and f"{int(product, 16):04x}" in CMSIS_DAP_PRODUCT_IDS
 
 
 def looks_like_locked_target(result: subprocess.CompletedProcess[str]) -> bool:
@@ -791,7 +793,7 @@ def looks_like_no_probe_error(result: subprocess.CompletedProcess[str]) -> bool:
 def force_nrf54l_unlock_workaround(
     pyocd_cmd: list[str], target: str, uid: str | None, safe_mode: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    if target.strip().lower() != "nrf54l":
+    if target.strip().lower() not in ("nrf54l", "nrf54lm20a"):
         return subprocess.CompletedProcess(
             args=[*pyocd_cmd, "commander"], returncode=2, stdout="", stderr=""
         )
@@ -846,7 +848,7 @@ def print_linux_probe_permission_hint(
         return
 
     lsusb_result = run(["lsusb"])
-    probe_id = f"{CMSIS_DAP_VENDOR_ID}:{CMSIS_DAP_PRODUCT_ID}"
+    probe_id = next((f"{CMSIS_DAP_VENDOR_ID}:{pid}" for pid in CMSIS_DAP_PRODUCT_IDS), f"{CMSIS_DAP_VENDOR_ID}:0066")
     if probe_id not in (lsusb_result.stdout or "").lower():
         return
 
@@ -956,7 +958,7 @@ def pyocd_install_timeout_seconds() -> float:
 
 
 def retry_connect_mode(target: str, attempt: int, safe_mode: bool = False) -> str | None:
-    if target.strip().lower() == "nrf54l":
+    if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
         if safe_mode:
             return None
         if attempt <= 1:
@@ -1150,7 +1152,7 @@ def upload_pyocd(
     reset_cmd = append_uid([*pyocd_cmd, "reset", "-W", "-t", target], uid)
     reset_cmd = append_connect_mode(reset_cmd, last_connect_mode)
     reset_cmd = append_pyocd_safe_options(reset_cmd, safe_mode)
-    if target.strip().lower() == "nrf54l":
+    if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
         reset_cmd.extend(["-m", "sysresetreq"])
         reset_cmd.extend(["-O", "auto_unlock=false"])
     reset_result = run(reset_cmd, timeout=pyocd_timeout_seconds())
