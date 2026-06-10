@@ -73,19 +73,19 @@ class NRF54LM20A(NRF54L):
 
     def check_flash_security(self):
         """Override: accept LM20B DP target ID (bits 16-19 = 0x0 vs 0xC on L15)."""
-        import logging
-        LOG = logging.getLogger(__name__)
+        import logging as _logging
+        _LOG = _logging.getLogger(__name__)
         target_id = self.dp.read_dp(0x24)
         if target_id & 0xFFF != 0x289:
-            LOG.error("This doesn't look like a Nordic Semiconductor device!")
+            _LOG.error("This doesn't look like a Nordic Semiconductor device!")
         if (target_id & 0xF0000) not in (0xC0000, 0x00000):
-            LOG.error("This doesn't look like an nRF54L device!")
+            _LOG.error("This doesn't look like an nRF54L device!")
 
         if not self.ap_is_enabled():
             if self.session.options.get('auto_unlock'):
-                self._log.warning(
+                _LOG.warning(
                     "%s APPROTECT enabled: will try to unlock via mass erase",
                     self.part_number)
                 self.mass_erase()
         else:
-            self._log.warning("%s is not in a secure state", self.part_number)
+            _LOG.warning("%s is not in a secure state", self.part_number)
