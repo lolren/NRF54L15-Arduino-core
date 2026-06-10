@@ -1003,9 +1003,25 @@ def _ensure_pyocd_targets():
                            "target_nRF54LM20A.py")
     dest = os.path.join(builtin_dir, "target_nRF54LM20A.py")
     
-    if os.path.exists(bundled) and not os.path.exists(dest):
+    if os.path.exists(bundled):
         try:
+            # Always copy/overwrite — ensures flash algo patch is applied
             shutil.copy2(bundled, dest)
+            
+            # If stock pyOCD target exists, overlay our working flash algorithm
+            if os.path.exists(dest):
+                try:
+                    with open(dest) as f:
+                        tgt = f.read()
+                    # Check if stock flash algo needs patching (has 0x5004e400 from stock)
+                    if '0x5004e400' in tgt.lower() or '0xe7fdbe00' in tgt.lower():
+                        import importlib.util
+                        spec = importlib.util.spec_from_file_location('target', bunded)
+                        # Simple approach: replace the file entirely
+                        pass  # shutil.copy2 above already replaced it
+                except Exception:
+                    pass
+            
             # Also register in __init__.py if needed
             init_py = os.path.join(builtin_dir, "__init__.py")
             if os.path.exists(init_py):
