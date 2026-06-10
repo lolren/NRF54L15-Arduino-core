@@ -56,7 +56,11 @@ This is a **bare-metal, register-level Arduino core** — no Zephyr, no nRF Conn
 | HOLYIOT-25007 Module | `holyiot_25007_nrf54l15` |
 | Generic 36-pad Module | `generic_nrf54l15_module_36pin` |
 
-> **⚠️ XIAO nRF54LM20B caveats:** USB serial (CDC ACM) is not yet working — the debug probe's CDC pin mapping requires the board schematic which isn't public. Use a **USB-UART adapter on D6 (TX) / D7 (RX) @ 115200 baud** for serial output. All other features (GPIO, RGB LED, BLE, I2C, SPI, PWM, compile, upload) are verified and working.
+> **⚠️ XIAO nRF54LM20B caveats:** USB serial (CDC ACM) is not yet working — the debug probe's CDC pin mapping requires the board schematic which isn't public. Use a **USB-UART adapter on D6 (TX) / D7 (RX) @ 115200 baud** for serial output.
+>
+> **pyOCD requirement:** The LM20B target (`nrf54lm20a`) requires pyOCD ≥ 0.44. If upload fails, upgrade: `pip install --upgrade pyocd`. Versions < 0.44 are supported via auto-install on first upload.
+>
+> All other features (GPIO, RGB LED, BLE, I2C, SPI, PWM, compile, upload) are verified and working.
 
 ---
 
