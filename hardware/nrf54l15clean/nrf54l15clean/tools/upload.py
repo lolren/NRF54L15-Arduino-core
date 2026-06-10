@@ -951,12 +951,31 @@ def pyocd_timeout_seconds() -> float:
 # ── Auto-install custom pyOCD targets ──────────────────────────
 def _ensure_pyocd_targets():
     """Copy bundled nRF54LM20A target to pyOCD builtin dir if needed."""
-    import shutil, importlib
+    import shutil, subprocess, glob
+    
+    # Find pyOCD builtin dir (works even if pyOCD not in Python path)
+    builtin_dir = None
     try:
         import pyocd.target.builtin
         builtin_dir = os.path.dirname(pyocd.target.builtin.__file__)
     except ImportError:
-        return  # pyOCD not available
+        # Try finding via pyocd command-line location
+        pyocd = shutil.which('pyocd')
+        if pyocd:
+            # pyocd is a script; try to find its site-packages
+            for pattern in [
+                os.path.join(os.path.dirname(os.path.dirname(pyocd)), 'lib', 'python*', 'site-packages'),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(pyocd))), 'lib', 'python*', 'site-packages'),
+            ]:
+                for d in sorted(glob.glob(pattern)):
+                    candidate = os.path.join(d, 'pyocd', 'target', 'builtin')
+                    if os.path.isdir(candidate):
+                        builtin_dir = candidate
+                        break
+                if builtin_dir:
+                    break
+    if not builtin_dir:
+        return  # pyOCD not found — target must be pre-installed
 
     bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "target_nRF54LM20A.py")
