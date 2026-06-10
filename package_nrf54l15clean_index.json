@@ -16,8 +16,8 @@
           "category": "Arduino",
           "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.0/nrf54l15clean-0.9.0-0ab679159bd5.tar.bz2",
           "archiveFileName": "nrf54l15clean-0.9.0-0ab679159bd5.tar.bz2",
-          "checksum": "SHA-256:7c77cb1c9ad774e0de0289c8cfc7573f36471821d1a4211f540e5863cefc67fb",
-          "size": "7700514",
+          "checksum": "SHA-256:56aefa9797a7e49f47fe41663a34a12ae0b90757c5aab847d1218ada64e7b626",
+          "size": "126",
           "boards": [
             {
               "name": "XIAO nRF54L15 / Sense"
@@ -33,6 +33,9 @@
             },
             {
               "name": "Nordic PCA10156 nRF54L15 DK"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
             }
           ],
           "help": {
