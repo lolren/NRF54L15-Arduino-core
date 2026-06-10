@@ -457,7 +457,9 @@ def matching_cmsis_dap_serial_ports(host_tools_path: Path | None = None) -> list
 def infer_uid_from_port(port: str | None, host_tools_path: Path | None = None) -> str | None:
     if not port:
         return None
-
+    # If the port itself looks like a probe UID, return it directly
+    if port_looks_like_probe_serial(port):
+        return port
     inferred = port_uid_from_list_ports(port, host_tools_path)
     if inferred is not None:
         return inferred
@@ -744,13 +746,16 @@ def probe_hidraw_nodes_accessible(nodes: list[Path]) -> bool:
 
 
 def port_looks_like_probe_serial(port: str | None) -> bool:
-    if not sys.platform.startswith("linux") or not port:
+    if not port:
         return False
-
+    # Probe unique ID: 8 hex chars (e.g., "3377B9D6")
+    if len(port) == 8 and all(c in '0123456789ABCDEF' for c in port.upper()):
+        return True
+    if not sys.platform.startswith("linux"):
+        return False
     port_name = Path(port).name
     if not port_name.startswith("tty"):
         return False
-
     vendor, product = _sysfs_usb_identity_for_tty(Path(port_name))
     return vendor == CMSIS_DAP_VENDOR_ID and f"{int(product, 16):04x}" in CMSIS_DAP_PRODUCT_IDS
 
