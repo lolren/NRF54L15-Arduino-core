@@ -460,7 +460,7 @@ def infer_uid_from_port(port: str | None, host_tools_path: Path | None = None) -
     # If port is an 8-char hex UID, return directly
     if len(port) == 8 and all(c in '0123456789ABCDEF' for c in port.upper()):
         return port
-    # Otherwise try to resolve via serial port lookup or udev
+    # Try to resolve via serial port lookup (works on all platforms)
     inferred = port_uid_from_list_ports(port, host_tools_path)
     if inferred is not None:
         return inferred
