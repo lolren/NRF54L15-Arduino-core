@@ -950,30 +950,52 @@ def pyocd_timeout_seconds() -> float:
 
 # ── Auto-install custom pyOCD targets ──────────────────────────
 def _ensure_pyocd_targets():
-    """Copy bundled nRF54LM20A target to pyOCD builtin dir if needed."""
-    import shutil, subprocess, glob
-    
-    # Find pyOCD builtin dir (works even if pyOCD not in Python path)
+    """Copy bundled nRF54LM20A target to pyOCD builtin dir. Tries multiple methods."""
+    import shutil, subprocess, glob, site
+
     builtin_dir = None
+
+    # Method 1: import pyocd
     try:
         import pyocd.target.builtin
         builtin_dir = os.path.dirname(pyocd.target.builtin.__file__)
     except ImportError:
-        # Try finding via pyocd command-line location
-        pyocd = shutil.which('pyocd')
-        if pyocd:
-            # pyocd is a script; try to find its site-packages
-            for pattern in [
-                os.path.join(os.path.dirname(os.path.dirname(pyocd)), 'lib', 'python*', 'site-packages'),
-                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(pyocd))), 'lib', 'python*', 'site-packages'),
-            ]:
-                for d in sorted(glob.glob(pattern)):
-                    candidate = os.path.join(d, 'pyocd', 'target', 'builtin')
-                    if os.path.isdir(candidate):
-                        builtin_dir = candidate
-                        break
-                if builtin_dir:
-                    break
+        pass
+
+    # Method 2: find via pyocd binary location
+    if not builtin_dir:
+        pyocd_bin = shutil.which('pyocd')
+        if pyocd_bin:
+            for root in [os.path.dirname(os.path.dirname(pyocd_bin)),
+                         os.path.dirname(os.path.dirname(os.path.dirname(pyocd_bin)))]:
+                for pat in ['lib/python*/site-packages', 'Lib/site-packages']:
+                    for d in sorted(glob.glob(os.path.join(root, pat))):
+                        c = os.path.join(d, 'pyocd', 'target', 'builtin')
+                        if os.path.isdir(c):
+                            builtin_dir = c; break
+                    if builtin_dir: break
+
+    # Method 3: site-packages scan
+    if not builtin_dir:
+        for sp in site.getsitepackages():
+            c = os.path.join(sp, 'pyocd', 'target', 'builtin')
+            if os.path.isdir(c):
+                builtin_dir = c; break
+
+    # Method 4: pip show pyocd
+    if not builtin_dir:
+        try:
+            result = subprocess.run([sys.executable, '-m', 'pip', 'show', 'pyocd'],
+                                    capture_output=True, text=True, timeout=10)
+            for line in result.stdout.split('\n'):
+                if line.startswith('Location:'):
+                    loc = line.split(':', 1)[1].strip()
+                    c = os.path.join(loc, 'pyocd', 'target', 'builtin')
+                    if os.path.isdir(c):
+                        builtin_dir = c; break
+        except Exception:
+            pass
+
     if not builtin_dir:
         return  # pyOCD not found — target must be pre-installed
 

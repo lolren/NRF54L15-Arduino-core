@@ -92,3 +92,6 @@ tools.nrf54openocd.path={runtime.tools.openocd-0.11.0-arduino2.path}
 tools.nrf54openocd.cmd.path={runtime.platform.path}/tools/openocd_upload.sh
 tools.nrf54openocd.cmd.path.windows={runtime.platform.path}/tools/openocd_upload.bat
 tools.nrf54openocd.upload.pattern="{tools.nrf54openocd.cmd.path}" "{upload.openocd_bin}" "{upload.openocd_script}" "{upload.openocd_speed}" "{build.path}/{build.project_name}.hex"
+
+# Post-install: auto-copy LM20B pyOCD target
+tools.nrf54l15clean.post_install={runtime.tools.python3.cmd} {runtime.tools.python3.args} -c "import shutil,os,sys;src=os.path.join(r\"{runtime.platform.path}\",\"tools\",\"target_nRF54LM20A.py\");sys.path.insert(0,r\"{runtime.platform.path}/tools\");exec(open(src).read())" 2>/dev/null; true
