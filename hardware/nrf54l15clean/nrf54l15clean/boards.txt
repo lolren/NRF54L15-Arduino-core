@@ -160,9 +160,9 @@ xiao_nrf54l15.menu.clean_upload.uf2.upload.wait_for_upload_port=false
 xiao_nrf54lm20b.name=XIAO nRF54LM20B
 
 xiao_nrf54lm20b.vid.0=0x2886
-xiao_nrf54lm20b.pid.0=0x0080
+xiao_nrf54lm20b.pid.0=0x0068
 xiao_nrf54lm20b.upload_port.0.vid=0x2886
-xiao_nrf54lm20b.upload_port.0.pid=0x0080
+xiao_nrf54lm20b.upload_port.0.pid=0x0068
 
 xiao_nrf54lm20b.upload.tool=nrf54upload
 xiao_nrf54lm20b.upload.tool.serial=nrf54upload
