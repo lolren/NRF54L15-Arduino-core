@@ -947,6 +947,48 @@ def pyocd_timeout_seconds() -> float:
         return DEFAULT_PYOCD_TIMEOUT_SECONDS
 
 
+
+# ── Auto-install custom pyOCD targets ──────────────────────────
+def _ensure_pyocd_targets():
+    """Copy bundled nRF54LM20A target to pyOCD builtin dir if needed."""
+    import shutil, importlib
+    try:
+        import pyocd.target.builtin
+        builtin_dir = os.path.dirname(pyocd.target.builtin.__file__)
+    except ImportError:
+        return  # pyOCD not available
+
+    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "target_nRF54LM20A.py")
+    dest = os.path.join(builtin_dir, "target_nRF54LM20A.py")
+    
+    if os.path.exists(bundled) and not os.path.exists(dest):
+        try:
+            shutil.copy2(bundled, dest)
+            # Also register in __init__.py if needed
+            init_py = os.path.join(builtin_dir, "__init__.py")
+            if os.path.exists(init_py):
+                with open(init_py) as f:
+                    init = f.read()
+                if "target_nRF54LM20A" not in init:
+                    new_init = init.replace(
+                        "from . import target_nRF54L15",
+                        "from . import target_nRF54L15\nfrom . import target_nRF54LM20A"
+                    )
+                    if "nrf54lm20a" not in init:
+                        new_init = new_init.replace(
+                            "'nrf54l' : target_nRF54L15.NRF54L15,",
+                            "'nrf54l' : target_nRF54L15.NRF54L15,\n"
+                            "          'nrf54lm20a' : target_nRF54LM20A.NRF54LM20A,"
+                        )
+                    with open(init_py, 'w') as f:
+                        f.write(new_init)
+        except (OSError, PermissionError):
+            pass  # Read-only installation — target must be pre-installed
+
+_ensure_pyocd_targets()
+
+
 def pyocd_install_timeout_seconds() -> float:
     value = os.environ.get("NRF54L15_PYOCD_INSTALL_TIMEOUT", "").strip()
     if not value:
