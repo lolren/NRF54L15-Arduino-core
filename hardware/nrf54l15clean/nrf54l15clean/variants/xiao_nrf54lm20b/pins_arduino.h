@@ -112,6 +112,7 @@ enum {
 // PMIC I2C (nPM1300): SDA=P1.18, SCL=P1.17
 #define PIN_PMIC_SDA (32)       // P1.18
 #define PIN_PMIC_SCL (33)       // P1.17
+// No RF switch on LM20B - always uses built-in ceramic antenna
 
 // Compatibility aliases for shared core code expecting SAMD11 bridge pins
 #define PIN_SAMD11_RX PIN_SERIAL_RX    // P1.09 = D7

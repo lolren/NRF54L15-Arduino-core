@@ -814,6 +814,11 @@ uint64_t nrf54lm20b_core_monotonic_time_us(void)
 #endif
 }
 
+// Compat wrapper: HAL library references nrf54l15_core_monotonic_time_us
+uint64_t nrf54l15_core_monotonic_time_us(void) {
+    return nrf54lm20b_core_monotonic_time_us();
+}
+
 uint32_t nrf54lm20b_core_monotonic_time_ms(void)
 {
     return (uint32_t)(nrf54lm20b_core_monotonic_time_us() / 1000ULL);
