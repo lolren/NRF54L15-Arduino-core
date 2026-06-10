@@ -1094,10 +1094,12 @@ def flash_hex(
     # Inject registration script for LM20B target (no admin rights needed)
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "pyocd_register_lm20b.py")
-    cmd = append_uid([*pyocd_cmd], uid)
+    cmd = append_uid([*pyocd_cmd, "load", "-W", "-t", target], uid)
     if target == "nrf54lm20a" and os.path.exists(script):
-        cmd.extend(["--script", script])
-    cmd.extend(["load", "-W", "-t", target])
+        # Insert --script between pyocd args and load args
+        load_idx = cmd.index("load")
+        cmd.insert(load_idx, "--script")
+        cmd.insert(load_idx + 1, script)
     cmd = append_connect_mode(cmd, connect_mode)
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     if not auto_unlock:
