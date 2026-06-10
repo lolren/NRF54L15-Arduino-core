@@ -457,9 +457,10 @@ def matching_cmsis_dap_serial_ports(host_tools_path: Path | None = None) -> list
 def infer_uid_from_port(port: str | None, host_tools_path: Path | None = None) -> str | None:
     if not port:
         return None
-    # If the port itself looks like a probe UID, return it directly
-    if port_looks_like_probe_serial(port):
+    # If port is an 8-char hex UID, return directly
+    if len(port) == 8 and all(c in '0123456789ABCDEF' for c in port.upper()):
         return port
+    # Otherwise try to resolve via serial port lookup or udev
     inferred = port_uid_from_list_ports(port, host_tools_path)
     if inferred is not None:
         return inferred
