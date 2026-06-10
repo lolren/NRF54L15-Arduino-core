@@ -190,9 +190,17 @@ static void zephyrApplyClockTrimParity(void)
 
 void SystemInit(void)
 {
-    /* Minimal init for LM20B: skip PLL config (CLOCK peripheral not responsive).
-     * CPU runs on default clock set by ROM bootloader (likely 16 MHz RC). */
-    SystemCoreClock = 16000000UL;
+#if defined(ARDUINO_NRF54_CPU_128M)
+    setPllFrequency(OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK128M);
+#else
+    setPllFrequency(OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M);
+#endif
+
+#if !defined(NRF_TRUSTZONE_NONSECURE)
+    zephyrApplySystemInitParity();
+    zephyrApplyClockTrimParity();
+#endif
+
     SystemCoreClockUpdate();
 }
 
