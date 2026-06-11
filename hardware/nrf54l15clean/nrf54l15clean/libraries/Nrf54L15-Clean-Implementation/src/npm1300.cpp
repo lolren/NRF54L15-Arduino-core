@@ -315,10 +315,12 @@ bool npm1300_read_burst(uint8_t base, uint8_t offset, uint8_t* data, size_t len)
   for (size_t i = 0; i < len; ++i) {
     const int value = g_pmicWire.read();
     if (value < 0) {
+      g_pmicWire.end();
       return false;
     }
     data[i] = static_cast<uint8_t>(value);
   }
+  g_pmicWire.end();
   return true;
 #else
   (void)base;
@@ -343,7 +345,9 @@ bool npm1300_write_burst(uint8_t base, uint8_t offset, const uint8_t* data,
   for (size_t i = 0; i < len; ++i) {
     g_pmicWire.write(data[i]);
   }
-  return g_pmicWire.endTransmission(true) == 0U;
+  const bool ok = (g_pmicWire.endTransmission(true) == 0U);
+  g_pmicWire.end();
+  return ok;
 #else
   (void)base;
   (void)offset;
