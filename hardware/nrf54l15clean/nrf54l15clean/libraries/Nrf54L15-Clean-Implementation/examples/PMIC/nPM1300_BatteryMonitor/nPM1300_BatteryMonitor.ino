@@ -3,7 +3,7 @@
  * Reads VBAT, temperature, charge current, and system/USB voltage
  * every 2 seconds. Ideal for ultra-low power battery-operated devices.
  *
- * Output via Serial (USB-UART on D6/D7 @ 115200).
+ * Output via Serial Monitor.
  * LED indicators:
  *   Green = charging
  *   Red   = low battery (< 3.6V)
@@ -12,7 +12,7 @@
 #include "npm1300.h"
 
 void setup() {
-    Serial1.begin(115200);  // Hardware UART on D6/D7
+    Serial.begin(115200);
     pinMode(LED_GREEN, OUTPUT);
     pinMode(LED_RED, OUTPUT);
     digitalWrite(LED_GREEN, HIGH);
@@ -20,7 +20,10 @@ void setup() {
     
     npm1300_begin();
     
-    Serial1.println("\n--- nPM1300 Battery Monitor ---");
+    Serial.println("\n--- nPM1300 Battery Monitor ---");
+    if (!npm1300_is_present()) {
+        Serial.println("nPM1300 not detected. This example is for XIAO nRF54LM20A.");
+    }
 }
 
 void loop() {
@@ -29,14 +32,27 @@ void loop() {
     int32_t ibat = npm1300_read_ibat_ma();
     int32_t vsys = npm1300_read_vsys_mv();
     int32_t vbus = npm1300_read_vbus_mv();
+    uint8_t vbusStatus = 0;
+    bool haveVbusStatus = npm1300_vbus_status(&vbusStatus);
     bool charging = npm1300_charger_is_charging();
     
-    Serial1.print("VBAT="); Serial1.print(vbat); Serial1.print("mV ");
-    Serial1.print("TEMP="); Serial1.print(temp / 1000); Serial1.print("C ");
-    Serial1.print("IBAT="); Serial1.print(ibat); Serial1.print("mA ");
-    Serial1.print("VSYS="); Serial1.print(vsys); Serial1.print("mV ");
-    Serial1.print("VBUS="); Serial1.print(vbus); Serial1.print("mV ");
-    Serial1.print("CHG="); Serial1.println(charging ? "YES" : "NO");
+    Serial.print("VBAT="); Serial.print(vbat); Serial.print("mV ");
+    Serial.print("TEMP="); Serial.print(temp / 1000); Serial.print("C ");
+    Serial.print("IBAT="); Serial.print(ibat); Serial.print("mA ");
+    Serial.print("VSYS="); Serial.print(vsys); Serial.print("mV ");
+    Serial.print("VBUS="); Serial.print(vbus); Serial.print("mV ");
+    Serial.print("VBUS_STATUS=");
+    if (haveVbusStatus) {
+        Serial.print("0x");
+        if (vbusStatus < 16) {
+            Serial.print('0');
+        }
+        Serial.print(vbusStatus, HEX);
+        Serial.print(' ');
+    } else {
+        Serial.print("NA ");
+    }
+    Serial.print("CHG="); Serial.println(charging ? "YES" : "NO");
     
     digitalWrite(LED_GREEN, charging ? LOW : HIGH);
     digitalWrite(LED_RED, (vbat > 0 && vbat < 3600) ? LOW : HIGH);

@@ -197,7 +197,6 @@ def parse_version(version: str) -> tuple[int, int, int]:
 
 def update_core_version_header(platform_dir: Path, version: str) -> None:
     major, minor, patch = parse_version(version)
-    header_path = platform_dir / "cores" / "nrf54l15" / "CoreVersionGenerated.h"
     content = f"""#ifndef NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
 #define NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
 
@@ -218,7 +217,13 @@ def update_core_version_header(platform_dir: Path, version: str) -> None:
 
 #endif  // NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
 """
-    header_path.write_text(content, encoding="utf-8")
+    cores_dir = platform_dir / "cores"
+    header_paths = sorted(cores_dir.glob("*/CoreVersionGenerated.h"))
+    if not header_paths:
+        header_paths = [cores_dir / "nrf54l15" / "CoreVersionGenerated.h"]
+
+    for header_path in header_paths:
+        header_path.write_text(content, encoding="utf-8")
 
 
 def update_platform_txt_version(platform_dir: Path, version: str) -> None:

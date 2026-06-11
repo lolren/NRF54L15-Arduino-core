@@ -85,10 +85,9 @@ enum {
 #define PIN_WIRE_SDA  (PIN_D4)   // P1.03
 #define PIN_WIRE_SCL  (PIN_D5)   // P1.07
 
-// Wire1 (second I2C) — same pins as Wire on LM20A for compatibility
-// LM20A has one I2C pair on the XIAO connector header.
-#define PIN_WIRE1_SDA PIN_WIRE_SDA
-#define PIN_WIRE1_SCL PIN_WIRE_SCL
+// Wire1 (second I2C) uses the internal IMU bus pads.
+#define PIN_WIRE1_SDA (36)      // P0.08
+#define PIN_WIRE1_SCL (37)      // P0.07
 
 // UART (Serial1 hardware)
 #define PIN_SERIAL_TX  (PIN_D6)  // P1.08
@@ -106,6 +105,8 @@ enum {
 // PMIC I2C (nPM1300): SDA=P1.18, SCL=P1.17
 #define PIN_PMIC_SDA (32)       // P1.18
 #define PIN_PMIC_SCL (33)       // P1.17
+// The IMU/MIC rail is controlled by the nPM1300 LDO API, not by an MCU GPIO.
+#define PIN_IMU_PWR  (0xFF)
 // No RF switch on LM20A - antenna path is fixed by board hardware.
 
 // CDC USB Serial — UART20 on P1.11/P1.10 (connected to SAMD11 debug probe)
@@ -181,6 +182,10 @@ static inline bool pinToPortPin(uint8_t pin, uint8_t* port, uint8_t* pinInPort)
         // SAMD11 USB serial bridge on Port 1
         case PIN_CDC_TX: *port = 1; *pinInPort = 11; return true;
         case PIN_CDC_RX: *port = 1; *pinInPort = 10; return true;
+
+        // Wire1 IMU I2C on Port 0
+        case PIN_WIRE1_SDA: *port = 0; *pinInPort = 8;  return true;   // P0.08
+        case PIN_WIRE1_SCL: *port = 0; *pinInPort = 7;  return true;   // P0.07
 
         default: return false;
     }

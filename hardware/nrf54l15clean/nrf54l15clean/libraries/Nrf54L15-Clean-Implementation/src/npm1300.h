@@ -1,88 +1,57 @@
 /*
- * nPM1300 PMIC Driver for nRF54L Series
- * 
- * Full-featured driver for the Nordic nPM1300 Power Management IC.
- * Controls LDOs, battery charger, ship/hibernate modes, GPIOs, LEDs,
- * and system monitoring for ultra-low power applications.
+ * nPM1300 PMIC driver for XIAO nRF54LM20A.
  *
- * I2C: Address 0x6B, SDA=P1.18, SCL=P1.17
- *
- * Register Map:
- *   0x0000: SHIP/HIBERNATE control
- *   0x0500: System Monitor (VBAT, temperature, current measurements)
- *   0x0600: Battery Charger
- *   0x0700: LED Drivers
- *   0x0800: Load Switches / LDOs
- *   0x0900: GPIO
- *   0x0A00: Fuel Gauge / Timers
- *   0x0B00: Events/Interrupts
- *   0x0E00: Error Log
+ * The nPM1300 register protocol uses a two-byte address: {base, offset}.
+ * This API follows the same access pattern used by Zephyr's nPM13xx MFD,
+ * regulator, charger, GPIO, and LED drivers.
  */
 
 #ifndef NPM1300_H
 #define NPM1300_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// ─── I2C Address ─────────────────────────────────────────────
-#define NPM1300_ADDR            0x6B
+#define NPM1300_ADDR 0x6B
 
-// ─── Register Base Addresses ─────────────────────────────────
-#define NPM1300_BASE_SHIP       0x0000  // Ship/Hibernate mode
-#define NPM1300_BASE_SYSMON     0x0500  // System Monitor
-#define NPM1300_BASE_CHARGER    0x0600  // Battery Charger
-#define NPM1300_BASE_LED        0x0700  // LED Drivers
-#define NPM1300_BASE_LDSW       0x0800  // Load Switches / LDOs
-#define NPM1300_BASE_GPIO       0x0900  // GPIO
-#define NPM1300_BASE_TIMER      0x0A00  // Fuel Gauge / Timers
-#define NPM1300_BASE_EVENT      0x0B00  // Event control
+/* Register bases. */
+#define NPM1300_BASE_MAIN    0x00
+#define NPM1300_BASE_VBUS    0x02
+#define NPM1300_BASE_CHARGER 0x03
+#define NPM1300_BASE_BUCK    0x04
+#define NPM1300_BASE_ADC     0x05
+#define NPM1300_BASE_GPIO    0x06
+#define NPM1300_BASE_TIMER   0x07
+#define NPM1300_BASE_LDSW    0x08
+#define NPM1300_BASE_LED     0x0A
+#define NPM1300_BASE_SHIP    0x0B
 
-// ─── SHIP/HIBERNATE Registers (0x0000) ───────────────────────
-#define NPM1300_TASK_ENTER_SHIP      0x0000
-#define NPM1300_TASK_ENTER_HIBERNATE 0x0004
-#define NPM1300_TASK_EXIT_HIBERNATE  0x0008
-#define NPM1300_SHIP_CONFIG          0x0028
+/* GPIO modes, matching Zephyr's nordic,npm13xx GPIO binding. */
+#define NPM1300_GPIO_GPIINPUT         0
+#define NPM1300_GPIO_GPILOGIC1        1
+#define NPM1300_GPIO_GPILOGIC0        2
+#define NPM1300_GPIO_GPIEVENTRISE     3
+#define NPM1300_GPIO_GPIEVENTFALL     4
+#define NPM1300_GPIO_GPOIRQ           5
+#define NPM1300_GPIO_GPORESET         6
+#define NPM1300_GPIO_GPOPWRLOSSWARN   7
+#define NPM1300_GPIO_GPOLOGIC1        8
+#define NPM1300_GPIO_GPOLOGIC0        9
 
-// ─── System Monitor Registers (0x0500) ───────────────────────
-#define NPM1300_TASK_VBAT_MEASURE    0x0504
-#define NPM1300_TASK_TEMP_MEASURE    0x050C
-#define NPM1300_TASK_VSYS_MEASURE    0x0514
-#define NPM1300_TASK_IBAT_MEASURE    0x051C
-#define NPM1300_TASK_VBUS_MEASURE    0x0524
-#define NPM1300_SYSMON_VBAT_RESULT   0x0540
-#define NPM1300_SYSMON_TEMP_RESULT   0x0544
-#define NPM1300_SYSMON_VSYS_RESULT   0x0548
-#define NPM1300_SYSMON_IBAT_RESULT   0x054C
-#define NPM1300_SYSMON_VBUS_RESULT   0x0550
+/* VBUS status bits returned by npm1300_vbus_status(). */
+#define NPM1300_VBUS_STATUS_PRESENT      0x01
+#define NPM1300_VBUS_STATUS_CUR_LIMIT    0x02
+#define NPM1300_VBUS_STATUS_OVERVOLT     0x04
+#define NPM1300_VBUS_STATUS_UNDERVOLT    0x08
+#define NPM1300_VBUS_STATUS_SUSPENDED    0x10
+#define NPM1300_VBUS_STATUS_BUSOUT       0x20
 
-// ─── Charger Registers (0x0600) ──────────────────────────────
-#define NPM1300_CHARGER_CONFIG       0x0600
-#define NPM1300_CHARGER_ICHARGE      0x0604
-#define NPM1300_CHARGER_VTERM        0x0608
-#define NPM1300_CHARGER_STATUS       0x060C
-#define NPM1300_CHARGER_ENABLE       0x0610
-#define NPM1300_CHARGER_DISABLE      0x0614
-#define NPM1300_CHARGER_VBUS_LIMIT   0x0618
-#define NPM1300_CHARGER_DISCHARGE    0x061C
-
-// ─── Load Switch / LDO Registers (0x0800) ────────────────────
-#define NPM1300_TASK_LDSW1_SET       0x0800
-#define NPM1300_TASK_LDSW1_CLR       0x0804
-#define NPM1300_TASK_LDSW2_SET       0x0810
-#define NPM1300_TASK_LDSW2_CLR       0x0814
-#define NPM1300_LDSW1_STATUS         0x0808
-#define NPM1300_LDSW1_LDOSEL         0x080C
-#define NPM1300_LDSW1_VOUTSEL        0x0820
-#define NPM1300_LDSW2_STATUS         0x0818
-#define NPM1300_LDSW2_LDOSEL         0x081C
-#define NPM1300_LDSW2_VOUTSEL        0x0824
-
-// ─── LDO Voltage Options (mV) ────────────────────────────────
+/* Common voltage/current helper values. */
 #define NPM1300_LDO_VOLTAGE_1V0      1000
 #define NPM1300_LDO_VOLTAGE_1V1      1100
 #define NPM1300_LDO_VOLTAGE_1V2      1200
@@ -93,14 +62,11 @@ extern "C" {
 #define NPM1300_LDO_VOLTAGE_1V7      1700
 #define NPM1300_LDO_VOLTAGE_1V8      1800
 #define NPM1300_LDO_VOLTAGE_2V0      2000
-#define NPM1300_LDO_VOLTAGE_2V1      2100
 #define NPM1300_LDO_VOLTAGE_2V5      2500
-#define NPM1300_LDO_VOLTAGE_2V7      2700
 #define NPM1300_LDO_VOLTAGE_3V0      3000
 #define NPM1300_LDO_VOLTAGE_3V3      3300
 
-// ─── Charger Current Options (mA) ────────────────────────────
-#define NPM1300_CHARGE_CURRENT_20MA   20
+#define NPM1300_CHARGE_CURRENT_32MA   32
 #define NPM1300_CHARGE_CURRENT_50MA   50
 #define NPM1300_CHARGE_CURRENT_100MA  100
 #define NPM1300_CHARGE_CURRENT_150MA  150
@@ -110,41 +76,62 @@ extern "C" {
 #define NPM1300_CHARGE_CURRENT_500MA  500
 #define NPM1300_CHARGE_CURRENT_800MA  800
 
-// ─── nPM1300 Public API ─────────────────────────────────────
+/* Raw MFD-style register access. */
+bool npm1300_read_reg(uint8_t base, uint8_t offset, uint8_t *value);
+bool npm1300_write_reg(uint8_t base, uint8_t offset, uint8_t value);
+bool npm1300_read_burst(uint8_t base, uint8_t offset, uint8_t *data, size_t len);
+bool npm1300_write_burst(uint8_t base, uint8_t offset, const uint8_t *data, size_t len);
+bool npm1300_update_reg(uint8_t base, uint8_t offset, uint8_t mask, uint8_t value);
 
-/* Initialize PMIC I2C and configure defaults for low-power operation. */
+/* Initialize/probe the PMIC bus. These calls are optional; all API calls lazy-init. */
 void npm1300_begin(void);
+void npm1300_init(void);  /* compatibility alias */
+bool npm1300_is_present(void);
 
-/* Enable/disable LDO1 (IMU/MIC power). Default: 1.8V. */
+/* Load switch/LDO rails. */
 bool npm1300_ldo1_enable(bool enable);
 bool npm1300_ldo1_set_voltage(uint16_t mv);
 bool npm1300_ldo1_is_enabled(void);
-
-/* Enable/disable LDO2 (second sensor rail). */
 bool npm1300_ldo2_enable(bool enable);
 bool npm1300_ldo2_set_voltage(uint16_t mv);
+bool npm1300_ldo2_is_enabled(void);
 
-/* Configure battery charger. */
+/* Buck regulators. */
+bool npm1300_buck1_enable(bool enable);
+bool npm1300_buck1_set_voltage(uint16_t mv);
+bool npm1300_buck1_is_enabled(void);
+bool npm1300_buck2_enable(bool enable);
+bool npm1300_buck2_set_voltage(uint16_t mv);
+bool npm1300_buck2_is_enabled(void);
+
+/* Battery charger and status. */
 bool npm1300_charger_enable(bool enable);
 bool npm1300_charger_set_current(uint16_t ma);
 bool npm1300_charger_set_term_voltage(uint16_t mv);
 bool npm1300_charger_is_charging(void);
+bool npm1300_charger_status(uint8_t *status);
+bool npm1300_charger_error(uint8_t *error);
+bool npm1300_vbus_status(uint8_t *status);
 
-/* Read system measurements. Returns value in specified units, or -1 on error. */
-int32_t npm1300_read_vbat_mv(void);     // Battery voltage in mV
-int32_t npm1300_read_temp_mc(void);     // Temperature in millicelsius
-int32_t npm1300_read_ibat_ma(void);     // Battery current in mA
-int32_t npm1300_read_vsys_mv(void);     // System voltage in mV
-int32_t npm1300_read_vbus_mv(void);     // USB voltage in mV
+/* Measurements. Returns value in requested units, or -1 when unavailable. */
+int32_t npm1300_read_vbat_mv(void);
+int32_t npm1300_read_temp_mc(void);  /* PMIC die temperature in millicelsius */
+int32_t npm1300_read_ibat_ma(void);
+int32_t npm1300_read_vsys_mv(void);
+int32_t npm1300_read_vbus_mv(void);
 
 /* Ultra-low power modes. */
-bool npm1300_enter_ship_mode(void);     // Ship mode — lowest power, GPIO wake only
-bool npm1300_enter_hibernate(void);     // Hibernate — timer/GPIO wake
+bool npm1300_enter_ship_mode(void);
+bool npm1300_enter_hibernate(void);
 
-/* LED driver control. */
-bool npm1300_led_set(uint8_t led, uint8_t brightness);  // 0=off, 255=max
+/* PMIC LED and GPIO helpers. LED brightness is treated as off/on. */
+bool npm1300_led_set(uint8_t led, uint8_t brightness);
+bool npm1300_gpio_set_mode(uint8_t pin, uint8_t mode);
+bool npm1300_gpio_write(uint8_t pin, bool high);
+bool npm1300_gpio_status(uint8_t *status);
 
 #ifdef __cplusplus
 }
 #endif
+
 #endif
