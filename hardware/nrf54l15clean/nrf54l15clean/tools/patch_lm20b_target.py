@@ -8,7 +8,7 @@ if not os.path.exists(_bundled):
 _targets = []
 
 # Shim pyOCD (AppImage IDE, fresh installs)
-_shim = os.path.normpath(os.path.join(_here, "..", "..", "..", "tools",
+_shim = os.path.normpath(os.path.join(_here, "..", "..", "..", "..", "tools",
     "nrf54l15hosttools", "1.1.2", "runtime", "pyocd-site", "pyocd", "target", "builtin"))
 if os.path.isdir(os.path.dirname(_shim)):
     _targets.append(_shim)
