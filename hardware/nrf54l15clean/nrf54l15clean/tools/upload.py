@@ -225,13 +225,14 @@ def bundled_wheelhouse_path(tool_root: Path | None) -> Path | None:
 def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | None:
     tool_root = pyocd_tool_root(host_tools_path)
 
-    bundled = bundled_pyocd_command(tool_root)
-    if bundled is not None:
-        return bundled
-
+    # Try system pyOCD first (pip/conda), bundled shim as fallback
     pyocd_exe = shutil.which("pyocd")
     if pyocd_exe:
         return [pyocd_exe]
+
+    bundled = bundled_pyocd_command(tool_root)
+    if bundled is not None:
+        return bundled
 
     module_probe = run([sys.executable, "-m", "pyocd", "--version"])
     if module_probe.returncode == 0:
