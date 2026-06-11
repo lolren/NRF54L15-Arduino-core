@@ -221,6 +221,18 @@ def update_core_version_header(platform_dir: Path, version: str) -> None:
     header_path.write_text(content, encoding="utf-8")
 
 
+def update_platform_txt_version(platform_dir: Path, version: str) -> None:
+    platform_path = platform_dir / "platform.txt"
+    lines = platform_path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("version="):
+            lines[index] = f"version={version}"
+            break
+    else:
+        raise SystemExit(f"Missing version= entry in {platform_path}")
+    platform_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def make_platform_entry(
     platform_name: str,
     archive_name: str,
@@ -564,6 +576,7 @@ def main() -> int:
 
     version = args.version if args.version else read_platform_version(platform_dir)
     update_core_version_header(platform_dir, version)
+    update_platform_txt_version(platform_dir, version)
 
     release_base_url = args.release_base_url.format(version=version)
     platform_excludes = tuple(
