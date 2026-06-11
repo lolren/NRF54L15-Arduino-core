@@ -229,7 +229,13 @@ def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | Non
     pyocd_exe = shutil.which("pyocd")
     if pyocd_exe:
         return [pyocd_exe]
+    bundled = bundled_pyocd_command(tool_root)
+    if bundled is not None:
+        return bundled
 
+    pyocd_exe = shutil.which("pyocd")
+    if pyocd_exe:
+        return [pyocd_exe]
     bundled = bundled_pyocd_command(tool_root)
     if bundled is not None:
         return bundled
@@ -321,7 +327,7 @@ def install_pyocd(host_tools_path: Path | None = None) -> bool:
     if install.returncode != 0:
         return False
 
-    bundled = bundled_pyocd_command(tool_root)
+    pyocd_exe = shutil.which("pyocd")
     if bundled is None:
         return False
     verify = run([*bundled, "--version"])
