@@ -1347,6 +1347,8 @@ def main() -> int:
         if detect_pyocd_command(host_tools_path) is None:
             if install_pyocd(host_tools_path):
                 print("pyocd installation succeeded.")
+                _ensure_pyocd_targets()
+                _ensure_pyocd_targets()
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
