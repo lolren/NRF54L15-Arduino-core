@@ -256,6 +256,38 @@ bool buck_is_enabled(uint8_t channel) {
   return (status & (channel == 0U ? kBuck1OnMask : kBuck2OnMask)) != 0U;
 }
 
+// Buck PWM/hysteretic mode control.
+// BUCK1PWMSET = {BUCK,0x04}, BUCK2PWMSET = {BUCK,0x06}
+// BUCK1PWMCLR = {BUCK,0x05}, BUCK2PWMCLR = {BUCK,0x07}
+// BUCKCTRL0   = {BUCK,0x0A} — bits 0/1 = force hysteretic buck1/buck2
+constexpr uint8_t kBuckOffsetPwmSet = 0x04U;
+constexpr uint8_t kBuckOffsetPwmClr = 0x05U;
+constexpr uint8_t kBuckOffsetCtrl0  = 0x0AU;
+
+bool buck_set_mode(uint8_t channel, uint8_t mode) {
+  channel = clamp_channel(channel);
+
+  // Always clear PWM first (move to AUTO)
+  npm1300_write_reg(NPM1300_BASE_BUCK,
+                     static_cast<uint8_t>(kBuckOffsetPwmClr + (channel * 2U)), 1U);
+
+  if (mode == NPM1300_BUCK_MODE_FORCE_PWM) {
+    return npm1300_write_reg(NPM1300_BASE_BUCK,
+                              static_cast<uint8_t>(kBuckOffsetPwmSet + (channel * 2U)), 1U);
+  }
+
+  if (mode == NPM1300_BUCK_MODE_FORCE_HYST) {
+    return npm1300_update_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0,
+                               static_cast<uint8_t>(1U << channel),
+                               static_cast<uint8_t>(1U << channel));
+  }
+
+  // AUTO: clear hysteretic force bit
+  npm1300_update_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0,
+                      static_cast<uint8_t>(1U << channel), 0U);
+  return true;
+}
+
 }  // namespace
 
 bool npm1300_read_burst(uint8_t base, uint8_t offset, uint8_t* data, size_t len) {
