@@ -20,10 +20,10 @@
 #include "npm1300.h"
 
 void setup() {
-    Serial1.begin(115200);
+    Serial.begin(115200);
     delay(500);
 
-    Serial1.println("vbat_mv, temp_mC, ibat_ma, vsys_mv, vbus_mv, vbus_st, chg_st");
+    Serial.println("vbat_mv, temp_mC, ibat_ma, vsys_mv, vbus_mv, vbus_st, chg_st");
 
     pinMode(LED_RED,   OUTPUT); digitalWrite(LED_RED,   HIGH);
     pinMode(LED_GREEN, OUTPUT); digitalWrite(LED_GREEN, HIGH);
@@ -43,13 +43,13 @@ void loop() {
     npm1300_charger_status(&chg_st);
 
     // CSV line — easy to import into spreadsheets
-    Serial1.print(vbat);   Serial1.print(", ");
-    Serial1.print(temp);   Serial1.print(", ");
-    Serial1.print(ibat);   Serial1.print(", ");
-    Serial1.print(vsys);   Serial1.print(", ");
-    Serial1.print(vbus);   Serial1.print(", ");
-    Serial1.print(vbus_st, HEX); Serial1.print(", ");
-    Serial1.println(chg_st, HEX);
+    Serial.print(vbat);   Serial.print(", ");
+    Serial.print(temp);   Serial.print(", ");
+    Serial.print(ibat);   Serial.print(", ");
+    Serial.print(vsys);   Serial.print(", ");
+    Serial.print(vbus);   Serial.print(", ");
+    Serial.print(vbus_st, HEX); Serial.print(", ");
+    Serial.println(chg_st, HEX);
 
     // PMIC alive check: any read above -1 is valid
     bool alive = (vbat > -1);

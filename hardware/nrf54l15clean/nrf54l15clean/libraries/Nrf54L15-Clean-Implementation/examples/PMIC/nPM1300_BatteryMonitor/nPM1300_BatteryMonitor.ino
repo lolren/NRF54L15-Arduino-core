@@ -17,11 +17,11 @@
 #include "npm1300.h"
 
 void setup() {
-    Serial1.begin(115200);
+    Serial.begin(115200);
     delay(500);
 
-    Serial1.println();
-    Serial1.println("=== nPM1300 Battery Monitor ===");
+    Serial.println();
+    Serial.println("=== nPM1300 Battery Monitor ===");
 
     // Configure charger: 200 mA, 4.2 V termination
     npm1300_charger_set_current(200);
@@ -50,15 +50,15 @@ void loop() {
     bool charging = npm1300_charger_is_charging();
 
     // ── display ──
-    Serial1.print("VBAT="); Serial1.print(vbat); Serial1.print("mV  ");
-    Serial1.print("TEMP="); Serial1.print(temp / 1000); Serial1.print(".");
-    Serial1.print(abs(temp) % 1000 / 100); Serial1.print("C  ");
-    Serial1.print("IBAT="); Serial1.print(ibat); Serial1.print("mA  ");
-    Serial1.print("VSYS="); Serial1.print(vsys); Serial1.print("mV  ");
-    Serial1.print("VBUS="); Serial1.print(vbus); Serial1.print("mV  ");
-    Serial1.print("VBUS_ST=0x"); Serial1.print(vbus_st, HEX);
-    Serial1.print(" CHG_ST=0x"); Serial1.print(chg_st, HEX);
-    Serial1.print(" CHG="); Serial1.println(charging ? "ON" : "OFF");
+    Serial.print("VBAT="); Serial.print(vbat); Serial.print("mV  ");
+    Serial.print("TEMP="); Serial.print(temp / 1000); Serial.print(".");
+    Serial.print(abs(temp) % 1000 / 100); Serial.print("C  ");
+    Serial.print("IBAT="); Serial.print(ibat); Serial.print("mA  ");
+    Serial.print("VSYS="); Serial.print(vsys); Serial.print("mV  ");
+    Serial.print("VBUS="); Serial.print(vbus); Serial.print("mV  ");
+    Serial.print("VBUS_ST=0x"); Serial.print(vbus_st, HEX);
+    Serial.print(" CHG_ST=0x"); Serial.print(chg_st, HEX);
+    Serial.print(" CHG="); Serial.println(charging ? "ON" : "OFF");
 
     // ── LEDs ──
     digitalWrite(LED_GREEN, (vbat > 3700)      ? LOW : HIGH);

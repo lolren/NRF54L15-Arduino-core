@@ -31,19 +31,19 @@ void applyProfile(int idx) {
     npm1300_charger_set_term_voltage(4200);
     npm1300_charger_enable(true);
 
-    Serial1.print("\n=== Profile ");
-    Serial1.print(idx + 1); Serial1.print("/");
-    Serial1.print(kNumProfiles);
-    Serial1.print(": "); Serial1.print(ma);
-    Serial1.println(" mA, 4.20 V ===\n");
+    Serial.print("\n=== Profile ");
+    Serial.print(idx + 1); Serial.print("/");
+    Serial.print(kNumProfiles);
+    Serial.print(": "); Serial.print(ma);
+    Serial.println(" mA, 4.20 V ===\n");
 }
 
 void setup() {
-    Serial1.begin(115200);
+    Serial.begin(115200);
     delay(500);
 
-    Serial1.println("=== nPM1300 Charger Control ===");
-    Serial1.println("Press the USER button to cycle charge profiles.\n");
+    Serial.println("=== nPM1300 Charger Control ===");
+    Serial.println("Press the USER button to cycle charge profiles.\n");
 
     pinMode(LED_RED,   OUTPUT); digitalWrite(LED_RED,   HIGH);
     pinMode(LED_GREEN, OUTPUT); digitalWrite(LED_GREEN, HIGH);
@@ -81,12 +81,12 @@ void loop() {
     uint8_t vbus_st = 0;
     npm1300_vbus_status(&vbus_st);
 
-    Serial1.print("VBAT="); Serial1.print(vbat); Serial1.print("mV  ");
-    Serial1.print("IBAT="); Serial1.print(ibat); Serial1.print("mA  ");
-    Serial1.print("CHG_ST=0x"); Serial1.print(chg_st, HEX);
-    Serial1.print(" CHG_ERR=0x"); Serial1.print(chg_err, HEX);
-    Serial1.print(" VBUS=0x"); Serial1.print(vbus_st, HEX);
-    Serial1.print(" CHG="); Serial1.println(charging ? "ON" : "OFF");
+    Serial.print("VBAT="); Serial.print(vbat); Serial.print("mV  ");
+    Serial.print("IBAT="); Serial.print(ibat); Serial.print("mA  ");
+    Serial.print("CHG_ST=0x"); Serial.print(chg_st, HEX);
+    Serial.print(" CHG_ERR=0x"); Serial.print(chg_err, HEX);
+    Serial.print(" VBUS=0x"); Serial.print(vbus_st, HEX);
+    Serial.print(" CHG="); Serial.println(charging ? "ON" : "OFF");
 
     digitalWrite(LED_GREEN, charging          ? LOW : HIGH);
     digitalWrite(LED_RED,   (chg_err != 0)    ? LOW : HIGH);
