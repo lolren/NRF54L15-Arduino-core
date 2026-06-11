@@ -156,8 +156,8 @@ xiao_nrf54l15.menu.clean_upload.uf2.upload.runner=uf2
 xiao_nrf54l15.menu.clean_upload.uf2.upload.use_1200bps_touch=false
 xiao_nrf54l15.menu.clean_upload.uf2.upload.wait_for_upload_port=false
 
-# ─── XIAO nRF54LM20B ────────────────────────────────────────────
-xiao_nrf54lm20b.name=XIAO nRF54LM20B
+# ─── XIAO nRF54LM20A ────────────────────────────────────────────
+xiao_nrf54lm20b.name=XIAO nRF54LM20A
 
 xiao_nrf54lm20b.vid.0=0x2886
 xiao_nrf54lm20b.pid.0=0x0068
@@ -185,7 +185,7 @@ xiao_nrf54lm20b.serial.disableRTS=false
 
 xiao_nrf54lm20b.build.mcu=cortex-m33
 xiao_nrf54lm20b.build.f_cpu=64000000L
-xiao_nrf54lm20b.build.board=XIAO_NRF54LM20B_CLEAN
+xiao_nrf54lm20b.build.board=XIAO_NRF54LM20A_CLEAN
 xiao_nrf54lm20b.build.core=nrf54lm20b
 xiao_nrf54lm20b.build.variant=xiao_nrf54lm20b
 xiao_nrf54lm20b.build.ldscript=nrf54lm20b_linker_script.ld
@@ -206,7 +206,7 @@ xiao_nrf54lm20b.build.zigbee_channel_flags=
 xiao_nrf54lm20b.build.zigbee_pan_flags=
 xiao_nrf54lm20b.build.antenna_flags=
 xiao_nrf54lm20b.build.serial_flags=
-xiao_nrf54lm20b.build.extra_flags=-DARDUINO_NRF54LM20B -DNRF54LM20B_XXAA {build.cpu_flags} {build.power_flags} {build.boot_flags} {build.auto_gate_flags} {build.security_flags} {build.ble_flags} {build.ble_tx_flags} {build.ble_timing_flags} {build.ble_trace_flags} {build.vpr_flags} {build.zigbee_flags} {build.zigbee_channel_flags} {build.zigbee_pan_flags} {build.thread_flags} {build.thread_seam_flags} {build.thread_crypto_flags} {build.matter_flags} {build.matter_seam_flags} {build.antenna_flags} {build.serial_flags}
+xiao_nrf54lm20b.build.extra_flags=-DARDUINO_NRF54LM20A -DARDUINO_NRF54LM20B -DNRF54LM20A_XXAA -DNRF54LM20B_XXAA {build.cpu_flags} {build.power_flags} {build.boot_flags} {build.auto_gate_flags} {build.security_flags} {build.ble_flags} {build.ble_tx_flags} {build.ble_timing_flags} {build.ble_trace_flags} {build.vpr_flags} {build.zigbee_flags} {build.zigbee_channel_flags} {build.zigbee_pan_flags} {build.thread_flags} {build.thread_seam_flags} {build.thread_crypto_flags} {build.matter_flags} {build.matter_seam_flags} {build.antenna_flags} {build.serial_flags}
 
 xiao_nrf54lm20b.menu.clean_ble.on=Enabled (Default)
 xiao_nrf54lm20b.menu.clean_ble.on.build.ble_flags=-DNRF54L15_CLEAN_BLE_ENABLED=1
@@ -247,7 +247,7 @@ xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN
 xiao_nrf54lm20b.menu.clean_upload.auto=Auto Recover (Default)
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool=nrf54upload
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool.serial=nrf54upload
-xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.runner=pyocd
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.runner=pyocd
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.use_1200bps_touch=false
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.wait_for_upload_port=false
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.pyocd_safe=auto

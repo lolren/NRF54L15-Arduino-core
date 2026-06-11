@@ -1,20 +1,20 @@
 /*
- * XiaoRgbLed — RGB LED demo for XIAO nRF54L15 / nRF54LM20B
+ * XiaoRgbLed — RGB LED demo for XIAO nRF54L15 / nRF54LM20A
  *
  * Cycles through colors using PWM fading on the built-in RGB LED.
  *
  * XIAO nRF54L15:   single LED on P2.00 (active-low) — shows heartbeat
- * XIAO nRF54LM20B: RGB LED on P1.22(R) P1.23(B) P1.24(G) — active-low
+ * XIAO nRF54LM20A: RGB LED on P1.22(R) P1.23(B) P1.24(G) — active-low
  *
  * Both boards are auto-detected and the example adapts automatically.
  *
  * Hardware:
  *   - XIAO nRF54L15  / Sense
- *   - XIAO nRF54LM20B
+ *   - XIAO nRF54LM20A
  */
 
-#if defined(ARDUINO_NRF54LM20B)
-  // ─── LM20B: RGB LED ─────────────────────────────────────────
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
+  // ─── LM20A: RGB LED ─────────────────────────────────────────
   const int LED_R = LED_RED;
   const int LED_G = LED_GREEN;
   const int LED_B = LED_BLUE;
@@ -32,9 +32,9 @@
 #endif
 
 void setup() {
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
   Serial.begin(115200);
-  Serial.println("\n--- XIAO nRF54LM20B RGB LED Demo ---");
+  Serial.println("\n--- XIAO nRF54LM20A RGB LED Demo ---");
   Serial.println("Cycling: Red → Green → Blue → White → Fade");
 #endif
 
@@ -46,7 +46,7 @@ void setup() {
 
 void setColor(int r, int g, int b) {
   // All values 0-255, 0 = full brightness (active-low)
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
   analogWrite(LED_R, 255 - r);
   analogWrite(LED_G, 255 - g);
   analogWrite(LED_B, 255 - b);

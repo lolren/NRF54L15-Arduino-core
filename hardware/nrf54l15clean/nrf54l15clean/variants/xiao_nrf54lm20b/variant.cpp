@@ -1,8 +1,5 @@
 /*
- * XIAO nRF54LM20B variant initialization.
- *
- * ⚠️ HARDWARE NOTE: No schematic available yet.
- * Initialization should be verified with physical hardware.
+ * XIAO nRF54LM20A variant initialization.
  *
  * Sets up:
  * - RGB LED as output (all off initially)

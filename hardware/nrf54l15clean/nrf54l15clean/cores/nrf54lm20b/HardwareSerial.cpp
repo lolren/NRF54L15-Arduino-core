@@ -68,6 +68,7 @@ static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
         case 0: return NRF_P0;
         case 1: return NRF_P1;
         case 2: return NRF_P2;
+        case 3: return NRF_P3;
         default: return nullptr;
     }
 }
@@ -1115,10 +1116,10 @@ static constexpr uint8_t kSerialPinDisconnected = 0xFFU;
 #if defined(NRF54L15_CLEAN_SERIAL_DISABLED)
 HardwareSerial Serial(NRF_UARTE21, kSerialPinDisconnected, kSerialPinDisconnected);
 HardwareSerial Serial1(NRF_UARTE20, kSerialPinDisconnected, kSerialPinDisconnected);
-#elif defined(ARDUINO_NRF54LM20B)
-/* LM20B: Serial=UART20 CDC (P1.11/P1.10→SAMD11), Serial1=UART21 header (P1.08/P1.09→D6/D7)
- * Confirmed from XIAO LM20A schematic: SAMD11_RX←P1.11, SAMD11_TX→P1.10 */
-HardwareSerial Serial(NRF_UARTE20, PIN_SERIAL_TX, PIN_SERIAL_RX);
+#elif defined(ARDUINO_NRF54LM20B) || defined(ARDUINO_NRF54LM20A)
+/* LM20A: Serial=UART20 CDC bridge, Serial1=UART21 XIAO header UART.
+ * Bridge naming is from the SAMD11 side: MCU TX drives SAMD11_RX. */
+HardwareSerial Serial(NRF_UARTE20, PIN_SAMD11_RX, PIN_SAMD11_TX);
 HardwareSerial Serial1(NRF_UARTE21, PIN_SERIAL1_TX, PIN_SERIAL1_RX);
 #elif defined(NRF54L15_CLEAN_SERIAL_ROUTE_HEADER)
 #if defined(NRF54L15_CLEAN_SERIAL_ROUTE_HEADER_SWAP_INSTANCES)

@@ -51,16 +51,16 @@ This is a **bare-metal, register-level Arduino core** — no Zephyr, no nRF Conn
 | Board | Identifier |
 |---|---|
 | XIAO nRF54L15 / Sense | `xiao_nrf54l15` |
-| **XIAO nRF54LM20B** | `xiao_nrf54lm20b` |
+| **XIAO nRF54LM20A** | `xiao_nrf54lm20b` |
 | HOLYIOT-25008 Module | `holyiot_25008_nrf54l15` |
 | HOLYIOT-25007 Module | `holyiot_25007_nrf54l15` |
 | Generic 36-pad Module | `generic_nrf54l15_module_36pin` |
 
-> **⚠️ XIAO nRF54LM20B caveats:** USB serial (CDC ACM) is not yet working — the debug probe's CDC pin mapping requires the board schematic which isn't public. Use a **USB-UART adapter on D6 (TX) / D7 (RX) @ 115200 baud** for serial output.
+> **XIAO nRF54LM20A note:** the board identifier remains `xiao_nrf54lm20b` for compatibility with early installs, but the board entry now targets XIAO nRF54LM20A. `Serial` uses the on-board SAMD11 USB bridge on P1.11/P1.10. `Serial1` uses the XIAO header UART on D6/D7.
 >
-> **pyOCD requirement:** The LM20B target (`nrf54lm20a`) requires pyOCD ≥ 0.44. If upload fails, upgrade: `pip install --upgrade pyocd`. Versions < 0.44 are supported via auto-install on first upload.
+> **pyOCD support:** LM20A upload uses the `nrf54lm20a` pyOCD target. The core passes a runtime pyOCD target hook during upload, so installs no longer need to modify pyOCD's site-packages directory. This avoids permission failures on managed Python and Windows installs.
 >
-> All other features (GPIO, RGB LED, BLE, I2C, SPI, PWM, compile, upload) are verified and working.
+> GPIO, RGB LED, USB `Serial`, header `Serial1`, BLE, I2C, SPI, PWM, compile, and pyOCD upload are verified on attached hardware.
 
 ---
 

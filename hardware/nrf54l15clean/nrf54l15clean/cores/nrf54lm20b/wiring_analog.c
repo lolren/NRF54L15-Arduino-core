@@ -393,6 +393,7 @@ static NRF_GPIO_Type* gpio_for_port(uint8_t port)
         case 0U: return NRF_P0;
         case 1U: return NRF_P1;
         case 2U: return NRF_P2;
+        case 3U: return NRF_P3;
         default: return (NRF_GPIO_Type*)0;
     }
 }

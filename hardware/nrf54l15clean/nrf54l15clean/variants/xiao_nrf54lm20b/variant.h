@@ -1,10 +1,8 @@
 /*
- * XIAO nRF54LM20B variant header.
+ * XIAO nRF54LM20A variant header.
  *
- * LM20B has NO antenna switch (built-in ceramic antenna only).
- * 
- * ⚠️ HARDWARE NOTE: No schematic available yet.
- * Features and pinout should be verified with physical hardware.
+ * LM20A has no software-controlled RF switch; the antenna path is fixed by
+ * board hardware.
  */
 
 #ifndef VARIANT_H
@@ -17,14 +15,20 @@ extern "C" {
 #endif
 
 // ─── Board Capabilities ───────────────────────────────────────
-#define NRF54LM20B_BOARD_HAS_RGB_LED     1
-#define NRF54LM20B_BOARD_LED_ACTIVE_LOW  1
-#define NRF54LM20B_BOARD_HAS_BUTTON      1
-#define NRF54LM20B_BOARD_HAS_EXTERNAL_FLASH 1
-#define NRF54LM20B_BOARD_HAS_RF_SWITCH   0   // No antenna switch
+#define NRF54LM20A_BOARD_HAS_RGB_LED     1
+#define NRF54LM20A_BOARD_LED_ACTIVE_LOW  1
+#define NRF54LM20A_BOARD_HAS_BUTTON      1
+#define NRF54LM20A_BOARD_HAS_EXTERNAL_FLASH 1
+#define NRF54LM20A_BOARD_HAS_RF_SWITCH   0
+
+#define NRF54LM20B_BOARD_HAS_RGB_LED     NRF54LM20A_BOARD_HAS_RGB_LED
+#define NRF54LM20B_BOARD_LED_ACTIVE_LOW  NRF54LM20A_BOARD_LED_ACTIVE_LOW
+#define NRF54LM20B_BOARD_HAS_BUTTON      NRF54LM20A_BOARD_HAS_BUTTON
+#define NRF54LM20B_BOARD_HAS_EXTERNAL_FLASH NRF54LM20A_BOARD_HAS_EXTERNAL_FLASH
+#define NRF54LM20B_BOARD_HAS_RF_SWITCH   NRF54LM20A_BOARD_HAS_RF_SWITCH
 
 // ─── Antenna type stub (required by HAL board policy) ─────────
-// LM20B has no antenna switch — always uses built-in ceramic.
+// LM20A has no antenna switch — always uses the fixed board antenna path.
 typedef enum {
     XIAO_NRF54L15_ANTENNA_CERAMIC = 0,
     XIAO_NRF54L15_ANTENNA_EXTERNAL = 1,
@@ -32,7 +36,7 @@ typedef enum {
     XIAO_NRF54L15_ANTENNA_COUNT = 3
 } xiao_nrf54l15_antenna_t;
 
-// Compat alias for older API
+// Compat alias for the early LM20B-named API.
 #define XIAO_LM20B_ANTENNA_BUILTIN XIAO_NRF54L15_ANTENNA_CERAMIC
 
 static inline const char* boardAntennaSelectionFromPath(int path) {
@@ -40,7 +44,7 @@ static inline const char* boardAntennaSelectionFromPath(int path) {
     return "builtin";
 }
 
-// ─── RF path select stub (no-op on LM20B) ────────────────────
+// ─── RF path select stub (no-op on LM20A) ────────────────────
 static inline void xiaoNrf54l15SetAntenna(xiao_nrf54l15_antenna_t sel) {
     (void)sel;
 }
@@ -56,7 +60,7 @@ static inline int arduinoXiaoNrf54l15GetImuMicEnable(void) {
     return 0;
 }
 
-// ─── RF switch stub (no RF switch on LM20B) ──────────────────
+// ─── RF switch stub (no RF switch on LM20A) ──────────────────
 static inline int arduinoXiaoNrf54l15SetRfSwitchPower(uint8_t enable) {
     (void)enable; return 0;
 }
@@ -70,8 +74,7 @@ static inline void xiaoNrf54l15EnterLowestPowerBoardState(void) {
 }
 
 // ─── Bootloader / Reset ───────────────────────────────────────
-// LM20B uses nrfutil-mcumgr for firmware updates
-// Also supports CMSIS-DAP / pyOCD / probe-rs
+// LM20A supports CMSIS-DAP / pyOCD / probe-rs.
 
 #ifdef __cplusplus
 }

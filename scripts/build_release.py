@@ -242,6 +242,7 @@ def make_platform_entry(
         "size": str(archive_size),
         "boards": [
             {"name": "XIAO nRF54L15 / Sense"},
+            {"name": "XIAO nRF54LM20A"},
             {"name": "HOLYIOT-25008 nRF54L15 Module"},
             {"name": "HOLYIOT-25007 nRF54L15 Module"},
             {"name": "Generic nRF54L15 Module (36-pad)"},
@@ -368,7 +369,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dist-dir", default=None, type=Path)
     parser.add_argument("--existing-index", default=None, type=Path)
     parser.add_argument("--archive-index", default=None, type=Path)
-    parser.add_argument("--stable-keep", default=64, type=int)
+    parser.add_argument(
+        "--stable-keep",
+        default=0,
+        type=int,
+        help="Number of stable platform entries to keep; 0 preserves the existing stable index history",
+    )
     parser.add_argument(
         "--host-tool-hosts",
         default="",
@@ -535,19 +541,15 @@ def write_release_manifest(
 
 
 def should_rebuild_host_tools(args, existing_index):
-    """Check if we should rebuild host tools instead of reusing existing index."""
+    """Check if host tools need rebuilding.
+
+    Core version bumps do not require new host-tool archives. Reuse the
+    existing HOST_TOOL_VERSION entry unless the caller explicitly asked for a
+    rebuild or the requested host-tool version is not present in the index.
+    """
     if not args.reuse_existing_hosttools:
         return True
-    existing_version = None
-    for platform in existing_index.get("packages", [{}])[0].get("platforms", []):
-        if isinstance(platform, dict) and platform.get("archived") != True:
-            v = platform.get("version")
-            if v and (existing_version is None or v > existing_version):
-                existing_version = v
-    if existing_version and existing_version != args.version:
-        print(f"Version bump detected ({existing_version} -> {args.version}), rebuilding host tools...")
-        return True
-    return False
+    return find_tool_entry(existing_index, HOST_TOOL_NAME, HOST_TOOL_VERSION) is None
 
 def main() -> int:
     args = parse_args()
@@ -677,7 +679,18 @@ def main() -> int:
     )
 
     full_index = merge_tool(merge_platform(existing_full, platform_entry), tool_entry)
-    stable_index = prune_platforms(full_index, keep=args.stable_keep)
+    if stable_fallback_index_path.is_file():
+        stable_source = load_existing_index(
+            stable_fallback_index_path,
+            packager=args.packager,
+            repo_url=args.repo_url,
+        )
+    else:
+        stable_source = make_index(packager=args.packager, repo_url=args.repo_url)
+    stable_index = prune_platforms(
+        merge_tool(merge_platform(stable_source, platform_entry), tool_entry),
+        keep=args.stable_keep,
+    )
 
     stable_index_path = dist_dir / f"package_{args.packager}_index.json"
     stable_alias_index_path = dist_dir / f"package_{args.packager}_stable_index.json"
@@ -726,28 +739,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-
-def _version_tuple(v: str) -> tuple:
-    """Convert version string to comparable tuple."""
-    try:
-        return tuple(int(x) for x in v.split("."))
-    except ValueError:
-        return (0, 0, 0)
-
-def should_rebuild_host_tools(args: argparse.Namespace, existing_index: dict) -> bool:
-    """Check if we should rebuild host tools instead of reusing existing index."""
-    if not args.reuse_existing_hosttools:
-        return True
-    # If version differs from latest in existing index, don't reuse (stale URLs)
-    existing_version = None
-    for platform in existing_index.get("packages", [{}])[0].get("platforms", []):
-        if isinstance(platform, dict) and platform.get("archived") != True:
-            v = platform.get("version")
-            if v and (existing_version is None or _version_tuple(v) > _version_tuple(existing_version)):
-                existing_version = v
-    if existing_version and existing_version != args.version:
-        print(f"Version bump detected ({existing_version} -> {args.version}), rebuilding host tools...")
-        return True
-    return False

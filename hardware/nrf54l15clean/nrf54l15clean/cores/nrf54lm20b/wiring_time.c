@@ -23,6 +23,8 @@ extern uint32_t nrf54l15_ble_grtc_reserved_cc_mask(void) __attribute__((weak));
 extern uint32_t nrf54l15_clean_ble_idle_sleep_cap_us(void) __attribute__((weak));
 extern uint8_t nrf54l15_clean_low_power_micro_delay_sleep_allowed(void)
     __attribute__((weak));
+uint32_t nrf54lm20b_core_enter_idle_cpu_scaling(void);
+void nrf54lm20b_core_exit_idle_cpu_scaling(uint32_t previousRaw);
 void nrf54lm20b_core_prepare_system_off_wake_timebase(void);
 void nrf54lm20b_core_prepare_system_off(void);
 void nrf54lm20b_core_disable_system_off_retention(void);

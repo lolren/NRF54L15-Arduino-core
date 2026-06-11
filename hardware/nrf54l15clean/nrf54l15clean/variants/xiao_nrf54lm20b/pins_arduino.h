@@ -1,12 +1,7 @@
 /*
- * XIAO nRF54LM20B pin definitions for clean bare-metal core.
+ * XIAO nRF54LM20A pin definitions for clean bare-metal core.
  *
- * Pin mapping derived from Seeed Studio's Zephyr device tree
- * (platform-seeedboards/xiao_nrf54lm20b/seeed_xiao_connector.dtsi).
- * 
- * ⚠️  HARDWARE NOTE: No schematic available yet.
- *     Pin assignments should be verified with physical hardware
- *     using LED blink / serial tests before production use.
+ * Pin mapping follows the Seeed Studio XIAO nRF54LM20A pin map and schematic.
  *
  * Pin Port mapping:
  *   P0: GPIO 0.00-0.09   (button, NFC, GRTC, peripherals)
@@ -54,8 +49,7 @@
 #define PIN_D27 (27)
 
 // ─── RGB LED (active-low, common-anode) ───────────────────────
-// nRF54LM20B: Red=P1.22, Blue=P1.23, Green=P1.24
-// Red/Blue are swapped vs nRF54LM20A
+// nRF54LM20A: Red=P1.22, Blue=P1.23, Green=P1.24
 #define PIN_LED_RED   (28)
 #define PIN_LED_BLUE  (29)   // ⚠️ Not an XIAO connector pin
 #define PIN_LED_GREEN (30)   // ⚠️ Not an XIAO connector pin
@@ -91,8 +85,8 @@ enum {
 #define PIN_WIRE_SDA  (PIN_D4)   // P1.03
 #define PIN_WIRE_SCL  (PIN_D5)   // P1.07
 
-// Wire1 (second I2C) — same pins as Wire on LM20B for compatibility
-// LM20B has only one I2C on the XIAO connector header
+// Wire1 (second I2C) — same pins as Wire on LM20A for compatibility
+// LM20A has one I2C pair on the XIAO connector header.
 #define PIN_WIRE1_SDA PIN_WIRE_SDA
 #define PIN_WIRE1_SCL PIN_WIRE_SCL
 
@@ -112,7 +106,7 @@ enum {
 // PMIC I2C (nPM1300): SDA=P1.18, SCL=P1.17
 #define PIN_PMIC_SDA (32)       // P1.18
 #define PIN_PMIC_SCL (33)       // P1.17
-// No RF switch on LM20B - always uses built-in ceramic antenna
+// No RF switch on LM20A - antenna path is fixed by board hardware.
 
 // CDC USB Serial — UART20 on P1.11/P1.10 (connected to SAMD11 debug probe)
 #define PIN_CDC_TX   (34)   // P1.11
@@ -120,9 +114,10 @@ enum {
 #define CDC_TX       PIN_CDC_TX
 #define CDC_RX       PIN_CDC_RX
 
-// Compatibility aliases for shared core code expecting SAMD11 bridge pins
-#define PIN_SAMD11_RX PIN_SERIAL_RX    // P1.09 = D7
-#define PIN_SAMD11_TX PIN_SERIAL_TX    // P1.08 = D6
+// Compatibility aliases for shared core code expecting SAMD11 bridge pins.
+// Names are from the bridge side: MCU TX -> SAMD11_RX, SAMD11_TX -> MCU RX.
+#define PIN_SAMD11_RX PIN_CDC_TX       // P1.11
+#define PIN_SAMD11_TX PIN_CDC_RX       // P1.10
 
 // ─── Port Register Helpers ────────────────────────────────────
 typedef volatile uint32_t PortReg;
@@ -182,6 +177,10 @@ static inline bool pinToPortPin(uint8_t pin, uint8_t* port, uint8_t* pinInPort)
         // PMIC I2C on Port 1
         case PIN_PMIC_SDA: *port = 1; *pinInPort = 18; return true;
         case PIN_PMIC_SCL: *port = 1; *pinInPort = 17; return true;
+
+        // SAMD11 USB serial bridge on Port 1
+        case PIN_CDC_TX: *port = 1; *pinInPort = 11; return true;
+        case PIN_CDC_RX: *port = 1; *pinInPort = 10; return true;
 
         default: return false;
     }
