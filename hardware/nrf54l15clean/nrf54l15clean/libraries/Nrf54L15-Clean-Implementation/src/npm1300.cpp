@@ -4,6 +4,10 @@
  */
 #include "npm1300.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // TWIM22 base — same as Wire (header I2C)
 static volatile uint32_t* const twi = (volatile uint32_t*)0x500C8000UL;
 
@@ -220,3 +224,7 @@ bool npm1300_led_set(uint8_t led, uint8_t brightness) {
     uint16_t reg = 0x0700 + led * 4;  // LED0..LED2 control registers
     return reg_write(reg, brightness);
 }
+
+#ifdef __cplusplus
+}
+#endif

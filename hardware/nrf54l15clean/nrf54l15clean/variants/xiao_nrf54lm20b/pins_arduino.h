@@ -276,6 +276,7 @@ static inline uint8_t analogInputToDigitalPin(uint8_t p)
 // ─── Static Pin References ────────────────────────────────────
 static const uint8_t SDA  = PIN_WIRE_SDA;
 static const uint8_t SCL  = PIN_WIRE_SCL;
+static const uint8_t IMU_PWR = PIN_IMU_PWR;
 static const uint8_t SDA1 = PIN_WIRE1_SDA;
 static const uint8_t SCL1 = PIN_WIRE1_SCL;
 static const uint8_t MOSI = PIN_SPI_MOSI;
