@@ -60,7 +60,7 @@
       "tools": [
         {
           "name": "nrf54l15hosttools",
-          "version": "1.0.0",
+          "version": "1.1.2",
           "systems": [
             {
               "host": "x86_64-pc-linux-gnu",
