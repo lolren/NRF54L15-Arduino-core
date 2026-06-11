@@ -6,6 +6,7 @@ pyOCD for CMSIS-DAP flashing.
 """
 
 from __future__ import annotations
+import patch_lm20b_target  # auto-install LM20B pyOCD target
 
 import argparse
 import os
@@ -840,59 +841,7 @@ def force_nrf54l_unlock_workaround(
             uid,
         )
         cmd = append_pyocd_safe_options(cmd, safe_mode)
-        result = run(cmd, timeout=def _ensure_pyocd_targets():
-    """Install nRF54LM20A target into shim + system pyOCD. No pyocd import needed for shim."""
-    import shutil, glob
-    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "target_nRF54LM20A.py")
-    if not os.path.exists(bundled):
-        return
-
-    # Patch shim pyOCD (used by AppImage IDE, fresh installs) — no imports needed
-    _shim = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-        "..", "..", "..", "tools", "nrf54l15hosttools",
-        "1.1.2", "runtime", "pyocd-site", "pyocd", "target", "builtin")
-    _shim = os.path.normpath(_shim)
-    try:
-        os.makedirs(_shim, exist_ok=True)
-        shutil.copy2(bundled, os.path.join(_shim, "target_nRF54LM20A.py"))
-        init = os.path.join(_shim, "__init__.py")
-        if os.path.exists(init):
-            with open(init) as f:
-                c = f.read()
-            if "target_nRF54LM20A" not in c:
-                c = c.replace("from . import target_nRF54L15",
-                    "from . import target_nRF54L15\nfrom . import target_nRF54LM20A")
-                c = c.replace("'nrf54l' : target_nRF54L15.NRF54L15,",
-                    "'nrf54l' : target_nRF54L15.NRF54L15,\n          'nrf54lm20a' : target_nRF54LM20A.NRF54LM20A,")
-                with open(init, "w") as f:
-                    f.write(c)
-        for d in glob.glob(os.path.join(_shim, "__pycache__")):
-            shutil.rmtree(d, ignore_errors=True)
-    except Exception:
-        pass
-
-    # Also patch system pyOCD if importable
-    try:
-        import pyocd.target.builtin
-        d = os.path.dirname(pyocd.target.builtin.__file__)
-        shutil.copy2(bundled, os.path.join(d, "target_nRF54LM20A.py"))
-        init = os.path.join(d, "__init__.py")
-        if os.path.exists(init):
-            with open(init) as f:
-                c = f.read()
-            if "target_nRF54LM20A" not in c:
-                c = c.replace("from . import target_nRF54L15",
-                    "from . import target_nRF54L15\nfrom . import target_nRF54LM20A")
-                c = c.replace("'nrf54l' : target_nRF54L15.NRF54L15,",
-                    "'nrf54l' : target_nRF54L15.NRF54L15,\n          'nrf54lm20a' : target_nRF54LM20A.NRF54LM20A,")
-                with open(init, "w") as f:
-                    f.write(c)
-    except Exception:
-        pass
-
-
-def pyocd_timeout_seconds())
+        result = run(cmd, timeout=pyocd_timeout_seconds())
         print_result(result)
         return result
     finally:
