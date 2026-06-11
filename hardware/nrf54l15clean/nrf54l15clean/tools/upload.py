@@ -223,8 +223,20 @@ def bundled_wheelhouse_path(tool_root: Path | None) -> Path | None:
 
 
 def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | None:
-    tool_root = pyocd_tool_root(host_tools_path)
+    # First try bundled wrapper (system pyocd 0.44.1 for AppImage IDE)
+    import pathlib
+    _here = pathlib.Path(__file__).resolve().parent
+    _wrapper = _here / "pyocd_bundled.py"
+    if _wrapper.is_file():
+        wrapper_cmd = [sys.executable, str(_wrapper)]
+        try:
+            result = subprocess.run(wrapper_cmd + ["--version"], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                return wrapper_cmd
+        except Exception:
+            pass
 
+    tool_root = pyocd_tool_root(host_tools_path)
     bundled = bundled_pyocd_command(tool_root)
     if bundled is not None:
         return bundled
