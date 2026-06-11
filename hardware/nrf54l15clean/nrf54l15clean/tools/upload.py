@@ -1048,6 +1048,14 @@ def choose_recovery_runner(openocd_bin: str, host_tools_path: Path | None) -> st
     raise RuntimeError("No supported uploader found (need pyocd or openocd in PATH)")
 
 
+def _ensure_lm20b_target():
+    """Re-apply LM20B target patch if needed."""
+    try:
+        import importlib, patch_lm20b_target
+        importlib.reload(patch_lm20b_target)
+    except Exception:
+        pass
+
 def upload_pyocd(
     hex_path: str,
     target: str,
@@ -1059,6 +1067,7 @@ def upload_pyocd(
     host_tools_path: Path | None = None,
     safe_mode: bool = False,
 ) -> int:
+    _ensure_lm20b_target()
     pyocd_cmd = pyocd_cmd if pyocd_cmd is not None else detect_pyocd_command(host_tools_path)
     if pyocd_cmd is None:
         print("ERROR: pyocd is not installed or not available in PATH", file=sys.stderr)
