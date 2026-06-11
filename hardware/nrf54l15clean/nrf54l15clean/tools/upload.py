@@ -1355,6 +1355,11 @@ def main() -> int:
         if detect_pyocd_command(host_tools_path) is None:
             if install_pyocd(host_tools_path):
                 print("pyocd installation succeeded.")
+                try:
+                    import importlib, patch_lm20b_target
+                    importlib.reload(patch_lm20b_target)
+                except Exception:
+                    pass
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
