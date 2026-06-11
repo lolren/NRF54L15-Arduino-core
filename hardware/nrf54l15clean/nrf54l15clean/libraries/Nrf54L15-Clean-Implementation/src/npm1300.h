@@ -104,6 +104,18 @@ bool npm1300_buck2_enable(bool enable);
 bool npm1300_buck2_set_voltage(uint16_t mv);
 bool npm1300_buck2_is_enabled(void);
 
+/* Buck mode control (applies to both BUCK1 and BUCK2).
+ * AUTO (default): Hysteretic at light load, PWM at heavy load.
+ * FORCE_PWM:       Low-ripple forced PWM (higher quiescent current).
+ * FORCE_HYST:      Forced Hysteretic (lowest IQ, higher ripple for light loads).
+ */
+#define NPM1300_BUCK_MODE_AUTO       0
+#define NPM1300_BUCK_MODE_FORCE_PWM  1
+#define NPM1300_BUCK_MODE_FORCE_HYST 2
+
+bool npm1300_buck1_set_mode(uint8_t mode);
+bool npm1300_buck2_set_mode(uint8_t mode);
+
 /* Battery charger and status. */
 bool npm1300_charger_enable(bool enable);
 bool npm1300_charger_set_current(uint16_t ma);

@@ -581,3 +581,11 @@ bool npm1300_gpio_write(uint8_t pin, bool high) {
 bool npm1300_gpio_status(uint8_t* status) {
   return npm1300_read_reg(NPM1300_BASE_GPIO, kGpioOffsetStatus, status);
 }
+
+bool npm1300_buck1_set_mode(uint8_t mode) {
+  return buck_set_mode(0U, mode);
+}
+
+bool npm1300_buck2_set_mode(uint8_t mode) {
+  return buck_set_mode(1U, mode);
+}
