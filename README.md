@@ -56,11 +56,13 @@ This is a **bare-metal, register-level Arduino core** — no Zephyr, no nRF Conn
 | HOLYIOT-25007 Module | `holyiot_25007_nrf54l15` |
 | Generic 36-pad Module | `generic_nrf54l15_module_36pin` |
 
-> **XIAO nRF54LM20A note:** the board identifier remains `xiao_nrf54lm20b` for compatibility with early installs, but the board entry now targets XIAO nRF54LM20A. `Serial` uses the on-board SAMD11 USB bridge on P1.11/P1.10. `Serial1` uses the XIAO header UART on D6/D7.
+> **XIAO nRF54LM20A note:** the board identifier remains `xiao_nrf54lm20b` for compatibility. `Serial` uses the on-board SAMD11 USB bridge on P1.11/P1.10 (confirmed from LM20A schematic). `Serial1` uses the XIAO header UART on D6/D7.
 >
-> **pyOCD support:** LM20A upload uses the `nrf54lm20a` pyOCD target. The core passes a runtime pyOCD target hook during upload, so installs no longer need to modify pyOCD's site-packages directory. This avoids permission failures on managed Python and Windows installs.
+> **⚠️ pyOCD:** The bundled host tools include pyOCD 0.42.0 which lacks `nrf54lm20a`. Run once: `pip install pyocd==0.44.1`. The core auto-detects and uses system pyOCD thereafter.
 >
-> GPIO, RGB LED, USB `Serial`, header `Serial1`, BLE, I2C, SPI, PWM, compile, and pyOCD upload are verified on attached hardware.
+> **⚠️ USB Serial:** SAMD11 CDC bridge may not forward data on some board revisions. If `/dev/ttyACM0` shows no output, use a **USB-UART adapter on D6/D7 @ 115200 baud**.
+>
+> GPIO, RGB LED, BLE, I2C, SPI, PWM, compile, and pyOCD upload are verified on attached hardware.
 
 ---
 
