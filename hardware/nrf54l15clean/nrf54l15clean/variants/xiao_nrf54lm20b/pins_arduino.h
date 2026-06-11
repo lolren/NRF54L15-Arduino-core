@@ -114,6 +114,12 @@ enum {
 #define PIN_PMIC_SCL (33)       // P1.17
 // No RF switch on LM20B - always uses built-in ceramic antenna
 
+// CDC USB Serial — UART20 on P1.11/P1.10 (connected to SAMD11 debug probe)
+#define PIN_CDC_TX   (34)   // P1.11
+#define PIN_CDC_RX   (35)   // P1.10
+#define CDC_TX       PIN_CDC_TX
+#define CDC_RX       PIN_CDC_RX
+
 // Compatibility aliases for shared core code expecting SAMD11 bridge pins
 #define PIN_SAMD11_RX PIN_SERIAL_RX    // P1.09 = D7
 #define PIN_SAMD11_TX PIN_SERIAL_TX    // P1.08 = D6
