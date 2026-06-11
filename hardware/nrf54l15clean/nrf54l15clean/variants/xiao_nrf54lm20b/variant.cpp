@@ -28,4 +28,12 @@ void initVariant(void)
     digitalWrite(PIN_LED_GREEN, LOW);
     delay(50);
     digitalWrite(PIN_LED_GREEN, HIGH);
+    
+    // Enable IMU/MIC power via nPM1300 PMIC
+    npm1300_init();
+    npm1300_ldo1_enable(true);
 }
+
+// PMIC init — enable IMU/MIC power rail
+extern void npm1300_init(void);
+extern bool npm1300_ldo1_enable(bool);
