@@ -96,6 +96,20 @@ bool npm1300_ldo2_enable(bool enable);
 bool npm1300_ldo2_set_voltage(uint16_t mv);
 bool npm1300_ldo2_is_enabled(void);
 
+/* Load-switch/LDO function select.
+ * LDSW mode is a plain load switch using LSIN as input.
+ * LDO mode regulates LSOUT to the selected voltage.
+ */
+#define NPM1300_LDSW_MODE_LOAD_SWITCH 0
+#define NPM1300_LDSW_MODE_LDO         1
+
+bool npm1300_ldo1_set_mode(uint8_t mode);
+bool npm1300_ldo2_set_mode(uint8_t mode);
+
+/* XIAO nRF54LM20A helper: LDO1 feeds the shared IMU&MIC_3V3 rail. */
+bool npm1300_imu_mic_power_enable(bool enable);
+bool npm1300_sensor_power_enable(bool enable);  /* compatibility alias */
+
 /* Buck regulators. */
 bool npm1300_buck1_enable(bool enable);
 bool npm1300_buck1_set_voltage(uint16_t mv);

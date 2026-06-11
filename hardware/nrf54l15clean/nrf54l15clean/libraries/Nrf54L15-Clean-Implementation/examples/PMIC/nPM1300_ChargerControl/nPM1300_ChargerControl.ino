@@ -11,11 +11,11 @@
  *
  * LEDs:
  *   Green  = charger running, no error
- *   Red    = charger error (check Serial1)
+ *   Red    = charger error (check USB Serial)
  *   Blue   = button pressed (profile switch)
  *
  * Hardware:  XIAO nRF54LM20A
- * Output:    Serial1 D6 TX 115200
+ * Output:    USB Serial Monitor at 115200 baud
  */
 
 #include <Arduino.h>

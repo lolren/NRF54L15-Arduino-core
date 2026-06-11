@@ -15,7 +15,7 @@
 #include <stdint.h>
 #include <nrf54lm20b.h>
 
-#define NUM_DIGITAL_PINS 28
+#define NUM_DIGITAL_PINS 42
 #define NUM_ANALOG_INPUTS 5   // A0-A3 (D0-D3) + A7 (D4)
 
 // ─── XIAO Connector Pins (D0–D27) ─────────────────────────────
@@ -107,6 +107,16 @@ enum {
 #define PIN_PMIC_SCL (33)       // P1.17
 // The IMU/MIC rail is controlled by the nPM1300 LDO API, not by an MCU GPIO.
 #define PIN_IMU_PWR  (0xFF)
+#define PIN_IMU_INT  (38)       // P0.06
+#define PIN_IMU_CS   (39)       // P3.12, HIGH selects I2C mode on LSM6DS3TR-C
+#define PIN_PDM_CLK  (40)       // P1.13
+#define PIN_PDM_DATA (41)       // P1.14
+#define IMU_INT      PIN_IMU_INT
+#define IMU_CS       PIN_IMU_CS
+#define PDM_CLK      PIN_PDM_CLK
+#define PDM_DATA     PIN_PDM_DATA
+#define MIC_CLK      PIN_PDM_CLK
+#define MIC_DATA     PIN_PDM_DATA
 // No RF switch on LM20A - antenna path is fixed by board hardware.
 
 // CDC USB Serial — UART20 on P1.11/P1.10 (connected to SAMD11 debug probe)
@@ -186,6 +196,12 @@ static inline bool pinToPortPin(uint8_t pin, uint8_t* port, uint8_t* pinInPort)
         // Wire1 IMU I2C on Port 0
         case PIN_WIRE1_SDA: *port = 0; *pinInPort = 8;  return true;   // P0.08
         case PIN_WIRE1_SCL: *port = 0; *pinInPort = 7;  return true;   // P0.07
+
+        // Internal IMU and PDM microphone pins from the LM20A schematic
+        case PIN_IMU_INT:  *port = 0; *pinInPort = 6;  return true;   // P0.06
+        case PIN_IMU_CS:   *port = 3; *pinInPort = 12; return true;   // P3.12
+        case PIN_PDM_CLK:  *port = 1; *pinInPort = 13; return true;   // P1.13
+        case PIN_PDM_DATA: *port = 1; *pinInPort = 14; return true;   // P1.14
 
         default: return false;
     }
@@ -282,6 +298,10 @@ static inline uint8_t analogInputToDigitalPin(uint8_t p)
 static const uint8_t SDA  = PIN_WIRE_SDA;
 static const uint8_t SCL  = PIN_WIRE_SCL;
 static const uint8_t IMU_PWR = PIN_IMU_PWR;
+static const uint8_t IMU_INT1 = PIN_IMU_INT;
+static const uint8_t IMU_CS_PAD = PIN_IMU_CS;
+static const uint8_t MIC_CLK_PAD = PIN_PDM_CLK;
+static const uint8_t MIC_DATA_PAD = PIN_PDM_DATA;
 static const uint8_t SDA1 = PIN_WIRE1_SDA;
 static const uint8_t SCL1 = PIN_WIRE1_SCL;
 static const uint8_t MOSI = PIN_SPI_MOSI;

@@ -18,40 +18,61 @@ namespace {
 
 #if NPM1300_HAS_BOARD_PMIC
 
-static volatile uint32_t* const gpio = (volatile uint32_t*)0x500D8200UL;
+static NRF_GPIO_Type* const gpio = NRF_P1;
 
 static uint8_t _sclPin = 0, _sdaPin = 0;
 static bool _pinsReady = false;
 
-static void pins_init() {
-    if (_pinsReady) return;
+static void pin_release(uint8_t pin) {
+    gpio->PIN_CNF[pin] =
+        (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
+        GPIO_PIN_CNF_INPUT_Connect |
+        (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos);
+}
+
+static void pin_low(uint8_t pin) {
+    gpio->OUTCLR = 1UL << pin;
+    gpio->PIN_CNF[pin] =
+        (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos) |
+        GPIO_PIN_CNF_INPUT_Connect |
+        (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos);
+}
+
+static bool pins_init() {
+    if (_pinsReady) return true;
     uint8_t port;
     if (pinToPortPin(PIN_PMIC_SCL, &port, &_sclPin)) {
-        gpio[0x80/4 + _sclPin*4] = (1<<0)|(1<<1);  // Output+Connect
+        if (port != 1U) return false;
+    } else {
+        return false;
     }
     if (pinToPortPin(PIN_PMIC_SDA, &port, &_sdaPin)) {
-        gpio[0x80/4 + _sdaPin*4] = (1<<0)|(1<<1);  // Output+Connect
+        if (port != 1U) return false;
+    } else {
+        return false;
     }
-    gpio[0x04/4] = (1UL << _sclPin) | (1UL << _sdaPin);  // Both high
+    pin_release(_sclPin);
+    pin_release(_sdaPin);
     _pinsReady = true;
+    return true;
 }
 
 static void pins_default() {
     if (!_pinsReady) return;
-    gpio[0x80/4 + _sclPin*4] = 2;  // Input+Connect
-    gpio[0x80/4 + _sdaPin*4] = 2;
+    pin_release(_sclPin);
+    pin_release(_sdaPin);
     _pinsReady = false;
 }
 
-static void scl_h() { gpio[0x04/4] = (1UL << _sclPin); }
-static void scl_l() { gpio[0x08/4] = (1UL << _sclPin); }
-static void sda_h() { gpio[0x04/4] = (1UL << _sdaPin); }
-static void sda_l() { gpio[0x08/4] = (1UL << _sdaPin); }
-static void sda_in() { gpio[0x80/4 + _sdaPin*4] = (0<<0)|(1<<1); }
-static void sda_out(){ gpio[0x80/4 + _sdaPin*4] = (1<<0)|(1<<1); }
-static int  sda_rd() { return (gpio[0x0C/4] >> _sdaPin) & 1; }
+static void scl_h() { pin_release(_sclPin); }
+static void scl_l() { pin_low(_sclPin); }
+static void sda_h() { pin_release(_sdaPin); }
+static void sda_l() { pin_low(_sdaPin); }
+static void sda_in() { pin_release(_sdaPin); }
+static void sda_out() {}
+static int  sda_rd() { return (gpio->IN >> _sdaPin) & 1; }
 
-static void i2c_delay() { for(volatile int i=0; i<20; i++) __asm__("nop"); }
+static void i2c_delay() { delayMicroseconds(5); }
 
 static void i2c_start() { sda_out(); sda_h(); scl_h(); i2c_delay(); sda_l(); i2c_delay(); scl_l(); }
 static void i2c_stop()  { sda_l(); i2c_delay(); scl_h(); i2c_delay(); sda_h(); }
@@ -86,8 +107,7 @@ static uint8_t i2c_read(bool nack) {
 }
 
 bool pmic_bus_begin() {
-    pins_init();
-    return true;
+    return pins_init();
 }
 
 void pmic_bus_end() {
@@ -138,28 +158,40 @@ bool pmic_write_burst(uint8_t base, uint8_t offset, const uint8_t* data, size_t 
 // ─── Register offsets ──────────────────────────────────────
 constexpr uint8_t kMainOffsetVersion = 0x26U;
 constexpr uint8_t kVbusOffsetStatus = 0x07U;
-constexpr uint8_t kChargerOffsetStatus = 0x07U;
-constexpr uint8_t kChargerOffsetError = 0x08U;
-constexpr uint8_t kChargerOffsetISet = 0x02U;
-constexpr uint8_t kChargerOffsetVTerm = 0x03U;
-constexpr uint8_t kChargerOffsetEnSet = 0x00U;
-constexpr uint8_t kChargerOffsetEnClr = 0x01U;
-constexpr uint8_t kChargerOffsetDischargeSet = 0x14U;
-constexpr uint8_t kAdcOffsetIbatEnable = 0x02U;
-constexpr uint8_t kAdcOffsetTaskAuto = 0x07U;
-constexpr uint8_t kAdcOffsetConfig = 0x00U;
-constexpr uint8_t kAdcOffsetTaskVbat = 0x10U;
-constexpr uint8_t kAdcOffsetTaskNtc = 0x11U;
-constexpr uint8_t kAdcOffsetTaskTemp = 0x12U;
-constexpr uint8_t kAdcOffsetResults = 0x36U;
+constexpr uint8_t kChargerOffsetErrClr = 0x00U;
+constexpr uint8_t kChargerOffsetEnSet = 0x04U;
+constexpr uint8_t kChargerOffsetEnClr = 0x05U;
+constexpr uint8_t kChargerOffsetDisableSet = 0x06U;
+constexpr uint8_t kChargerOffsetISet = 0x08U;
+constexpr uint8_t kChargerOffsetVTerm = 0x0CU;
+constexpr uint8_t kChargerOffsetStatus = 0x34U;
+constexpr uint8_t kChargerOffsetError = 0x36U;
+constexpr uint8_t kAdcOffsetTaskVbat = 0x00U;
+constexpr uint8_t kAdcOffsetTaskNtc = 0x01U;
+constexpr uint8_t kAdcOffsetTaskTemp = 0x02U;
+constexpr uint8_t kAdcOffsetTaskVsys = 0x03U;
+constexpr uint8_t kAdcOffsetTaskVbus = 0x07U;
+constexpr uint8_t kAdcOffsetConfig = 0x09U;
+constexpr uint8_t kAdcOffsetTaskAuto = 0x0CU;
+constexpr uint8_t kAdcOffsetResults = 0x10U;
+constexpr uint8_t kAdcOffsetIbatEnable = 0x24U;
 constexpr uint8_t kAdcLsbVbatShift = 0U;
-constexpr uint8_t kAdcLsbDieShift = 2U;
+constexpr uint8_t kAdcLsbNtcShift = 2U;
+constexpr uint8_t kAdcLsbDieShift = 4U;
+constexpr uint8_t kAdcLsbVsysShift = 6U;
 constexpr uint8_t kAdcLsbIbatShift = 4U;
+constexpr uint8_t kAdcLsbVbusShift = 6U;
 constexpr uint32_t kAdcCacheWindowMs = 500U;
+constexpr uint32_t kAdcConversionTimeUs = 250U;
 constexpr uint8_t kLdSwOffsetEnSet = 0x00U;
-constexpr uint8_t kLdSwOffsetEnClr = 0x04U;
-constexpr uint8_t kLdSwOffsetVoutSel = 0x20U;
-constexpr uint8_t kLdSwOffsetStatus = 0x08U;
+constexpr uint8_t kLdSwOffsetEnClr = 0x01U;
+constexpr uint8_t kLdSwOffsetStatus = 0x04U;
+constexpr uint8_t kLdSwOffsetGpiSel = 0x05U;
+constexpr uint8_t kLdSwOffsetConfig = 0x07U;
+constexpr uint8_t kLdSwOffsetLdoSel = 0x08U;
+constexpr uint8_t kLdSwOffsetVoutSel = 0x0CU;
+constexpr uint8_t kLdSw1OnMask = 0x03U;
+constexpr uint8_t kLdSw2OnMask = 0x0CU;
 constexpr uint8_t kBuckOffsetEnSet = 0x00U;
 constexpr uint8_t kBuckOffsetEnClr = 0x01U;
 constexpr uint8_t kBuckOffsetPwmSet = 0x04U;
@@ -170,13 +202,28 @@ constexpr uint8_t kBuckOffsetSwCtrl = 0x0FU;
 constexpr uint8_t kBuckOffsetStatus = 0x34U;
 constexpr uint8_t kBuck1OnMask = 0x04U;
 constexpr uint8_t kBuck2OnMask = 0x40U;
-constexpr uint8_t kGpioCount = 2U;
-constexpr uint8_t kGpioOffsetMode = 0x04U;
-constexpr uint8_t kGpioOffsetStatus = 0x01U;
-constexpr uint8_t kLedOffsetEnSet = 0x00U;
-constexpr int32_t kDieTempOffsetMilliC = 267000;
-constexpr int32_t kDieTempFactorMul = 1000;
-constexpr int32_t kDieTempFactorDiv = 3870;
+constexpr uint8_t kGpioCount = 5U;
+constexpr uint8_t kGpioOffsetMode = 0x00U;
+constexpr uint8_t kGpioOffsetStatus = 0x1EU;
+constexpr uint8_t kLedCount = 3U;
+constexpr uint8_t kLedOffsetMode = 0x00U;
+constexpr uint8_t kLedOffsetSet = 0x03U;
+constexpr uint8_t kLedOffsetClr = 0x04U;
+constexpr uint8_t kLedModeHost = 2U;
+constexpr uint8_t kShipOffsetHibernate = 0x00U;
+constexpr uint8_t kShipOffsetShip = 0x02U;
+constexpr uint8_t kTimeOffsetTimer = 0x08U;
+constexpr uint8_t kTimeOffsetLoad = 0x03U;
+constexpr uint32_t kTimerPrescalerMs = 16U;
+constexpr uint32_t kTimerMaxTicks = 0xFFFFFFUL;
+constexpr int32_t kDieTempOffsetMilliC = 394670;
+constexpr int32_t kDieTempFactorMul = 3963000;
+constexpr int32_t kDieTempFactorDiv = 5000;
+constexpr uint8_t kChargerStatusChargingMask = 0x1CU;
+constexpr uint8_t kIbatStatDischarge = 0x04U;
+constexpr uint8_t kIbatStatChargeTrickle = 0x0CU;
+constexpr uint8_t kIbatStatChargeCool = 0x0DU;
+constexpr uint8_t kIbatStatChargeNormal = 0x0FU;
 
 // ─── State ─────────────────────────────────────────────────
 bool g_present = false;
@@ -185,7 +232,15 @@ bool g_adcValid = false;
 uint32_t g_adcCachedMs = 0;
 
 struct AdcResults {
-    uint8_t msbVbat, msbDie, msbIbat, lsbA, lsbB;
+    uint8_t ibatStat;
+    uint8_t msbVbat;
+    uint8_t msbNtc;
+    uint8_t msbDie;
+    uint8_t msbVsys;
+    uint8_t lsbA;
+    uint8_t msbIbat;
+    uint8_t msbVbus;
+    uint8_t lsbB;
 };
 AdcResults g_adcCache{};
 uint8_t g_chargerStatus = 0;
@@ -204,35 +259,50 @@ static uint16_t adc10(uint8_t msb, uint8_t lsb, uint8_t shift) {
 static int32_t adc_to_mv(uint16_t raw) { return (raw * 5000) / 1024; }
 
 static bool voltage_to_index(uint16_t mv, uint8_t* idx) {
-    if (mv <= 1000) { *idx = 0; return true; }
-    if (mv <= 1100) { *idx = 1; return true; }
-    if (mv <= 1200) { *idx = 2; return true; }
-    if (mv <= 1300) { *idx = 3; return true; }
-    if (mv <= 1400) { *idx = 4; return true; }
-    if (mv <= 1500) { *idx = 5; return true; }
-    if (mv <= 1600) { *idx = 6; return true; }
-    if (mv <= 1700) { *idx = 7; return true; }
-    if (mv <= 1800) { *idx = 8; return true; }
-    if (mv <= 2000) { *idx = 9; return true; }
-    if (mv <= 2100) { *idx = 10; return true; }
-    if (mv <= 2500) { *idx = 11; return true; }
-    if (mv <= 2700) { *idx = 12; return true; }
-    if (mv <= 3000) { *idx = 13; return true; }
-    *idx = 14; return true;  // 3.3V
+    if (!idx) return false;
+    if (mv < 1000 || mv > 3300) return false;
+    *idx = static_cast<uint8_t>((mv - 1000U + 50U) / 100U);
+    if (*idx > 23U) *idx = 23U;
+    return true;
 }
 
-static uint8_t charger_current_code(uint16_t ma) {
-    if (ma <= 20) return 1; else if (ma <= 50) return 2;
-    else if (ma <= 100) return 3; else if (ma <= 150) return 4;
-    else if (ma <= 200) return 5; else if (ma <= 300) return 6;
-    else if (ma <= 400) return 7; else if (ma <= 500) return 8;
-    return 9;
+static uint16_t charger_current_index(uint16_t ma) {
+    uint32_t ua = static_cast<uint32_t>(ma) * 1000UL;
+    if (ua < 32000UL) ua = 32000UL;
+    if (ua > 800000UL) ua = 800000UL;
+    return static_cast<uint16_t>(((ua - 32000UL + 1000UL) / 2000UL) + 16UL);
+}
+
+static uint8_t charger_vterm_index(uint16_t mv) {
+    if (mv <= 3500U) return 0U;
+    if (mv <= 3650U) return static_cast<uint8_t>((mv - 3500U + 25U) / 50U);
+    if (mv < 4000U) return 4U;
+    uint8_t idx = static_cast<uint8_t>(((mv - 4000U + 25U) / 50U) + 4U);
+    if (idx > 13U) idx = 13U;
+    return idx;
+}
+
+static int32_t ibat_to_ma(uint16_t raw, uint8_t status) {
+    int32_t fullScaleUa = 0;
+    switch (status) {
+        case kIbatStatDischarge:
+            fullScaleUa = -(g_dischargeLimitUa * 112) / 100;
+            break;
+        case kIbatStatChargeTrickle:
+        case kIbatStatChargeCool:
+        case kIbatStatChargeNormal:
+            fullScaleUa = (g_chargeCurrentUa * 125) / 100;
+            break;
+        default:
+            return 0;
+    }
+    return static_cast<int32_t>((static_cast<int64_t>(raw) * fullScaleUa) / (1023LL * 1000LL));
 }
 
 // ─── Internal helpers ─────────────────────────────────────
 static void ensure_adc_active() {
     uint8_t revision = 0;
-    if (!g_probeValid) {
+    if (!g_probeValid || !g_present) {
         g_present = npm1300_read_reg(NPM1300_BASE_MAIN, kMainOffsetVersion, &revision);
         g_probeValid = true;
     }
@@ -250,17 +320,26 @@ static bool read_adc_results(AdcResults* out) {
         *out = g_adcCache; return true;
     }
     ensure_adc_active();
-    const uint8_t tasks[] = {1U, 1U, 1U};
+    const uint8_t tasks[] = {1U, 1U, 1U, 1U};
     if (!npm1300_write_burst(NPM1300_BASE_ADC, kAdcOffsetTaskVbat, tasks, sizeof(tasks)))
         return false;
+    (void)npm1300_write_reg(NPM1300_BASE_ADC, kAdcOffsetTaskVbus, 1U);
     npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetStatus, &g_chargerStatus);
     npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetError, &g_chargerError);
     npm1300_read_reg(NPM1300_BASE_VBUS, kVbusOffsetStatus, &g_vbusStatus);
-    uint8_t buf[5];
+    delayMicroseconds(kAdcConversionTimeUs * 6U);
+    uint8_t buf[11];
     if (!npm1300_read_burst(NPM1300_BASE_ADC, kAdcOffsetResults, buf, sizeof(buf)))
         return false;
-    g_adcCache.msbVbat = buf[0]; g_adcCache.msbDie = buf[1];
-    g_adcCache.msbIbat = buf[2]; g_adcCache.lsbA = buf[3]; g_adcCache.lsbB = buf[4];
+    g_adcCache.ibatStat = buf[0];
+    g_adcCache.msbVbat = buf[1];
+    g_adcCache.msbNtc = buf[2];
+    g_adcCache.msbDie = buf[3];
+    g_adcCache.msbVsys = buf[4];
+    g_adcCache.lsbA = buf[5];
+    g_adcCache.msbIbat = buf[8];
+    g_adcCache.msbVbus = buf[9];
+    g_adcCache.lsbB = buf[10];
     g_adcValid = true; g_adcCachedMs = now;
     *out = g_adcCache;
     return true;
@@ -268,12 +347,17 @@ static bool read_adc_results(AdcResults* out) {
 
 static bool buck_set_mode(uint8_t channel, uint8_t mode) {
     channel = clamp_channel(channel);
-    npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetPwmClr + (channel * 2U), 1U);
-    if (mode == NPM1300_BUCK_MODE_FORCE_PWM)
-        return npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetPwmSet + (channel * 2U), 1U);
-    if (mode == NPM1300_BUCK_MODE_FORCE_HYST)
-        return npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0, 1U << channel);
-    return npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0, 0U);
+    const uint8_t pfmMask = static_cast<uint8_t>(1U << channel);
+    if (mode == NPM1300_BUCK_MODE_FORCE_PWM) {
+        return npm1300_update_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0, pfmMask, 0U) &&
+               npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetPwmSet + (channel * 2U), 1U);
+    }
+    if (mode == NPM1300_BUCK_MODE_FORCE_HYST) {
+        return npm1300_update_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0, pfmMask, pfmMask) &&
+               npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetPwmClr + (channel * 2U), 1U);
+    }
+    return npm1300_update_reg(NPM1300_BASE_BUCK, kBuckOffsetCtrl0, pfmMask, 0U) &&
+           npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetPwmClr + (channel * 2U), 1U);
 }
 
 static bool buck_enable(uint8_t channel, bool enable) {
@@ -352,14 +436,40 @@ bool npm1300_ldo1_set_voltage(uint16_t mv) {
     return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetVoutSel, idx);
 }
 bool npm1300_ldo1_is_enabled(void) {
-    uint8_t s; return npm1300_read_reg(NPM1300_BASE_LDSW, kLdSwOffsetStatus, &s) && (s & 1);
+    uint8_t s; return npm1300_read_reg(NPM1300_BASE_LDSW, kLdSwOffsetStatus, &s) &&
+                      ((s & kLdSw1OnMask) != 0U);
 }
 bool npm1300_ldo2_enable(bool enable) {
-    return npm1300_write_reg(NPM1300_BASE_LDSW, enable ? kLdSwOffsetEnSet+4 : kLdSwOffsetEnClr+4, 1U);
+    return npm1300_write_reg(NPM1300_BASE_LDSW,
+                             static_cast<uint8_t>((enable ? kLdSwOffsetEnSet : kLdSwOffsetEnClr) + 2U),
+                             1U);
 }
-bool npm1300_ldo2_set_voltage(uint16_t mv) { return npm1300_ldo1_set_voltage(mv); }
+bool npm1300_ldo2_set_voltage(uint16_t mv) {
+    uint8_t idx; if (!voltage_to_index(mv, &idx)) return false;
+    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetVoutSel + 1U, idx);
+}
 bool npm1300_ldo2_is_enabled(void) {
-    uint8_t s; return npm1300_read_reg(NPM1300_BASE_LDSW, kLdSwOffsetStatus, &s) && (s & 2);
+    uint8_t s; return npm1300_read_reg(NPM1300_BASE_LDSW, kLdSwOffsetStatus, &s) &&
+                      ((s & kLdSw2OnMask) != 0U);
+}
+bool npm1300_ldo1_set_mode(uint8_t mode) {
+    if (mode > NPM1300_LDSW_MODE_LDO) return false;
+    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetLdoSel,
+                             mode == NPM1300_LDSW_MODE_LDO ? 1U : 0U);
+}
+bool npm1300_ldo2_set_mode(uint8_t mode) {
+    if (mode > NPM1300_LDSW_MODE_LDO) return false;
+    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetLdoSel + 1U,
+                             mode == NPM1300_LDSW_MODE_LDO ? 1U : 0U);
+}
+bool npm1300_imu_mic_power_enable(bool enable) {
+    if (!enable) return npm1300_ldo1_enable(false);
+    return npm1300_ldo1_set_mode(NPM1300_LDSW_MODE_LDO) &&
+           npm1300_ldo1_set_voltage(NPM1300_LDO_VOLTAGE_3V3) &&
+           npm1300_ldo1_enable(true);
+}
+bool npm1300_sensor_power_enable(bool enable) {
+    return npm1300_imu_mic_power_enable(enable);
 }
 
 bool npm1300_buck1_enable(bool e) { return buck_enable(0, e); }
@@ -372,18 +482,30 @@ bool npm1300_buck1_set_mode(uint8_t m) { return buck_set_mode(0, m); }
 bool npm1300_buck2_set_mode(uint8_t m) { return buck_set_mode(1, m); }
 
 bool npm1300_charger_enable(bool e) {
+    if (e) {
+        (void)npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetErrClr, 1U);
+    }
     return npm1300_write_reg(NPM1300_BASE_CHARGER, e ? kChargerOffsetEnSet : kChargerOffsetEnClr, 1U);
 }
 bool npm1300_charger_set_current(uint16_t ma) {
-    return npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetISet, charger_current_code(ma));
+    const uint16_t idx = charger_current_index(ma);
+    const uint8_t data[] = {
+        static_cast<uint8_t>(idx / 2U),
+        static_cast<uint8_t>(idx & 1U)
+    };
+    if (!npm1300_write_burst(NPM1300_BASE_CHARGER, kChargerOffsetISet, data, sizeof(data))) {
+        return false;
+    }
+    g_chargeCurrentUa = 32000 + (static_cast<int32_t>(idx) - 16) * 2000;
+    return true;
 }
 bool npm1300_charger_set_term_voltage(uint16_t mv) {
-    uint8_t code = (mv > 3500) ? ((mv - 3500) / 50) : 0;
-    if (code > 19) code = 19;
-    return npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetVTerm, code);
+    return npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetVTerm,
+                             charger_vterm_index(mv));
 }
 bool npm1300_charger_is_charging(void) {
-    uint8_t s; return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetStatus, &s) && (s & 1);
+    uint8_t s; return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetStatus, &s) &&
+                      ((s & kChargerStatusChargingMask) != 0U);
 }
 bool npm1300_charger_status(uint8_t* s) { return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetStatus, s); }
 bool npm1300_charger_error(uint8_t* e) { return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetError, e); }
@@ -400,22 +522,29 @@ int32_t npm1300_read_temp_mc(void) {
 }
 int32_t npm1300_read_ibat_ma(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
-    return (adc10(r.msbIbat, r.lsbB, kAdcLsbIbatShift) * 1000) / 2048;
+    return ibat_to_ma(adc10(r.msbIbat, r.lsbB, kAdcLsbIbatShift), r.ibatStat);
 }
-int32_t npm1300_read_vsys_mv(void) { return -1; }
+int32_t npm1300_read_vsys_mv(void) {
+    AdcResults r{}; if (!read_adc_results(&r)) return -1;
+    return adc_to_mv(adc10(r.msbVsys, r.lsbA, kAdcLsbVsysShift));
+}
 int32_t npm1300_read_vbus_mv(void) {
-    uint8_t s; if (!npm1300_read_reg(NPM1300_BASE_VBUS, 0x08, &s)) return -1;
-    return (s * 5000) / 1024;
+    AdcResults r{}; if (!read_adc_results(&r)) return -1;
+    return adc_to_mv(adc10(r.msbVbus, r.lsbB, kAdcLsbVbusShift));
 }
 
 bool npm1300_enter_ship_mode(void) {
-    return npm1300_write_reg(NPM1300_BASE_SHIP, 0x00, 1U);
+    return npm1300_write_reg(NPM1300_BASE_SHIP, kShipOffsetShip, 1U);
 }
 bool npm1300_enter_hibernate(void) {
-    return npm1300_write_reg(NPM1300_BASE_SHIP, 0x04, 1U);
+    return npm1300_write_reg(NPM1300_BASE_SHIP, kShipOffsetHibernate, 1U);
 }
 bool npm1300_led_set(uint8_t led, uint8_t brightness) {
-    return npm1300_write_reg(NPM1300_BASE_LED, led * 2U, brightness ? 1U : 0U);
+    if (led >= kLedCount) return false;
+    return npm1300_write_reg(NPM1300_BASE_LED, kLedOffsetMode + led, kLedModeHost) &&
+           npm1300_write_reg(NPM1300_BASE_LED,
+                             static_cast<uint8_t>((brightness ? kLedOffsetSet : kLedOffsetClr) + (led * 2U)),
+                             1U);
 }
 bool npm1300_gpio_set_mode(uint8_t pin, uint8_t mode) {
     if (pin >= kGpioCount || mode > 9) return false;

@@ -10,7 +10,7 @@
  *   Blue   = VBUS present / charging
  *
  * Hardware: XIAO nRF54LM20A
- * Output:   Serial1 on D6 (TX) at 115200 baud — connect a USB-UART bridge.
+ * Output:   USB Serial Monitor at 115200 baud.
  */
 
 #include <Arduino.h>

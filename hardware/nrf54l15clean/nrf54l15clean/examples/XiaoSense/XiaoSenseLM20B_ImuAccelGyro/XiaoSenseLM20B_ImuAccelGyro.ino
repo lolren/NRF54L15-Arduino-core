@@ -2,7 +2,7 @@
  * XiaoSenseLM20B_ImuAccelGyro
  *
  * Reads accelerometer and gyroscope from the onboard LSM6DS3TR-C
- * on XIAO nRF54LM20B.
+ * on XIAO nRF54LM20A.
  *
  * Pins:
  *   SDA = P0.08, SCL = P0.07 (Wire1/TWIM30)
@@ -18,7 +18,7 @@
 #include "npm1300.h"
 
 #define IMU_ADDR      0x6A
-#define IMU_CS_PIN    (44)  // P3.12
+#define IMU_CS_PIN    PIN_IMU_CS
 
 // LSM6DS3TR-C registers
 #define WHO_AM_I      0x0F
@@ -62,8 +62,10 @@ void setup() {
     delay(250);
 
     // Power + CS
-    npm1300_ldo1_enable(true);
-    delay(10);
+    if (!npm1300_imu_mic_power_enable(true)) {
+        Serial.println("ERROR: nPM1300 sensor rail enable failed");
+    }
+    delay(25);
 
     pinMode(IMU_CS_PIN, OUTPUT);
     digitalWrite(IMU_CS_PIN, HIGH);

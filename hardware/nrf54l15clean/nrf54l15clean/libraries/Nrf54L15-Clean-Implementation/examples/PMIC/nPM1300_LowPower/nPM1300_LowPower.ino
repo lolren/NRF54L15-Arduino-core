@@ -6,13 +6,13 @@
  *   - Read battery voltage while sensors are off
  *   - Enter ship mode (sub-µA) on button long-press
  *
- * Ship mode disables ALL PMIC outputs — the only way to wake is a
- * short press on the USER button (PMIC GPIO0, P1.25) or a power-cycle.
+ * Ship mode disables PMIC outputs. Wake depends on the board PMIC wake
+ * wiring; validate your battery setup before relying on ship mode.
  *
  * LEDs:
  *   Green  = IMU/MIC powered (LDO1 ON)
  *   Blue   = measuring battery
- *   Red    = low battery warning, or shipping in 3…2…1…
+ *   Red    = low battery warning, or shipping in 3...2...1...
  *
  * Hardware:  XIAO nRF54LM20A
  */
@@ -28,33 +28,33 @@ void setup() {
 }
 
 void loop() {
-    // ── Power-ON sequence ──
-    npm1300_ldo1_enable(true);
+    // Power-ON sequence. On XIAO nRF54LM20A, LDO1 feeds IMU&MIC_3V3.
+    npm1300_imu_mic_power_enable(true);
     digitalWrite(LED_GREEN, LOW);  // green = IMU/MIC rail ON
     delay(50);                     // let LDO ramp
 
-    // … read the IMU or microphone here …
+    // Read the IMU or microphone here.
     // e.g. Wire1.begin();  readWHOAMI();  Wire1.end();
 
     delay(100);
 
-    // ── Battery measurement (before shutting LDO) ──
+    // Battery measurement before shutting the sensor rail down.
     digitalWrite(LED_BLUE, LOW);   // blue = measuring
     int32_t vbat = npm1300_read_vbat_mv();
     digitalWrite(LED_BLUE, HIGH);
 
-    // ── Low battery warning ──
+    // Low battery warning.
     if (vbat > 0 && vbat < 3600) {
         digitalWrite(LED_RED, LOW);   // red = low battery
     } else {
         digitalWrite(LED_RED, HIGH);
     }
 
-    // ── Power-OFF — gate sensors to save µA ──
-    npm1300_ldo1_enable(false);
+    // Power-OFF: gate sensors to save current between measurements.
+    npm1300_imu_mic_power_enable(false);
     digitalWrite(LED_GREEN, HIGH);
 
-    // ── Check button for ship mode ──
+    // Check button for ship mode.
     if (digitalRead(PIN_BUTTON) == LOW) {
         unsigned long start = millis();
         while (digitalRead(PIN_BUTTON) == LOW) {

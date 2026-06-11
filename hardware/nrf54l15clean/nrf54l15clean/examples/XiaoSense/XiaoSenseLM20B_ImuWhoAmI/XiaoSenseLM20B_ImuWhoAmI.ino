@@ -1,14 +1,14 @@
 /*
  * XiaoSenseLM20B_ImuWhoAmI
  *
- * Verifies the onboard LSM6DS3TR-C on XIAO nRF54LM20B.
+ * Verifies the onboard LSM6DS3TR-C on XIAO nRF54LM20A.
  *
- * LM20B I2C pins (different from L15 Sense):
+ * LM20A I2C pins (different from L15 Sense):
  *   SDA = P0.08 (Wire1 pin 36)
  *   SCL = P0.07 (Wire1 pin 37)
  *   CS  = P3.12 — MUST be HIGH for I2C mode
  *
- * Power: nPM1300 LDO1 on P1.12 (controlled via npm1300 driver)
+ * Power: nPM1300 LDO1 feeds IMU&MIC_3V3.
  *
  * Expected: addr=0x6A, WHO_AM_I=0x6A
  */
@@ -17,10 +17,10 @@
 #include <Wire.h>
 #include "npm1300.h"
 
-// LM20B IMU I2C bus (different from L15 Sense D12/D11)
+// LM20A IMU I2C bus (different from L15 Sense D12/D11)
 #define IMU_BUS       Wire1
 #define IMU_ADDR      0x6A
-#define IMU_CS_PIN    (44)  // P3.12 — HIGH = I2C mode
+#define IMU_CS_PIN    PIN_IMU_CS
 
 static bool readWhoAmI(uint8_t* whoAmI) {
     IMU_BUS.beginTransmission(IMU_ADDR);
@@ -38,9 +38,11 @@ void setup() {
     Serial.begin(115200);
     delay(250);
 
-    // 1. Power IMU via PMIC LDO1
-    npm1300_ldo1_enable(true);
-    delay(10);
+    // 1. Power IMU via PMIC LDO1 as a 3.3 V regulator
+    if (!npm1300_imu_mic_power_enable(true)) {
+        Serial.println("ERROR: nPM1300 sensor rail enable failed");
+    }
+    delay(25);
 
     // 2. Set CS HIGH — I2C mode (critical!)
     pinMode(IMU_CS_PIN, OUTPUT);
