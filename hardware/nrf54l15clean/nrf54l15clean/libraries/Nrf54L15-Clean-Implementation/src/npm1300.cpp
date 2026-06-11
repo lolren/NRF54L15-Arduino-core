@@ -117,11 +117,8 @@ int32_t g_dischargeLimitUa = 84000;
 
 bool pmic_bus_begin() {
 #if NPM1300_HAS_BOARD_PMIC
-  if (!g_busStarted) {
-    g_pmicWire.begin();
-    g_pmicWire.setClock(400000UL);
-    g_busStarted = true;
-  }
+  g_pmicWire.begin();
+  g_pmicWire.setClock(400000UL);
   return true;
 #else
   return false;
@@ -296,32 +293,36 @@ bool npm1300_read_burst(uint8_t base, uint8_t offset, uint8_t* data, size_t len)
   }
 
 #if NPM1300_HAS_BOARD_PMIC
+  bool ok = false;
+  uint8_t received = 0;
   g_pmicWire.beginTransmission(NPM1300_ADDR);
   g_pmicWire.write(base);
   g_pmicWire.write(offset);
   if (g_pmicWire.endTransmission(false) != 0U) {
-    return false;
+    goto exit;
   }
 
-  const uint8_t received =
+  received =
       g_pmicWire.requestFrom(static_cast<uint8_t>(NPM1300_ADDR), len, true);
   if (received != len) {
     while (g_pmicWire.available() > 0) {
       (void)g_pmicWire.read();
     }
-    return false;
+    goto exit;
   }
 
   for (size_t i = 0; i < len; ++i) {
     const int value = g_pmicWire.read();
     if (value < 0) {
-      g_pmicWire.end();
-      return false;
+      goto exit;
     }
     data[i] = static_cast<uint8_t>(value);
   }
+  ok = true;
+
+exit:
   g_pmicWire.end();
-  return true;
+  return ok;
 #else
   (void)base;
   (void)offset;
@@ -335,6 +336,7 @@ bool npm1300_write_burst(uint8_t base, uint8_t offset, const uint8_t* data,
     return false;
   }
   if (len > 0U && data == nullptr) {
+    g_pmicWire.end();
     return false;
   }
 
