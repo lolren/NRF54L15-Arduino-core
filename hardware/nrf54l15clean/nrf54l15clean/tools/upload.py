@@ -6,7 +6,7 @@ pyOCD for CMSIS-DAP flashing.
 """
 
 from __future__ import annotations
-import patch_lm20b_target  # auto-install LM20B pyOCD target
+import patch_lm20b_target
 
 import argparse
 import os
@@ -226,10 +226,6 @@ def bundled_wheelhouse_path(tool_root: Path | None) -> Path | None:
 def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | None:
     tool_root = pyocd_tool_root(host_tools_path)
 
-    # Try system pyOCD first (pip/conda), bundled shim as fallback
-    pyocd_exe = shutil.which("pyocd")
-    if pyocd_exe:
-        return [pyocd_exe]
     bundled = bundled_pyocd_command(tool_root)
     if bundled is not None:
         return bundled
@@ -237,9 +233,6 @@ def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | Non
     pyocd_exe = shutil.which("pyocd")
     if pyocd_exe:
         return [pyocd_exe]
-    bundled = bundled_pyocd_command(tool_root)
-    if bundled is not None:
-        return bundled
 
     module_probe = run([sys.executable, "-m", "pyocd", "--version"])
     if module_probe.returncode == 0:
@@ -328,7 +321,7 @@ def install_pyocd(host_tools_path: Path | None = None) -> bool:
     if install.returncode != 0:
         return False
 
-    pyocd_exe = shutil.which("pyocd")
+    bundled = bundled_pyocd_command(tool_root)
     if bundled is None:
         return False
     verify = run([*bundled, "--version"])
@@ -951,15 +944,6 @@ def append_pyocd_safe_options(cmd: list[str], safe_mode: bool) -> list[str]:
     return cmd
 
 
-def pyocd_target_script_args(target: str) -> list[str]:
-    if target.strip().lower() != "nrf54lm20a":
-        return []
-    script = Path(__file__).resolve().parent / "pyocd_register_lm20b.py"
-    if not script.is_file():
-        return []
-    return ["--script", str(script)]
-
-
 def pyocd_timeout_seconds() -> float:
     value = os.environ.get("NRF54L15_PYOCD_TIMEOUT", "").strip()
     if not value:
@@ -968,6 +952,99 @@ def pyocd_timeout_seconds() -> float:
         return max(10.0, float(value))
     except ValueError:
         return DEFAULT_PYOCD_TIMEOUT_SECONDS
+
+
+
+# ── Auto-install custom pyOCD targets ──────────────────────────
+
+# Delete old bundled pyOCD (< 0.44) so system pyOCD takes over
+_shim_site = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    "..", "..", "..", "tools", "nrf54l15hosttools",
+    "1.1.2", "runtime", "pyocd-site")
+_shim_site = os.path.normpath(_shim_site)
+if os.path.isdir(_shim_site):
+    _shim_tgt = os.path.join(_shim_site, "pyocd", "target", "builtin", "target_nRF54LM20A.py")
+    if not os.path.exists(_shim_tgt):
+        shutil.rmtree(_shim_site, ignore_errors=True)
+
+def _ensure_pyocd_targets():
+    """Copy bundled nRF54LM20A target to pyOCD builtin dir. Tries multiple methods."""
+    import shutil, subprocess, glob, site
+
+    builtin_dir = None
+
+    # Method 1: import pyocd
+    try:
+        import pyocd.target.builtin
+        builtin_dir = os.path.dirname(pyocd.target.builtin.__file__)
+    except ImportError:
+        pass
+
+    # Method 2: find via pyocd binary location
+    if not builtin_dir:
+        pyocd_bin = shutil.which('pyocd')
+        if pyocd_bin:
+            for root in [os.path.dirname(os.path.dirname(pyocd_bin)),
+                         os.path.dirname(os.path.dirname(os.path.dirname(pyocd_bin)))]:
+                for pat in ['lib/python*/site-packages', 'Lib/site-packages']:
+                    for d in sorted(glob.glob(os.path.join(root, pat))):
+                        c = os.path.join(d, 'pyocd', 'target', 'builtin')
+                        if os.path.isdir(c):
+                            builtin_dir = c; break
+                    if builtin_dir: break
+
+    # Method 3: site-packages scan
+    if not builtin_dir:
+        for sp in site.getsitepackages():
+            c = os.path.join(sp, 'pyocd', 'target', 'builtin')
+            if os.path.isdir(c):
+                builtin_dir = c; break
+
+    # Method 4: pip show pyocd
+    if not builtin_dir:
+        try:
+            result = subprocess.run([sys.executable, '-m', 'pip', 'show', 'pyocd'],
+                                    capture_output=True, text=True, timeout=10)
+            for line in result.stdout.split('\n'):
+                if line.startswith('Location:'):
+                    loc = line.split(':', 1)[1].strip()
+                    c = os.path.join(loc, 'pyocd', 'target', 'builtin')
+                    if os.path.isdir(c):
+                        builtin_dir = c; break
+        except Exception:
+            pass
+
+    if not builtin_dir:
+        return  # pyOCD not found — target must be pre-installed
+
+    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "target_nRF54LM20A.py")
+    dest = os.path.join(builtin_dir, "target_nRF54LM20A.py")
+    
+    if os.path.exists(bundled):
+        try:
+            shutil.copy2(bundled, dest)
+            import glob as _g
+            for _d in _g.glob(os.path.join(builtin_dir, "__pycache__")):
+                shutil.rmtree(_d, ignore_errors=True)
+            # Register in __init__.py if needed
+            init_py = os.path.join(builtin_dir, "__init__.py")
+            if os.path.exists(init_py):
+                with open(init_py) as f:
+                    ic = f.read()
+                if "target_nRF54LM20A" not in ic:
+                    ic = ic.replace("from . import target_nRF54L15",
+                                    "from . import target_nRF54L15\nfrom . import target_nRF54LM20A")
+                    ic = ic.replace("'nrf54l' : target_nRF54L15.NRF54L15,",
+                                    "'nrf54l' : target_nRF54L15.NRF54L15,\n          'nrf54lm20a' : target_nRF54LM20A.NRF54LM20A,")
+                    with open(init_py, 'w') as f:
+                        f.write(ic)
+        except PermissionError:
+            sys.stderr.write("\npyOCD target needs write access.\n")
+            sys.stderr.write("Run: pip install --user pyocd\n\n")
+            return
+
+_ensure_pyocd_targets()
 
 
 def pyocd_install_timeout_seconds() -> float:
@@ -1009,7 +1086,7 @@ def flash_hex(
     pyocd_cmd: list[str], target: str, uid: str | None, hex_path: str,
     *, auto_unlock: bool = True, connect_mode: str | None = None, safe_mode: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    cmd = append_uid([*pyocd_cmd, "load", *pyocd_target_script_args(target), "-W", "-t", target], uid)
+    cmd = append_uid([*pyocd_cmd, "load", "-W", "-t", target], uid)
     cmd = append_connect_mode(cmd, connect_mode)
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     if not auto_unlock:
@@ -1025,7 +1102,7 @@ def recover_target(
     connect_mode: str | None = None, safe_mode: bool = False
 ) -> subprocess.CompletedProcess[str]:
     print("Detected protected target; attempting chip erase and retry...")
-    cmd = append_uid([*pyocd_cmd, "erase", *pyocd_target_script_args(target), "-W", "--chip", "-t", target], uid)
+    cmd = append_uid([*pyocd_cmd, "erase", "-W", "--chip", "-t", target], uid)
     cmd = append_connect_mode(cmd, connect_mode)
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     result = run(cmd, timeout=pyocd_timeout_seconds())
@@ -1172,7 +1249,7 @@ def upload_pyocd(
         print("If the sketch does not start, press RESET or power-cycle the board.")
         return 0
 
-    reset_cmd = append_uid([*pyocd_cmd, "reset", *pyocd_target_script_args(target), "-W", "-t", target], uid)
+    reset_cmd = append_uid([*pyocd_cmd, "reset", "-W", "-t", target], uid)
     reset_cmd = append_connect_mode(reset_cmd, last_connect_mode)
     reset_cmd = append_pyocd_safe_options(reset_cmd, safe_mode)
     if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
@@ -1354,8 +1431,7 @@ def main() -> int:
         if detect_pyocd_command(host_tools_path) is None:
             if install_pyocd(host_tools_path):
                 print("pyocd installation succeeded.")
-                _ensure_pyocd_targets()
-                _ensure_pyocd_targets()
+                import patch_lm20b_target
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
