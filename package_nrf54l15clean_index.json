@@ -16,8 +16,8 @@
           "category": "Contributed",
           "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.42/nrf54l15clean-0.9.42.tar.bz2",
           "archiveFileName": "nrf54l15clean-0.9.42.tar.bz2",
-          "checksum": "SHA-256:56be3d6eb6781682c4fbfdd4495dd44dc050f3ad9bbbf98ca750b0cb49f77c63",
-          "size": "3830012",
+          "checksum": "SHA-256:ad1529e5b4b8f026f8aa4862228ac583874f566c7739f14b814fb9b71bbb6294",
+          "size": "3830114",
           "help": {
             "online": "https://github.com/lolren/nrf54-arduino-core"
           },
