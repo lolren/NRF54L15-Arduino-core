@@ -36,12 +36,12 @@ void loop() {}
 
 | | | |
 |---|---|---|
-| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54L15**<br>`xiao_nrf54l15` | <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54LM20A**<br>`xiao_nrf54lm20b` | <img src="docs/boards/holyiot_25007_product.png" width="180"><br>**HOLYIOT-25007**<br>`holyiot_25007_nrf54l15` |
+| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54L15**<br>`xiao_nrf54l15`<br><sub>128 MHz M33 · 1.5 MB NVM</sub> | <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54LM20A / Sense**<br>`xiao_nrf54lm20b`<br><sub>128 MHz M33 · 2 MB NVM · nPM1300 PMIC</sub> | <img src="docs/boards/holyiot_25007_product.png" width="180"><br>**HOLYIOT-25007**<br>`holyiot_25007_nrf54l15` |
 | <img src="docs/boards/holyiot_25008_product.jpg" width="180"><br>**HOLYIOT-25008**<br>`holyiot_25008_nrf54l15` | <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**Generic 36-Pad**<br>`generic_nrf54l15_module_36pin` | |
 
 </div>
 
-> **LM20A note:** The `xiao_nrf54lm20b` identifier supports the XIAO nRF54LM20A. USB Serial through the on‑board SAMD11 bridge on P1.11/P1.10. `pyocd >= 0.44.1` required for upload — run `pip install pyocd==0.44.1` once.
+> **LM20A / Sense** — [Official board images & pinout](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/). Two variants: **standard** (wireless) and **Sense** (LSM6DS3TR-C IMU + MSM261DGT006 mic). nPM1300 PMIC with battery charging, fuel gauge, 0.33 µA ship mode. `xiao_nrf54lm20b` identifier for compatibility.
 
 ---
 
