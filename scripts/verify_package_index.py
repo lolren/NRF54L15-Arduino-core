@@ -6,7 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import tarfile
+import zipfile
 from pathlib import Path
+
+REQUIRED_PLATFORM_TOOL_DEPENDENCIES = {
+    ("arduino", "arm-none-eabi-gcc", "7-2017q4"),
+    ("arduino", "openocd", "0.11.0-arduino2"),
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -18,6 +25,24 @@ def sha256_file(path: Path) -> str:
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+def archive_link_entries(path: Path) -> list[str]:
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as zf:
+            links = []
+            for entry in zf.infolist():
+                mode = (entry.external_attr >> 16) & 0o170000
+                if mode == 0o120000:
+                    links.append(entry.filename)
+            return links
+
+    with tarfile.open(path, "r:*") as tar:
+        return [
+            member.name
+            for member in tar.getmembers()
+            if member.issym() or member.islnk()
+        ]
 
 
 def parse_args() -> argparse.Namespace:
@@ -86,6 +111,21 @@ def main() -> int:
         raise SystemExit(
             f"checksum mismatch: index={actual_checksum}, expected={expected_checksum}"
         )
+
+    dependency_keys = {
+        (str(dep.get("packager", "")), str(dep.get("name", "")), str(dep.get("version", "")))
+        for dep in platform.get("toolsDependencies", [])
+        if isinstance(dep, dict)
+    }
+    missing_dependencies = sorted(REQUIRED_PLATFORM_TOOL_DEPENDENCIES - dependency_keys)
+    if missing_dependencies:
+        raise SystemExit(f"missing required tool dependencies: {missing_dependencies}")
+
+    links = archive_link_entries(archive_path)
+    if links:
+        preview = ", ".join(links[:10])
+        suffix = "" if len(links) <= 10 else f", ... ({len(links)} total)"
+        raise SystemExit(f"archive contains link entries: {preview}{suffix}")
 
     print("package index verification OK")
     print(f"archive: {archive_path}")

@@ -33,6 +33,10 @@ HOST_TOOL_WHEELHOUSE_PLATFORMS = {
     "x86_64-apple-darwin": "macosx_10_12_x86_64",
     "arm64-apple-darwin": "macosx_11_0_arm64",
 }
+REQUIRED_PLATFORM_TOOL_DEPENDENCIES = (
+    {"packager": "arduino", "name": "arm-none-eabi-gcc", "version": "7-2017q4"},
+    {"packager": "arduino", "name": "openocd", "version": "0.11.0-arduino2"},
+)
 HOST_TOOL_REQUIREMENTS_FILE = "requirements-pyocd.txt"
 ARCHIVE_HASH_LEN = 12
 DEFAULT_PLATFORM_PACKAGE_EXCLUDES = (
@@ -267,8 +271,7 @@ def make_platform_entry(
         ],
         "help": {"online": repo_url},
         "toolsDependencies": [
-            {"packager": "arduino", "name": "arm-none-eabi-gcc", "version": "7-2017q4"},
-            {"packager": "arduino", "name": "openocd", "version": "0.11.0-arduino2"},
+            *REQUIRED_PLATFORM_TOOL_DEPENDENCIES,
             {"packager": architecture, "name": HOST_TOOL_NAME, "version": HOST_TOOL_VERSION},
         ],
         "discoveryDependencies": [],
@@ -302,6 +305,26 @@ def make_index(packager: str, repo_url: str) -> dict:
     }
 
 
+def normalize_platform_tool_dependencies(platform: dict) -> dict:
+    """Ensure historical entries still install Arduino toolchain dependencies."""
+    normalized = json.loads(json.dumps(platform))
+    dependencies = [
+        dep for dep in normalized.get("toolsDependencies", [])
+        if isinstance(dep, dict)
+    ]
+    existing = {
+        (str(dep.get("packager", "")), str(dep.get("name", "")))
+        for dep in dependencies
+    }
+    prepend = [
+        dep for dep in REQUIRED_PLATFORM_TOOL_DEPENDENCIES
+        if (dep["packager"], dep["name"]) not in existing
+    ]
+    if prepend:
+        normalized["toolsDependencies"] = [*prepend, *dependencies]
+    return normalized
+
+
 def load_existing_index(index_path: Path, packager: str, repo_url: str) -> dict:
     if not index_path.is_file():
         return make_index(packager=packager, repo_url=repo_url)
@@ -322,6 +345,11 @@ def load_existing_index(index_path: Path, packager: str, repo_url: str) -> dict:
     package["help"] = {"online": repo_url}
     if not isinstance(package.get("platforms"), list):
         package["platforms"] = []
+    package["platforms"] = [
+        normalize_platform_tool_dependencies(platform)
+        for platform in package["platforms"]
+        if isinstance(platform, dict)
+    ]
     if not isinstance(package.get("tools"), list):
         package["tools"] = []
     return data
