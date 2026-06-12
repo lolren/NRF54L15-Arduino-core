@@ -55,7 +55,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -107,7 +107,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -147,7 +147,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -185,7 +185,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -223,7 +223,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -261,7 +261,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -299,7 +299,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -337,7 +337,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -375,7 +375,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -413,7 +413,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -451,7 +451,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -489,7 +489,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -527,7 +527,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ]
         },
@@ -577,7 +577,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -632,7 +632,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -687,7 +687,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -742,7 +742,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -797,7 +797,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -852,7 +852,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -907,7 +907,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -959,7 +959,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1011,7 +1011,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1063,7 +1063,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1115,7 +1115,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1167,7 +1167,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1219,7 +1219,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1271,7 +1271,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1323,7 +1323,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1375,7 +1375,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1427,7 +1427,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1479,7 +1479,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1531,7 +1531,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1583,7 +1583,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1635,7 +1635,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1687,7 +1687,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1739,7 +1739,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1791,7 +1791,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1843,7 +1843,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1895,7 +1895,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1947,7 +1947,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -1999,7 +1999,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2048,7 +2048,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2097,7 +2097,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2146,7 +2146,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2195,7 +2195,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2244,7 +2244,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2293,7 +2293,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2342,7 +2342,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2391,7 +2391,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2440,7 +2440,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2489,7 +2489,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2538,7 +2538,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2587,7 +2587,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2636,7 +2636,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2685,7 +2685,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2734,7 +2734,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2783,7 +2783,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2832,7 +2832,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2881,7 +2881,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2930,7 +2930,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -2979,7 +2979,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3028,7 +3028,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3077,7 +3077,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3126,7 +3126,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3175,7 +3175,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3224,7 +3224,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3273,7 +3273,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3322,7 +3322,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3371,7 +3371,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3420,7 +3420,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3469,7 +3469,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3518,7 +3518,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3567,7 +3567,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3616,7 +3616,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3665,7 +3665,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3714,7 +3714,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3763,7 +3763,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3812,7 +3812,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3861,7 +3861,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3910,7 +3910,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -3959,7 +3959,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4008,7 +4008,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4057,7 +4057,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4106,7 +4106,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4155,7 +4155,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4204,7 +4204,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4253,7 +4253,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4302,7 +4302,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4351,7 +4351,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4400,7 +4400,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4449,7 +4449,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4498,7 +4498,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4547,7 +4547,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4596,7 +4596,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4645,7 +4645,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4694,7 +4694,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4743,7 +4743,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4792,7 +4792,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4841,7 +4841,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4890,7 +4890,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4939,7 +4939,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -4988,7 +4988,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -5037,7 +5037,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -5086,7 +5086,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -5135,7 +5135,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.2"
+              "version": "1.1.3"
             }
           ],
           "discoveryDependencies": [],
@@ -5143,6 +5143,19 @@
         }
       ],
       "tools": [
+        {
+          "name": "nrf54l15hosttools",
+          "version": "1.1.3",
+          "systems": [
+            {
+              "host": "x86_64-pc-linux-gnu",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.46-tools/nrf54l15hosttools-1.1.3-x86_64-pc-linux-gnu.tar.bz2",
+              "archiveFileName": "nrf54l15hosttools-1.1.3-x86_64-pc-linux-gnu.tar.bz2",
+              "size": "22063095",
+              "checksum": "SHA-256:5c5bc5c4de65ed8f1e6e0b7637054eafc23fd3a6cbe374cf42a2488301c13e4f"
+            }
+          ]
+        },
         {
           "name": "nrf54l15hosttools",
           "version": "1.0.0",
