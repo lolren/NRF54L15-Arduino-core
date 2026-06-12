@@ -17,7 +17,7 @@ static constexpr uint32_t SPIM_EVENTS_DMA_RX_BUSERROR = 0x154UL;
 static constexpr uint32_t SPIM_EVENTS_DMA_TX_BUSERROR = 0x170UL;
 
 static constexpr uint32_t SPIM_ENABLE           = 0x500UL;
-static constexpr uint32_t SPIM_FREQUENCY       = 0x524UL;   // Serial fabric FREQ (not 0x52C legacy PRESCALER)
+static constexpr uint32_t SPIM_PRESCALER        = 0x52CUL;
 static constexpr uint32_t SPIM_CONFIG           = 0x554UL;
 static constexpr uint32_t SPIM_ORC              = 0x5C0UL;
 
@@ -63,14 +63,26 @@ static bool decode_pin(uint8_t pin, uint8_t* port, uint8_t* p) {
     return pinToPortPin(pin, port, p);
 }
 
-static uint32_t compute_frequency(uint32_t target_hz) {
-    // Serial fabric SPIM uses TWIM-style frequency encoding:
-    // 0x04000000 = 250k, 0x08000000 = 1M, 0x10000000 = 2M, 0x20000000 = 4M, 0x40000000 = 8M
-    if (target_hz >= 8000000UL) return 0x40000000;
-    if (target_hz >= 4000000UL) return 0x20000000;
-    if (target_hz >= 2000000UL) return 0x10000000;
-    if (target_hz >= 1000000UL) return 0x08000000;
-    return 0x04000000;  // 250 kHz minimum
+static uint32_t compute_prescaler(uint32_t target_hz) {
+    const uint32_t core_hz = F_CPU;
+    if (target_hz == 0U) {
+        target_hz = 1000000U;
+    }
+
+    uint32_t divisor = core_hz / target_hz;
+    if ((core_hz % target_hz) != 0U) {
+        ++divisor;
+    }
+    if (divisor < 2U) {
+        divisor = 2U;
+    }
+    if ((divisor & 1U) != 0U) {
+        ++divisor;
+    }
+    if (divisor > 126U) {
+        divisor = 126U;
+    }
+    return divisor;
 }
 
 }  // namespace
@@ -216,15 +228,15 @@ uint16_t SPIClass::transfer16(uint16_t data) {
     return static_cast<uint16_t>((static_cast<uint16_t>(rx[0]) << 8U) | rx[1]);
 }
 
-static uint8_t reverse8(uint8_t b) {
+void SPIClass::transfer(void* buf, size_t count) {
+    transfer(buf, buf, count);
+}
+
+static uint8_t reverse_bits(uint8_t b) {
     b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
     b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
     b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
     return b;
-}
-
-void SPIClass::transfer(void* buf, size_t count) {
-    transfer(buf, buf, count);
 }
 
 void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
@@ -233,21 +245,25 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
     const bool autoTransaction = !_inTransaction;
     if (autoTransaction) beginTransaction(_settings);
 
-    // GPIO bit-bang SPI — hardware SPIM can't read MISO on nRF54L serial fabric
-    uint8_t sckPort=0, sckPin=0, mosiPort=0, mosiPin=0, misoPort=0, misoPin=0;
-    if (!decode_pin(_sck, &sckPort, &sckPin) || !decode_pin(_mosi, &mosiPort, &mosiPin) ||
+    uint8_t sckPort, sckPin, mosiPort, mosiPin, misoPort, misoPin;
+    if (!decode_pin(_sck, &sckPort, &sckPin) ||
+        !decode_pin(_mosi, &mosiPort, &mosiPin) ||
         !decode_pin(_miso, &misoPort, &misoPin)) return;
 
-    volatile uint32_t* gpio_sck = (sckPort==0)?(volatile uint32_t*)0x5010A000UL:(sckPort==1)?(volatile uint32_t*)0x500D8200UL:nullptr;
-    volatile uint32_t* gpio_mosi = (mosiPort==0)?(volatile uint32_t*)0x5010A000UL:(mosiPort==1)?(volatile uint32_t*)0x500D8200UL:nullptr;
-    volatile uint32_t* gpio_miso = (misoPort==0)?(volatile uint32_t*)0x5010A000UL:(misoPort==1)?(volatile uint32_t*)0x500D8200UL:nullptr;
+    volatile uint32_t* gpio_sck  = (sckPort == 0) ? (volatile uint32_t*)0x5010A000UL :
+                                   (sckPort == 1) ? (volatile uint32_t*)0x500D8200UL : nullptr;
+    volatile uint32_t* gpio_mosi = (mosiPort == 0) ? (volatile uint32_t*)0x5010A000UL :
+                                   (mosiPort == 1) ? (volatile uint32_t*)0x500D8200UL : nullptr;
+    volatile uint32_t* gpio_miso = (misoPort == 0) ? (volatile uint32_t*)0x5010A000UL :
+                                   (misoPort == 1) ? (volatile uint32_t*)0x500D8200UL : nullptr;
     if (!gpio_sck || !gpio_mosi || !gpio_miso) return;
 
     const uint8_t* txSrc = static_cast<const uint8_t*>(tx_buf);
     uint8_t* rxDst = static_cast<uint8_t*>(rx_buf);
     bool lsbFirst = (_settings.bitOrder() == LSBFIRST);
-    bool cpha = (_settings.dataMode() == SPI_MODE1 || _settings.dataMode() == SPI_MODE3);
-    bool cpol = (_settings.dataMode() == SPI_MODE2 || _settings.dataMode() == SPI_MODE3);
+    uint8_t mode = _settings.dataMode();
+    bool cpha = (mode == SPI_MODE1 || mode == SPI_MODE3);
+    bool cpol = (mode == SPI_MODE2 || mode == SPI_MODE3);
 
     for (size_t i = 0; i < count; i++) {
         uint8_t tx = txSrc ? txSrc[i] : 0xFF;
@@ -256,18 +272,22 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
             int idx = lsbFirst ? bit : (7 - bit);
             if (tx & (1 << idx)) gpio_mosi[0x04/4] = (1UL << mosiPin);
             else                  gpio_mosi[0x08/4] = (1UL << mosiPin);
+            
             if (!cpha) {
-                if (cpol) gpio_sck[0x08/4] = (1UL << sckPin); else gpio_sck[0x04/4] = (1UL << sckPin);
+                if (cpol) gpio_sck[0x08/4] = (1UL << sckPin);
+                else      gpio_sck[0x04/4] = (1UL << sckPin);
             }
-            for (volatile int d=0;d<20;d++) __asm__("nop");
+            for (volatile int d = 0; d < 10; d++) __asm__("nop");
             rx = (rx << 1) | ((gpio_miso[0x0C/4] >> misoPin) & 1);
             if (cpha) {
-                if (cpol) gpio_sck[0x04/4] = (1UL << sckPin); else gpio_sck[0x08/4] = (1UL << sckPin);
+                if (cpol) gpio_sck[0x04/4] = (1UL << sckPin);
+                else      gpio_sck[0x08/4] = (1UL << sckPin);
             } else {
-                if (cpol) gpio_sck[0x04/4] = (1UL << sckPin); else gpio_sck[0x08/4] = (1UL << sckPin);
+                if (cpol) gpio_sck[0x04/4] = (1UL << sckPin);
+                else      gpio_sck[0x08/4] = (1UL << sckPin);
             }
         }
-        if (rxDst) rxDst[i] = lsbFirst ? reverse8(rx) : rx;
+        if (rxDst) rxDst[i] = lsbFirst ? reverse_bits(rx) : rx;
     }
 
     if (autoTransaction) endTransaction();
@@ -342,22 +362,9 @@ void SPIClass::applySettings() {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
 
-    reg32(base + SPIM_FREQUENCY) = compute_frequency(_settings.clock());
+    // Bit-bang SPI — no hardware registers to configure
 
-    uint32_t cfg = 0U;
-    if (_settings.bitOrder() == LSBFIRST) {
-        cfg |= SPIM_CONFIG_ORDER_LSB_FIRST;
-    }
 
-    const uint8_t mode = _settings.dataMode();
-    if (mode == SPI_MODE1 || mode == SPI_MODE3) {
-        cfg |= SPIM_CONFIG_CPHA_TRAILING;
-    }
-    if (mode == SPI_MODE2 || mode == SPI_MODE3) {
-        cfg |= SPIM_CONFIG_CPOL_ACTIVE_LOW;
-    }
-
-    reg32(base + SPIM_CONFIG) = cfg;
 }
 
 uint32_t SPIClass::getFrequencyValue(uint32_t clockHz) {
