@@ -22,18 +22,6 @@ https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l1
 
 Add this URL in **Arduino IDE → Preferences → Additional Boards Manager URLs**, then install **nRF54L15 Boards** from the Boards Manager.
 
-### 🐧 Linux Setup (Ubuntu, Mint, Debian)
-
-Linux requires udev rules for CMSIS-DAP probe access. After installing the board package, run once:
-
-```bash
-sudo cp ~/.arduino15/packages/nrf54l15clean/tools/nrf54l15hosttools/1.1.3/setup/60-seeed-xiao-nrf54-cmsis-dap.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-Then **unplug and replug** the board. This grants access to `/dev/hidraw*` needed for pyOCD upload. No `pip install` required — pyOCD 0.44.1 is bundled in the host tools.
-
 ```cpp
 #include <nrf54_all.h>
 void setup() { Serial.begin(115200); Serial.println("Hello nRF54!"); }
@@ -186,5 +174,37 @@ void loop() {}
 <div align="center">
 
 **Built from datasheets. Verified on hardware. No vendor blobs.**
+
+---
+
+## 🔧 Troubleshooting
+
+### Linux: Upload fails with "hidraw access denied"
+
+```
+ERROR: CMSIS-DAP probe 2886:0068 is present but hidraw access is denied.
+```
+
+**Fix:** Copy the udev rules and replug the board:
+
+```bash
+sudo cp ~/.arduino15/packages/nrf54l15clean/tools/nrf54l15hosttools/*/setup/60-seeed-xiao-nrf54-cmsis-dap.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+# Unplug and replug the board
+```
+
+> This is a one-time setup. The udev rule grants plugdev group access to `/dev/hidraw*` and the USB device node. Covers both L15 (0066) and LM20A (0068).
+
+### Linux Mint: No probe detected even after udev rules
+
+If `pyocd list` shows no probes but `lsusb` shows the board, check:
+
+```bash
+ls -la /dev/bus/usb/*/???   # USB device should be rw for plugdev
+ls -la /dev/hidraw*          # hidraw should be rw for plugdev
+groups                       # verify you're in plugdev group
+```
+
+If USB device is root-only, the udev rule didn't trigger. Replug the board or run `sudo udevadm trigger`.
 
 </div>
