@@ -22,6 +22,18 @@ https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l1
 
 Add this URL in **Arduino IDE → Preferences → Additional Boards Manager URLs**, then install **nRF54L15 Boards** from the Boards Manager.
 
+### 🐧 Linux Setup (Ubuntu, Mint, Debian)
+
+Linux requires udev rules for CMSIS-DAP probe access. After installing the board package, run once:
+
+```bash
+sudo cp ~/.arduino15/packages/nrf54l15clean/tools/nrf54l15hosttools/1.1.3/setup/60-seeed-xiao-nrf54-cmsis-dap.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+Then **unplug and replug** the board. This grants access to `/dev/hidraw*` needed for pyOCD upload. No `pip install` required — pyOCD 0.44.1 is bundled in the host tools.
+
 ```cpp
 #include <nrf54_all.h>
 void setup() { Serial.begin(115200); Serial.println("Hello nRF54!"); }
