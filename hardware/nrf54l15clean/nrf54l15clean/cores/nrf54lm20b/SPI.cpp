@@ -73,9 +73,9 @@ static uint32_t compute_prescaler(uint32_t target_hz) {
     if ((core_hz % target_hz) != 0U) {
         ++divisor;
     }
-    if (divisor < 4U) {
-        divisor = 4U;
-    }  // datasheet: min prescaler = 4
+    if (divisor < 2U) {
+        divisor = 2U;
+    }  // serial fabric: 2..126 (§8.19)
     if ((divisor & 1U) != 0U) {
         ++divisor;
     }
