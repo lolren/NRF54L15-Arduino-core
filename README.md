@@ -32,27 +32,21 @@ void loop() {}
 
 ## 🖥️ Supported Boards
 
-### XIAO nRF54L15
+<div align="center">
 
-<img src="docs/xiao_nrf54l15_default_pin_routes.png" width="400"><br>
-<sub>`xiao_nrf54l15` — 128 MHz M33 · 1.5 MB NVM · 512 KB RAM</sub>
+| | |
+|---|---|
+| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="280"><br>**XIAO nRF54L15**<br>`xiao_nrf54l15` | <img src="docs/nrf54lm20a_front_pinout.png" width="280"><br>**XIAO nRF54LM20A / Sense**<br>`xiao_nrf54lm20b` |
+| <img src="docs/boards/holyiot_25007_product.png" width="280"><br>**HOLYIOT-25007**<br>`holyiot_25007_nrf54l15` | <img src="docs/boards/holyiot_25008_product.jpg" width="280"><br>**HOLYIOT-25008**<br>`holyiot_25008_nrf54l15` |
 
-### XIAO nRF54LM20A / Sense
+</div>
 
-<img src="docs/nrf54lm20a_front_pinout.png" width="400"><br>
-<img src="docs/nrf54lm20a_back_pinout.png" width="400"><br>
-<sub>`xiao_nrf54lm20b` — 128 MHz M33 · 2 MB NVM · 512 KB RAM · nPM1300 PMIC</sub><br>
-<sub>Sense variant: LSM6DS3TR‑C IMU + MSM261DGT006 PDM mic · Battery charging + fuel gauge · 0.33 µA ship mode</sub>
-
-### HOLYIOT-25007
-
-<img src="docs/boards/holyiot_25007_product.png" width="200"><br>
-<sub>`holyiot_25007_nrf54l15` — 18.0 × 14.8 mm module</sub>
-
-### HOLYIOT-25008
-
-<img src="docs/boards/holyiot_25008_product.jpg" width="200"><br>
-<sub>`holyiot_25008_nrf54l15` — 23.2 × 17.5 mm module, PCB antenna</sub>
+| Board | Specs |
+|---|---|
+| **XIAO nRF54L15** | 128 MHz M33 · 1.5 MB NVM · 512 KB RAM |
+| **XIAO nRF54LM20A / Sense** | 128 MHz M33 · 2 MB NVM · 512 KB RAM · nPM1300 PMIC · LSM6DS3TR‑C IMU + MSM261DGT006 mic (Sense) · [back pinout](docs/nrf54lm20a_back_pinout.png) · [official wiki](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) |
+| **HOLYIOT-25007** | 18.0 × 14.8 mm · PCB antenna |
+| **HOLYIOT-25008** | 23.2 × 17.5 mm · PCB antenna |
 
 > See [board reference](docs/board-reference.md) for detailed pin assignments and schematics.
 
