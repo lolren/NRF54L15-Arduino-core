@@ -87,7 +87,7 @@ static uint32_t compute_prescaler(uint32_t target_hz) {
 
 }  // namespace
 
-SPIClass SPI(NRF_SPIM30, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
+SPIClass SPI(NRF_SPIM22, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
 
 SPIClass::SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck, uint8_t cs)
     : _spim(spim), _mosi(mosi), _miso(miso), _sck(sck), _cs(cs), _settings(),
@@ -232,65 +232,69 @@ void SPIClass::transfer(void* buf, size_t count) {
     transfer(buf, buf, count);
 }
 
-static uint8_t reverse_bits(uint8_t b) {
-    b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
-    b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
-    b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
-    return b;
-}
-
 void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
-    if (!_initialized || count == 0U) return;
-
-    const bool autoTransaction = !_inTransaction;
-    if (autoTransaction) beginTransaction(_settings);
-
-    uint8_t sckPort, sckPin, mosiPort, mosiPin, misoPort, misoPin;
-    if (!decode_pin(_sck, &sckPort, &sckPin) ||
-        !decode_pin(_mosi, &mosiPort, &mosiPin) ||
-        !decode_pin(_miso, &misoPort, &misoPin)) return;
-
-    volatile uint32_t* gpio_sck  = (sckPort == 0) ? (volatile uint32_t*)0x5010A000UL :
-                                   (sckPort == 1) ? (volatile uint32_t*)0x500D8200UL : nullptr;
-    volatile uint32_t* gpio_mosi = (mosiPort == 0) ? (volatile uint32_t*)0x5010A000UL :
-                                   (mosiPort == 1) ? (volatile uint32_t*)0x500D8200UL : nullptr;
-    volatile uint32_t* gpio_miso = (misoPort == 0) ? (volatile uint32_t*)0x5010A000UL :
-                                   (misoPort == 1) ? (volatile uint32_t*)0x500D8200UL : nullptr;
-    if (!gpio_sck || !gpio_mosi || !gpio_miso) return;
-
-    const uint8_t* txSrc = static_cast<const uint8_t*>(tx_buf);
-    uint8_t* rxDst = static_cast<uint8_t*>(rx_buf);
-    bool lsbFirst = (_settings.bitOrder() == LSBFIRST);
-    uint8_t mode = _settings.dataMode();
-    bool cpha = (mode == SPI_MODE1 || mode == SPI_MODE3);
-    bool cpol = (mode == SPI_MODE2 || mode == SPI_MODE3);
-
-    for (size_t i = 0; i < count; i++) {
-        uint8_t tx = txSrc ? txSrc[i] : 0xFF;
-        uint8_t rx = 0;
-        for (int bit = 0; bit < 8; bit++) {
-            int idx = lsbFirst ? bit : (7 - bit);
-            if (tx & (1 << idx)) gpio_mosi[0x04/4] = (1UL << mosiPin);
-            else                  gpio_mosi[0x08/4] = (1UL << mosiPin);
-            
-            if (!cpha) {
-                if (cpol) gpio_sck[0x08/4] = (1UL << sckPin);
-                else      gpio_sck[0x04/4] = (1UL << sckPin);
-            }
-            for (volatile int d = 0; d < 10; d++) __asm__("nop");
-            rx = (rx << 1) | ((gpio_miso[0x0C/4] >> misoPin) & 1);
-            if (cpha) {
-                if (cpol) gpio_sck[0x04/4] = (1UL << sckPin);
-                else      gpio_sck[0x08/4] = (1UL << sckPin);
-            } else {
-                if (cpol) gpio_sck[0x04/4] = (1UL << sckPin);
-                else      gpio_sck[0x08/4] = (1UL << sckPin);
-            }
-        }
-        if (rxDst) rxDst[i] = lsbFirst ? reverse_bits(rx) : rx;
+    if (!_initialized || _spim == nullptr || count == 0U) {
+        return;
     }
 
-    if (autoTransaction) endTransaction();
+    const bool autoTransaction = !_inTransaction;
+    if (autoTransaction) {
+        beginTransaction(_settings);
+    }
+
+    const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
+    const uint8_t* txSrc = static_cast<const uint8_t*>(tx_buf);
+    uint8_t* rxDst = static_cast<uint8_t*>(rx_buf);
+
+    // nRF54 EasyDMA requires RAM/word-aligned pointers. Stage every transfer
+    // through aligned RAM so single-byte and const/flash-backed buffers work.
+    alignas(4) uint8_t txScratch[SPI_DMA_CHUNK_BYTES];
+    alignas(4) uint8_t rxScratch[SPI_DMA_CHUNK_BYTES];
+
+    size_t transferred = 0U;
+    while (transferred < count) {
+        const size_t remaining = count - transferred;
+        const uint32_t chunk = static_cast<uint32_t>(
+            (remaining > SPI_DMA_CHUNK_BYTES) ? SPI_DMA_CHUNK_BYTES : remaining);
+        const bool hasRx = (rxDst != nullptr);
+
+        if (txSrc != nullptr) {
+            std::memcpy(txScratch, txSrc + transferred, chunk);
+        } else {
+            std::memset(txScratch, 0xFF, chunk);
+        }
+
+        reg32(base + SPIM_EVENTS_END) = 0U;
+        reg32(base + SPIM_EVENTS_STOPPED) = 0U;
+        reg32(base + SPIM_EVENTS_DMA_RX_BUSERROR) = 0U;
+        reg32(base + SPIM_EVENTS_DMA_TX_BUSERROR) = 0U;
+
+        reg32(base + SPIM_DMA_TX_PTR) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(txScratch));
+        reg32(base + SPIM_DMA_TX_MAXCNT) = chunk;
+        reg32(base + SPIM_DMA_RX_PTR) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rxScratch));
+        reg32(base + SPIM_DMA_RX_MAXCNT) = hasRx ? chunk : 0U;
+
+        reg32(base + SPIM_TASKS_START) = 1U;
+        const bool endOk = wait_event(base, SPIM_EVENTS_END, 2000000UL);
+
+        const bool rxBusError = (reg32(base + SPIM_EVENTS_DMA_RX_BUSERROR) != 0U);
+        const bool txBusError = (reg32(base + SPIM_EVENTS_DMA_TX_BUSERROR) != 0U);
+        if (!endOk || rxBusError || txBusError) {
+            reg32(base + SPIM_TASKS_STOP) = 1U;
+            (void)wait_event(base, SPIM_EVENTS_STOPPED, 2000000UL);
+            break;
+        }
+
+        if (hasRx) {
+            std::memcpy(rxDst + transferred, rxScratch, chunk);
+        }
+
+        transferred += chunk;
+    }
+
+    if (autoTransaction) {
+        endTransaction();
+    }
     _lastActivityUs = micros();
 }
 
@@ -362,9 +366,22 @@ void SPIClass::applySettings() {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
 
-    // Bit-bang SPI — no hardware registers to configure
+    reg32(base + SPIM_PRESCALER) = compute_prescaler(_settings.clock());
 
+    uint32_t cfg = 0U;
+    if (_settings.bitOrder() == LSBFIRST) {
+        cfg |= SPIM_CONFIG_ORDER_LSB_FIRST;
+    }
 
+    const uint8_t mode = _settings.dataMode();
+    if (mode == SPI_MODE1 || mode == SPI_MODE3) {
+        cfg |= SPIM_CONFIG_CPHA_TRAILING;
+    }
+    if (mode == SPI_MODE2 || mode == SPI_MODE3) {
+        cfg |= SPIM_CONFIG_CPOL_ACTIVE_LOW;
+    }
+
+    reg32(base + SPIM_CONFIG) = cfg;
 }
 
 uint32_t SPIClass::getFrequencyValue(uint32_t clockHz) {
