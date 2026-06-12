@@ -12,6 +12,34 @@
         {
           "name": "nRF54L15 Boards",
           "architecture": "nrf54l15clean",
+          "version": "0.9.43",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.43/nrf54l15clean-0.9.43.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.43.tar.bz2",
+          "checksum": "SHA-256:ec59962e455508016b62b2ca4550a5d57888195210a77e7b96324e30d94f09ed",
+          "size": "3829951",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.2"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
           "version": "0.9.42",
           "category": "Contributed",
           "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.42/nrf54l15clean-0.9.42.tar.bz2",
