@@ -277,13 +277,11 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
         reg32(base + SPIM_TASKS_START) = 1U;
         const bool endOk = wait_event(base, SPIM_EVENTS_END, 2000000UL);
 
-        reg32(base + SPIM_TASKS_STOP) = 1U;
-        const bool stopOk = wait_event(base, SPIM_EVENTS_STOPPED, 2000000UL);
-
-        if (!endOk ||
-            !stopOk ||
-            reg32(base + SPIM_EVENTS_DMA_RX_BUSERROR) != 0U ||
-            reg32(base + SPIM_EVENTS_DMA_TX_BUSERROR) != 0U) {
+        const bool rxBusError = (reg32(base + SPIM_EVENTS_DMA_RX_BUSERROR) != 0U);
+        const bool txBusError = (reg32(base + SPIM_EVENTS_DMA_TX_BUSERROR) != 0U);
+        if (!endOk || rxBusError || txBusError) {
+            reg32(base + SPIM_TASKS_STOP) = 1U;
+            (void)wait_event(base, SPIM_EVENTS_STOPPED, 2000000UL);
             break;
         }
 

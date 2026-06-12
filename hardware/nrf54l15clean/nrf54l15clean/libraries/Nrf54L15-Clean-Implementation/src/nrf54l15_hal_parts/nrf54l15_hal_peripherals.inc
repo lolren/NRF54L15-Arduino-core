@@ -293,14 +293,16 @@ bool Spim::transfer(const uint8_t* tx, uint8_t* rx, size_t len,
   reg32(base_ + spim::TASKS_START) = 1;
   const bool endOk = waitForEvent(base_, spim::EVENTS_END, spinLimit);
 
-  reg32(base_ + spim::TASKS_STOP) = 1;
-  const bool stopOk = waitForEvent(base_, spim::EVENTS_STOPPED, spinLimit);
+  if (!endOk) {
+    reg32(base_ + spim::TASKS_STOP) = 1;
+    (void)waitForEvent(base_, spim::EVENTS_STOPPED, spinLimit);
+  }
 
   if (isConnected(cs_)) {
     Gpio::write(cs_, true);
   }
 
-  return endOk && stopOk;
+  return endOk;
 }
 
 Spis::Spis(uint32_t base)
