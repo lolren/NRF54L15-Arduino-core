@@ -36,7 +36,7 @@ void loop() {}
 
 | | | |
 |---|---|---|
-| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54L15**<br>`xiao_nrf54l15`<br><sub>128 MHz M33 · 1.5 MB NVM</sub> | <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54LM20A / Sense**<br>`xiao_nrf54lm20b`<br><sub>128 MHz M33 · 2 MB NVM · nPM1300 PMIC</sub> | <img src="docs/boards/holyiot_25007_product.png" width="180"><br>**HOLYIOT-25007**<br>`holyiot_25007_nrf54l15` |
+| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**XIAO nRF54L15**<br>`xiao_nrf54l15`<br><sub>128 MHz M33 · 1.5 MB NVM</sub> | <a href="docs/nrf54lm20a_front_pinout.png"><img src="docs/nrf54lm20a_front_pinout.png" width="180"></a><br>**XIAO nRF54LM20A / Sense**<br>`xiao_nrf54lm20b`<br><sub>128 MHz M33 · 2 MB NVM · nPM1300</sub><br><sub>[front](docs/nrf54lm20a_front_pinout.png) · [back](docs/nrf54lm20a_back_pinout.png)</sub> | <img src="docs/boards/holyiot_25007_product.png" width="180"><br>**HOLYIOT-25007**<br>`holyiot_25007_nrf54l15` |
 | <img src="docs/boards/holyiot_25008_product.jpg" width="180"><br>**HOLYIOT-25008**<br>`holyiot_25008_nrf54l15` | <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="180"><br>**Generic 36-Pad**<br>`generic_nrf54l15_module_36pin` | |
 
 </div>
