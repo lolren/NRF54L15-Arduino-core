@@ -64,7 +64,7 @@ static bool decode_pin(uint8_t pin, uint8_t* port, uint8_t* p) {
 }
 
 static uint32_t compute_prescaler(uint32_t target_hz) {
-    const uint32_t core_hz = F_CPU;
+    const uint32_t core_hz = 16000000UL;  // serial fabric SPIM
     if (target_hz == 0U) {
         target_hz = 1000000U;
     }
@@ -319,7 +319,7 @@ void SPIClass::setClockDivider(uint32_t div) {
     } else if (div >= 100000UL) {
         clock = div;
     } else {
-        clock = static_cast<uint32_t>(F_CPU / div);
+        clock = static_cast<uint32_t>(16000000UL / div);
     }
 
     _settings = SPISettings(clock, _settings.bitOrder(), _settings.dataMode());
