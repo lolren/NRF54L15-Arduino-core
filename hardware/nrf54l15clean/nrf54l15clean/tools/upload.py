@@ -1021,7 +1021,7 @@ def flash_hex(
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     if not auto_unlock:
         cmd.extend(["-O", "auto_unlock=false"])
-    cmd.extend([hex_path, "--format", "hex", "--no-reset"])
+    cmd.extend([hex_path, "--format", "hex"])
     result = run(cmd, timeout=pyocd_timeout_seconds())
     print_result(result)
     return result
@@ -1202,18 +1202,6 @@ def upload_pyocd(
         reset_cmd.extend(["-O", "auto_unlock=false"])
     reset_result = run(reset_cmd, timeout=pyocd_timeout_seconds())
     print_result(reset_result)
-
-    # Detach debug probe so SYSTEM OFF works after upload.
-    # Uses pyocd commander (available in AppImage and system installs).
-    # Resumes the CPU and disconnects the probe cleanly.
-    if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
-        detach_cmd = [*pyocd_cmd, "commander", "-W", "-t", target]
-        detach_cmd = append_uid(detach_cmd, uid)
-        detach_cmd.extend(["-c", "resume"])
-        try:
-            subprocess.run(detach_cmd, timeout=5.0, capture_output=True)
-        except (Exception, subprocess.TimeoutExpired):
-            pass  # best-effort, non-fatal
     return 0
 
 
