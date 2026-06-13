@@ -10,37 +10,25 @@
       },
       "platforms": [
         {
-          "name": "nrf54l15clean",
+          "name": "nRF54L15 Boards",
           "architecture": "nrf54l15clean",
           "version": "0.9.53",
-          "category": "Arduino",
-          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15clean-0.9.53-a3274093bd24.tar.bz2",
-          "archiveFileName": "nrf54l15clean-0.9.53-a3274093bd24.tar.bz2",
-          "checksum": "SHA-256:a3274093bd24f347ec270138af749b6421084ded7e1f51afe4b040d7901eff11",
-          "size": "24007493",
-          "boards": [
-            {
-              "name": "XIAO nRF54L15 / Sense"
-            },
-            {
-              "name": "XIAO nRF54LM20A"
-            },
-            {
-              "name": "HOLYIOT-25008 nRF54L15 Module"
-            },
-            {
-              "name": "HOLYIOT-25007 nRF54L15 Module"
-            },
-            {
-              "name": "Generic nRF54L15 Module (36-pad)"
-            },
-            {
-              "name": "Nordic PCA10156 nRF54L15 DK"
-            }
-          ],
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15clean-0.9.53.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.53.tar.bz2",
+          "checksum": "SHA-256:b0e62be43fac51895cde0831d0a5a031bca01ec59f2c2c43778673d2b07b24f4",
+          "size": "25911486",
           "help": {
             "online": "https://github.com/lolren/nrf54-arduino-core"
           },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
           "toolsDependencies": [
             {
               "packager": "arduino",
@@ -55,11 +43,9 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.4"
+              "version": "1.1.3"
             }
-          ],
-          "discoveryDependencies": [],
-          "monitorDependencies": []
+          ]
         },
         {
           "name": "nRF54L15 Boards",
