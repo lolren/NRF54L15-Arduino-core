@@ -53,3 +53,9 @@ Load this at session start after context compaction.
 - Sandboxed Python CANNOT use system pip packages
 - Must use `pyocd commander` CLI (not Python API) for AppImage compat
 - Host tools wheelhouse provides pyocd for AppImage
+
+## Host Tools
+- Permanent release: `host-tools-v1.1.4` (never delete)
+- 5 platforms, pyOCD 0.44.1
+- URL: https://github.com/lolren/nrf54-arduino-core/releases/tag/host-tools-v1.1.4
+- Only update when tools version bumps (1.2.0+)
