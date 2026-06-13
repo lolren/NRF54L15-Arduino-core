@@ -54,20 +54,28 @@ echo "Archive verified: no symlinks, single root dir ✅"
 HOST_TOOLS_VERSION="1.1.4"
 INDEX="package_nrf54l15clean_index.json"
 
-python3 << PYEOF
-import json
-with open("$INDEX") as f:
+export VERSION CHECKSUM SIZE HOST_TOOLS_VERSION INDEX
+python3 << 'PYEOF'
+import json, os
+
+VERSION = os.environ["VERSION"]
+CHECKSUM = os.environ["CHECKSUM"]
+SIZE = os.environ["SIZE"]
+HOST_TOOLS_VERSION = os.environ["HOST_TOOLS_VERSION"]
+INDEX = os.environ["INDEX"]
+
+with open(INDEX) as f:
     data = json.load(f)
 
 entry = {
     "name": "nRF54L15 Boards",
     "architecture": "nrf54l15clean",
-    "version": "$VERSION",
+    "version": VERSION,
     "category": "Contributed",
-    "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v$VERSION/nrf54l15clean-${VERSION}.tar.bz2",
-    "archiveFileName": "nrf54l15clean-${VERSION}.tar.bz2",
-    "checksum": "SHA-256:$CHECKSUM",
-    "size": "$SIZE",
+    "url": f"https://github.com/lolren/nrf54-arduino-core/releases/download/v{VERSION}/nrf54l15clean-{VERSION}.tar.bz2",
+    "archiveFileName": f"nrf54l15clean-{VERSION}.tar.bz2",
+    "checksum": f"SHA-256:{CHECKSUM}",
+    "size": SIZE,
     "help": {"online": "https://github.com/lolren/nrf54-arduino-core"},
     "boards": [
         {"name": "XIAO nRF54L15"},
@@ -76,19 +84,19 @@ entry = {
     "toolsDependencies": [
         {"packager": "arduino", "name": "arm-none-eabi-gcc", "version": "7-2017q4"},
         {"packager": "arduino", "name": "openocd", "version": "0.11.0-arduino2"},
-        {"packager": "nrf54l15clean", "name": "nrf54l15hosttools", "version": "$HOST_TOOLS_VERSION"}
+        {"packager": "nrf54l15clean", "name": "nrf54l15hosttools", "version": HOST_TOOLS_VERSION}
     ]
 }
 
 for pkg in data["packages"]:
     if pkg["name"] == "nrf54l15clean":
-        pkg["platforms"] = [p for p in pkg["platforms"] if p["version"] != "$VERSION"]
+        pkg["platforms"] = [p for p in pkg["platforms"] if p["version"] != VERSION]
         pkg["platforms"].insert(0, entry)
         break
 
-with open("$INDEX", "w") as f:
+with open(INDEX, "w") as f:
     json.dump(data, f, indent=2)
-print(f"Package index updated: v$VERSION")
+print(f"Package index updated: v{VERSION}")
 PYEOF
 
 # ── 6. Commit & push ────────────────────────────────────────────
