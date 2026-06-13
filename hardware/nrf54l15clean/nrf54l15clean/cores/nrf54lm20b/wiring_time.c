@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #include "cmsis.h"
-#include "nrf54lm20b.h"
+#include "nrf54l15.h"
 #include "variant.h"
 
 #if !defined(ARDUINO_XIAO_NRF54L15) && !defined(ARDUINO_XIAO_NRF54L15_CLEAN) && !defined(XIAO_NRF54L15_BOARD_STATE_DECLARED)
@@ -23,11 +23,9 @@ extern uint32_t nrf54l15_ble_grtc_reserved_cc_mask(void) __attribute__((weak));
 extern uint32_t nrf54l15_clean_ble_idle_sleep_cap_us(void) __attribute__((weak));
 extern uint8_t nrf54l15_clean_low_power_micro_delay_sleep_allowed(void)
     __attribute__((weak));
-uint32_t nrf54lm20b_core_enter_idle_cpu_scaling(void);
-void nrf54lm20b_core_exit_idle_cpu_scaling(uint32_t previousRaw);
-void nrf54lm20b_core_prepare_system_off_wake_timebase(void);
-void nrf54lm20b_core_prepare_system_off(void);
-void nrf54lm20b_core_disable_system_off_retention(void);
+void nrf54l15_core_prepare_system_off_wake_timebase(void);
+void nrf54l15_core_prepare_system_off(void);
+void nrf54l15_core_disable_system_off_retention(void);
 
 static volatile uint32_t g_millis_ticks = 0;
 static volatile uint32_t* const kScbScr = (volatile uint32_t*)0xE000ED10UL;
@@ -39,8 +37,8 @@ static const uint32_t kSystemOffLfclkFrequencyHz = 32768UL;
 static const uint32_t kSystemOffMaxCcLatchWaitUs = 77UL;
 static const uint32_t kSystemOffMinimumLatencyGuardUs = 1000UL;
 static const uint32_t kGrtcStartSettleUs = 93UL;
-uint64_t nrf54lm20b_core_monotonic_time_us(void);
-uint32_t nrf54lm20b_core_monotonic_time_ms(void);
+uint64_t nrf54l15_core_monotonic_time_us(void);
+uint32_t nrf54l15_core_monotonic_time_ms(void);
 #if defined(NRF54L15_CLEAN_POWER_LOW)
 volatile uint32_t g_nrf54l15_diag_delay_outer_loops = 0U;
 volatile uint32_t g_nrf54l15_diag_delay_wfi_entries = 0U;
@@ -91,14 +89,14 @@ static void clearSystemOffVprRetention(void)
 
 static uint32_t beginIdleSleep(void)
 {
-    const uint32_t restoreRaw = nrf54lm20b_core_enter_idle_cpu_scaling();
+    const uint32_t restoreRaw = nrf54l15_core_enter_idle_cpu_scaling();
     *kScbScr &= ~(kScbScrSleepDeep_Msk | kScbScrSleepOnExit_Msk);
     return restoreRaw;
 }
 
 static void endIdleSleep(uint32_t restoreRaw)
 {
-    nrf54lm20b_core_exit_idle_cpu_scaling(restoreRaw);
+    nrf54l15_core_exit_idle_cpu_scaling(restoreRaw);
 }
 
 static uint8_t highestSetBit(uint32_t mask)
@@ -408,7 +406,7 @@ static void initLowPowerTimebase(void)
     g_low_power_timebase_initialized = 1U;
 }
 
-void nrf54lm20b_core_bootstrap_low_power_timebase(void)
+void nrf54l15_core_bootstrap_low_power_timebase(void)
 {
     initLowPowerTimebase();
 }
@@ -573,7 +571,7 @@ static uint8_t systemOffWakeChannel(void)
 #endif
 }
 
-void nrf54lm20b_core_prepare_system_off_wake_timebase(void)
+void nrf54l15_core_prepare_system_off_wake_timebase(void)
 {
     NRF_GRTC_Type* const grtc = NRF_GRTC;
     NRF54L15_GRTC_INTENCLR_REG(grtc) = 0xFFFFFFFFUL;
@@ -679,8 +677,18 @@ static void programSystemOffWakeUs(uint32_t delayUs)
     NRF_GRTC_Type* const grtc = NRF_GRTC;
     delayUs = clampSystemOffDelayUs(delayUs);
 
-    nrf54lm20b_core_prepare_system_off_wake_timebase();
+    nrf54l15_core_prepare_system_off_wake_timebase();
     ensureSystemOffLfxoRunning();
+    
+    // If LFXO failed to start (cold boot), fall back to LFRC
+    // so SYSTEM OFF wake always works. LFRC is less accurate
+    // but starts in <1ms vs LFXO's ~500ms crystal stabilization.
+    if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO) &&
+        !lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)) {
+        startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFRC);
+        static const uint32_t kQuickLfrcLimit = 10000000UL;
+        waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC, kQuickLfrcLimit);
+    }
     configureSystemOffWakeSleep(grtc);
 
     const uint8_t wakeChannel = systemOffWakeChannel();
@@ -718,9 +726,9 @@ static void programSystemOffWakeUs(uint32_t delayUs)
 static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
 {
     programSystemOffWakeUs(delayUs);
-    nrf54lm20b_core_prepare_system_off();
+    nrf54l15_core_prepare_system_off();
     if (disableRamRetention) {
-        nrf54lm20b_core_disable_system_off_retention();
+        nrf54l15_core_disable_system_off_retention();
     }
 
     __asm volatile("cpsid i" ::: "memory");
@@ -761,7 +769,7 @@ void initSysTick(void)
 unsigned long millis(void)
 {
 #if defined(NRF54L15_CLEAN_POWER_LOW)
-    return (unsigned long)(nrf54lm20b_core_monotonic_time_us() / 1000ULL);
+    return (unsigned long)(nrf54l15_core_monotonic_time_us() / 1000ULL);
 #else
     uint32_t ticks = g_millis_ticks;
     if (ticks == 0U) {
@@ -784,7 +792,7 @@ unsigned long millis(void)
 unsigned long micros(void)
 {
 #if defined(NRF54L15_CLEAN_POWER_LOW)
-    return (unsigned long)nrf54lm20b_core_monotonic_time_us();
+    return (unsigned long)nrf54l15_core_monotonic_time_us();
 #else
     uint32_t ms_a;
     uint32_t ms_b;
@@ -808,7 +816,7 @@ unsigned long micros(void)
 #endif
 }
 
-uint64_t nrf54lm20b_core_monotonic_time_us(void)
+uint64_t nrf54l15_core_monotonic_time_us(void)
 {
 #if defined(NRF54L15_CLEAN_POWER_LOW)
     initLowPowerTimebase();
@@ -824,17 +832,9 @@ uint64_t nrf54lm20b_core_monotonic_time_us(void)
 #endif
 }
 
-// Compat wrappers: HAL/Bluefruit libraries reference nrf54l15_core_monotonic_*
-uint64_t nrf54l15_core_monotonic_time_us(void) {
-    return nrf54lm20b_core_monotonic_time_us();
-}
-uint32_t nrf54l15_core_monotonic_time_ms(void) {
-    return nrf54lm20b_core_monotonic_time_ms();
-}
-
-uint32_t nrf54lm20b_core_monotonic_time_ms(void)
+uint32_t nrf54l15_core_monotonic_time_ms(void)
 {
-    return (uint32_t)(nrf54lm20b_core_monotonic_time_us() / 1000ULL);
+    return (uint32_t)(nrf54l15_core_monotonic_time_us() / 1000ULL);
 }
 
 void delay(unsigned long ms)
@@ -949,7 +949,7 @@ void delayMicroseconds(unsigned int us)
     }
 }
 
-void nrf54lm20b_core_prepare_system_off(void)
+void nrf54l15_core_prepare_system_off(void)
 {
 #if defined(NRF54L15_CLEAN_POWER_LOW)
     if (g_low_power_timebase_initialized != 0U) {
@@ -973,7 +973,7 @@ void nrf54lm20b_core_prepare_system_off(void)
     SysTick->CTRL = 0U;
 }
 
-void nrf54lm20b_core_disable_system_off_retention(void)
+void nrf54l15_core_disable_system_off_retention(void)
 {
     disableSystemOffRetention();
 }

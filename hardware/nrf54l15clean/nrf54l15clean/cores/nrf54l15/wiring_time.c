@@ -679,6 +679,16 @@ static void programSystemOffWakeUs(uint32_t delayUs)
 
     nrf54l15_core_prepare_system_off_wake_timebase();
     ensureSystemOffLfxoRunning();
+    
+    // If LFXO failed to start (cold boot), fall back to LFRC
+    // so SYSTEM OFF wake always works. LFRC is less accurate
+    // but starts in <1ms vs LFXO's ~500ms crystal stabilization.
+    if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO) &&
+        !lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)) {
+        startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFRC);
+        static const uint32_t kQuickLfrcLimit = 10000000UL;
+        waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC, kQuickLfrcLimit);
+    }
     configureSystemOffWakeSleep(grtc);
 
     const uint8_t wakeChannel = systemOffWakeChannel();
