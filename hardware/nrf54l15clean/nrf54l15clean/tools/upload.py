@@ -1203,12 +1203,17 @@ def upload_pyocd(
     reset_result = run(reset_cmd, timeout=pyocd_timeout_seconds())
     print_result(reset_result)
 
-    # Detach debug probe so SYSTEM OFF sleep works after upload.
-    # Without this, the debug connection prevents proper SYSTEM OFF entry.
+    # Detach debug probe so SYSTEM OFF works after upload.
+    # Uses pyocd commander (available in AppImage and system installs).
+    # Resumes the CPU and disconnects the probe cleanly.
     if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
-        detach_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyocd_detach.py")
-        if os.path.isfile(detach_script):
-            subprocess.run([sys.executable, detach_script, target, uid or ""], timeout=10.0)
+        detach_cmd = [*pyocd_cmd, "commander", "-W", "-t", target]
+        detach_cmd = append_uid(detach_cmd, uid)
+        detach_cmd.extend(["-c", "resume"])
+        try:
+            subprocess.run(detach_cmd, timeout=5.0, capture_output=True)
+        except (Exception, subprocess.TimeoutExpired):
+            pass  # best-effort, non-fatal
     return 0
 
 
