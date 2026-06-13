@@ -6,6 +6,7 @@
  * Pin Port mapping:
  *   P0: GPIO 0.00-0.09   (button, NFC, GRTC, peripherals)
  *   P1: GPIO 1.00-1.31   (D0-D10, LED, ADC, PMIC I2C)
+ *   P2: GPIO 2.00-2.05   (onboard QSPI flash / HS-SPI pads)
  *   P3: GPIO 3.00-3.12   (D11-D18, D25-D27, IMU CS)
  */
 
@@ -15,7 +16,7 @@
 #include <stdint.h>
 #include <nrf54lm20b.h>
 
-#define NUM_DIGITAL_PINS 42
+#define NUM_DIGITAL_PINS 48
 #define NUM_ANALOG_INPUTS 5   // A0-A3 (D0-D3) + A7 (D4)
 
 // ─── XIAO Connector Pins (D0–D27) ─────────────────────────────
@@ -117,6 +118,21 @@ enum {
 #define PDM_DATA     PIN_PDM_DATA
 #define MIC_CLK      PIN_PDM_CLK
 #define MIC_DATA     PIN_PDM_DATA
+
+// On-board PY25Q64 QSPI flash on the LM20A dedicated HS-SPI/QSPI pins.
+// These are not XIAO header pins. They are exposed so the core can put the
+// flash into deep power-down and so advanced sketches can use the 32 MHz
+// SPIM00 path deliberately.
+#define PIN_QSPI_IO3 (42)       // P2.00
+#define PIN_QSPI_SCK (43)       // P2.01
+#define PIN_QSPI_IO0 (44)       // P2.02 / SPIM00 SDO
+#define PIN_QSPI_IO2 (45)       // P2.03
+#define PIN_QSPI_IO1 (46)       // P2.04 / SPIM00 SDI
+#define PIN_QSPI_CS  (47)       // P2.05 / SPIM00 CSN
+#define PIN_HSPI_MOSI PIN_QSPI_IO0
+#define PIN_HSPI_MISO PIN_QSPI_IO1
+#define PIN_HSPI_SCK  PIN_QSPI_SCK
+#define PIN_HSPI_SS   PIN_QSPI_CS
 // No RF switch on LM20A - antenna path is fixed by board hardware.
 
 // CDC USB Serial — UART20 on P1.11/P1.10 (connected to SAMD11 debug probe)
@@ -203,6 +219,14 @@ static inline bool pinToPortPin(uint8_t pin, uint8_t* port, uint8_t* pinInPort)
         case PIN_PDM_CLK:  *port = 1; *pinInPort = 13; return true;   // P1.13
         case PIN_PDM_DATA: *port = 1; *pinInPort = 14; return true;   // P1.14
 
+        // On-board QSPI flash / dedicated HS-SPI pins on Port 2
+        case PIN_QSPI_IO3: *port = 2; *pinInPort = 0; return true;    // P2.00
+        case PIN_QSPI_SCK: *port = 2; *pinInPort = 1; return true;    // P2.01
+        case PIN_QSPI_IO0: *port = 2; *pinInPort = 2; return true;    // P2.02
+        case PIN_QSPI_IO2: *port = 2; *pinInPort = 3; return true;    // P2.03
+        case PIN_QSPI_IO1: *port = 2; *pinInPort = 4; return true;    // P2.04
+        case PIN_QSPI_CS:  *port = 2; *pinInPort = 5; return true;    // P2.05
+
         default: return false;
     }
 }
@@ -239,6 +263,7 @@ static inline volatile uint32_t* portOutputRegister(uint8_t port)
     switch (port) {
         case 0: return &NRF_P0->OUT;
         case 1: return &NRF_P1->OUT;
+        case 2: return &NRF_P2->OUT;
         case 3: return &NRF_P3->OUT;
         default: return (volatile uint32_t*)0;
     }
@@ -249,6 +274,7 @@ static inline volatile uint32_t* portInputRegister(uint8_t port)
     switch (port) {
         case 0: return (volatile uint32_t*)&NRF_P0->IN;
         case 1: return (volatile uint32_t*)&NRF_P1->IN;
+        case 2: return (volatile uint32_t*)&NRF_P2->IN;
         case 3: return (volatile uint32_t*)&NRF_P3->IN;
         default: return (volatile uint32_t*)0;
     }
@@ -259,6 +285,7 @@ static inline volatile uint32_t* portModeRegister(uint8_t port)
     switch (port) {
         case 0: return &NRF_P0->DIR;
         case 1: return &NRF_P1->DIR;
+        case 2: return &NRF_P2->DIR;
         case 3: return &NRF_P3->DIR;
         default: return (volatile uint32_t*)0;
     }
@@ -275,8 +302,9 @@ static inline int digitalPinToInterrupt(uint8_t pin)
 {
     uint8_t port = 0;
     uint8_t pinInPort = 0;
-    // Port 3 pins do not support GPIO interrupts on nRF54L series
-    if (!pinToPortPin(pin, &port, &pinInPort) || port == 3U) {
+    // Ports 2 and 3 are dedicated/internal pads in this core and are not
+    // routed through the Arduino interrupt helper.
+    if (!pinToPortPin(pin, &port, &pinInPort) || port == 2U || port == 3U) {
         return NOT_AN_INTERRUPT;
     }
     return pin;
@@ -308,6 +336,10 @@ static const uint8_t MOSI = PIN_SPI_MOSI;
 static const uint8_t MISO = PIN_SPI_MISO;
 static const uint8_t SCK  = PIN_SPI_SCK;
 static const uint8_t SS   = PIN_SPI_SS;
+static const uint8_t HS_MOSI = PIN_HSPI_MOSI;
+static const uint8_t HS_MISO = PIN_HSPI_MISO;
+static const uint8_t HS_SCK  = PIN_HSPI_SCK;
+static const uint8_t HS_SS   = PIN_HSPI_SS;
 
 // ─── Serial Port Aliases ──────────────────────────────────────
 #define SERIAL_PORT_MONITOR       Serial

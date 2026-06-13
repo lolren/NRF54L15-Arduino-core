@@ -13,6 +13,8 @@ This tracks board-specific follow-up so LM20A work does not get mixed into unrel
 - [x] Add and hardware-validate the nPM1300 PMIC API for the internal P1.17/P1.18 I2C bus.
 - [x] Add LM20A PMIC examples for system monitoring and IMU/MIC rail control.
 - [x] Add and hardware-test LM20A IMU and PDM microphone examples.
+- [x] Add LM20A onboard PY25Q64 QSPI flash support, boot-time flash deep-power-down, and QSPI flash examples.
+- [x] Add explicit `SPI_HS` support for the LM20A dedicated SPIM00/QSPI pads while keeping default `SPI` on the XIAO header pins.
 
 ## Follow-Up
 

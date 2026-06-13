@@ -21,6 +21,9 @@
 #define SPI_MODE3 0x03  // CPOL=1, CPHA=1
 
 // Clock divider settings (nRF54L15 specific)
+#define SPI_CLOCK_32M    32000000UL
+#define SPI_CLOCK_16M    16000000UL
+#define SPI_CLOCK_8M      8000000UL
 #define SPI_CLOCK_DIV4   4000000   // 4 MHz
 #define SPI_CLOCK_DIV8   2000000   // 2 MHz
 #define SPI_CLOCK_DIV16  1000000   // 1 MHz
@@ -126,5 +129,7 @@ private:
 
 // Global SPI instance (using SPIM00 on XIAO nRF54L15 headers)
 extern SPIClass SPI;
+// Alias for sketches that want to make the HS-SPI intent explicit.
+extern SPIClass& SPI_HS;
 
 #endif // SPI_h

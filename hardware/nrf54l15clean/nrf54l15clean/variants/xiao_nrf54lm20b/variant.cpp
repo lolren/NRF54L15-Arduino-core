@@ -23,6 +23,11 @@ void initVariant(void)
     
     // Initialize button as input with pull-up
     pinMode(PIN_BUTTON, INPUT_PULLUP);
+
+    // The onboard PY25Q64 flash is not used for code execution. Keep it in
+    // deep power-down by default so simple low-power sketches are not charged
+    // for an awake external flash. XiaoQspiFlash.begin() wakes it again.
+    (void)xiaoNrf54lm20QspiFlashPrepareForSleep();
     
     // Quick LED flash to confirm boot
     digitalWrite(PIN_LED_GREEN, LOW);

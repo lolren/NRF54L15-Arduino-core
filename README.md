@@ -44,7 +44,7 @@ void loop() {}
 | Board | Specs |
 |---|---|
 | **XIAO nRF54L15** | 128 MHz M33 · 1.5 MB NVM · 512 KB RAM |
-| **XIAO nRF54LM20A / Sense** | 128 MHz M33 · 2 MB NVM · 512 KB RAM · nPM1300 PMIC · LSM6DS3TR‑C IMU + MSM261DGT006 mic (Sense) · [back pinout](docs/nrf54lm20a_back_pinout.png) · [official wiki](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) |
+| **XIAO nRF54LM20A / Sense** | 128 MHz M33 · 2 MB NVM · 512 KB RAM · nPM1300 PMIC · onboard PY25Q64 QSPI flash · LSM6DS3TR‑C IMU + MSM261DGT006 mic (Sense) · [back pinout](docs/nrf54lm20a_back_pinout.png) · [official wiki](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) |
 | **HOLYIOT-25007** | 18.0 × 14.8 mm · PCB antenna |
 | **HOLYIOT-25008** | 23.2 × 17.5 mm · PCB antenna |
 
@@ -107,6 +107,7 @@ void loop() {}
 | | Status |
 |---|---|
 | **GPIO, PWM, ADC, I2C, SPI, UART** | ✅ |
+| **HS-SPI 32 MHz** (`SPI_HS`) | ✅ |
 | **I2S, PDM Microphone** | ✅ |
 | **QDEC** (rotary encoder) | ✅ |
 | **NFC‑A Tag** | ✅ |
@@ -125,6 +126,7 @@ void loop() {}
 | **VPR RISC‑V Coprocessor** | ✅ |
 | **SoftPeripheral SDK + sQSPI** | ✅ |
 | **nPM1300 PMIC Driver** | ✅ |
+| **LM20A QSPI Flash Sleep** | ✅ |
 | **GPIO Bit‑Bang I²C** (zero residual) | ✅ |
 | **Buck Hysteretic Mode** (µA sleep) | ✅ |
 | **LM20A IMU** (LSM6DS3TR‑C) | ✅ |
@@ -155,7 +157,7 @@ void loop() {}
 - **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
 - **Thread and Matter are compile‑targets only** — not functional protocol stacks. End‑to‑end commissioner validation is pending.
 - **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and multi‑hop routing are missing.
-- **SPI and Wire1 (IMU) share serial‑fabric slot 30** — can't be used simultaneously on Sense boards.
+- **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
 - **Channel Sounding Mode 2** needs the VPR RISC‑V coprocessor — M33 alone can't keep up with subevent timing.
 

@@ -1,5 +1,5 @@
 /*
- * XiaoSenseLM20B_ImuAccelGyro
+ * XiaoLM20A_ImuAccelGyro
  *
  * Reads accelerometer and gyroscope from the onboard LSM6DS3TR-C
  * on XIAO nRF54LM20A.
@@ -16,6 +16,10 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "npm1300.h"
+
+#if !(defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B))
+#error "XiaoLM20A_ImuAccelGyro requires the XIAO nRF54LM20A board."
+#endif
 
 #define IMU_ADDR      0x6A
 #define IMU_CS_PIN    PIN_IMU_CS
@@ -44,12 +48,12 @@ static int16_t read16(uint8_t reg) {
 }
 
 static float accel_mg(int16_t raw) {
-    // ±2g = ±2000 mg, 16-bit → 0.061 mg/LSB
+    // +/-2g = +/-2000 mg, 16-bit -> 0.061 mg/LSB
     return raw * 0.061f;
 }
 
 static float gyro_mdps(int16_t raw) {
-    // ±250 dps = 250000 mdps, 16-bit → 8.75 mdps/LSB
+    // +/-250 dps = 250000 mdps, 16-bit -> 8.75 mdps/LSB
     return raw * 8.75f;
 }
 
@@ -61,7 +65,6 @@ void setup() {
     Serial.begin(115200);
     delay(250);
 
-    // Power + CS
     if (!npm1300_imu_mic_power_enable(true)) {
         Serial.println("ERROR: nPM1300 sensor rail enable failed");
     }
@@ -73,9 +76,8 @@ void setup() {
     Wire1.begin();
     Wire1.setClock(400000);
 
-    // Configure IMU
-    writeReg(CTRL1_XL, 0x60);  // Accel: 416 Hz, ±2g
-    writeReg(CTRL2_G,  0x60);  // Gyro:  416 Hz, ±250 dps
+    writeReg(CTRL1_XL, 0x60);  // Accel: 416 Hz, +/-2g
+    writeReg(CTRL2_G,  0x60);  // Gyro:  416 Hz, +/-250 dps
     delay(10);
 
     Serial.println("ax_mg,ay_mg,az_mg,gx_mdps,gy_mdps,gz_mdps,temp_c");

@@ -63,8 +63,52 @@ static bool decode_pin(uint8_t pin, uint8_t* port, uint8_t* p) {
     return pinToPortPin(pin, port, p);
 }
 
-static uint32_t compute_prescaler(uint32_t target_hz) {
-    const uint32_t core_hz = F_CPU;
+static bool is_hs_spim(NRF_SPIM_Type* spim) {
+    return reinterpret_cast<uintptr_t>(spim) == reinterpret_cast<uintptr_t>(NRF_SPIM00);
+}
+
+static uint32_t spim_core_hz(NRF_SPIM_Type* spim) {
+    return is_hs_spim(spim) ? 128000000UL : 16000000UL;
+}
+
+static uint32_t spim_min_divisor(NRF_SPIM_Type* spim) {
+    return is_hs_spim(spim) ? 4UL : 2UL;
+}
+
+static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
+    switch (port) {
+        case 0: return NRF_P0;
+        case 1: return NRF_P1;
+        case 2: return NRF_P2;
+        default: return nullptr;
+    }
+}
+
+static void set_extra_high_drive_if_hs(NRF_SPIM_Type* spim, uint8_t pin) {
+    if (!is_hs_spim(spim)) {
+        return;
+    }
+
+    uint8_t port = 0;
+    uint8_t p = 0;
+    if (!decode_pin(pin, &port, &p)) {
+        return;
+    }
+
+    NRF_GPIO_Type* gpio = gpio_for_port(port);
+    if (gpio == nullptr) {
+        return;
+    }
+
+    uint32_t cnf = gpio->PIN_CNF[p];
+    cnf &= ~(GPIO_PIN_CNF_DRIVE0_Msk | GPIO_PIN_CNF_DRIVE1_Msk);
+    cnf |= (GPIO_PIN_CNF_DRIVE0_E0 << GPIO_PIN_CNF_DRIVE0_Pos);
+    cnf |= (GPIO_PIN_CNF_DRIVE1_E1 << GPIO_PIN_CNF_DRIVE1_Pos);
+    gpio->PIN_CNF[p] = cnf;
+}
+
+static uint32_t compute_prescaler(NRF_SPIM_Type* spim, uint32_t target_hz) {
+    const uint32_t core_hz = spim_core_hz(spim);
     if (target_hz == 0U) {
         target_hz = 1000000U;
     }
@@ -73,8 +117,9 @@ static uint32_t compute_prescaler(uint32_t target_hz) {
     if ((core_hz % target_hz) != 0U) {
         ++divisor;
     }
-    if (divisor < 2U) {
-        divisor = 2U;
+    const uint32_t minDivisor = spim_min_divisor(spim);
+    if (divisor < minDivisor) {
+        divisor = minDivisor;
     }
     if ((divisor & 1U) != 0U) {
         ++divisor;
@@ -88,6 +133,7 @@ static uint32_t compute_prescaler(uint32_t target_hz) {
 }  // namespace
 
 SPIClass SPI(NRF_SPIM00, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
+SPIClass& SPI_HS = SPI;
 
 SPIClass::SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck, uint8_t cs)
     : _spim(spim), _mosi(mosi), _miso(miso), _sck(sck), _cs(cs), _settings(),
@@ -319,7 +365,7 @@ void SPIClass::setClockDivider(uint32_t div) {
     } else if (div >= 100000UL) {
         clock = div;
     } else {
-        clock = static_cast<uint32_t>(F_CPU / div);
+        clock = static_cast<uint32_t>(spim_core_hz(_spim) / div);
     }
 
     _settings = SPISettings(clock, _settings.bitOrder(), _settings.dataMode());
@@ -357,6 +403,9 @@ void SPIClass::configurePins() {
     pinMode(_sck, OUTPUT);
     pinMode(_mosi, OUTPUT);
     pinMode(_miso, INPUT);
+    set_extra_high_drive_if_hs(_spim, _sck);
+    set_extra_high_drive_if_hs(_spim, _mosi);
+    set_extra_high_drive_if_hs(_spim, _miso);
 }
 
 void SPIClass::applySettings() {
@@ -366,7 +415,7 @@ void SPIClass::applySettings() {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
 
-    reg32(base + SPIM_PRESCALER) = compute_prescaler(_settings.clock());
+    reg32(base + SPIM_PRESCALER) = compute_prescaler(_spim, _settings.clock());
 
     uint32_t cfg = 0U;
     if (_settings.bitOrder() == LSBFIRST) {
