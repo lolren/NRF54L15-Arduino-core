@@ -14,10 +14,10 @@
           "architecture": "nrf54l15clean",
           "version": "0.9.54",
           "category": "Contributed",
-          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.54/nrf54l15clean-0.9.54.tar.bz2",
-          "archiveFileName": "nrf54l15clean-0.9.54.tar.bz2",
-          "checksum": "SHA-256:dc527594187a5126d73323f008c9594495412b45836e8131945e3ba86df81750",
-          "size": "25910655",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.54/nrf54l15clean-0.9.54-dc527594.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.54-dc527594.tar.bz2",
+          "checksum": "SHA-256:91f577e0095df0c96c1e9a55967de06ebe69dfbd986096a41f03b6679211bdef",
+          "size": "25910849",
           "help": {
             "online": "https://github.com/lolren/nrf54-arduino-core"
           },
