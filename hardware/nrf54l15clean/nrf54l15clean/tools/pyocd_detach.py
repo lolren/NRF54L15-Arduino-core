@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""Detach CMSIS-DAP probe so SYSTEM OFF works after upload.
-Resumes CPU (if halted after --no-reset flash) then disconnects probe."""
-import sys, os, time
+"""Detach CMSIS-DAP probe so SYSTEM OFF works after upload."""
+import sys, os, subprocess
+
+def find_pyocd_cmd():
+    """Find pyocd command path."""
+    try:
+        r = subprocess.run(['which', 'pyocd'], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0: return r.stdout.strip()
+    except: pass
+    for p in ['/home/lolren/.local/bin/pyocd', '/home/lolren/pinokio/bin/miniconda/bin/pyocd']:
+        if os.path.isfile(p): return p
+    return None
 
 def detach(target, uid):
-    for p in ['/home/lolren/.local/lib/python3.10/site-packages',
-              '/home/lolren/pinokio/bin/miniconda/lib/python3.10/site-packages']:
-        if os.path.isdir(p): sys.path.insert(0, p)
+    pyocd = find_pyocd_cmd()
+    if not pyocd: return False
+    cmd = [pyocd, 'commander', '-W', '-t', target]
+    if uid: cmd.extend(['-u', uid])
+    cmd.extend(['-c', 'resume'])
     try:
-        from pyocd.core.helpers import ConnectHelper
-        import logging; logging.disable(logging.CRITICAL)
-        with ConnectHelper.session_with_chosen_probe(
-            target_override=target, unique_id=uid or None, connect_mode='attach'
-        ) as session:
-            session.target.resume()  # Resume if halted after --no-reset
-            time.sleep(0.5)  # Give CPU time to start
+        subprocess.run(cmd, timeout=5.0, capture_output=True)
         return True
     except:
         return False
