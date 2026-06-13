@@ -34,12 +34,31 @@ fi
 
 # ── 2. Determine and set version ────────────────────────────────
 PLATFORM_TXT="hardware/nrf54l15clean/nrf54l15clean/platform.txt"
+CORE_VERSION_L15="hardware/nrf54l15clean/nrf54l15clean/cores/nrf54l15/CoreVersionGenerated.h"
+CORE_VERSION_LM20="hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/CoreVersionGenerated.h"
 if [ -n "${1:-}" ]; then
     VERSION="$1"
     sed -i "s/^version=.*/version=$VERSION/" "$PLATFORM_TXT"
 else
     VERSION=$(grep "^version=" "$PLATFORM_TXT" | cut -d= -f2)
 fi
+
+IFS=. read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH_EXTRA <<< "$VERSION"
+VERSION_PATCH="${VERSION_PATCH_EXTRA%%[^0-9]*}"
+if [ -z "${VERSION_MAJOR:-}" ] || [ -z "${VERSION_MINOR:-}" ] || [ -z "${VERSION_PATCH:-}" ]; then
+    echo "ERROR: Version must look like MAJOR.MINOR.PATCH"
+    exit 1
+fi
+
+for CORE_VERSION in "$CORE_VERSION_L15" "$CORE_VERSION_LM20"; do
+    sed -i "s/^#define ARDUINO_NRF54L15_CLEAN_VERSION_MAJOR .*/#define ARDUINO_NRF54L15_CLEAN_VERSION_MAJOR $VERSION_MAJOR/" "$CORE_VERSION"
+    sed -i "s/^#define ARDUINO_NRF54L15_CLEAN_VERSION_MINOR .*/#define ARDUINO_NRF54L15_CLEAN_VERSION_MINOR $VERSION_MINOR/" "$CORE_VERSION"
+    sed -i "s/^#define ARDUINO_NRF54L15_CLEAN_VERSION_PATCH .*/#define ARDUINO_NRF54L15_CLEAN_VERSION_PATCH $VERSION_PATCH/" "$CORE_VERSION"
+    sed -i "s/^#define ARDUINO_NRF54L15_CLEAN_VERSION_STRING .*/#define ARDUINO_NRF54L15_CLEAN_VERSION_STRING \"$VERSION\"/" "$CORE_VERSION"
+done
+
+git add "$PLATFORM_TXT" "$CORE_VERSION_L15" "$CORE_VERSION_LM20"
+ARCHIVE_TREE=$(git write-tree)
 echo "=== Release v$VERSION ==="
 
 # ── 3. Build core archive ──────────────────────────────────────
@@ -47,7 +66,7 @@ ARCHIVE="nrf54l15clean-${VERSION}.tar.bz2"
 PACKAGE_TMP=$(mktemp -d)
 git archive --format=tar \
     --prefix="nrf54l15clean/" \
-    HEAD:hardware/nrf54l15clean/nrf54l15clean/ | \
+    "$ARCHIVE_TREE:hardware/nrf54l15clean/nrf54l15clean/" | \
     tar -C "$PACKAGE_TMP" -xf -
 
 while IFS= read -r LINK_PATH; do
@@ -163,7 +182,7 @@ print(f"Package index updated: v{VERSION}")
 PYEOF
 
 # ── 6. Commit & push ────────────────────────────────────────────
-git add "$PLATFORM_TXT" "$INDEX"
+git add "$PLATFORM_TXT" "$CORE_VERSION_L15" "$CORE_VERSION_LM20" "$INDEX"
 git commit -m "release: v$VERSION"
 git push origin main
 
