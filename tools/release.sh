@@ -10,24 +10,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# ── 1. Determine version ──────────────────────────────────────
-PLATFORM_TXT="hardware/nrf54l15clean/nrf54l15clean/platform.txt"
-if [ -n "${1:-}" ]; then
-    VERSION="$1"
-    # Update platform.txt
-    sed -i "s/^version=.*/version=$VERSION/" "$PLATFORM_TXT"
-else
-    VERSION=$(grep "^version=" "$PLATFORM_TXT" | cut -d= -f2)
-fi
-echo "=== Release v$VERSION ==="
-
-# ── 2. Check clean state ───────────────────────────────────────
+# ── 1. Check clean state ───────────────────────────────────────
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "ERROR: Uncommitted changes. Commit or stash first."
     exit 1
 fi
 
-# ── 3. Build core archive ──────────────────────────────────────
+# ── 2. Determine and set version ──────────────────────────────── ──────────────────────────────────────
 ARCHIVE="nrf54l15clean-${VERSION}.tar.bz2"
 git archive --format=tar \
     --prefix="nrf54l15clean/" \
