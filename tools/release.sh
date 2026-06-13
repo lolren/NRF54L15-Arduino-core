@@ -9,6 +9,22 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+PACKAGE_TMP=""
+ARCHIVE_LIST=""
+ARCHIVE_TABLE=""
+
+cleanup_release_tmp() {
+    if [ -n "$PACKAGE_TMP" ]; then
+        rm -rf "$PACKAGE_TMP"
+    fi
+    if [ -n "$ARCHIVE_LIST" ]; then
+        rm -f "$ARCHIVE_LIST"
+    fi
+    if [ -n "$ARCHIVE_TABLE" ]; then
+        rm -f "$ARCHIVE_TABLE"
+    fi
+}
+trap cleanup_release_tmp EXIT
 
 # ── 1. Check clean state ───────────────────────────────────────
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -28,9 +44,24 @@ echo "=== Release v$VERSION ==="
 
 # ── 3. Build core archive ──────────────────────────────────────
 ARCHIVE="nrf54l15clean-${VERSION}.tar.bz2"
+PACKAGE_TMP=$(mktemp -d)
 git archive --format=tar \
     --prefix="nrf54l15clean/" \
     HEAD:hardware/nrf54l15clean/nrf54l15clean/ | \
+    tar -C "$PACKAGE_TMP" -xf -
+
+while IFS= read -r LINK_PATH; do
+    TARGET=$(readlink "$LINK_PATH")
+    TARGET_PATH="$(dirname "$LINK_PATH")/$TARGET"
+    if [ ! -e "$TARGET_PATH" ]; then
+        echo "ERROR: Broken symlink in package tree: $LINK_PATH -> $TARGET"
+        exit 1
+    fi
+    rm "$LINK_PATH"
+    cp -aL "$TARGET_PATH" "$LINK_PATH"
+done < <(find "$PACKAGE_TMP/nrf54l15clean" -type l)
+
+tar -C "$PACKAGE_TMP" -cf - "nrf54l15clean" | \
     bzip2 > "/tmp/$ARCHIVE"
 
 CHECKSUM=$(sha256sum "/tmp/$ARCHIVE" | awk '{print $1}')
@@ -46,17 +77,14 @@ tar tvjf "/tmp/$ARCHIVE" > "$ARCHIVE_TABLE"
 SYMLINKS=$(grep -c "^l" "$ARCHIVE_TABLE" || true)
 if [ "$SYMLINKS" -gt 0 ]; then
     echo "ERROR: Archive contains $SYMLINKS symlinks! Windows will fail."
-    rm -f "$ARCHIVE_LIST" "$ARCHIVE_TABLE"
     exit 1
 fi
 # Check single root directory
 ROOT_DIRS=$(cut -d/ -f1 "$ARCHIVE_LIST" | sort -u | wc -l)
 if [ "$ROOT_DIRS" -ne 1 ]; then
     echo "ERROR: Archive must have a single root directory"
-    rm -f "$ARCHIVE_LIST" "$ARCHIVE_TABLE"
     exit 1
 fi
-rm -f "$ARCHIVE_LIST" "$ARCHIVE_TABLE"
 echo "Archive verified: no symlinks, single root dir ✅"
 
 # ── 5. Update package index ─────────────────────────────────────
