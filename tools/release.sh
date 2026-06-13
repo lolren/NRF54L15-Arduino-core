@@ -16,7 +16,17 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
-# ── 2. Determine and set version ──────────────────────────────── ──────────────────────────────────────
+# ── 2. Determine and set version ────────────────────────────────
+PLATFORM_TXT="hardware/nrf54l15clean/nrf54l15clean/platform.txt"
+if [ -n "${1:-}" ]; then
+    VERSION="$1"
+    sed -i "s/^version=.*/version=$VERSION/" "$PLATFORM_TXT"
+else
+    VERSION=$(grep "^version=" "$PLATFORM_TXT" | cut -d= -f2)
+fi
+echo "=== Release v$VERSION ==="
+
+# ── 3. Build core archive ──────────────────────────────────────
 ARCHIVE="nrf54l15clean-${VERSION}.tar.bz2"
 git archive --format=tar \
     --prefix="nrf54l15clean/" \
