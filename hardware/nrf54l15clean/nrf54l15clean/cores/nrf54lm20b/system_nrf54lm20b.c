@@ -134,8 +134,21 @@ void SystemInit(void)
     /* PLL is already at 64 MHz by default on LM20B — no change needed */
 
 #if !defined(NRF_TRUSTZONE_NONSECURE)
+    /* Force green LED (P1.24) HIGH before debug signal init.
+     * Debug signal enabling can cause the probe to drive P1.24 as SWO,
+     * lighting the active-low LED. Pre-initialize it to OUTPUT HIGH. */
+    NRF_P1->DIRSET = (1UL << 24);
+    NRF_P1->OUTSET = (1UL << 24);
+
     zephyrApplySystemInitParity();
     zephyrApplyClockTrimParity();
+
+    /* Re-assert P1.24 after debug signal enabling in case probe stole it */
+    NRF_P1->DIRSET = (1UL << 24);
+    NRF_P1->OUTSET = (1UL << 24);
+    /* Also set all RGB pins through normal GPIO path */
+    NRF_P1->DIRSET = (1UL << 22) | (1UL << 23);
+    NRF_P1->OUTSET = (1UL << 22) | (1UL << 23) | (1UL << 24);
 #endif
     SystemCoreClockUpdate();
 }

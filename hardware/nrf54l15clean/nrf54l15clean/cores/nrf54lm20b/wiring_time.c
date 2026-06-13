@@ -739,11 +739,13 @@ static void programSystemOffWakeUs(uint32_t delayUs)
 
 static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
 {
-    // Check RESETREAS for debug-triggered reset.
-    // In Debug Interface mode, SYSTEM OFF is emulated (CPU stays on),
-    // causing a reboot loop. Skip real SYSTEM OFF and just delay.
-    // SREQ(bit6)=sysresetreq, CTRLAPSOFT(3)=debug soft, CTRLAPHARD(4)=debug hard
-    if (NRF_RESET->RESETREAS & 0x58UL) {  // bits 3,4,6 = debug/sysreq reset
+    // Skip SYSTEM OFF when reset was triggered by debug probe or external
+    // reset button. In Debug Interface mode, SYSTEM OFF is emulated (CPU
+    // keeps running) and writing SYSTEMOFF causes a reset loop.
+    // Only allow real SYSTEMOFF when RESETREAS is clean or shows OFF bit
+    // (wake from previous SYSTEMOFF = debug probe already disconnected).
+    // OFF = bit 8 (wake from System OFF)
+    if (NRF_RESET->RESETREAS & ~(1UL << 8UL)) {
         delayMicroseconds(delayUs);
         return;
     }

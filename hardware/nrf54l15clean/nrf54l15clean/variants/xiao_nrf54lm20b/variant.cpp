@@ -10,7 +10,7 @@
 #include "variant.h"
 #include "Arduino.h"
 
-void initVariant(void)
+extern "C" void initVariant(void)
 {
     // Initialize RGB LED pins as outputs (off = HIGH for active-low)
     pinMode(PIN_LED_RED, OUTPUT);
@@ -28,11 +28,6 @@ void initVariant(void)
     // deep power-down by default so simple low-power sketches are not charged
     // for an awake external flash. XiaoQspiFlash.begin() wakes it again.
     (void)xiaoNrf54lm20QspiFlashPrepareForSleep();
-    
-    // Quick LED flash to confirm boot
-    digitalWrite(PIN_LED_GREEN, LOW);
-    delay(50);
-    digitalWrite(PIN_LED_GREEN, HIGH);
     
     // PMIC-controlled rails are intentionally opt-in. Sketches that need the
     // IMU/MIC rail should include npm1300.h and enable the required LDO.

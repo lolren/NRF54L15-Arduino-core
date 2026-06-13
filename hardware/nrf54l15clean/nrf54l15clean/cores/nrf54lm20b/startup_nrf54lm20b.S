@@ -151,6 +151,14 @@ Reset_Handler:
     /* Disable interrupts */
     cpsid i
 
+    /* Force green LED (P1.24) HIGH immediately — external pull-down on board
+     * keeps it LOW (LED on) during early boot before SystemInit/initVariant. */
+    ldr r0, =0x500D8214    /* NRF_P1->DIRSET */
+    mov r1, #0x1000000     /* (1 << 24) */
+    str r1, [r0]
+    ldr r0, =0x500D8204    /* NRF_P1->OUTSET */
+    str r1, [r0]
+
     /* Copy .data section from FLASH (sidata) to RAM (sdata..edata). */
     ldr r0, =_sidata         /* SRC: .data load address in FLASH */
     ldr r1, =_sdata          /* DST: .data start in RAM */
