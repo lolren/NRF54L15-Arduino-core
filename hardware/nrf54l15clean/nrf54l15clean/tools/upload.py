@@ -1206,11 +1206,9 @@ def upload_pyocd(
     # Detach debug probe so SYSTEM OFF sleep works after upload.
     # Without this, the debug connection prevents proper SYSTEM OFF entry.
     if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
-        detach_cmd = [*pyocd_cmd, "commander", "-W", "-t", target]
-        detach_cmd = append_uid(detach_cmd, uid)
-        detach_cmd = append_connect_mode(detach_cmd, last_connect_mode)
-        detach_cmd.extend(["-c", "resume"])
-        run(detach_cmd, timeout=5.0)  # best-effort, ignore failures
+        detach_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyocd_detach.py")
+        if os.path.isfile(detach_script):
+            subprocess.run([sys.executable, detach_script, target, uid or ""], timeout=10.0)
     return 0
 
 
