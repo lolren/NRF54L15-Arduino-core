@@ -138,6 +138,23 @@ void loop() {}
 
 ---
 
+## SPI Speed And Routing
+
+| Board family | External Arduino `SPI` pins | Implemented max on exposed pins | `SPI_HS` / 32 MHz status |
+|---|---|---|---|
+| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the nRF54L15 high-speed `SPIM00` route | 32 MHz requestable through `SPISettings(SPI_CLOCK_32M, ...)` | `SPI_HS` aliases `SPI`, so the normal header SPI path is the HS path |
+| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` SPI route on nRF54L15 `SPIM00` | 32 MHz requestable where board wiring and the attached device allow it | `SPI_HS` aliases `SPI` |
+| **XIAO nRF54LM20A / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on serial-fabric `SPIM22` | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
+
+Notes:
+
+- The **64 MHz / 128 MHz CPU menu does not set the SPI SCK ceiling**. SPI speed comes from the selected SPIM peripheral clock and its prescaler.
+- On **LM20A**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
+- On **LM20A**, the 32 MHz `SPI_HS` path is useful for the onboard QSPI flash and deliberate advanced probing of the flash pads. The schematic does not expose that HS bus on the normal XIAO header.
+- Examples: `File > Examples > Peripherals > HighSpeedSpi32MHzProbe` and `File > Examples > XiaoLM20A > QspiFlashInfo`.
+
+---
+
 ## 📊 Stack Maturity
 
 | Stack | Lines | Maturity | Production Ready? |
