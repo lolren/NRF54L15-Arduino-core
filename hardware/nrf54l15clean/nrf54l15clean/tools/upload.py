@@ -1021,7 +1021,7 @@ def flash_hex(
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     if not auto_unlock:
         cmd.extend(["-O", "auto_unlock=false"])
-    cmd.extend([hex_path, "--format", "hex", "--no-reset"])
+    cmd.extend([hex_path, "--format", "hex"])
     result = run(cmd, timeout=pyocd_timeout_seconds())
     print_result(result)
     return result
@@ -1191,14 +1191,17 @@ def upload_pyocd(
         print("If the sketch does not start, press RESET or power-cycle the board.")
         return 0
 
-    # Disconnect debug probe so SYSTEM OFF sleep works after upload.
-    # The debug interface prevents SYSTEM OFF entry while connected.
+    reset_cmd = [*pyocd_cmd, "reset"]
+    reset_cmd = append_pyocd_target_script(reset_cmd, target)
+    reset_cmd.extend(["-W", "-t", target])
+    reset_cmd = append_uid(reset_cmd, uid)
+    reset_cmd = append_connect_mode(reset_cmd, last_connect_mode)
+    reset_cmd = append_pyocd_safe_options(reset_cmd, safe_mode)
     if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
-        detach_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyocd_detach.py")
-        try:
-            subprocess.run(["python3", detach_script, target, uid or ""], timeout=5.0, capture_output=True)
-        except (Exception, subprocess.TimeoutExpired):
-            pass  # best-effort, non-fatal
+        reset_cmd.extend(["-m", "sysresetreq"])
+        reset_cmd.extend(["-O", "auto_unlock=false"])
+    reset_result = run(reset_cmd, timeout=pyocd_timeout_seconds())
+    print_result(reset_result)
     return 0
 
 
