@@ -1202,6 +1202,15 @@ def upload_pyocd(
         reset_cmd.extend(["-O", "auto_unlock=false"])
     reset_result = run(reset_cmd, timeout=pyocd_timeout_seconds())
     print_result(reset_result)
+
+    # Disconnect debug probe so SYSTEM OFF sleep works after upload.
+    # The debug interface prevents SYSTEM OFF entry while connected.
+    if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
+        detach_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyocd_detach.py")
+        try:
+            subprocess.run(["python3", detach_script, target, uid or ""], timeout=5.0, capture_output=True)
+        except (Exception, subprocess.TimeoutExpired):
+            pass  # best-effort, non-fatal
     return 0
 
 
