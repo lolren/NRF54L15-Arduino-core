@@ -114,18 +114,9 @@ gh release create "v$VERSION" "/tmp/$ARCHIVE" \
     --title "v$VERSION" \
     --notes "Release v$VERSION"
 
-# ── 8. Upload host tools (from cached copies) ──────────────────
-TOOLS_CACHE="/tmp"
-TOOLS_VERSION="1.1.4"
-echo "Uploading host tools ${TOOLS_VERSION}..."
-for f in "$TOOLS_CACHE"/nrf54l15hosttools-${TOOLS_VERSION}-*.tar.bz2 \
-         "$TOOLS_CACHE"/nrf54l15hosttools-${TOOLS_VERSION}-*.zip; do
-    [ -f "$f" ] || continue
-    echo "  $(basename $f)..."
-    gh release upload "v$VERSION" "$f" --clobber 2>/dev/null || true
-done
-
 echo ""
 echo "✅ v$VERSION released!"
 echo "   Archive: /tmp/$ARCHIVE"
 echo "   Install: arduino-cli core install nrf54l15clean:nrf54l15clean@$VERSION"
+echo ""
+echo "   Host tools are served from the v0.9.53 release — no need to re-upload."
