@@ -12,12 +12,12 @@
         {
           "name": "nRF54L15 Boards",
           "architecture": "nrf54l15clean",
-          "version": "0.9.59",
+          "version": "0.9.58",
           "category": "Contributed",
-          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.59/nrf54l15clean-0.9.59.tar.bz2",
-          "archiveFileName": "nrf54l15clean-0.9.59.tar.bz2",
-          "checksum": "SHA-256:663b01af9fd2d359f3b39d46ed98794a11e258937467100f244d03bfe87ae78b",
-          "size": "26210245",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.58/nrf54l15clean-0.9.58.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.58.tar.bz2",
+          "checksum": "SHA-256:e902ce85589423c6ae4747845051ba1826ce727d5c402c569f079d7a02ea8917",
+          "size": "26213353",
           "help": {
             "online": "https://github.com/lolren/nrf54-arduino-core"
           },
@@ -53,12 +53,12 @@
         {
           "name": "nRF54L15 Boards",
           "architecture": "nrf54l15clean",
-          "version": "0.9.58",
+          "version": "0.9.59",
           "category": "Contributed",
-          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.58/nrf54l15clean-0.9.58.tar.bz2",
-          "archiveFileName": "nrf54l15clean-0.9.58.tar.bz2",
-          "checksum": "SHA-256:8394cbe3d4014f9050bd6f9538b1edf091c50592ecca3e77bb2aa71175dac85d",
-          "size": "26208511",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.59/nrf54l15clean-0.9.59.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.59.tar.bz2",
+          "checksum": "SHA-256:663b01af9fd2d359f3b39d46ed98794a11e258937467100f244d03bfe87ae78b",
+          "size": "26210245",
           "help": {
             "online": "https://github.com/lolren/nrf54-arduino-core"
           },
