@@ -158,6 +158,25 @@ static void ensureSystemOffLfxoRunning(void)
     (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFXO, kLfxoStartSpinLimit);
 }
 
+static uint32_t selectRunningGrtcLfClockSource(void)
+{
+    ensureSystemOffLfxoRunning();
+    if (lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
+        return GRTC_CLKCFG_CLKSEL_LFXO;
+    }
+
+    if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)) {
+        startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFRC);
+        static const uint32_t kQuickLfrcLimit = 10000000UL;
+        (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC,
+                                  kQuickLfrcLimit);
+    }
+
+    return lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)
+               ? GRTC_CLKCFG_CLKSEL_SystemLFCLK
+               : GRTC_CLKCFG_CLKSEL_LFXO;
+}
+
 static bool grtcSyscounterReady(NRF_GRTC_Type* grtc)
 {
     (void)NRF54L15_GRTC_SYSCOUNTER(grtc).SYSCOUNTERL;
@@ -353,11 +372,12 @@ static void initLowPowerTimebase(void)
         return;
     }
 
-    ensureSystemOffLfxoRunning();
+    const uint32_t grtcClockSel = selectRunningGrtcLfClockSource();
 
     uint32_t clkcfg = g_low_power_grtc->CLKCFG;
     clkcfg &= ~GRTC_CLKCFG_CLKSEL_Msk;
-    clkcfg |= (GRTC_CLKCFG_CLKSEL_LFXO << GRTC_CLKCFG_CLKSEL_Pos);
+    clkcfg |= (grtcClockSel << GRTC_CLKCFG_CLKSEL_Pos) &
+              GRTC_CLKCFG_CLKSEL_Msk;
     g_low_power_grtc->CLKCFG = clkcfg;
 
     g_low_power_grtc->TIMEOUT =
@@ -618,7 +638,8 @@ static uint32_t clampSystemOffDelayUs(uint32_t delayUs)
     return delayUs;
 }
 
-static void configureSystemOffWakeSleep(NRF_GRTC_Type* grtc)
+static void configureSystemOffWakeSleep(NRF_GRTC_Type* grtc,
+                                        uint32_t grtcClockSel)
 {
     uint32_t mode = grtc->MODE;
     mode &= ~(GRTC_MODE_AUTOEN_Msk | GRTC_MODE_SYSCOUNTEREN_Msk);
@@ -629,7 +650,8 @@ static void configureSystemOffWakeSleep(NRF_GRTC_Type* grtc)
 
     uint32_t clkcfg = grtc->CLKCFG;
     clkcfg &= ~GRTC_CLKCFG_CLKSEL_Msk;
-    clkcfg |= (GRTC_CLKCFG_CLKSEL_LFXO << GRTC_CLKCFG_CLKSEL_Pos);
+    clkcfg |= (grtcClockSel << GRTC_CLKCFG_CLKSEL_Pos) &
+              GRTC_CLKCFG_CLKSEL_Msk;
     grtc->CLKCFG = clkcfg;
 
     grtc->TIMEOUT = (((uint32_t)kSystemOffTimeoutLfclk << GRTC_TIMEOUT_VALUE_Pos) &
@@ -678,18 +700,8 @@ static void programSystemOffWakeUs(uint32_t delayUs)
     delayUs = clampSystemOffDelayUs(delayUs);
 
     nrf54l15_core_prepare_system_off_wake_timebase();
-    ensureSystemOffLfxoRunning();
-    
-    // If LFXO failed to start (cold boot), fall back to LFRC
-    // so SYSTEM OFF wake always works. LFRC is less accurate
-    // but starts in <1ms vs LFXO's ~500ms crystal stabilization.
-    if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO) &&
-        !lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)) {
-        startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFRC);
-        static const uint32_t kQuickLfrcLimit = 10000000UL;
-        waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC, kQuickLfrcLimit);
-    }
-    configureSystemOffWakeSleep(grtc);
+    const uint32_t grtcClockSel = selectRunningGrtcLfClockSource();
+    configureSystemOffWakeSleep(grtc, grtcClockSel);
 
     const uint8_t wakeChannel = systemOffWakeChannel();
     for (uint8_t channel = 0U; channel < GRTC_CC_MaxCount; ++channel) {
