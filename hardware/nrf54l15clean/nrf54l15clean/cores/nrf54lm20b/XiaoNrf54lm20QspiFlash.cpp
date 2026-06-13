@@ -5,12 +5,17 @@
 namespace {
 
 static constexpr uint8_t kCmdWriteDisable = 0x04U;
+static constexpr uint8_t kCmdWriteEnable = 0x06U;
 static constexpr uint8_t kCmdReadStatus1 = 0x05U;
 static constexpr uint8_t kCmdReadData = 0x03U;
+static constexpr uint8_t kCmdPageProgram = 0x02U;
+static constexpr uint8_t kCmdSectorErase4k = 0x20U;
+static constexpr uint8_t kCmdChipErase = 0xC7U;
 static constexpr uint8_t kCmdReadJedecId = 0x9FU;
 static constexpr uint8_t kCmdDeepPowerDown = 0xB9U;
 static constexpr uint8_t kCmdReleasePowerDown = 0xABU;
 static constexpr uint32_t kDefaultTimeoutMs = 100UL;
+static constexpr size_t kPageSize = 256U;
 
 static bool is_blank_or_floating_id(const uint8_t id[3]) {
     return ((id[0] == 0x00U && id[1] == 0x00U && id[2] == 0x00U) ||
@@ -92,6 +97,160 @@ bool XiaoNrf54lm20QspiFlash::prepareForSleep() {
     return ok;
 }
 
+bool XiaoNrf54lm20QspiFlash::runCommand(uint8_t command) {
+    if (!_begun) {
+        return false;
+    }
+
+    if (!wakeUp()) {
+        return false;
+    }
+
+    SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));
+    select();
+    (void)transferByte(command);
+    deselect();
+    SPI_HS.endTransaction();
+    return true;
+}
+
+bool XiaoNrf54lm20QspiFlash::readCommand(uint8_t command,
+                                         uint8_t* data,
+                                         size_t length) {
+    if (!_begun || (length > 0U && data == nullptr)) {
+        return false;
+    }
+
+    if (!wakeUp()) {
+        return false;
+    }
+
+    SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));
+    select();
+    (void)transferByte(command);
+    for (size_t i = 0; i < length; ++i) {
+        data[i] = transferByte(0xFFU);
+    }
+    deselect();
+    SPI_HS.endTransaction();
+    return true;
+}
+
+bool XiaoNrf54lm20QspiFlash::writeEnable() {
+    if (!_begun) {
+        return false;
+    }
+
+    if (!wakeUp()) {
+        return false;
+    }
+
+    SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));
+    select();
+    (void)transferByte(kCmdWriteEnable);
+    deselect();
+    SPI_HS.endTransaction();
+    return true;
+}
+
+bool XiaoNrf54lm20QspiFlash::waitReady(uint32_t timeoutMs) {
+    if (!_begun) {
+        return false;
+    }
+
+    const uint32_t startMs = millis();
+    uint8_t status = 0x01U;
+    while ((status & 0x01U) != 0U) {
+        if (!readStatus(&status)) {
+            return false;
+        }
+        if ((millis() - startMs) > timeoutMs) {
+            return false;
+        }
+        if ((status & 0x01U) != 0U) {
+            delay(1);
+        }
+    }
+    return true;
+}
+
+bool XiaoNrf54lm20QspiFlash::eraseSector(uint32_t address) {
+    if (!_begun || !writeEnable()) {
+        return false;
+    }
+
+    SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));
+    select();
+    (void)transferByte(kCmdSectorErase4k);
+    (void)transferByte(static_cast<uint8_t>((address >> 16U) & 0xFFU));
+    (void)transferByte(static_cast<uint8_t>((address >> 8U) & 0xFFU));
+    (void)transferByte(static_cast<uint8_t>(address & 0xFFU));
+    deselect();
+    SPI_HS.endTransaction();
+    return waitReady(1000UL);
+}
+
+bool XiaoNrf54lm20QspiFlash::eraseChip(uint32_t timeoutMs) {
+    if (!_begun || !writeEnable()) {
+        return false;
+    }
+
+    SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));
+    select();
+    (void)transferByte(kCmdChipErase);
+    deselect();
+    SPI_HS.endTransaction();
+    return waitReady(timeoutMs);
+}
+
+bool XiaoNrf54lm20QspiFlash::writePage(uint32_t address,
+                                       const uint8_t* data,
+                                       size_t length) {
+    if (!_begun || data == nullptr || length == 0U || length > kPageSize) {
+        return false;
+    }
+
+    const size_t pageRemaining = kPageSize - (address & (kPageSize - 1U));
+    if (length > pageRemaining || !writeEnable()) {
+        return false;
+    }
+
+    SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));
+    select();
+    (void)transferByte(kCmdPageProgram);
+    (void)transferByte(static_cast<uint8_t>((address >> 16U) & 0xFFU));
+    (void)transferByte(static_cast<uint8_t>((address >> 8U) & 0xFFU));
+    (void)transferByte(static_cast<uint8_t>(address & 0xFFU));
+    for (size_t i = 0; i < length; ++i) {
+        (void)transferByte(data[i]);
+    }
+    deselect();
+    SPI_HS.endTransaction();
+    return waitReady(kDefaultTimeoutMs);
+}
+
+bool XiaoNrf54lm20QspiFlash::write(uint32_t address,
+                                   const uint8_t* data,
+                                   size_t length) {
+    if (!_begun || data == nullptr) {
+        return false;
+    }
+
+    size_t offset = 0U;
+    while (offset < length) {
+        const size_t pageRemaining = kPageSize - ((address + offset) & (kPageSize - 1U));
+        size_t chunk = length - offset;
+        if (chunk > pageRemaining) {
+            chunk = pageRemaining;
+        }
+        if (!writePage(address + offset, data + offset, chunk)) {
+            return false;
+        }
+        offset += chunk;
+    }
+    return true;
+}
+
 bool XiaoNrf54lm20QspiFlash::readJedecId(uint8_t idOut[3]) {
     if (idOut == nullptr || !_begun) {
         return false;
@@ -150,18 +309,8 @@ bool XiaoNrf54lm20QspiFlash::read(uint32_t address, uint8_t* data, size_t length
         return false;
     }
 
-    const uint32_t startMs = millis();
-    uint8_t status = 0x01U;
-    while ((status & 0x01U) != 0U) {
-        if (!readStatus(&status)) {
-            return false;
-        }
-        if ((millis() - startMs) > kDefaultTimeoutMs) {
-            return false;
-        }
-        if ((status & 0x01U) != 0U) {
-            delay(1);
-        }
+    if (!waitReady(kDefaultTimeoutMs)) {
+        return false;
     }
 
     SPI_HS.beginTransaction(SPISettings(_clockHz, MSBFIRST, SPI_MODE0));

@@ -1,0 +1,6 @@
+#ifndef ADAFRUIT_FLASHTRANSPORT_QSPI_NRF54_COMPAT_H
+#define ADAFRUIT_FLASHTRANSPORT_QSPI_NRF54_COMPAT_H
+
+#include "qspi/Adafruit_FlashTransport_QSPI_NRF54.h"
+
+#endif

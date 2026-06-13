@@ -63,7 +63,13 @@ static const IRQn_Type kLowPowerTickIrq = GRTC_1_IRQn;
 static const IRQn_Type kLowPowerTickIrq = GRTC_0_IRQn;
 #endif
 #endif
-#if defined(ARDUINO_XIAO_NRF54L15) || defined(ARDUINO_XIAO_NRF54L15_CLEAN)
+#if defined(ARDUINO_XIAO_NRF54L15) || defined(ARDUINO_XIAO_NRF54L15_CLEAN) || \
+    defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B) || \
+    defined(ARDUINO_XIAO_NRF54LM20A_CLEAN) || defined(ARDUINO_XIAO_NRF54LM20B_CLEAN)
+#define NRF54_CLEAN_XIAO_GRTC_RESTRICTED 1
+#endif
+
+#if defined(NRF54_CLEAN_XIAO_GRTC_RESTRICTED)
 static const uint32_t kZephyrAllowedCcMaskXiao = 0x67UL;
 static const uint8_t kZephyrMainCcChannelXiao = 1U;
 #endif
@@ -376,7 +382,7 @@ static void initLowPowerTimebase(void)
             ? nrf54l15_ble_grtc_reserved_cc_mask()
             : 0U;
     uint32_t availableMask = lowPowerAllCcMask() & ~bleReservedMask;
-#if defined(ARDUINO_XIAO_NRF54L15) || defined(ARDUINO_XIAO_NRF54L15_CLEAN)
+#if defined(NRF54_CLEAN_XIAO_GRTC_RESTRICTED)
     availableMask &= kZephyrAllowedCcMaskXiao;
 #endif
     g_low_power_delay_channel =
@@ -558,7 +564,7 @@ static uint8_t delayAutoBoardStateEnabled(void)
 
 static uint8_t systemOffWakeChannel(void)
 {
-#if defined(ARDUINO_XIAO_NRF54L15) || defined(ARDUINO_XIAO_NRF54L15_CLEAN)
+#if defined(NRF54_CLEAN_XIAO_GRTC_RESTRICTED)
     const uint32_t available =
         kZephyrAllowedCcMaskXiao & ~(1UL << kZephyrMainCcChannelXiao);
     return highestSetBit(available);
@@ -653,8 +659,10 @@ static void armSystemOffWakeCompare(NRF_GRTC_Type* grtc,
          GRTC_CC_CCH_CCH_Pos) &
         GRTC_CC_CCH_CCH_Msk;
     NRF54L15_GRTC_INTENSET_REG(grtc) = (1UL << wakeChannel);
+    __asm volatile("dsb 0xF" ::: "memory");
     grtc->CC[wakeChannel].CCEN =
         (GRTC_CC_CCEN_ACTIVE_Enable << GRTC_CC_CCEN_ACTIVE_Pos);
+    __asm volatile("dsb 0xF" ::: "memory");
 }
 
 static void waitForSystemOffWakeLatch(void)

@@ -126,7 +126,7 @@ void loop() {}
 | **VPR RISC‑V Coprocessor** | ✅ |
 | **SoftPeripheral SDK + sQSPI** | ✅ |
 | **nPM1300 PMIC Driver** | ✅ |
-| **LM20A QSPI Flash Sleep** | ✅ |
+| **LM20A QSPI Flash + Sleep** | ✅ |
 | **GPIO Bit‑Bang I²C** (zero residual) | ✅ |
 | **Buck Hysteretic Mode** (µA sleep) | ✅ |
 | **LM20A IMU** (LSM6DS3TR‑C) | ✅ |
@@ -151,7 +151,23 @@ Notes:
 - The **64 MHz / 128 MHz CPU menu does not set the SPI SCK ceiling**. SPI speed comes from the selected SPIM peripheral clock and its prescaler.
 - On **LM20A**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
 - On **LM20A**, the 32 MHz `SPI_HS` path is useful for the onboard QSPI flash and deliberate advanced probing of the flash pads. The schematic does not expose that HS bus on the normal XIAO header.
-- Examples: `File > Examples > Peripherals > HighSpeedSpi32MHzProbe` and `File > Examples > XiaoLM20A > QspiFlashInfo`.
+- Examples: `File > Examples > Peripherals > HighSpeedSpi32MHzProbe`, `File > Examples > XiaoLM20A > QspiFlashInfo`, and `File > Examples > Adafruit SPIFlash > FlashInfo`.
+
+## LM20A Onboard QSPI Flash
+
+XIAO nRF54LM20A includes an onboard P25Q64/PY25Q64-class 8 MB flash on the dedicated QSPI/HS-SPI pads. The core exposes it in two layers:
+
+- `XiaoQspiFlash` for board-specific low-level control, including JEDEC read, read/write/erase, and `prepareForSleep()`.
+- `Adafruit_SPIFlash` compatibility with `Adafruit_FlashTransport_QSPI_NRF54`, so sketches can use common `begin()`, `readBuffer()`, `writeBuffer()`, `eraseSector()`, `readJEDECID()`, and `runCommand(0xB9)` style calls.
+
+For low-current sleep on LM20A, put the external flash into deep power-down before sleeping. Use `XiaoQspiFlash.prepareForSleep()` or `flash.runCommand(0xB9); flash.end();` from the SPIFlash-compatible API.
+
+Examples:
+
+- `File > Examples > XiaoLM20A > QspiFlashInfo`
+- `File > Examples > XiaoLM20A > QspiFlashReadWrite`
+- `File > Examples > Adafruit SPIFlash > FlashInfo`
+- `File > Examples > Bluefruit52Lib > Diagnostics > lm20a_spiflash_sleep_adv`
 
 ---
 

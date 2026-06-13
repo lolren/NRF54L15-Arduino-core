@@ -14,6 +14,14 @@ public:
     bool deepPowerDown();
     bool prepareForSleep();
 
+    bool runCommand(uint8_t command);
+    bool readCommand(uint8_t command, uint8_t* data, size_t length);
+    bool writeEnable();
+    bool waitReady(uint32_t timeoutMs = 100UL);
+    bool eraseSector(uint32_t address);
+    bool eraseChip(uint32_t timeoutMs = 60000UL);
+    bool writePage(uint32_t address, const uint8_t* data, size_t length);
+    bool write(uint32_t address, const uint8_t* data, size_t length);
     bool readJedecId(uint8_t idOut[3]);
     uint32_t jedecId();
     bool readStatus(uint8_t* statusOut);
