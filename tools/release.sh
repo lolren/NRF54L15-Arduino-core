@@ -4,8 +4,8 @@
 #   If no version given, reads from platform.txt
 
 set -euo pipefail
-# Allow upload failures (network issues, timeouts on large files)
-# The core archive is what matters — tools can be uploaded later.
+# Core releases upload only the board package archive. Host tools are resolved
+# through package_index toolsDependencies from the permanent host-tools release.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -38,17 +38,25 @@ SIZE=$(stat -c%s "/tmp/$ARCHIVE")
 echo "Core archive: $SIZE bytes, SHA-256:$CHECKSUM"
 
 # ── 4. Verify archive (no symlinks, correct structure) ──────────
-SYMLINKS=$(tar tjf "/tmp/$ARCHIVE" | grep -c "^l" || true)
+ARCHIVE_LIST=$(mktemp)
+ARCHIVE_TABLE=$(mktemp)
+tar tjf "/tmp/$ARCHIVE" > "$ARCHIVE_LIST"
+tar tvjf "/tmp/$ARCHIVE" > "$ARCHIVE_TABLE"
+
+SYMLINKS=$(grep -c "^l" "$ARCHIVE_TABLE" || true)
 if [ "$SYMLINKS" -gt 0 ]; then
     echo "ERROR: Archive contains $SYMLINKS symlinks! Windows will fail."
+    rm -f "$ARCHIVE_LIST" "$ARCHIVE_TABLE"
     exit 1
 fi
 # Check single root directory
-ROOT_DIRS=$(tar tjf "/tmp/$ARCHIVE" | head -1 | cut -d/ -f1 | sort -u | wc -l)
+ROOT_DIRS=$(cut -d/ -f1 "$ARCHIVE_LIST" | sort -u | wc -l)
 if [ "$ROOT_DIRS" -ne 1 ]; then
     echo "ERROR: Archive must have a single root directory"
+    rm -f "$ARCHIVE_LIST" "$ARCHIVE_TABLE"
     exit 1
 fi
+rm -f "$ARCHIVE_LIST" "$ARCHIVE_TABLE"
 echo "Archive verified: no symlinks, single root dir ✅"
 
 # ── 5. Update package index ─────────────────────────────────────
@@ -68,6 +76,31 @@ INDEX = os.environ["INDEX"]
 with open(INDEX) as f:
     data = json.load(f)
 
+host_tools = None
+for pkg in data["packages"]:
+    if pkg["name"] == "nrf54l15clean":
+        for tool in pkg.get("tools", []):
+            if (tool.get("name") == "nrf54l15hosttools" and
+                    tool.get("version") == HOST_TOOLS_VERSION):
+                host_tools = tool
+                break
+        break
+
+if host_tools is None:
+    raise SystemExit(
+        f"Missing nrf54l15hosttools@{HOST_TOOLS_VERSION} in {INDEX}")
+
+expected_release_path = f"/host-tools-v{HOST_TOOLS_VERSION}/"
+bad_urls = [
+    system.get("url", "")
+    for system in host_tools.get("systems", [])
+    if expected_release_path not in system.get("url", "")
+]
+if bad_urls:
+    raise SystemExit(
+        "Host tools must be served from the permanent "
+        f"host-tools-v{HOST_TOOLS_VERSION} release: {bad_urls[0]}")
+
 entry = {
     "name": "nRF54L15 Boards",
     "architecture": "nrf54l15clean",
@@ -79,8 +112,9 @@ entry = {
     "size": SIZE,
     "help": {"online": "https://github.com/lolren/nrf54-arduino-core"},
     "boards": [
-        {"name": "XIAO nRF54L15"},
-        {"name": "XIAO nRF54LM20B"}
+        {"name": "XIAO nRF54L15 / Sense"},
+        {"name": "XIAO nRF54LM20A"},
+        {"name": "HOLYIOT nRF54L15 Modules"}
     ],
     "toolsDependencies": [
         {"packager": "arduino", "name": "arm-none-eabi-gcc", "version": "7-2017q4"},
@@ -118,4 +152,4 @@ echo "✅ v$VERSION released!"
 echo "   Archive: /tmp/$ARCHIVE"
 echo "   Install: arduino-cli core install nrf54l15clean:nrf54l15clean@$VERSION"
 echo ""
-echo "   Host tools are served from the v0.9.53 release — no need to re-upload."
+echo "   Host tools are served from host-tools-v$HOST_TOOLS_VERSION — no per-release tool upload."
