@@ -729,11 +729,28 @@ static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
     // In Debug Interface mode, SYSTEM OFF is emulated (CPU keeps running)
     // and writing SYSTEMOFF causes a reset loop.
     // Also skip if LFXO is not available — LFRC stops during SYSTEM OFF,
-    // so the GRTC wake timer would never fire. Fall back to busy-wait.
+    // so the GRTC wake timer would never fire. Fall back to WFI sleep.
     // SREQ(bit6)=upload, CTRLAPSOFT(3)=debug soft, CTRLAPHARD(4)=debug hard
     if ((NRF_RESET->RESETREAS & ((1UL << 6) | (1UL << 3) | (1UL << 4))) ||
         !lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
-        delayMicroseconds(delayUs);
+        // Disable TAMPC debug signals so WFI can reach deeper sleep
+        const uint32_t key = (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_KEY <<
+                              TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_Pos);
+        const uint32_t wpen = (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_WRITEPROTECTION_Clear <<
+                               TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_WRITEPROTECTION_Pos);
+        const uintptr_t tbc = 0x500EF500UL;
+        volatile uint32_t* r = (volatile uint32_t*)tbc;
+        r[0] = key | wpen; r[0] = key;  // DBGEN = Low
+        r[2] = key | wpen; r[2] = key;  // NIDEN
+        r[4] = key | wpen; r[4] = key;  // SPIDEN
+        r[6] = key | wpen; r[6] = key;  // SPNIDEN
+        __DSB();
+        // Use low-power delay (GRTC + WFI) directly — bypasses the BLE
+        // connection check in delayMicroseconds that blocks sleep.
+        initLowPowerTimebase();
+        const uint64_t targetUs =
+            readLowPowerCounterUs() + (uint64_t)delayUs;
+        delayUntilLowPowerCounterUs(targetUs);
         return;
     }
 
