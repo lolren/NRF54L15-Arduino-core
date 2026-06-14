@@ -139,8 +139,10 @@ static void startLfclkSource(uint32_t src)
 
 static void ensureSystemOffLfxoRunning(void)
 {
-    // LFRC starts in <1ms; LFXO crystal needs 250-500ms.
-    // Spin limits are calibrated at 128 MHz CPU clock.
+    // LFRC starts in <1ms; LFXO crystal needs 250-500ms if present.
+    // Only LFXO runs in System OFF mode. LFRC stops in SYSTEM OFF.
+    // If LFXO doesn't start (no crystal on board), we'll detect this
+    // later and skip real SYSTEM OFF.
     static const uint32_t kLfrcStartSpinLimit  =   2000000UL; // ~15ms
     static const uint32_t kLfxoStartSpinLimit  = 120000000UL; // ~940ms
 
@@ -150,12 +152,11 @@ static void ensureSystemOffLfxoRunning(void)
 
     if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)) {
         startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFRC);
-        if (!waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC,
-                                 kLfrcStartSpinLimit)) {
-            return;
-        }
+        (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC,
+                                  kLfrcStartSpinLimit);
     }
 
+    // Try to start LFXO — may fail if no crystal on board
     startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFXO);
     (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFXO, kLfxoStartSpinLimit);
 }
@@ -739,13 +740,14 @@ static void programSystemOffWakeUs(uint32_t delayUs)
 
 static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
 {
-    // Skip SYSTEM OFF when reset was triggered by debug probe or external
-    // reset button. In Debug Interface mode, SYSTEM OFF is emulated (CPU
-    // keeps running) and writing SYSTEMOFF causes a reset loop.
-    // Only allow real SYSTEMOFF when RESETREAS is clean or shows OFF bit
-    // (wake from previous SYSTEMOFF = debug probe already disconnected).
-    // OFF = bit 8 (wake from System OFF)
-    if (NRF_RESET->RESETREAS & ~(1UL << 8UL)) {
+    // Skip SYSTEM OFF when reset was triggered by the debug probe.
+    // In Debug Interface mode, SYSTEM OFF is emulated (CPU keeps running)
+    // and writing SYSTEMOFF causes a reset loop.
+    // Also skip if LFXO is not available — LFRC stops during SYSTEM OFF,
+    // so the GRTC wake timer would never fire. Fall back to busy-wait.
+    // SREQ(bit6)=upload, CTRLAPSOFT(3)=debug soft, CTRLAPHARD(4)=debug hard
+    if ((NRF_RESET->RESETREAS & ((1UL << 6) | (1UL << 3) | (1UL << 4))) ||
+        !lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
         delayMicroseconds(delayUs);
         return;
     }
