@@ -139,26 +139,11 @@ static void startLfclkSource(uint32_t src)
 
 static void ensureSystemOffLfxoRunning(void)
 {
-    // LFRC starts in <1ms; LFXO crystal needs 250-500ms if present.
-    // Only LFXO runs in System OFF mode. LFRC stops in SYSTEM OFF.
-    // If LFXO doesn't start (no crystal on board), we'll detect this
-    // later and skip real SYSTEM OFF.
-    static const uint32_t kLfrcStartSpinLimit  =   2000000UL; // ~15ms
-    static const uint32_t kLfxoStartSpinLimit  = 120000000UL; // ~940ms
-
-    if (lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
-        return;
-    }
-
-    if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFRC)) {
-        startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFRC);
-        (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFRC,
-                                  kLfrcStartSpinLimit);
-    }
-
-    // Try to start LFXO — may fail if no crystal on board
-    startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFXO);
-    (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFXO, kLfxoStartSpinLimit);
+    // LFXO is not present on XIAO nRF54LM20B (no 32.768 kHz crystal).
+    // Only LFRC is available. LFRC stops in SYSTEM OFF, so timed wake
+    // is impossible. The caller (enterTimedSystemOff) checks LFXO status
+    // and falls back to delayMicroseconds if LFXO isn't running.
+    // Do NOT try to start LFXO — that would break the LFCLK state.
 }
 
 static uint32_t selectRunningGrtcLfClockSource(void)
