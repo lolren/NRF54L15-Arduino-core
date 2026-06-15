@@ -1123,7 +1123,7 @@ def upload_nrf_ocd(
         args.extend(["-u", uid])
     if no_reset:
         args.append("--no-reset")
-    args.extend(["-e", "-f", hex_path, "-R"])  # -R resets board after flash
+    args.extend(["-e", "-f", hex_path])
 
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=120)
