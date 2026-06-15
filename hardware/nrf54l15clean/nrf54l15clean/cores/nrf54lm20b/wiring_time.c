@@ -139,16 +139,21 @@ static void startLfclkSource(uint32_t src)
 
 static void ensureSystemOffLfxoRunning(void)
 {
-    // LFXO is not present on XIAO nRF54LM20B (no 32.768 kHz crystal).
-    // Only LFRC is available. LFRC stops in SYSTEM OFF, so timed wake
-    // is impossible. The caller (enterTimedSystemOff) checks LFXO status
-    // and falls back to delayMicroseconds if LFXO isn't running.
-    // Do NOT try to start LFXO — that would break the LFCLK state.
+    // LFXO is present on XIAO nRF54LM20B (XL1=P1.20, XL2=P1.21).
+    // Try to start it for SYSTEM OFF wake. If it fails, the caller
+    // will fall back to WFI sleep (which works reliably).
+    static const uint32_t kLfxoStartSpinLimit = 240000000UL;
+    if (lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) return;
+    startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFXO);
+    (void)waitForLfclkStarted(CLOCK_LFCLK_STAT_SRC_LFXO, kLfxoStartSpinLimit);
 }
 
 static uint32_t selectRunningGrtcLfClockSource(void)
 {
-    ensureSystemOffLfxoRunning();
+    // Note: ensureSystemOffLfxoRunning is NOT called here.
+    // It is only needed for SYSTEM OFF wake (programSystemOffWakeUs).
+    // Calling it here would stop the LFCLK on every delay(), corrupting
+    // GRTC timing and making delay() take 10x longer.
     if (lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
         return GRTC_CLKCFG_CLKSEL_LFXO;
     }
@@ -728,25 +733,9 @@ static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
     // Skip SYSTEM OFF when reset was triggered by the debug probe.
     // In Debug Interface mode, SYSTEM OFF is emulated (CPU keeps running)
     // and writing SYSTEMOFF causes a reset loop.
-    // Also skip if LFXO is not available — LFRC stops during SYSTEM OFF,
-    // so the GRTC wake timer would never fire. Fall back to WFI sleep.
     // SREQ(bit6)=upload, CTRLAPSOFT(3)=debug soft, CTRLAPHARD(4)=debug hard
-    if ((NRF_RESET->RESETREAS & ((1UL << 6) | (1UL << 3) | (1UL << 4))) ||
-        !lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
-        // Disable TAMPC debug signals so WFI can reach deeper sleep
-        const uint32_t key = (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_KEY <<
-                              TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_KEY_Pos);
-        const uint32_t wpen = (TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_WRITEPROTECTION_Clear <<
-                               TAMPC_PROTECT_DOMAIN_DBGEN_CTRL_WRITEPROTECTION_Pos);
-        const uintptr_t tbc = 0x500EF500UL;
-        volatile uint32_t* r = (volatile uint32_t*)tbc;
-        r[0] = key | wpen; r[0] = key;  // DBGEN = Low
-        r[2] = key | wpen; r[2] = key;  // NIDEN
-        r[4] = key | wpen; r[4] = key;  // SPIDEN
-        r[6] = key | wpen; r[6] = key;  // SPNIDEN
-        __DSB();
-        // Use low-power delay (GRTC + WFI) directly — bypasses the BLE
-        // connection check in delayMicroseconds that blocks sleep.
+    if (NRF_RESET->RESETREAS & ((1UL << 6) | (1UL << 3) | (1UL << 4))) {
+        // Use low-power delay (GRTC + WFI) directly
         initLowPowerTimebase();
         const uint64_t targetUs =
             readLowPowerCounterUs() + (uint64_t)delayUs;

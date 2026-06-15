@@ -252,6 +252,19 @@ def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | Non
     return None
 
 
+
+def detect_nrf_ocd_command(host_tools_path: Path | None = None) -> list[str] | None:
+    """Find the nrf_ocd native CMSIS-DAP programmer."""
+    tool_root = pyocd_tool_root(host_tools_path)
+    nrf_ocd = tool_root / "nrf_ocd"
+    if nrf_ocd.is_file():
+        return [str(nrf_ocd)]
+    exe = shutil.which("nrf_ocd")
+    if exe:
+        return [exe]
+    return None
+
+
 def host_setup_hint(host_tools_path: Path | None = None, purpose: str = "python") -> str:
     tool_root = pyocd_tool_root(host_tools_path)
     tools_dir = tool_root / "setup"
@@ -1068,6 +1081,46 @@ def _ensure_lm20b_target():
     except Exception:
         pass
 
+
+def upload_nrf_ocd(
+    hex_path: str,
+    target: str,
+    requested_uid: str | None,
+    host_tools_path: Path | None = None,
+    no_reset: bool = False,
+) -> int:
+    """Upload using nrf_ocd native CMSIS-DAP programmer."""
+    _ensure_lm20b_target()
+    cmd = detect_nrf_ocd_command(host_tools_path)
+    if cmd is None:
+        return -1  # signal caller to fall back
+
+    uid = normalize_uid(requested_uid)
+    print(f"Flashing {hex_path}")
+    print(f"Runner: nrf_ocd")
+    print(f"Probe UID: {uid or 'auto-select'}")
+
+    args = [*cmd, "-t", target]
+    if uid:
+        args.extend(["-u", uid])
+    if no_reset:
+        args.append("--no-reset")
+    args.extend(["-e", "-f", hex_path])
+
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        print(result.stdout)
+        if result.returncode != 0:
+            print(result.stderr, file=sys.stderr)
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        print("nrf_ocd timed out", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"nrf_ocd error: {e}", file=sys.stderr)
+        return 1
+
+
 def upload_pyocd(
     hex_path: str,
     target: str,
@@ -1384,16 +1437,40 @@ def main() -> int:
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
-        rc = upload_pyocd(
+        # Try nrf_ocd first (zero-dependency native programmer)
+        nrf_rc = upload_nrf_ocd(
             args.hex,
             args.target,
             selected_uid,
-            allow_uid_fallback=allow_inferred_uid_fallback,
-            retries=args.retries,
-            retry_delay=args.retry_delay,
             host_tools_path=host_tools_path,
-            safe_mode=pyocd_safe_mode,
         )
+        if nrf_rc == 0:
+            rc = 0
+        elif nrf_rc == -1:
+            # nrf_ocd not found, fall back to pyocd
+            rc = upload_pyocd(
+                args.hex,
+                args.target,
+                selected_uid,
+                allow_uid_fallback=allow_inferred_uid_fallback,
+                retries=args.retries,
+                retry_delay=args.retry_delay,
+                host_tools_path=host_tools_path,
+                safe_mode=pyocd_safe_mode,
+            )
+        else:
+            # nrf_ocd failed, try pyocd as fallback
+            print("nrf_ocd upload failed; falling back to pyocd...")
+            rc = upload_pyocd(
+                args.hex,
+                args.target,
+                selected_uid,
+                allow_uid_fallback=allow_inferred_uid_fallback,
+                retries=args.retries,
+                retry_delay=args.retry_delay,
+                host_tools_path=host_tools_path,
+                safe_mode=pyocd_safe_mode,
+            )
         if rc != 0 and requested_runner == "auto":
             print("pyocd upload failed in auto mode; trying openocd...")
             rc = upload_openocd(
