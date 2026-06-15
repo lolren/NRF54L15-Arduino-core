@@ -6198,8 +6198,8 @@
               "host": "x86_64-pc-linux-gnu",
               "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
               "archiveFileName": "nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
-              "checksum": "SHA-256:ff2ed8fa06c75a16e6c3e8c46a0140ef839b3a802ef7551e3f3e0dd30e4d292c",
-              "size": "36166"
+              "checksum": "SHA-256:221ea2b060bc81c0e16581f19fd0a6586adc3e6c3a3be8f5b57cd5e0bccfd1eb",
+              "size": "36354"
             },
             {
               "host": "aarch64-linux-gnu",
