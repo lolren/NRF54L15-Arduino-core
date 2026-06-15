@@ -1125,28 +1125,18 @@ def upload_nrf_ocd(
         args.append("--no-reset")
     args.extend(["-e", "-f", hex_path, "-R"])  # -R resets board after flash
 
-    for attempt in range(1, 4):
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-            print(result.stdout)
-            if result.returncode == 0:
-                return 0
-            # On failure, try resetting probe state and retry
-            if attempt < 3:
-                stderr = result.stderr or ""
-                if "Unable to claim" in stderr or "CMSIS-DAP" in stderr or "command error" in stderr or "SWD connect" in stderr:
-                    wait = attempt * 2.0
-                    print(f"nrf_ocd retry {attempt+1}/3 — waiting {wait:.0f}s for probe release...")
-                    time.sleep(wait)
-                else:
-                    print(result.stderr, file=sys.stderr)
-                    time.sleep(attempt * 1.0)
-        except subprocess.TimeoutExpired:
-            wait = attempt * 2.0
-            print(f"nrf_ocd timed out — waiting {wait:.0f}s...")
-            time.sleep(wait)
-        except Exception as e:
-            print(f"nrf_ocd error: {e}", file=sys.stderr)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        print(result.stdout)
+        if result.returncode == 0:
+            return 0
+        # SWD failures on LM20B are a known CMSIS-DAP v2 issue.
+        # Don't retry — fall back to pyocd which handles it better.
+        print(result.stderr, file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print("nrf_ocd timed out", file=sys.stderr)
+    except Exception as e:
+        print(f"nrf_ocd error: {e}", file=sys.stderr)
     return 1
 
 
