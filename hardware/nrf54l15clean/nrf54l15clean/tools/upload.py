@@ -1111,11 +1111,14 @@ def upload_nrf_ocd(
         return -1  # signal caller to fall back
 
     uid = normalize_uid(requested_uid)
+    # Map board target names to nrf_ocd target names
+    target_map = {"nrf54l": "nrf54l15", "nrf54lm20a": "nrf54lm20a"}
+    ocd_target = target_map.get(target.strip().lower(), target)
     print(f"Flashing {hex_path}")
     print(f"Runner: nrf_ocd")
     print(f"Probe UID: {uid or 'auto-select'}")
 
-    args = [*cmd, "-t", target]
+    args = [*cmd, "-t", ocd_target]
     if uid:
         args.extend(["-u", uid])
     if no_reset:
