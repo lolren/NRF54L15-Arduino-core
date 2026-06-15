@@ -1134,16 +1134,17 @@ def upload_nrf_ocd(
             # On failure, try resetting probe state and retry
             if attempt < 3:
                 stderr = result.stderr or ""
-                if "Unable to claim" in stderr or "CMSIS-DAP" in stderr or "command error" in stderr:
-                    print(f"nrf_ocd retry {attempt+1}/3 — resetting probe...")
-                    # Disconnect/reconnect to clear stale state
-                    subprocess.run([*cmd, "-t", target] + (["-u", uid] if uid else []) + ["-R"],
-                                 capture_output=True, text=True, timeout=5)
-            print(result.stderr, file=sys.stderr)
-            time.sleep(attempt * 1.0)
+                if "Unable to claim" in stderr or "CMSIS-DAP" in stderr or "command error" in stderr or "SWD connect" in stderr:
+                    wait = attempt * 2.0
+                    print(f"nrf_ocd retry {attempt+1}/3 — waiting {wait:.0f}s for probe release...")
+                    time.sleep(wait)
+                else:
+                    print(result.stderr, file=sys.stderr)
+                    time.sleep(attempt * 1.0)
         except subprocess.TimeoutExpired:
-            print(f"nrf_ocd timed out — attempt {attempt}/3", file=sys.stderr)
-            time.sleep(attempt * 1.0)
+            wait = attempt * 2.0
+            print(f"nrf_ocd timed out — waiting {wait:.0f}s...")
+            time.sleep(wait)
         except Exception as e:
             print(f"nrf_ocd error: {e}", file=sys.stderr)
     return 1
