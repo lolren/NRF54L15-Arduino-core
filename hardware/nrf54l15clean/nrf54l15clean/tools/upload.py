@@ -255,10 +255,25 @@ def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | Non
 
 def detect_nrf_ocd_command(host_tools_path: Path | None = None) -> list[str] | None:
     """Find the nrf_ocd native CMSIS-DAP programmer."""
-    tool_root = pyocd_tool_root(host_tools_path)
+    tool_root = Path(pyocd_tool_root(host_tools_path))
+    # Handle Arduino tool version nesting (tools/2.0.0/2.0.0/nrf_ocd)
+    for candidate in tool_root.rglob("nrf_ocd"):
+        if candidate.is_file():
+            return [str(candidate)]
+    for candidate in tool_root.rglob("nrf_ocd.exe"):
+        if candidate.is_file():
+            return [str(candidate)]
+    # Also check direct path (for symlinked dev installs)
     nrf_ocd = tool_root / "nrf_ocd"
     if nrf_ocd.is_file():
         return [str(nrf_ocd)]
+    # Search Arduino15 packages directory
+    arduino15 = Path.home() / ".arduino15" / "packages" / "nrf54l15clean" / "tools" / "nrf54l15hosttools"
+    if arduino15.is_dir():
+        for candidate in arduino15.rglob("nrf_ocd"):
+            if candidate.is_file():
+                return [str(candidate)]
+    # Fall back to PATH
     exe = shutil.which("nrf_ocd")
     if exe:
         return [exe]
@@ -1107,18 +1122,28 @@ def upload_nrf_ocd(
         args.append("--no-reset")
     args.extend(["-e", "-f", hex_path])
 
-    try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-        print(result.stdout)
-        if result.returncode != 0:
-            print(result.stderr, file=sys.stderr)
-        return result.returncode
-    except subprocess.TimeoutExpired:
-        print("nrf_ocd timed out", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"nrf_ocd error: {e}", file=sys.stderr)
-        return 1
+    for attempt in range(1, 3):
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+            print(result.stdout)
+            if result.returncode == 0:
+                return 0
+            # On failure, try resetting the board first
+            if attempt < 2 and "Unable to claim" in (result.stderr or ""):
+                print("Board unresponsive — resetting before retry...")
+                subprocess.run([*cmd, "-t", target] + (["-u", uid] if uid else []) + ["-R"],
+                             capture_output=True, text=True, timeout=5)
+                time.sleep(1)
+            else:
+                print(result.stderr, file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            print("nrf_ocd timed out — resetting before retry...", file=sys.stderr)
+            subprocess.run([*cmd, "-t", target] + (["-u", uid] if uid else []) + ["-R"],
+                         capture_output=True, text=True, timeout=5)
+            time.sleep(1)
+        except Exception as e:
+            print(f"nrf_ocd error: {e}", file=sys.stderr)
+    return 1
 
 
 def upload_pyocd(
