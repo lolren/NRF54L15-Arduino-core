@@ -1122,25 +1122,25 @@ def upload_nrf_ocd(
         args.append("--no-reset")
     args.extend(["-e", "-f", hex_path])
 
-    for attempt in range(1, 3):
+    for attempt in range(1, 4):
         try:
             result = subprocess.run(args, capture_output=True, text=True, timeout=120)
             print(result.stdout)
             if result.returncode == 0:
                 return 0
-            # On failure, try resetting the board first
-            if attempt < 2 and "Unable to claim" in (result.stderr or ""):
-                print("Board unresponsive — resetting before retry...")
-                subprocess.run([*cmd, "-t", target] + (["-u", uid] if uid else []) + ["-R"],
-                             capture_output=True, text=True, timeout=5)
-                time.sleep(1)
-            else:
-                print(result.stderr, file=sys.stderr)
+            # On failure, try resetting probe state and retry
+            if attempt < 3:
+                stderr = result.stderr or ""
+                if "Unable to claim" in stderr or "CMSIS-DAP" in stderr or "command error" in stderr:
+                    print(f"nrf_ocd retry {attempt+1}/3 — resetting probe...")
+                    # Disconnect/reconnect to clear stale state
+                    subprocess.run([*cmd, "-t", target] + (["-u", uid] if uid else []) + ["-R"],
+                                 capture_output=True, text=True, timeout=5)
+            print(result.stderr, file=sys.stderr)
+            time.sleep(attempt * 1.0)
         except subprocess.TimeoutExpired:
-            print("nrf_ocd timed out — resetting before retry...", file=sys.stderr)
-            subprocess.run([*cmd, "-t", target] + (["-u", uid] if uid else []) + ["-R"],
-                         capture_output=True, text=True, timeout=5)
-            time.sleep(1)
+            print(f"nrf_ocd timed out — attempt {attempt}/3", file=sys.stderr)
+            time.sleep(attempt * 1.0)
         except Exception as e:
             print(f"nrf_ocd error: {e}", file=sys.stderr)
     return 1
