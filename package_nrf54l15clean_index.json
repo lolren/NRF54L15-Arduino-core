@@ -6278,7 +6278,7 @@
           "systems": [
             {
               "host": "x86_64-pc-linux-gnu",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/nrf-ocd-v2.0.1/nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
               "archiveFileName": "nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
               "checksum": "SHA-256:acc4f1a27e0b387496f4f49cfa27919b7a4a8181e96e2c20d7a0289f25ca19c0",
               "size": "36296"
