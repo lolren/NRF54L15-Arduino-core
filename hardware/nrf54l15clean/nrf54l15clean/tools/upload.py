@@ -1512,19 +1512,6 @@ def main() -> int:
                 host_tools_path=host_tools_path,
                 safe_mode=pyocd_safe_mode,
             )
-        else:
-            # nrf_ocd failed, try pyocd as fallback
-            print("nrf_ocd upload failed; falling back to pyocd...")
-            rc = upload_pyocd(
-                args.hex,
-                args.target,
-                selected_uid,
-                allow_uid_fallback=allow_inferred_uid_fallback,
-                retries=args.retries,
-                retry_delay=args.retry_delay,
-                host_tools_path=host_tools_path,
-                safe_mode=pyocd_safe_mode,
-            )
         if rc != 0 and requested_runner == "auto":
             print("pyocd upload failed in auto mode; trying openocd...")
             rc = upload_openocd(
