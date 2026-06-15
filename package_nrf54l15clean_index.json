@@ -6282,27 +6282,6 @@
               "archiveFileName": "nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
               "checksum": "SHA-256:f57c25b21f996375a2fecf905e81c367e13e6f4849e953f871a0363b7cee200f",
               "size": "36296"
-            },
-            {
-              "host": "aarch64-linux-gnu",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-aarch64-linux-gnu.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-aarch64-linux-gnu.tar.bz2",
-              "checksum": "SHA-256:9563c9a088a978cb9ca49539df6b43adb90115bdc8f9b7438d401f5b8bd9a787",
-              "size": "430632"
-            },
-            {
-              "host": "arm-linux-gnueabihf",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-arm-linux-gnueabihf.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-arm-linux-gnueabihf.tar.bz2",
-              "checksum": "SHA-256:61f3d3d2a66c353a695be3bb80358e78ee5a4161e6bd4fdf315aeab44485fe3c",
-              "size": "372871"
-            },
-            {
-              "host": "i686-mingw32",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-i686-mingw32.zip",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-i686-mingw32.zip",
-              "checksum": "SHA-256:b0e53f213f1766d386e182c8bd1cabeaa251598df7dab198d0175f28f7a89706",
-              "size": "52183"
             }
           ]
         },
