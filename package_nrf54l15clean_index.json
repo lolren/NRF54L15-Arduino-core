@@ -5911,29 +5911,29 @@
               "host": "x86_64-pc-linux-gnu",
               "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
               "archiveFileName": "nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
-              "checksum": "SHA-256:7ec9c17da2799e68266052f6fef0c23e3f58d5eb3e0ceb8a59b6cb41ad267704",
-              "size": "66374"
+              "checksum": "SHA-256:d786c6e68c03f9cbc7b06c0c50b87356e57ea3471c0fb29f0045d58405461e9e",
+              "size": "66398"
             },
             {
               "host": "aarch64-linux-gnu",
               "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-aarch64-linux-gnu.tar.bz2",
               "archiveFileName": "nrf54l15hosttools-2.0.0-aarch64-linux-gnu.tar.bz2",
-              "checksum": "SHA-256:58785f7880863a0aa8f57cdb5dd206b0f892f230841563a4e117e4a0688698c8",
-              "size": "430626"
+              "checksum": "SHA-256:9563c9a088a978cb9ca49539df6b43adb90115bdc8f9b7438d401f5b8bd9a787",
+              "size": "430632"
             },
             {
               "host": "arm-linux-gnueabihf",
               "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-arm-linux-gnueabihf.tar.bz2",
               "archiveFileName": "nrf54l15hosttools-2.0.0-arm-linux-gnueabihf.tar.bz2",
-              "checksum": "SHA-256:1756155c76c93ff0a9f0a78506f8c537cfc89e8f7679f6af53e5c43f0283dc49",
-              "size": "372879"
+              "checksum": "SHA-256:61f3d3d2a66c353a695be3bb80358e78ee5a4161e6bd4fdf315aeab44485fe3c",
+              "size": "372871"
             },
             {
               "host": "i686-mingw32",
               "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v2.0.0/nrf54l15hosttools-2.0.0-i686-mingw32.zip",
               "archiveFileName": "nrf54l15hosttools-2.0.0-i686-mingw32.zip",
-              "checksum": "SHA-256:7ead374078f0338501014cb79682b6e302d0157e1b52054d1eb269bd8710ea7e",
-              "size": "52201"
+              "checksum": "SHA-256:b0e53f213f1766d386e182c8bd1cabeaa251598df7dab198d0175f28f7a89706",
+              "size": "52183"
             }
           ]
         },
