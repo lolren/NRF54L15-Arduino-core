@@ -45,7 +45,6 @@ void loop() {}
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -82,7 +81,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -113,7 +111,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -194,7 +191,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -213,7 +209,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -261,7 +256,6 @@ Examples:
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -290,7 +284,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -316,7 +309,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -341,7 +333,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 
@@ -362,7 +353,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
 
 Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
 

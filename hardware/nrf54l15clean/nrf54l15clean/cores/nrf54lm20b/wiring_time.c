@@ -693,6 +693,7 @@ static void programSystemOffWakeUs(uint32_t delayUs)
     delayUs = clampSystemOffDelayUs(delayUs);
 
     nrf54lm20b_core_prepare_system_off_wake_timebase();
+    ensureSystemOffLfxoRunning();
     const uint32_t grtcClockSel = selectRunningGrtcLfClockSource();
     configureSystemOffWakeSleep(grtc, grtcClockSel);
 
