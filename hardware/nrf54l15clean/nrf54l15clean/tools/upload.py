@@ -1456,53 +1456,30 @@ def main() -> int:
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
-        # nrf_ocd first if runner is auto, skip if user explicitly chose pyocd
-        if requested_runner == "auto":
+        # pyOCD first (stable), nrf_ocd as fallback
+        rc = upload_pyocd(
+            args.hex,
+            args.target,
+            selected_uid,
+            allow_uid_fallback=allow_inferred_uid_fallback,
+            retries=args.retries,
+            retry_delay=args.retry_delay,
+            host_tools_path=host_tools_path,
+            safe_mode=pyocd_safe_mode,
+        )
+        if rc != 0 and requested_runner == "auto":
             nrf_rc = upload_nrf_ocd(
                 args.hex,
                 args.target,
                 selected_uid,
                 host_tools_path=host_tools_path,
             )
-            if nrf_rc == 0:
-                rc = 0
-            elif nrf_rc == -1:
-                # nrf_ocd not found, fall back to pyocd
-                rc = upload_pyocd(
-                    args.hex,
-                    args.target,
-                    selected_uid,
-                    allow_uid_fallback=allow_inferred_uid_fallback,
-                    retries=args.retries,
-                    retry_delay=args.retry_delay,
-                    host_tools_path=host_tools_path,
-                    safe_mode=pyocd_safe_mode,
-                )
+            if nrf_rc == -1:
+                print("nrf_ocd not installed or not found in PATH.", file=sys.stderr)
+            elif nrf_rc != 0:
+                print("nrf_ocd upload also failed.", file=sys.stderr)
             else:
-                # nrf_ocd failed, try pyocd as fallback
-                print("nrf_ocd upload failed; falling back to pyocd...")
-                rc = upload_pyocd(
-                    args.hex,
-                    args.target,
-                    selected_uid,
-                    allow_uid_fallback=allow_inferred_uid_fallback,
-                    retries=args.retries,
-                    retry_delay=args.retry_delay,
-                    host_tools_path=host_tools_path,
-                    safe_mode=pyocd_safe_mode,
-                )
-        else:
-            # User explicitly chose pyocd or openocd — use pyocd directly
-            rc = upload_pyocd(
-                args.hex,
-                args.target,
-                selected_uid,
-                allow_uid_fallback=allow_inferred_uid_fallback,
-                retries=args.retries,
-                retry_delay=args.retry_delay,
-                host_tools_path=host_tools_path,
-                safe_mode=pyocd_safe_mode,
-            )
+                rc = 0
         if rc != 0 and requested_runner == "auto":
             print("pyocd upload failed in auto mode; trying openocd...")
             rc = upload_openocd(
