@@ -16,17 +16,20 @@
           "category": "Contributed",
           "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.113/nrf54l15clean-0.9.113.tar.bz2",
           "archiveFileName": "nrf54l15clean-0.9.113.tar.bz2",
-          "checksum": "SHA-256:e50f78adf0b380acc01c43ab611d5eba7776f9b8bbe9319892085f951d8620a2",
-          "size": "26224169",
+          "checksum": "SHA-256:4e4f71b2025b008cad7a68a961b9a498022e0eed0ca11da8799680f327c4f6f7",
+          "size": "26222687",
           "help": {
             "online": "https://github.com/lolren/nrf54-arduino-core"
           },
           "boards": [
             {
-              "name": "XIAO nRF54L15"
+              "name": "XIAO nRF54L15 / Sense"
             },
             {
-              "name": "XIAO nRF54LM20B"
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
             }
           ],
           "toolsDependencies": [
