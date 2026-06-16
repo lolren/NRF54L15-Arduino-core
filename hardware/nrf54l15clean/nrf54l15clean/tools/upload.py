@@ -252,34 +252,6 @@ def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | Non
     return None
 
 
-
-def detect_nrf_ocd_command(host_tools_path: Path | None = None) -> list[str] | None:
-    """Find the nrf_ocd native CMSIS-DAP programmer."""
-    tool_root = Path(pyocd_tool_root(host_tools_path))
-    # Handle Arduino tool version nesting (tools/2.0.0/2.0.0/nrf_ocd)
-    for candidate in tool_root.rglob("nrf_ocd"):
-        if candidate.is_file():
-            return [str(candidate)]
-    for candidate in tool_root.rglob("nrf_ocd.exe"):
-        if candidate.is_file():
-            return [str(candidate)]
-    # Also check direct path (for symlinked dev installs)
-    nrf_ocd = tool_root / "nrf_ocd"
-    if nrf_ocd.is_file():
-        return [str(nrf_ocd)]
-    # Search Arduino15 packages directory
-    arduino15 = Path.home() / ".arduino15" / "packages" / "nrf54l15clean" / "tools" / "nrf54l15hosttools"
-    if arduino15.is_dir():
-        for candidate in arduino15.rglob("nrf_ocd"):
-            if candidate.is_file():
-                return [str(candidate)]
-    # Fall back to PATH
-    exe = shutil.which("nrf_ocd")
-    if exe:
-        return [exe]
-    return None
-
-
 def host_setup_hint(host_tools_path: Path | None = None, purpose: str = "python") -> str:
     tool_root = pyocd_tool_root(host_tools_path)
     tools_dir = tool_root / "setup"
@@ -1049,7 +1021,7 @@ def flash_hex(
     cmd = append_pyocd_safe_options(cmd, safe_mode)
     if not auto_unlock:
         cmd.extend(["-O", "auto_unlock=false"])
-    cmd.extend([hex_path, "--format", "hex"])
+    cmd.extend([hex_path, "--format", "hex", "--no-reset"])
     result = run(cmd, timeout=pyocd_timeout_seconds())
     print_result(result)
     return result
@@ -1095,50 +1067,6 @@ def _ensure_lm20b_target():
         importlib.reload(patch_lm20b_target)
     except Exception:
         pass
-
-
-def upload_nrf_ocd(
-    hex_path: str,
-    target: str,
-    requested_uid: str | None,
-    host_tools_path: Path | None = None,
-    no_reset: bool = False,
-) -> int:
-    """Upload using nrf_ocd native CMSIS-DAP programmer."""
-    _ensure_lm20b_target()
-    cmd = detect_nrf_ocd_command(host_tools_path)
-    if cmd is None:
-        return -1  # signal caller to fall back
-
-    uid = normalize_uid(requested_uid)
-    # Map board target names to nrf_ocd target names
-    target_map = {"nrf54l": "nrf54l15", "nrf54lm20a": "nrf54lm20a"}
-    ocd_target = target_map.get(target.strip().lower(), target)
-    print(f"Flashing {hex_path}")
-    print(f"Runner: nrf_ocd")
-    print(f"Probe UID: {uid or 'auto-select'}")
-
-    args = [*cmd, "-t", ocd_target]
-    if uid:
-        args.extend(["-u", uid])
-    if no_reset:
-        args.append("--no-reset")
-    args.extend(["-e", "-f", hex_path])
-
-    try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-        print(result.stdout)
-        if result.returncode == 0:
-            return 0
-        # SWD failures on LM20B are a known CMSIS-DAP v2 issue.
-        # Don't retry — fall back to pyocd which handles it better.
-        print(result.stderr, file=sys.stderr)
-    except subprocess.TimeoutExpired:
-        print("nrf_ocd timed out", file=sys.stderr)
-    except Exception as e:
-        print(f"nrf_ocd error: {e}", file=sys.stderr)
-    return 1
-
 
 def upload_pyocd(
     hex_path: str,
@@ -1263,17 +1191,14 @@ def upload_pyocd(
         print("If the sketch does not start, press RESET or power-cycle the board.")
         return 0
 
-    reset_cmd = [*pyocd_cmd, "reset"]
-    reset_cmd = append_pyocd_target_script(reset_cmd, target)
-    reset_cmd.extend(["-W", "-t", target])
-    reset_cmd = append_uid(reset_cmd, uid)
-    reset_cmd = append_connect_mode(reset_cmd, last_connect_mode)
-    reset_cmd = append_pyocd_safe_options(reset_cmd, safe_mode)
+    # Disconnect debug probe so SYSTEM OFF sleep works after upload.
+    # The debug interface prevents SYSTEM OFF entry while connected.
     if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
-        reset_cmd.extend(["-m", "sysresetreq"])
-        reset_cmd.extend(["-O", "auto_unlock=false"])
-    reset_result = run(reset_cmd, timeout=pyocd_timeout_seconds())
-    print_result(reset_result)
+        detach_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyocd_detach.py")
+        try:
+            subprocess.run(["python3", detach_script, target, uid or ""], timeout=5.0, capture_output=True)
+        except (Exception, subprocess.TimeoutExpired):
+            pass  # best-effort, non-fatal
     return 0
 
 
@@ -1456,7 +1381,6 @@ def main() -> int:
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
-        # pyOCD first (stable), nrf_ocd as fallback
         rc = upload_pyocd(
             args.hex,
             args.target,
@@ -1467,19 +1391,6 @@ def main() -> int:
             host_tools_path=host_tools_path,
             safe_mode=pyocd_safe_mode,
         )
-        if rc != 0 and requested_runner == "auto":
-            nrf_rc = upload_nrf_ocd(
-                args.hex,
-                args.target,
-                selected_uid,
-                host_tools_path=host_tools_path,
-            )
-            if nrf_rc == -1:
-                print("nrf_ocd not installed or not found in PATH.", file=sys.stderr)
-            elif nrf_rc != 0:
-                print("nrf_ocd upload also failed.", file=sys.stderr)
-            else:
-                rc = 0
         if rc != 0 and requested_runner == "auto":
             print("pyocd upload failed in auto mode; trying openocd...")
             rc = upload_openocd(

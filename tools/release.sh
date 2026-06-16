@@ -107,7 +107,7 @@ fi
 echo "Archive verified: no symlinks, single root dir ✅"
 
 # ── 5. Update package index ─────────────────────────────────────
-HOST_TOOLS_VERSION="2.0.0"
+HOST_TOOLS_VERSION="1.1.4"
 INDEX="package_nrf54l15clean_index.json"
 
 export VERSION CHECKSUM SIZE HOST_TOOLS_VERSION INDEX

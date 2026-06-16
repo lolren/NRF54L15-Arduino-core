@@ -14,21 +14,6 @@
 
 ---
 
-## 🔧 Zero-Dependency Upload (v0.9.100+)
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
-
----
-
 ## ⚡ Quick Install
 
 ```
@@ -42,20 +27,6 @@ Add this URL in **Arduino IDE → Preferences → Additional Boards Manager URLs
 void setup() { Serial.begin(115200); Serial.println("Hello nRF54!"); }
 void loop() {}
 ```
-
----
-
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
 
 ---
 
@@ -81,20 +52,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
-
----
-
 ## ⚡ Why Bare Metal?
 
 | | This Core | nRF Connect SDK |
@@ -108,20 +65,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 | **Learning curve** | Datasheet + Arduino API | Zephyr + DTS + Kconfig |
 
 **This core is for developers who want full hardware control with Arduino convenience.**
-
----
-
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
 
 ---
 
@@ -191,35 +134,7 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
-
----
-
 > **Legend:** ✅ Production &nbsp; ⚠️ Experimental / Partial &nbsp; 🚧 In Development
-
----
-
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
 
 ---
 
@@ -256,20 +171,6 @@ Examples:
 
 ---
 
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
-
----
-
 ## 📊 Stack Maturity
 
 | Stack | Lines | Maturity | Production Ready? |
@@ -284,20 +185,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
-
----
-
 ## ⚠️ Known Limitations
 
 - **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
@@ -306,20 +193,6 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
 - **Channel Sounding Mode 2** needs the VPR RISC‑V coprocessor — M33 alone can't keep up with subevent timing.
-
----
-
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
 
 ---
 
@@ -333,37 +206,9 @@ nrf_ocd is automatically detected and used by the upload flow. No user configura
 
 ---
 
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
-
----
-
 <div align="center">
 
 **Built from datasheets. Verified on hardware. No vendor blobs.**
-
----
-
-
-Starting with v0.9.100, this core ships **[nrf_ocd](https://github.com/lolren/open-nrf-ocd)** — a **native C CMSIS-DAP programmer** that replaces pyOCD entirely.
-
-| Before (pyOCD) | After (nrf_ocd) |
-|---|---|
-| 50+ Python packages | **0 external deps** |
-| pip/virtualenv setup | **Single ~100KB binary** |
-| AppImage IDE broken | **Works everywhere** (statically linked libusb/hidapi) |
-| 50MB tool download | **~65KB download** |
-
-nrf_ocd is automatically detected and used by the upload flow. No user configuration needed.
 
 ---
 

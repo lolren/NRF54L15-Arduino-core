@@ -43,7 +43,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -81,7 +81,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -119,7 +119,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -157,7 +157,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -198,7 +198,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -239,7 +239,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -280,7 +280,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -321,7 +321,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -362,7 +362,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -403,7 +403,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -444,7 +444,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -485,7 +485,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -526,7 +526,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -567,7 +567,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "2.0.0"
+              "version": "1.1.4"
             }
           ]
         },
@@ -6424,40 +6424,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "nrf54l15hosttools",
-          "version": "2.0.0",
-          "systems": [
-            {
-              "host": "x86_64-pc-linux-gnu",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/nrf-ocd-v1.0.1/nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-x86_64-pc-linux-gnu.tar.bz2",
-              "checksum": "SHA-256:e4dd14dae61439b37027ed8f882994c0924debb77688040283db52d4879a36e4",
-              "size": "66942"
-            },
-            {
-              "host": "aarch64-linux-gnu",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/nrf-ocd-v1.0.1/nrf54l15hosttools-2.0.0-aarch64-linux-gnu.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-aarch64-linux-gnu.tar.bz2",
-              "checksum": "SHA-256:577c502e857cd86d2a2d101630a3721eb5fd35191435483f124686a369e7c63e",
-              "size": "431052"
-            },
-            {
-              "host": "arm-linux-gnueabihf",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/nrf-ocd-v1.0.1/nrf54l15hosttools-2.0.0-arm-linux-gnueabihf.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-arm-linux-gnueabihf.tar.bz2",
-              "checksum": "SHA-256:cdb05c674850ed76a416fc18da38bace942509f4ca8e8c33ffd86674ad29a924",
-              "size": "373238"
-            },
-            {
-              "host": "i686-mingw32",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/nrf-ocd-v1.0.1/nrf54l15hosttools-2.0.0-i686-mingw32.zip",
-              "archiveFileName": "nrf54l15hosttools-2.0.0-i686-mingw32.zip",
-              "checksum": "SHA-256:ba64adb0fea4cdbfe58be65604f410b5e527203e667639c3ffd9f8b103468a4c",
-              "size": "52772"
-            }
-          ]
-        },
         {
           "name": "nrf54l15hosttools",
           "version": "1.0.0",

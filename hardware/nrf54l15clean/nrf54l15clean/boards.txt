@@ -127,14 +127,6 @@ xiao_nrf54l15.menu.clean_antenna.ceramic.build.antenna_flags=
 xiao_nrf54l15.menu.clean_antenna.external=External U.FL
 xiao_nrf54l15.menu.clean_antenna.external.build.antenna_flags=-DNRF54L15_CLEAN_ANTENNA_EXTERNAL
 
-
-xiao_nrf54l15.menu.clean_upload.nrf_ocd=nRF OCD (Default)
-xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.tool=nrf54upload
-xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.tool.serial=nrf54upload
-xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.runner=auto
-xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.use_1200bps_touch=false
-xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.wait_for_upload_port=false
-xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.pyocd_safe=false
 xiao_nrf54l15.menu.clean_upload.auto=Auto Recover (Default)
 xiao_nrf54l15.menu.clean_upload.auto.upload.tool=nrf54upload
 xiao_nrf54l15.menu.clean_upload.auto.upload.tool.serial=nrf54upload
@@ -269,14 +261,6 @@ xiao_nrf54lm20b.menu.clean_matter.stage=Experimental Compile Target (On-Network 
 xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_flags=-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1 -DNRF54L15_CLEAN_MATTER_TRANSPORT_THREAD=1 -DNRF54L15_CLEAN_MATTER_RENDEZVOUS_ON_NETWORK_ONLY=1 -DNRF54L15_CLEAN_MATTER_BLE_RENDEZVOUS=0 -DNRF54L15_CLEAN_MATTER_FIRST_DEVICE_ONOFF_LIGHT=1
 xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN_MATTER_HEADER_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_SUPPORT_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_ERROR_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_KEY_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_TIME_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_HEX_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_THREAD_DATASET_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_DATA_MODEL_SEED_AVAILABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/matter_core_stage -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src
 
-
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd=nRF OCD (Default)
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.tool=nrf54upload
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.tool.serial=nrf54upload
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.runner=auto
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.use_1200bps_touch=false
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.wait_for_upload_port=false
-xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.pyocd_safe=false
 xiao_nrf54lm20b.menu.clean_upload.auto=Auto Recover (Default)
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool=nrf54upload
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool.serial=nrf54upload
