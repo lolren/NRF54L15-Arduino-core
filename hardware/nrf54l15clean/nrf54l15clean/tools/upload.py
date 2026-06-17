@@ -1192,8 +1192,7 @@ def upload_pyocd(
         return 0
 
     # Reset the board after upload so the sketch starts immediately
-    # Reset board after upload using nrf_ocd -R
-    # Wait briefly for pyOCD to release the probe
+    # Reset board after upload using nrf_ocd
     import time as _time
     _time.sleep(1)
     try:
@@ -1202,12 +1201,12 @@ def upload_pyocd(
             ocd_tgt = target.strip().lower()
             if ocd_tgt in ("nrf54l",):
                 ocd_tgt = "nrf54l15"
-            reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-R"]
+            reset_cmd = [*nrf_ocd, "-t", ocd_tgt]
             if uid:
                 reset_cmd.extend(["-u", uid])
+            reset_cmd.extend(["reset"])
             result = subprocess.run(reset_cmd, timeout=15.0, capture_output=True, text=True)
             if result.returncode != 0:
-                # Print stderr so user knows why reset failed
                 for line in (result.stderr or "").split("\n"):
                     if line.strip() and "INFO" not in line:
                         print(line, file=sys.stderr)
@@ -1266,7 +1265,7 @@ def upload_nrf_ocd(
     args = [*nrf_ocd_cmd, "-t", ocd_target]
     if uid:
         args.extend(["-u", uid])
-    args.extend(["-e", "-f", hex_path])
+    args.extend(["-e", "chip", "-R", "load", hex_path])
     print(f"Flashing {hex_path}")
     print(f"Runner: nrf_ocd")
     print(f"Probe UID: {uid or 'auto-select'}")
@@ -1281,12 +1280,6 @@ def upload_nrf_ocd(
                 if line.strip() and "WARN" not in line:
                     print(line, file=sys.stderr)
         if result.returncode == 0:
-            # Reset after flash
-            try:
-                reset_args = [*nrf_ocd_cmd, "-t", ocd_target, "-u", uid, "-R"] if uid else [*nrf_ocd_cmd, "-t", ocd_target, "-R"]
-                subprocess.run(reset_args, timeout=10.0, capture_output=True)
-            except:
-                pass
             return 0
         return 1
     except subprocess.TimeoutExpired:

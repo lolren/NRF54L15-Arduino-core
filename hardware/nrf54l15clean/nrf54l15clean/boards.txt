@@ -145,6 +145,7 @@ xiao_nrf54l15.menu.clean_upload.pyocd.upload.pyocd_safe=auto
 xiao_nrf54l15.menu.clean_upload.nrf_ocd=nRF OCD (Native)
 xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.tool=nrf54upload
 xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.tool.serial=nrf54upload
+xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.runner=nrf_ocd
 xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.use_1200bps_touch=false
 xiao_nrf54l15.menu.clean_upload.nrf_ocd.upload.wait_for_upload_port=false
 
@@ -276,6 +277,7 @@ xiao_nrf54lm20b.menu.clean_upload.auto.upload.pyocd_safe=auto
 xiao_nrf54lm20b.menu.clean_upload.nrf_ocd=nRF OCD (Native)
 xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.tool=nrf54upload
 xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.tool.serial=nrf54upload
+xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.runner=nrf_ocd
 xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.use_1200bps_touch=false
 xiao_nrf54lm20b.menu.clean_upload.nrf_ocd.upload.wait_for_upload_port=false
 
