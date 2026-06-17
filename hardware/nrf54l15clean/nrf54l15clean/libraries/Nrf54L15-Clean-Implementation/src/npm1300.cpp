@@ -79,6 +79,8 @@ constexpr uint8_t kChargerOffsetEnSet = 0x04U;
 constexpr uint8_t kChargerOffsetEnClr = 0x05U;
 constexpr uint8_t kChargerOffsetDisableSet = 0x06U;
 constexpr uint8_t kChargerOffsetISet = 0x08U;
+constexpr uint8_t kChargerOffsetDischargeMsb = 0x0AU;
+constexpr uint8_t kChargerOffsetDischargeLsb = 0x0BU;
 constexpr uint8_t kChargerOffsetVTerm = 0x0CU;
 constexpr uint8_t kChargerOffsetStatus = 0x34U;
 constexpr uint8_t kChargerOffsetError = 0x36U;
@@ -162,6 +164,24 @@ static int32_t adc_to_mv(uint16_t code) {
 }
 
 static int32_t ibat_to_ma(uint16_t code, uint8_t stat) {
+    // BCHARGER.MODE bits[7:6]: 00=idle/no-battery, 01=discharge, 11=charge
+    uint8_t mode = (stat >> 6) & 0x03U;
+    // VBAT will be ~0 if no battery present
+    if (mode == 0U) return 0;  // No battery / idle
+    if (mode == 1U) {
+        // Discharging: use BCHGISETDISCHARGEMSB/LSB for full scale
+        uint8_t msb = 0, lsb = 0;
+        if (npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetDischargeMsb, &msb) &&
+            npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetDischargeLsb, &lsb)) {
+            uint16_t fullScale = ((uint16_t)msb << 8U) | lsb;
+            if (fullScale != 0) {
+                // I = code * full_scale * 0.836 / 1023
+                return ((int32_t)code * (int32_t)fullScale * 836) / 1023000;
+            }
+        }
+        return ((int32_t)code * 200) / 1023;
+    }
+    // Charging: center-zero bipolar measurement (512 = 0 mA)
     const int32_t mul = (stat & 1U) ? 50 : 100;
     return ((int32_t)code - 512) * mul;
 }
