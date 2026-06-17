@@ -1192,12 +1192,25 @@ def upload_pyocd(
         return 0
 
     # Reset the board after upload so the sketch starts immediately
-    # Reset board after upload using nrf_ocd -R (reliable, pyOCD commander hangs)
+    # Reset board after upload using nrf_ocd -R
+    # Wait briefly for pyOCD to release the probe
+    import time as _time
+    _time.sleep(1)
     try:
         nrf_ocd = detect_nrf_ocd_command(host_tools_path)
         if nrf_ocd:
-            reset_cmd = [*nrf_ocd, "-t", target.strip().lower().replace("nrf54l", "nrf54l15"), "-u", uid or "--auto", "-R"]
-            subprocess.run(reset_cmd, timeout=10.0, capture_output=True)
+            ocd_tgt = target.strip().lower()
+            if ocd_tgt in ("nrf54l",):
+                ocd_tgt = "nrf54l15"
+            reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-R"]
+            if uid:
+                reset_cmd.extend(["-u", uid])
+            result = subprocess.run(reset_cmd, timeout=15.0, capture_output=True, text=True)
+            if result.returncode != 0:
+                # Print stderr so user knows why reset failed
+                for line in (result.stderr or "").split("\n"):
+                    if line.strip() and "INFO" not in line:
+                        print(line, file=sys.stderr)
     except (Exception, subprocess.TimeoutExpired):
         pass
     return 0
@@ -1535,6 +1548,16 @@ def main() -> int:
                 host_tools_path=host_tools_path,
                 safe_mode=pyocd_safe_mode,
             )
+    elif runner == "nrf_ocd":
+        nrf_rc = upload_nrf_ocd(
+            args.hex,
+            args.target,
+            selected_uid,
+        )
+        if nrf_rc == 0:
+            rc = 0
+        elif nrf_rc == -1:
+            print("nrf_ocd not found (please install or choose pyOCD)", file=sys.stderr)
     elif runner != "uf2":
         print(f"ERROR: Unsupported runner: {runner}", file=sys.stderr)
         return 4
