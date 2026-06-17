@@ -1191,24 +1191,16 @@ def upload_pyocd(
         print("If the sketch does not start, press RESET or power-cycle the board.")
         return 0
 
-    # Disconnect debug probe so SYSTEM OFF sleep works after upload.
-    # The debug interface prevents SYSTEM OFF entry while connected.
-    if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
-        detach_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyocd_detach.py")
-        try:
-            subprocess.run(["python3", detach_script, target, uid or ""], timeout=5.0, capture_output=True)
-        except (Exception, subprocess.TimeoutExpired):
-            pass  # best-effort, non-fatal
-        # Reset the board after upload so the sketch starts immediately
-        try:
-            reset_cmd = [*pyocd_cmd, "commander"]
-            reset_cmd = append_pyocd_target_script(reset_cmd, target)
-            if uid:
-                reset_cmd.extend(["-u", uid])
-            reset_cmd.extend(["-c", "halt", "-c", "reset", "-c", "exit"])
-            subprocess.run(reset_cmd, timeout=10.0, capture_output=True)
-        except (Exception, subprocess.TimeoutExpired):
-            pass  # best-effort, non-fatal
+    # Reset the board after upload so the sketch starts immediately
+    try:
+        reset_cmd = [*pyocd_cmd, "commander"]
+        reset_cmd = append_pyocd_target_script(reset_cmd, target)
+        if uid:
+            reset_cmd.extend(["-u", uid])
+        reset_cmd.extend(["-c", "halt", "-c", "reset", "-c", "exit"])
+        subprocess.run(reset_cmd, timeout=10.0, capture_output=True)
+    except (Exception, subprocess.TimeoutExpired):
+        pass  # best-effort, non-fatal
     return 0
 
 
