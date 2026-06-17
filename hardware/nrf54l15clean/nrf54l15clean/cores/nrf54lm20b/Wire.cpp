@@ -265,8 +265,8 @@ static bool twi_supports_target_mode(const NRF_TWIM_Type* twim) {
 // The XIAO nRF54L15 board routes its two hardware I2C buses onto dedicated
 // controllers (D4/D5 -> TWIM22, D12/D11 -> TWIM30), not the serial-fabric
 // instances used by Serial/Serial1.
-TwoWire Wire(NRF_TWIM30, PIN_WIRE1_SDA, PIN_WIRE1_SCL);
-TwoWire Wire1(NRF_TWIM22, PIN_WIRE_SDA, PIN_WIRE_SCL);
+TwoWire Wire(NRF_TWIM22, PIN_WIRE_SDA, PIN_WIRE_SCL);
+TwoWire Wire1(NRF_TWIM30, PIN_WIRE1_SDA, PIN_WIRE1_SCL);
 
 extern "C" void TWIM20_IRQHandler(void) {
     if (g_twim20Owner != nullptr) {
