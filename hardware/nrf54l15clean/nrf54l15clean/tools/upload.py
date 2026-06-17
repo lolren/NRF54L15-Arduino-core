@@ -1199,6 +1199,16 @@ def upload_pyocd(
             subprocess.run(["python3", detach_script, target, uid or ""], timeout=5.0, capture_output=True)
         except (Exception, subprocess.TimeoutExpired):
             pass  # best-effort, non-fatal
+        # Reset the board after upload so the sketch starts immediately
+        try:
+            reset_cmd = [*pyocd_cmd, "commander"]
+            reset_cmd = append_pyocd_target_script(reset_cmd, target)
+            if uid:
+                reset_cmd.extend(["-u", uid])
+            reset_cmd.extend(["-c", "halt", "-c", "reset", "-c", "exit"])
+            subprocess.run(reset_cmd, timeout=10.0, capture_output=True)
+        except (Exception, subprocess.TimeoutExpired):
+            pass  # best-effort, non-fatal
     return 0
 
 
