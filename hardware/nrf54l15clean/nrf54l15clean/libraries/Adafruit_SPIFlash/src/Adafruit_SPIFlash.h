@@ -44,8 +44,7 @@ public:
   explicit Adafruit_SPIFlash(Adafruit_FlashTransport *transport);
   ~Adafruit_SPIFlash();
 
-  bool begin(const SPIFlash_Device_t *devices = possible_devices,
-             size_t count = EXTERNAL_FLASH_DEVICE_COUNT);
+  bool begin(const SPIFlash_Device_t *devices = nullptr, size_t count = 0U);
   void end();
 
   uint32_t size() const;

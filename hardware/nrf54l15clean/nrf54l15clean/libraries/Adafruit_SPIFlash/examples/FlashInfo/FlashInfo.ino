@@ -2,8 +2,9 @@
   FlashInfo
 
   Adafruit_SPIFlash-compatible JEDEC probe for the XIAO nRF54LM20A onboard
-  P25Q64/PY25Q64 QSPI flash. The transport uses the dedicated LM20A flash pads,
-  not the normal XIAO SPI header.
+  PY25Q64 QSPI flash. The bundled SPIFlash descriptors also recognize
+  MX25R6435F on Nordic DK-style QSPI buses. The transport uses the dedicated
+  LM20A flash pads, not the normal XIAO SPI header.
 */
 
 #include <Arduino.h>

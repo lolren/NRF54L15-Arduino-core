@@ -1,8 +1,5 @@
 #!/bin/bash
-# Ensure nrf_ocd binary is executable
-if [ -f "$(dirname "$0")/nrf_ocd" ]; then
-    chmod +x "$(dirname "$0")/nrf_ocd"
-fi
+# Native nRF OCD upload support is fetched per host OS on first use by upload.py.
 
 # Post-install: symlink shim pyocd to system pyocd if available
 SYS_PYOCD=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null)

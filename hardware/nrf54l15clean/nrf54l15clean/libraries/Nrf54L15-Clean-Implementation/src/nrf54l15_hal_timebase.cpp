@@ -226,8 +226,11 @@ void armSystemOffWakeCompare(NRF_GRTC_Type* grtc, uint8_t wakeChannel,
        << GRTC_CC_CCH_CCH_Pos) &
       GRTC_CC_CCH_CCH_Msk;
   NRF54L15_GRTC_INTENSET_REG(grtc) = (1UL << static_cast<uint32_t>(wakeChannel));
+  grtc->EVTENSET = (1UL << static_cast<uint32_t>(wakeChannel));
+  __asm volatile("dsb 0xF" ::: "memory");
   grtc->CC[wakeChannel].CCEN =
       (GRTC_CC_CCEN_ACTIVE_Enable << GRTC_CC_CCEN_ACTIVE_Pos);
+  __asm volatile("dsb 0xF" ::: "memory");
 }
 
 void clearSystemOffVprRetention() {
@@ -421,6 +424,7 @@ void programSystemOffWake(uint32_t delayUs) {
 
   for (uint8_t channel = 0; channel < GRTC_CC_MaxCount; ++channel) {
     NRF54L15_GRTC_INTENCLR_REG(grtc) = (1UL << channel);
+    grtc->EVTENCLR = (1UL << channel);
     if (channel != wakeChannel) {
       grtc->CC[channel].CCEN =
           (GRTC_CC_CCEN_ACTIVE_Disable << GRTC_CC_CCEN_ACTIVE_Pos);

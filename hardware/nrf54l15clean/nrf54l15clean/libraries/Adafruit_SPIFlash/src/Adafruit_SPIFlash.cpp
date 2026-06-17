@@ -9,6 +9,15 @@ static constexpr uint8_t kCmdReadStatus = 0x05U;
 static constexpr uint8_t kCmdSectorErase4k = 0x20U;
 static constexpr uint8_t kCmdChipErase = 0xC7U;
 
+static const SPIFlash_Device_t kDefaultFlashDevices[] = {
+    PY25Q64HA,
+    PY25Q64HA_ALT_JEDEC,
+    MX25R6435F,
+};
+
+static constexpr size_t kDefaultFlashDeviceCount =
+    sizeof(kDefaultFlashDevices) / sizeof(kDefaultFlashDevices[0]);
+
 static bool jedecMatches(const SPIFlash_Device_t &device,
                          const uint8_t id[3]) {
   return device.manufacturer_id == id[0] &&
@@ -28,8 +37,13 @@ Adafruit_SPIFlash::~Adafruit_SPIFlash() {
 }
 
 bool Adafruit_SPIFlash::begin(const SPIFlash_Device_t *devices, size_t count) {
-  if (_transport == nullptr || devices == nullptr || count == 0U) {
+  if (_transport == nullptr) {
     return false;
+  }
+
+  if (devices == nullptr || count == 0U) {
+    devices = kDefaultFlashDevices;
+    count = kDefaultFlashDeviceCount;
   }
 
   if (!_transport->begin()) {

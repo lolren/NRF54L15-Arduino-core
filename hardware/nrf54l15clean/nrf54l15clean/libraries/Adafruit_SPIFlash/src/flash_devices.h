@@ -21,24 +21,27 @@ typedef struct {
   bool is_fram;
 } SPIFlash_Device_t;
 
-#define P25Q64HA                                                            \
+#define PY25Q64HA                                                           \
   {                                                                         \
     (1UL << 23), 5000, 0x85, 0x60, 0x17, 104, 0x02, false, true, true,       \
     true, false, false, false                                               \
   }
 
-#define P25Q64HA_ALT_JEDEC                                                  \
+#define PY25Q64HA_ALT_JEDEC                                                 \
   {                                                                         \
     (1UL << 23), 5000, 0x85, 0x20, 0x17, 104, 0x02, false, true, true,       \
     true, false, false, false                                               \
   }
 
-static const SPIFlash_Device_t possible_devices[] = {
-    P25Q64HA,
-    P25Q64HA_ALT_JEDEC,
-};
+#define MX25R6435F                                                          \
+  {                                                                         \
+    (1UL << 23), 5000, 0xC2, 0x28, 0x17, 8, 0x40, false, true, true, true,   \
+    false, true, false                                                      \
+  }
 
-static const size_t EXTERNAL_FLASH_DEVICE_COUNT =
-    sizeof(possible_devices) / sizeof(possible_devices[0]);
+// Backwards-compatible aliases for sketches written before the Puya part name
+// was corrected to PY25Q64HA.
+#define P25Q64HA PY25Q64HA
+#define P25Q64HA_ALT_JEDEC PY25Q64HA_ALT_JEDEC
 
 #endif

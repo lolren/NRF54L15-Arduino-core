@@ -595,6 +595,7 @@ void nrf54l15_core_prepare_system_off_wake_timebase(void)
 {
     NRF_GRTC_Type* const grtc = NRF_GRTC;
     NRF54L15_GRTC_INTENCLR_REG(grtc) = 0xFFFFFFFFUL;
+    grtc->EVTENCLR = 0xFFFFFFFFUL;
     for (uint8_t channel = 0U; channel < GRTC_CC_MaxCount; ++channel) {
         grtc->CC[channel].CCEN =
             (GRTC_CC_CCEN_ACTIVE_Disable << GRTC_CC_CCEN_ACTIVE_Pos);
@@ -679,6 +680,7 @@ static void armSystemOffWakeCompare(NRF_GRTC_Type* grtc,
          GRTC_CC_CCH_CCH_Pos) &
         GRTC_CC_CCH_CCH_Msk;
     NRF54L15_GRTC_INTENSET_REG(grtc) = (1UL << wakeChannel);
+    grtc->EVTENSET = (1UL << wakeChannel);
     __asm volatile("dsb 0xF" ::: "memory");
     grtc->CC[wakeChannel].CCEN =
         (GRTC_CC_CCEN_ACTIVE_Enable << GRTC_CC_CCEN_ACTIVE_Pos);
@@ -706,6 +708,7 @@ static void programSystemOffWakeUs(uint32_t delayUs)
     const uint8_t wakeChannel = systemOffWakeChannel();
     for (uint8_t channel = 0U; channel < GRTC_CC_MaxCount; ++channel) {
         NRF54L15_GRTC_INTENCLR_REG(grtc) = (1UL << channel);
+        grtc->EVTENCLR = (1UL << channel);
         if (channel != wakeChannel) {
             grtc->CC[channel].CCEN =
                 (GRTC_CC_CCEN_ACTIVE_Disable << GRTC_CC_CCEN_ACTIVE_Pos);

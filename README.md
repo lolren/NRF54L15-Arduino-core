@@ -28,6 +28,8 @@ void setup() { Serial.begin(115200); Serial.println("Hello nRF54!"); }
 void loop() {}
 ```
 
+If pyOCD is blocked by a host Python or driver issue, use **Tools → Upload Method → nRF OCD (Native Fallback)**. The uploader downloads the matching `open-nrf-ocd` binary from the permanent release on first use (`linux-x64`, `linux-arm64`, `linux-armhf`, or `win64`) and caches it locally.
+
 ---
 
 ## 🖥️ Supported Boards
@@ -155,7 +157,7 @@ Notes:
 
 ## LM20A Onboard QSPI Flash
 
-XIAO nRF54LM20A includes an onboard P25Q64/PY25Q64-class 8 MB flash on the dedicated QSPI/HS-SPI pads. The core exposes it in two layers:
+XIAO nRF54LM20A includes an onboard PY25Q64-class 8 MB flash on the dedicated QSPI/HS-SPI pads. Nordic DK-style MX25R6435F QSPI flash is also recognized by the bundled SPIFlash compatibility layer. The core exposes this in two layers:
 
 - `XiaoQspiFlash` for board-specific low-level control, including JEDEC read, read/write/erase, and `prepareForSleep()`.
 - `Adafruit_SPIFlash` compatibility with `Adafruit_FlashTransport_QSPI_NRF54`, so sketches can use common `begin()`, `readBuffer()`, `writeBuffer()`, `eraseSector()`, `readJEDECID()`, and `runCommand(0xB9)` style calls.

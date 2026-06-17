@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 CMSIS_DAP_VENDOR_ID = "2886"
@@ -33,6 +37,10 @@ DEFAULT_UF2_LABELS = (
     "DAPLINK",
 )
 UF2_MARKER_FILES = ("INFO_UF2.TXT", "CURRENT.UF2", "INDEX.HTM")
+OPEN_NRF_OCD_RELEASE = "v0.1.0"
+OPEN_NRF_OCD_RELEASE_BASE_URL = (
+    "https://github.com/lolren/open-nrf-ocd/releases/download"
+)
 
 
 def run(cmd: list[str], timeout: float | None = None) -> subprocess.CompletedProcess[str]:
@@ -1196,7 +1204,7 @@ def upload_pyocd(
     import time as _time
     _time.sleep(1)
     try:
-        nrf_ocd = detect_nrf_ocd_command(host_tools_path)
+        nrf_ocd = detect_nrf_ocd_command(host_tools_path, allow_download=False)
         if nrf_ocd:
             ocd_tgt = target.strip().lower()
             if ocd_tgt in ("nrf54l",):
@@ -1215,45 +1223,167 @@ def upload_pyocd(
     return 0
 
 
-def detect_nrf_ocd_command(host_tools_path=None):
-    from pathlib import Path
-    candidates = []
-    # Check host_tools_path first
-    if host_tools_path:
-        p = Path(host_tools_path)
-        try:
-            for f in p.rglob("nrf_ocd"):
-                if f.is_file():
-                    candidates.insert(0, f)
-        except OSError:
-            pass
-    # Check tools dir relative to this script
-    script_dir = Path(__file__).resolve().parent
-    if script_dir.name == "tools":
-        for f in script_dir.rglob("nrf_ocd"):
-            if f.is_file() and str(f) not in [str(c) for c in candidates]:
-                candidates.append(f)
-    # Check Arduino15 package tools
-    arduino_tools = Path.home() / ".arduino15" / "packages" / "nrf54l15clean" / "tools"
-    if arduino_tools.is_dir():
-        try:
-            for p in arduino_tools.rglob("nrf_ocd"):
-                if p.is_file() and str(p) not in [str(c) for c in candidates]:
-                    candidates.append(p)
-        except OSError:
-            pass
-    if not candidates:
+def open_nrf_ocd_asset_for_host() -> tuple[str, str] | None:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system == "windows":
+        if machine in {"amd64", "x86_64"}:
+            return "nrf_ocd-win64.exe", "nrf_ocd.exe"
         return None
-    return [str(candidates[0])]
+
+    if system == "linux":
+        if machine in {"x86_64", "amd64"}:
+            return "nrf_ocd-linux-x64", "nrf_ocd"
+        if machine in {"aarch64", "arm64"}:
+            return "nrf_ocd-linux-arm64", "nrf_ocd"
+        if machine.startswith("arm") or machine in {"armv7l", "armhf"}:
+            return "nrf_ocd-linux-armhf", "nrf_ocd"
+
+    return None
+
+
+def open_nrf_ocd_candidate_names() -> tuple[str, ...]:
+    if sys.platform.startswith("win"):
+        return ("nrf_ocd.exe", "nrf_ocd-win64.exe", "nrf_ocd")
+    return (
+        "nrf_ocd",
+        "nrf_ocd-linux-x64",
+        "nrf_ocd-linux-arm64",
+        "nrf_ocd-linux-armhf",
+    )
+
+
+def open_nrf_ocd_cache_roots(host_tools_path: Path | None = None) -> list[Path]:
+    roots: list[Path] = []
+    if host_tools_path is not None:
+        roots.append(host_tools_path / "runtime" / "open-nrf-ocd" / OPEN_NRF_OCD_RELEASE)
+
+    script_dir = Path(__file__).resolve().parent
+    roots.append(script_dir / "runtime" / "open-nrf-ocd" / OPEN_NRF_OCD_RELEASE)
+    roots.append(
+        Path.home()
+        / ".arduino15"
+        / "packages"
+        / "nrf54l15clean"
+        / "tools"
+        / "open-nrf-ocd"
+        / OPEN_NRF_OCD_RELEASE
+    )
+    roots.append(Path.home() / ".cache" / "nrf54l15clean" / "open-nrf-ocd" / OPEN_NRF_OCD_RELEASE)
+    return roots
+
+
+def make_executable_if_needed(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        return
+    try:
+        mode = path.stat().st_mode
+        path.chmod(mode | 0o755)
+    except OSError:
+        pass
+
+
+def ensure_open_nrf_ocd_release_binary(host_tools_path: Path | None = None) -> list[str] | None:
+    asset = open_nrf_ocd_asset_for_host()
+    if asset is None:
+        print(
+            "open-nrf-ocd fallback is not available for this host OS/CPU; "
+            "use pyOCD instead.",
+            file=sys.stderr,
+        )
+        return None
+
+    asset_name, executable_name = asset
+    url = f"{OPEN_NRF_OCD_RELEASE_BASE_URL}/{OPEN_NRF_OCD_RELEASE}/{asset_name}"
+
+    for root in open_nrf_ocd_cache_roots(host_tools_path):
+        destination = root / executable_name
+        if destination.is_file():
+            make_executable_if_needed(destination)
+            return [str(destination)]
+
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+
+        temp_path = destination.with_suffix(destination.suffix + ".tmp")
+        try:
+            print(f"Downloading open-nrf-ocd {asset_name}...")
+            with urllib.request.urlopen(url, timeout=60) as response, temp_path.open("wb") as out:
+                shutil.copyfileobj(response, out, length=1024 * 1024)
+            os.replace(temp_path, destination)
+            make_executable_if_needed(destination)
+            return [str(destination)]
+        except (OSError, urllib.error.URLError) as exc:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            print(f"open-nrf-ocd download/cache failed at {root}: {exc}", file=sys.stderr)
+
+    return None
+
+
+def detect_nrf_ocd_command(
+    host_tools_path: Path | None = None,
+    allow_download: bool = False,
+) -> list[str] | None:
+    override = os.environ.get("NRF54_NRF_OCD") or os.environ.get("OPEN_NRF_OCD")
+    if override:
+        return shlex.split(override)
+
+    candidates: list[Path] = []
+    candidate_names = set(open_nrf_ocd_candidate_names())
+    search_roots: list[Path] = []
+    if host_tools_path is not None:
+        search_roots.append(host_tools_path)
+    search_roots.append(Path(__file__).resolve().parent)
+    search_roots.append(
+        Path.home() / ".arduino15" / "packages" / "nrf54l15clean" / "tools"
+    )
+    search_roots.extend(open_nrf_ocd_cache_roots(host_tools_path))
+
+    seen: set[str] = set()
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        try:
+            for item in root.rglob("*"):
+                if item.name not in candidate_names or not item.is_file():
+                    continue
+                item_key = str(item)
+                if item_key in seen:
+                    continue
+                seen.add(item_key)
+                candidates.append(item)
+        except OSError:
+            continue
+
+    if candidates:
+        candidates.sort(key=lambda path: (path.name != "nrf_ocd" and path.name != "nrf_ocd.exe", len(str(path))))
+        make_executable_if_needed(candidates[0])
+        return [str(candidates[0])]
+
+    if allow_download:
+        return ensure_open_nrf_ocd_release_binary(host_tools_path)
+
+    return None
 
 
 def upload_nrf_ocd(
     hex_path,
     target,
     uid,
+    host_tools_path: Path | None = None,
     nrf_ocd_cmd=None,
 ):
-    nrf_ocd_cmd = nrf_ocd_cmd if nrf_ocd_cmd is not None else detect_nrf_ocd_command()
+    nrf_ocd_cmd = (
+        nrf_ocd_cmd
+        if nrf_ocd_cmd is not None
+        else detect_nrf_ocd_command(host_tools_path, allow_download=True)
+    )
     if nrf_ocd_cmd is None:
         return -1  # not found
     target_map = {
@@ -1351,7 +1481,7 @@ def main() -> int:
     parser.add_argument(
         "--runner",
         default="auto",
-        help="Upload runner: uf2, auto, pyocd, openocd",
+        help="Upload runner: uf2, auto, pyocd, openocd, nrf_ocd",
     )
     parser.add_argument(
         "--openocd-script",
@@ -1546,6 +1676,7 @@ def main() -> int:
             args.hex,
             args.target,
             selected_uid,
+            host_tools_path=host_tools_path,
         )
         if nrf_rc == 0:
             rc = 0
@@ -1561,6 +1692,7 @@ def main() -> int:
             args.hex,
             args.target,
             selected_uid,
+            host_tools_path=host_tools_path,
         )
         if nrf_rc == 0:
             rc = 0
