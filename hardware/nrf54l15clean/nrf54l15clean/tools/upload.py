@@ -1192,16 +1192,95 @@ def upload_pyocd(
         return 0
 
     # Reset the board after upload so the sketch starts immediately
+    # Reset board after upload using nrf_ocd -R (reliable, pyOCD commander hangs)
     try:
-        reset_cmd = [*pyocd_cmd, "commander"]
-        reset_cmd = append_pyocd_target_script(reset_cmd, target)
-        if uid:
-            reset_cmd.extend(["-u", uid])
-        reset_cmd.extend(["-c", "halt", "-c", "reset", "-c", "exit"])
-        subprocess.run(reset_cmd, timeout=10.0, capture_output=True)
+        nrf_ocd = detect_nrf_ocd_command(host_tools_path)
+        if nrf_ocd:
+            reset_cmd = [*nrf_ocd, "-t", target.strip().lower().replace("nrf54l", "nrf54l15"), "-u", uid or "--auto", "-R"]
+            subprocess.run(reset_cmd, timeout=10.0, capture_output=True)
     except (Exception, subprocess.TimeoutExpired):
-        pass  # best-effort, non-fatal
+        pass
     return 0
+
+
+def detect_nrf_ocd_command(host_tools_path=None):
+    from pathlib import Path
+    candidates = []
+    # Check host_tools_path first
+    if host_tools_path:
+        p = Path(host_tools_path)
+        try:
+            for f in p.rglob("nrf_ocd"):
+                if f.is_file():
+                    candidates.insert(0, f)
+        except OSError:
+            pass
+    # Check tools dir relative to this script
+    script_dir = Path(__file__).resolve().parent
+    if script_dir.name == "tools":
+        for f in script_dir.rglob("nrf_ocd"):
+            if f.is_file() and str(f) not in [str(c) for c in candidates]:
+                candidates.append(f)
+    # Check Arduino15 package tools
+    arduino_tools = Path.home() / ".arduino15" / "packages" / "nrf54l15clean" / "tools"
+    if arduino_tools.is_dir():
+        try:
+            for p in arduino_tools.rglob("nrf_ocd"):
+                if p.is_file() and str(p) not in [str(c) for c in candidates]:
+                    candidates.append(p)
+        except OSError:
+            pass
+    if not candidates:
+        return None
+    return [str(candidates[0])]
+
+
+def upload_nrf_ocd(
+    hex_path,
+    target,
+    uid,
+    nrf_ocd_cmd=None,
+):
+    nrf_ocd_cmd = nrf_ocd_cmd if nrf_ocd_cmd is not None else detect_nrf_ocd_command()
+    if nrf_ocd_cmd is None:
+        return -1  # not found
+    target_map = {
+        "nrf54l": "nrf54l15",
+    }
+    ocd_target = target.strip().lower()
+    if ocd_target in target_map:
+        ocd_target = target_map[ocd_target]
+    args = [*nrf_ocd_cmd, "-t", ocd_target]
+    if uid:
+        args.extend(["-u", uid])
+    args.extend(["-e", "-f", hex_path])
+    print(f"Flashing {hex_path}")
+    print(f"Runner: nrf_ocd")
+    print(f"Probe UID: {uid or 'auto-select'}")
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        if result.stdout:
+            for line in result.stdout.split("\n"):
+                if line.strip():
+                    print(line)
+        if result.stderr:
+            for line in result.stderr.split("\n"):
+                if line.strip() and "WARN" not in line:
+                    print(line, file=sys.stderr)
+        if result.returncode == 0:
+            # Reset after flash
+            try:
+                reset_args = [*nrf_ocd_cmd, "-t", ocd_target, "-u", uid, "-R"] if uid else [*nrf_ocd_cmd, "-t", ocd_target, "-R"]
+                subprocess.run(reset_args, timeout=10.0, capture_output=True)
+            except:
+                pass
+            return 0
+        return 1
+    except subprocess.TimeoutExpired:
+        print("nrf_ocd timed out", file=sys.stderr)
+    except Exception as e:
+        print(f"nrf_ocd error: {e}", file=sys.stderr)
+    return 1
 
 
 def upload_openocd(
@@ -1459,6 +1538,18 @@ def main() -> int:
     elif runner != "uf2":
         print(f"ERROR: Unsupported runner: {runner}", file=sys.stderr)
         return 4
+
+    if rc != 0:
+        # Final fallback: try nrf_ocd
+        nrf_rc = upload_nrf_ocd(
+            args.hex,
+            args.target,
+            selected_uid,
+        )
+        if nrf_rc == 0:
+            rc = 0
+        elif nrf_rc == -1:
+            print("nrf_ocd not found (optional native flash tool)", file=sys.stderr)
 
     if rc != 0:
         return rc
