@@ -18,6 +18,7 @@ using xiao_nrf54l15::Nrf54ThreadExperimental;
 
 void setup() {
   Serial.begin(115200);
+  Serial1.begin(115200);
   delay(3000);
   Serial.println("\n=== PASE SPAKE2+ CRYPTO TEST ==="); Serial.flush(); delay(500);
   

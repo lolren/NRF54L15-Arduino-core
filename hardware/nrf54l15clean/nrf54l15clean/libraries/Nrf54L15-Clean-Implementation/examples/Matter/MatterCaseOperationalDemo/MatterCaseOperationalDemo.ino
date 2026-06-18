@@ -62,7 +62,8 @@ void ps(){
 }
 }
 void setup(){
-  Serial.begin(115200);{uint32_t t=millis();while(!Serial&&(millis()-t)<1500){}}
+  Serial.begin(115200);
+  Serial1.begin(115200);{uint32_t t=millis();while(!Serial&&(millis()-t)<1500){}}
   pinMode(LED_BUILTIN,OUTPUT);digitalWrite(LED_BUILTIN,LOW);
   Serial.print("op === Encrypted Matter (");
 #if MATTER_DEMO_ROLE==0

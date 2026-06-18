@@ -261,8 +261,8 @@ public:
      */
     const char * AsString(bool withSourceLocation = true) const
     {
-        extern const char * ErrorStr(ChipError, bool);
-        return ErrorStr(*this, withSourceLocation);
+        // Arduino: inline stub
+        return "error";
     }
 
     /**
