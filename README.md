@@ -224,6 +224,48 @@ Examples:
 
 ---
 
+## ⚡ PWM (analogWrite)
+
+### Pin Allocation (LM20A)
+
+| Instance | Channels | Pins |
+|---|---|---|
+| **PWM20** | 0–3 | D0, D1, D2, D3 |
+| **PWM21** | 0–3 | D4, D5, D6, D7 |
+| **PWM22** | 0–3 | D8, LED_R (28), LED_B (29), LED_G (30) |
+| Software | — | D9–D15 |
+
+All 10 digital pins (D0–D9) and all 3 onboard RGB LEDs have hardware PWM support.
+
+### Frequency Control
+
+- **`analogWriteFrequency(hz)`** — Sets the shared base frequency for all hardware PWM instances (~980 Hz default).
+- **`analogWritePinFrequency(pin, hz)`** — Per-pin independent frequency using a dedicated timer + DPPI + GPIOTE path. Supports up to **6 pins** simultaneously.
+- Pins without a custom frequency inherit their instance's shared frequency.
+
+### Examples
+
+```cpp
+analogWriteResolution(8);
+
+// Same frequency on shared instance (PWM20):
+analogWrite(D0, 128);   // 50% duty, ~980 Hz
+analogWrite(D1, 64);    // 25% duty, ~980 Hz
+
+// Different frequencies per pin (timer-backed):
+analogWritePinFrequency(D0, 500);   // 500 Hz
+analogWritePinFrequency(D1, 2000);  // 2 kHz
+analogWrite(D0, 128);
+analogWrite(D1, 128);
+```
+
+### Limitations
+
+- Pins sharing the same PWM instance run at the same base frequency unless `analogWritePinFrequency()` is used.
+- Per-pin timer PWM is limited to **6 pins** (hardware TIMER + DPPI slot count).
+- **D9** uses software PWM fallback (CPU-driven). Use `analogWritePinFrequency(D9, 1000)` for timer-backed PWM.
+- D6–D8 share pins with SPI (P1.04–P1.06). When SPI is active, those PWM channels are unavailable.
+
 ## 🔧 Troubleshooting
 
 ### Linux: Upload fails with "hidraw access denied"
