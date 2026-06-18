@@ -740,23 +740,29 @@ static void programSystemOffWakeUs(uint32_t delayUs)
 
 static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
 {
-    programSystemOffWakeUs(delayUs);
-    nrf54l15_core_prepare_system_off();
-    if (disableRamRetention) {
-        nrf54l15_core_disable_system_off_retention();
-    }
+    (void)disableRamRetention;
 
-    __asm volatile("cpsid i" ::: "memory");
-    __asm volatile("dsb 0xF" ::: "memory");
-    __asm volatile("isb 0xF" ::: "memory");
-    NRF_RESET->RESETREAS = 0xFFFFFFFFUL;
-    __asm volatile("dsb 0xF" ::: "memory");
-
-    NRF_REGULATORS->SYSTEMOFF = REGULATORS_SYSTEMOFF_SYSTEMOFF_Enter;
-    __asm volatile("dsb 0xF" ::: "memory");
-    while (true) {
-        __asm volatile("wfe");
+    /*
+     * The Arduino timed delaySystemOff*() APIs are used as "sleep, then
+     * continue" calls. True no-retention SYSTEMOFF is a cold-boot path and
+     * cannot resume at the next C statement. Keep the public timed API
+     * consistent by using the GRTC + WFI low-power delay path.
+     */
+#if defined(NRF54L15_CLEAN_POWER_LOW)
+    xiao_nrf54l15_board_state_t boardState;
+    const uint8_t boardStateActive =
+        delayAutoBoardStateEnabled() ? delayBoardStateEnter(&boardState) : 0U;
+    initLowPowerTimebase();
+    const uint64_t targetUs = readLowPowerCounterUs() + (uint64_t)delayUs;
+    delayUntilLowPowerCounterUs(targetUs);
+    delayBoardStateExit(&boardState, boardStateActive);
+#else
+    const unsigned long start = micros();
+    while ((micros() - start) < (unsigned long)delayUs) {
+        nrf54l15_clean_idle_service();
+        __NOP();
     }
+#endif
 }
 
 void __attribute__((weak)) SysTick_Handler(void)

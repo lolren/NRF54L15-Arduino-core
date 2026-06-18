@@ -10,6 +10,1718 @@
       },
       "platforms": [
         {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.136",
+          "category": "Arduino",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.136/nrf54l15clean-0.9.136-420b02b73267.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.136-420b02b73267.tar.bz2",
+          "checksum": "SHA-256:420b02b73267aed0510914a5577198839528eace18ffb1f81dec0cba1da004cf",
+          "size": "24028711",
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT-25008 nRF54L15 Module"
+            },
+            {
+              "name": "HOLYIOT-25007 nRF54L15 Module"
+            },
+            {
+              "name": "Generic nRF54L15 Module (36-pad)"
+            },
+            {
+              "name": "Nordic PCA10156 nRF54L15 DK"
+            }
+          ],
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ],
+          "discoveryDependencies": [],
+          "monitorDependencies": []
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.135",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.135/nrf54l15clean-0.9.135.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.135.tar.bz2",
+          "checksum": "SHA-256:41c443b9b6dbb4ecf9a18a976f28eaf4bd30c4cd18d6cd43097eab756e469d3e",
+          "size": "26225013",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.134",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.134/nrf54l15clean-0.9.134.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.134.tar.bz2",
+          "checksum": "SHA-256:c95da8a03602bd83b605d8d4d0684397353047c685aa0a092e4c78921723aedb",
+          "size": "26223405",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.133",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.133/nrf54l15clean-0.9.133.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.133.tar.bz2",
+          "checksum": "SHA-256:eb670805b8942aff19abdc83d8a639c9d0b26cde08deaccc674d9387df39d28f",
+          "size": "26339954",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.132",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.132/nrf54l15clean-0.9.132.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.132.tar.bz2",
+          "checksum": "SHA-256:8ca3ac8092d70a012f206ee53141f62b41fe080b4343ad77e1fc163e04223a05",
+          "size": "26339207",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.131",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.131/nrf54l15clean-0.9.131.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.131.tar.bz2",
+          "checksum": "SHA-256:e81e43fe3f16cca62236e84d7da05d6b37cc8ba23ca59c5eb6d10628821bdd5a",
+          "size": "26337135",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.130",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.130/nrf54l15clean-0.9.130.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.130.tar.bz2",
+          "checksum": "SHA-256:50bff7120560d4bc800049d46e7ddcb1e3dec86c78deddd198cb038538f06e33",
+          "size": "26337402",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.129",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.129/nrf54l15clean-0.9.129.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.129.tar.bz2",
+          "checksum": "SHA-256:40752aed22bdc6e38428cfe49bb264a200ab41ef5d7c42af63a7715d68a120d4",
+          "size": "26340122",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.128",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.128/nrf54l15clean-0.9.128.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.128.tar.bz2",
+          "checksum": "SHA-256:7b1a9aaa41a4260fc3127f911ad420da9ff7af1fc65b73b423eb74b14b72804a",
+          "size": "26247858",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.127",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.127/nrf54l15clean-0.9.127.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.127.tar.bz2",
+          "checksum": "SHA-256:dbb9c076818f2182b2f9954a473020de278e5c7b8b2f13bd1fdc4e5deaf211f3",
+          "size": "26248959",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.126",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.126/nrf54l15clean-0.9.126.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.126.tar.bz2",
+          "checksum": "SHA-256:bb74be834f6013b21247cd3ef09ee830e13f99b16e046f4b1614644d1940adc4",
+          "size": "26250735",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.125",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.125/nrf54l15clean-0.9.125.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.125.tar.bz2",
+          "checksum": "SHA-256:ec415289108828f7f79c629c7a3aa9027e650b6995e610280ef1088432f00ec1",
+          "size": "26221978",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.124",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.124/nrf54l15clean-0.9.124.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.124.tar.bz2",
+          "checksum": "SHA-256:398b1264132079fcbc8df9ae7c6e568d76b4e0115ba9a7dcd6bc8d555ed22552",
+          "size": "26223037",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.123",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.123/nrf54l15clean-0.9.123.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.123.tar.bz2",
+          "checksum": "SHA-256:05b790d633f98b48cfefe1136ffb09f3cdf6036792e83ee62092e60535ad921d",
+          "size": "26221925",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.122",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.122/nrf54l15clean-0.9.122.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.122.tar.bz2",
+          "checksum": "SHA-256:811d538573719f071211cfa662ab3a87bee9d9074d7c4799628fbf8390ce95a3",
+          "size": "26223136",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.121",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.121/nrf54l15clean-0.9.121.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.121.tar.bz2",
+          "checksum": "SHA-256:c48efcd68930d46a1aa102091094a718b68c8884d042032c47f6d1864267fa7a",
+          "size": "26222830",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.120",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.120/nrf54l15clean-0.9.120.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.120.tar.bz2",
+          "checksum": "SHA-256:f7f158b00b5cb7fb51c6a9afe5e9d229f06625eea145b9a113f9165ec07e18d9",
+          "size": "26222912",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.113",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.113/nrf54l15clean-0.9.113.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.113.tar.bz2",
+          "checksum": "SHA-256:4e4f71b2025b008cad7a68a961b9a498022e0eed0ca11da8799680f327c4f6f7",
+          "size": "26222687",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.112",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.112/nrf54l15clean-0.9.112.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.112.tar.bz2",
+          "checksum": "SHA-256:0021d20798dc365e86844875efdd59a3b7d49e1f2d0f305b1afe68fc959d773b",
+          "size": "25910322",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.111",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.111/nrf54l15clean-0.9.111.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.111.tar.bz2",
+          "checksum": "SHA-256:521bd09499a9e06cef7784f9c083dc9f83d78f80e46d156e8f15b0f857c6470f",
+          "size": "26221645",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.110",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.110/nrf54l15clean-0.9.110.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.110.tar.bz2",
+          "checksum": "SHA-256:4f92d1deddf9a4578a3fd5f10a9a49ef4391c04019fceaecaf7809d62df88323",
+          "size": "26221645",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.109",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.109/nrf54l15clean-0.9.109.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.109.tar.bz2",
+          "checksum": "SHA-256:95923dd9831459506d37e6873545af88b1147c49c7adfa221d90f3a9c1ae2841",
+          "size": "26222638",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.108",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.108/nrf54l15clean-0.9.108.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.108.tar.bz2",
+          "checksum": "SHA-256:e55ec28b3dd0d1716a757d4414ce79231c5ac4a5bff7437b33e0a8840d6b2096",
+          "size": "26222895",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.107",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.107/nrf54l15clean-0.9.107.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.107.tar.bz2",
+          "checksum": "SHA-256:8dc2541934d931e3bb641a5031e9a921897e20ca01c1474eb37fa2be606a7a14",
+          "size": "26222803",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.106",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.106/nrf54l15clean-0.9.106.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.106.tar.bz2",
+          "checksum": "SHA-256:1e6112aa4a25c7c77b713df28bee7827b54bc863fdd75f674b42271527b42282",
+          "size": "26223506",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.105",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.105/nrf54l15clean-0.9.105.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.105.tar.bz2",
+          "checksum": "SHA-256:83b29de37a9344003ad0628b4968c6abc49a0c01a4192e867581bc55e0caf06a",
+          "size": "26223542",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.104",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.104/nrf54l15clean-0.9.104.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.104.tar.bz2",
+          "checksum": "SHA-256:f2bab228b87e7b540d33b78feb8a5347cd9182fb6c03fafdce483ea0bd5ed44d",
+          "size": "26223143",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.103",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.103/nrf54l15clean-0.9.103.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.103.tar.bz2",
+          "checksum": "SHA-256:5d52e6b533aff0adc117dc34cf5d4b66e8267428b55390268570dceac1cc50b7",
+          "size": "26226248",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.102",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.102/nrf54l15clean-0.9.102.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.102.tar.bz2",
+          "checksum": "SHA-256:486602e6db8f1f0c0378fe8aa2e9504716bf0f3d247c6d4fbc59e425baca5db7",
+          "size": "26223064",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.101",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.101/nrf54l15clean-0.9.101.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.101.tar.bz2",
+          "checksum": "SHA-256:54422c963c09b5997854fe3e68dbda6b1c56ccd03c7a20df544dcc9b8efe900a",
+          "size": "26224053",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.100",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.100/nrf54l15clean-0.9.100.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.100.tar.bz2",
+          "checksum": "SHA-256:58208cbc165be372d5399621b57276b6296d1bdbaba0942e907a16eb35097526",
+          "size": "26221128",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.64",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.64/nrf54l15clean-0.9.64.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.64.tar.bz2",
+          "checksum": "SHA-256:12c03dd64d1076490aba4b2fda15f8f0e9c8c694b0983856a47936da03af6be8",
+          "size": "26221041",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.63",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.63/nrf54l15clean-0.9.63.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.63.tar.bz2",
+          "checksum": "SHA-256:6ea2e269e2a46785fdde1ba7ad1709524652a91dba5ed0f4455334da7c18e0aa",
+          "size": "26223346",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.62",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.62/nrf54l15clean-0.9.62.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.62.tar.bz2",
+          "checksum": "SHA-256:0f45657c3a19ac93a98ea85d6643e696895499ffebda13b67769c4f84e1980da",
+          "size": "26221979",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.61",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.61/nrf54l15clean-0.9.61.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.61.tar.bz2",
+          "checksum": "SHA-256:1d1f48e5f5bfc4e69ce725d6f0241ca726e28289b65a97ba72bb65a5afc72c4d",
+          "size": "26209293",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.60",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.60/nrf54l15clean-0.9.60.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.60.tar.bz2",
+          "checksum": "SHA-256:513686bf8af17cdda5231b34dd8af7f792d530adce200db50e1a56d81bb89623",
+          "size": "26209840",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.59",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.59/nrf54l15clean-0.9.59.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.59.tar.bz2",
+          "checksum": "SHA-256:b3f32a5b18e9ed9ccf75566937844cbffe8599df55d80bb3060b1e77b01a8472",
+          "size": "26209447",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.58",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.58/nrf54l15clean-0.9.58.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.58.tar.bz2",
+          "checksum": "SHA-256:e902ce85589423c6ae4747845051ba1826ce727d5c402c569f079d7a02ea8917",
+          "size": "26213353",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15 / Sense"
+            },
+            {
+              "name": "XIAO nRF54LM20A"
+            },
+            {
+              "name": "HOLYIOT nRF54L15 Modules"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.57",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.57/nrf54l15clean-0.9.57.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.57.tar.bz2",
+          "checksum": "SHA-256:039944ab135512f63edcec70892e54f917c5884690012da309c18106c0162e36",
+          "size": "25910259",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.56",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.56/nrf54l15clean-0.9.56.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.56.tar.bz2",
+          "checksum": "SHA-256:ecbe75b6bf2dc6f73d0feb00cc79f583f31413102d89cf22dfafb60ad2a56fae",
+          "size": "25910824",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.55",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.55/nrf54l15clean-0.9.55.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.55.tar.bz2",
+          "checksum": "SHA-256:abb86ce236421ce9942599d4fd250dfeb745d4aa8d3195c244481a8c7efd8278",
+          "size": "25911878",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.54",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.54/nrf54l15clean-0.9.54.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.54.tar.bz2",
+          "checksum": "SHA-256:b0e62be43fac51895cde0831d0a5a031bca01ec59f2c2c43778673d2b07b24f4",
+          "size": "25911486",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
           "name": "nrf54l15clean",
           "architecture": "nrf54l15clean",
           "version": "0.9.53",
@@ -64,6 +1776,196 @@
         {
           "name": "nRF54L15 Boards",
           "architecture": "nrf54l15clean",
+          "version": "0.9.52",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.52/nrf54l15clean-0.9.52.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.52.tar.bz2",
+          "checksum": "SHA-256:394b9f3fbc24ffcc3bfb1a90a5eb6de49d09d7200c47c0485d2e2bd0e9c6a1e7",
+          "size": "25915301",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.51",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.51/nrf54l15clean-0.9.51.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.51.tar.bz2",
+          "checksum": "SHA-256:5dd04e62c9a6db35643ee2d3fe24b9f610eb8daff32d87fb35c5388aa5f36300",
+          "size": "25914327",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.50",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.50/nrf54l15clean-0.9.50.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.50.tar.bz2",
+          "checksum": "SHA-256:5119a046b17bdb3e6eff71b3c795c90f305292387e515d6f4c634b6b9aebf67b",
+          "size": "25911071",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.49",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.49/nrf54l15clean-0.9.49.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.49.tar.bz2",
+          "checksum": "SHA-256:9783de5e20dd38c738992b556fe5635bfeb3514115fce55373e5ba623b8c0f2a",
+          "size": "25911199",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
+          "version": "0.9.48",
+          "category": "Contributed",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.48/nrf54l15clean-0.9.48.tar.bz2",
+          "archiveFileName": "nrf54l15clean-0.9.48.tar.bz2",
+          "checksum": "SHA-256:c0cbdfae84526732fb4870190d51226e7e3f74dd49692265cd537fd9d0e0f9dc",
+          "size": "25907365",
+          "help": {
+            "online": "https://github.com/lolren/nrf54-arduino-core"
+          },
+          "boards": [
+            {
+              "name": "XIAO nRF54L15"
+            },
+            {
+              "name": "XIAO nRF54LM20B"
+            }
+          ],
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "nrf54l15clean",
+              "name": "nrf54l15hosttools",
+              "version": "1.1.4"
+            }
+          ]
+        },
+        {
+          "name": "nRF54L15 Boards",
+          "architecture": "nrf54l15clean",
           "version": "0.9.47",
           "category": "Arduino",
           "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.47/nrf54l15clean-0.9.47-294c226290be.tar.bz2",
@@ -107,7 +2009,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -159,7 +2061,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -211,7 +2113,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -251,7 +2153,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -289,7 +2191,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -327,7 +2229,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -365,7 +2267,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -403,7 +2305,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -441,7 +2343,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -479,7 +2381,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -517,7 +2419,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -555,7 +2457,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -593,7 +2495,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -631,7 +2533,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ]
         },
@@ -681,7 +2583,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -736,7 +2638,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -791,7 +2693,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -846,7 +2748,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -901,7 +2803,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -956,7 +2858,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1011,7 +2913,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1063,7 +2965,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1115,7 +3017,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1167,7 +3069,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1219,7 +3121,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1271,7 +3173,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1323,7 +3225,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1375,7 +3277,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1427,7 +3329,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1479,7 +3381,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1531,7 +3433,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1583,7 +3485,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1635,7 +3537,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1687,7 +3589,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1739,7 +3641,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1791,7 +3693,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1843,7 +3745,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1895,7 +3797,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1947,7 +3849,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -1999,7 +3901,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2051,7 +3953,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2103,7 +4005,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2152,7 +4054,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2201,7 +4103,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2234,7 +4136,7 @@
             }
           ],
           "help": {
-            "online": "https://github.com/REPLACE_ME/REPLACE_ME"
+            "online": "https://github.com/lolren/nrf54-arduino-core"
           },
           "toolsDependencies": [
             {
@@ -2250,7 +4152,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2283,7 +4185,7 @@
             }
           ],
           "help": {
-            "online": "https://github.com/REPLACE_ME/REPLACE_ME"
+            "online": "https://github.com/lolren/nrf54-arduino-core"
           },
           "toolsDependencies": [
             {
@@ -2299,7 +4201,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2332,7 +4234,7 @@
             }
           ],
           "help": {
-            "online": "https://github.com/REPLACE_ME/REPLACE_ME"
+            "online": "https://github.com/lolren/nrf54-arduino-core"
           },
           "toolsDependencies": [
             {
@@ -2348,7 +4250,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2381,7 +4283,7 @@
             }
           ],
           "help": {
-            "online": "https://github.com/REPLACE_ME/REPLACE_ME"
+            "online": "https://github.com/lolren/nrf54-arduino-core"
           },
           "toolsDependencies": [
             {
@@ -2397,7 +4299,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2430,7 +4332,7 @@
             }
           ],
           "help": {
-            "online": "https://github.com/REPLACE_ME/REPLACE_ME"
+            "online": "https://github.com/lolren/nrf54-arduino-core"
           },
           "toolsDependencies": [
             {
@@ -2446,7 +4348,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2495,7 +4397,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2544,7 +4446,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2593,7 +4495,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2642,7 +4544,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2691,7 +4593,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2740,7 +4642,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2789,7 +4691,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2838,7 +4740,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2887,7 +4789,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2936,7 +4838,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -2985,7 +4887,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3034,7 +4936,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3083,7 +4985,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3132,7 +5034,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3181,7 +5083,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3230,7 +5132,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3279,7 +5181,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3328,7 +5230,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3377,7 +5279,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3426,7 +5328,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3475,7 +5377,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3524,7 +5426,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3573,7 +5475,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3622,7 +5524,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3671,7 +5573,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3720,7 +5622,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3769,7 +5671,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3818,7 +5720,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3867,7 +5769,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3916,7 +5818,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -3965,7 +5867,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4014,7 +5916,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4063,7 +5965,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4112,7 +6014,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4161,7 +6063,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4210,7 +6112,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4259,7 +6161,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4308,7 +6210,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4357,7 +6259,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4406,7 +6308,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4455,7 +6357,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4504,7 +6406,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4553,7 +6455,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4602,7 +6504,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4651,7 +6553,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4700,7 +6602,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4749,7 +6651,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4798,7 +6700,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4847,7 +6749,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4896,7 +6798,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4945,7 +6847,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -4994,7 +6896,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -5043,7 +6945,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -5092,7 +6994,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -5141,7 +7043,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -5190,7 +7092,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -5239,7 +7141,7 @@
             {
               "packager": "nrf54l15clean",
               "name": "nrf54l15hosttools",
-              "version": "1.1.3"
+              "version": "1.1.4"
             }
           ],
           "discoveryDependencies": [],
@@ -13097,47 +14999,6 @@
       "tools": [
         {
           "name": "nrf54l15hosttools",
-          "version": "1.1.4",
-          "systems": [
-            {
-              "host": "x86_64-pc-linux-gnu",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15hosttools-1.1.4-x86_64-pc-linux-gnu-3cea2ae132b5.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-1.1.4-x86_64-pc-linux-gnu-3cea2ae132b5.tar.bz2",
-              "checksum": "SHA-256:3cea2ae132b5c937b9f73574ca549611182dc78a209fe8277b9bffe96e53d0e1",
-              "size": "66743039"
-            },
-            {
-              "host": "aarch64-linux-gnu",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15hosttools-1.1.4-aarch64-linux-gnu-f2c32f300035.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-1.1.4-aarch64-linux-gnu-f2c32f300035.tar.bz2",
-              "checksum": "SHA-256:f2c32f3000357e3d410a6df9b1d920b7410c9917c7ed99de49173e05290d41f0",
-              "size": "65778164"
-            },
-            {
-              "host": "i686-mingw32",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15hosttools-1.1.4-i686-mingw32-7b7661ef2a3d.zip",
-              "archiveFileName": "nrf54l15hosttools-1.1.4-i686-mingw32-7b7661ef2a3d.zip",
-              "checksum": "SHA-256:7b7661ef2a3d9cca7fcade65a925c6669e6714aa5debdbbc9a370896581b2c89",
-              "size": "58818824"
-            },
-            {
-              "host": "x86_64-apple-darwin",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15hosttools-1.1.4-x86_64-apple-darwin-6343a79a75e5.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-1.1.4-x86_64-apple-darwin-6343a79a75e5.tar.bz2",
-              "checksum": "SHA-256:6343a79a75e51c7742621cc7de44de3697a09829da76019005a2e40dac485d01",
-              "size": "43625515"
-            },
-            {
-              "host": "arm64-apple-darwin",
-              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v0.9.53/nrf54l15hosttools-1.1.4-arm64-apple-darwin-085b285d150f.tar.bz2",
-              "archiveFileName": "nrf54l15hosttools-1.1.4-arm64-apple-darwin-085b285d150f.tar.bz2",
-              "checksum": "SHA-256:085b285d150f72e1bf036edb2b24233fb83d6abc0a000ba5e314a042acc76e3c",
-              "size": "65424884"
-            }
-          ]
-        },
-        {
-          "name": "nrf54l15hosttools",
           "version": "1.0.0",
           "systems": [
             {
@@ -13310,6 +15171,47 @@
               "archiveFileName": "nrf54l15hosttools-1.1.3-x86_64-pc-linux-gnu.tar.bz2",
               "size": "22063325",
               "checksum": "SHA-256:3004cdaa49cc97cbf9dfa32ef7492837221c3b52b25e401be7cfdae3ccfcd712"
+            }
+          ]
+        },
+        {
+          "name": "nrf54l15hosttools",
+          "version": "1.1.4",
+          "systems": [
+            {
+              "host": "x86_64-pc-linux-gnu",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v1.1.4/nrf54l15hosttools-1.1.4-x86_64-pc-linux-gnu-3cea2ae132b5.tar.bz2",
+              "archiveFileName": "nrf54l15hosttools-1.1.4-x86_64-pc-linux-gnu-3cea2ae132b5.tar.bz2",
+              "checksum": "SHA-256:3cea2ae132b5c937b9f73574ca549611182dc78a209fe8277b9bffe96e53d0e1",
+              "size": "66743039"
+            },
+            {
+              "host": "aarch64-linux-gnu",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v1.1.4/nrf54l15hosttools-1.1.4-aarch64-linux-gnu-f2c32f300035.tar.bz2",
+              "archiveFileName": "nrf54l15hosttools-1.1.4-aarch64-linux-gnu-f2c32f300035.tar.bz2",
+              "checksum": "SHA-256:f2c32f3000357e3d410a6df9b1d920b7410c9917c7ed99de49173e05290d41f0",
+              "size": "65778164"
+            },
+            {
+              "host": "i686-mingw32",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v1.1.4/nrf54l15hosttools-1.1.4-i686-mingw32-7b7661ef2a3d.zip",
+              "archiveFileName": "nrf54l15hosttools-1.1.4-i686-mingw32-7b7661ef2a3d.zip",
+              "checksum": "SHA-256:7b7661ef2a3d9cca7fcade65a925c6669e6714aa5debdbbc9a370896581b2c89",
+              "size": "58818824"
+            },
+            {
+              "host": "x86_64-apple-darwin",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v1.1.4/nrf54l15hosttools-1.1.4-x86_64-apple-darwin-6343a79a75e5.tar.bz2",
+              "archiveFileName": "nrf54l15hosttools-1.1.4-x86_64-apple-darwin-6343a79a75e5.tar.bz2",
+              "checksum": "SHA-256:6343a79a75e51c7742621cc7de44de3697a09829da76019005a2e40dac485d01",
+              "size": "43625515"
+            },
+            {
+              "host": "arm64-apple-darwin",
+              "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v1.1.4/nrf54l15hosttools-1.1.4-arm64-apple-darwin-085b285d150f.tar.bz2",
+              "archiveFileName": "nrf54l15hosttools-1.1.4-arm64-apple-darwin-085b285d150f.tar.bz2",
+              "checksum": "SHA-256:085b285d150f72e1bf036edb2b24233fb83d6abc0a000ba5e314a042acc76e3c",
+              "size": "65424884"
             }
           ]
         }
