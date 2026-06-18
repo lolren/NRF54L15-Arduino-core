@@ -23,8 +23,8 @@
 
 using namespace xiao_nrf54l15;
 
-static constexpr Pin kPdmClk{1, 13};
-static constexpr Pin kPdmDin{1, 14};
+static constexpr Pin kPdmClk{1, 12};
+static constexpr Pin kPdmDin{1, 13};
 static constexpr size_t kSampleCount = 512;
 
 static Pdm g_pdm;
