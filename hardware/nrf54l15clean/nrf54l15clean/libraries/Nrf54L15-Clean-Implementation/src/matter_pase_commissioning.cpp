@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_pase_commissioning.h"
 
 #include <Arduino.h>
@@ -1226,3 +1227,4 @@ const char* MatterPaseCommissioning::stateName(
 }
 
 }  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

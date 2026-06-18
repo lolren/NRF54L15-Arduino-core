@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_case_session.h"
 
 #include <Arduino.h>
@@ -612,3 +613,4 @@ const char* MatterCaseSession::stateName(CaseState state) {
 }
 
 }  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

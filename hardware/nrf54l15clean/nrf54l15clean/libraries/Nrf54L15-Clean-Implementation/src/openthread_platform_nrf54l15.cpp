@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) && NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE
 #include "openthread_platform_nrf54l15.h"
 
 #include <Arduino.h>
@@ -4988,3 +4989,4 @@ extern "C" uint16_t otPlatTimeGetXtalAccuracy(void)
 {
     return 500;
 }
+#endif // NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE

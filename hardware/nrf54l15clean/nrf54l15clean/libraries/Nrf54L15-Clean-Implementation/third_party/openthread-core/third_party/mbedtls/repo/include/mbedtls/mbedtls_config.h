@@ -8,4 +8,5 @@
  */
 #pragma once
 
-#include "../../../mbedtls-config.h"
+// Forward to OpenThread's mbedTLS config via include path
+#include <mbedtls-config.h>

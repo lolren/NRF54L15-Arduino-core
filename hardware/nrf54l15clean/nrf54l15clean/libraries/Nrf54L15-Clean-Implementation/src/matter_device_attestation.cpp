@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_device_attestation.h"
 
 #include <Arduino.h>
@@ -263,4 +264,4 @@ const char* MatterDeviceAttestation::certTypeName(AttestationCertType type) {
   }
 }
 
-}  // namespace xiao_nrf54l15
+}  // namespace xiao_nrf54l15#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

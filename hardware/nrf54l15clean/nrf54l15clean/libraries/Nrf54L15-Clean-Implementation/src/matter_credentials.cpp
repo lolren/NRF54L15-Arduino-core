@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_credentials.h"
 
 #include <string.h>
@@ -233,3 +234,4 @@ bool MatterCredentials::saveState() {
 }
 
 }  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

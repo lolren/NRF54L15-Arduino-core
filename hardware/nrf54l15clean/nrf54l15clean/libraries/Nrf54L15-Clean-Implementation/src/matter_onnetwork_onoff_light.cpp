@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_onnetwork_onoff_light.h"
 
 #include <stdio.h>
@@ -1616,3 +1617,4 @@ bool Nrf54MatterOnNetworkOnOffLightNode::threadDatasetExportable() const {
 }
 
 }  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

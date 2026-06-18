@@ -2,7 +2,7 @@
 #define NRF52_COMPAT_H_
 
 #include <stdint.h>
-#include "nrf54l15_types.h"
+#include "nrf54lm20b_types.h"
 
 #ifndef NRF_FICR
 #define NRF_FICR (reinterpret_cast<NRF_FICR_Type*>(0x00FFC000UL))
@@ -16,11 +16,19 @@
 
 struct Nrf52CompatUicr {
   volatile uint32_t NFCPINS;
+  volatile uint32_t PSELRESET[2];
+  volatile uint32_t APPROTECT;
+  volatile uint32_t DEBUGCTRL;
+  volatile uint32_t RESERVED;
+  volatile uint32_t NRFFW[15];
 };
 
 struct Nrf52CompatNvmc {
   volatile uint32_t CONFIG;
   volatile uint32_t READY;
+  volatile uint32_t RESERVED[128];
+  volatile uint32_t ERASEPAGE;
+  volatile uint32_t ERASEALL;
 };
 
 extern Nrf52CompatUicr g_nrf52_compat_uicr;
@@ -64,6 +72,14 @@ extern Nrf52CompatNvmc g_nrf52_compat_nvmc;
 
 #ifndef NVMC_READY_READY_Ready
 #define NVMC_READY_READY_Ready 1UL
+#endif
+
+#ifndef NVMC_ERASEALL_ERASEALL_Erase
+#define NVMC_ERASEALL_ERASEALL_Erase 1UL
+#endif
+
+#ifndef NVMC_ERASEALL_ERASEALL_NoOperation
+#define NVMC_ERASEALL_ERASEALL_NoOperation 0UL
 #endif
 
 static inline uint32_t SysTick_Config(uint32_t ticks) {

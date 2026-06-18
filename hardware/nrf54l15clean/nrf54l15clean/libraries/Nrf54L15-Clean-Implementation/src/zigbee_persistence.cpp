@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE
 #include "zigbee_persistence.h"
 
 #include <stdio.h>
@@ -540,3 +541,4 @@ bool ZigbeePersistentStateStore::clear() {
 }
 
 }  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_ZIGBEE_ENABLE

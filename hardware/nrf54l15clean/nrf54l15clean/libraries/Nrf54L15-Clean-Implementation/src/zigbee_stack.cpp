@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE
 #include "zigbee_stack.h"
 
 #include <Arduino.h>
@@ -7127,3 +7128,4 @@ bool ZigbeeHomeAutomationDevice::buildDeviceAnnounce(
 }
 
 }  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_ZIGBEE_ENABLE

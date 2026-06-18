@@ -46,7 +46,7 @@ bool pmic_read_burst(uint8_t base, uint8_t offset, uint8_t* data, size_t len) {
     g_pmicWire.write(base);
     g_pmicWire.write(offset);
     if (g_pmicWire.endTransmission(false) != 0) { ok = false; goto exit; }
-    g_pmicWire.requestFrom(NPM1300_ADDR, (uint8_t)len);
+    g_pmicWire.requestFrom(NPM1300_ADDR, (int)len);
     for (size_t i = 0; i < len; i++) {
         if (g_pmicWire.available()) data[i] = g_pmicWire.read();
         else { ok = false; break; }

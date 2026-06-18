@@ -1,14 +1,34 @@
 #include "Arduino.h"
 
-Nrf52CompatUicr g_nrf52_compat_uicr = {0U};
-Nrf52CompatNvmc g_nrf52_compat_nvmc = {0U, NVMC_READY_READY_Ready};
+Nrf52CompatNvmc g_nrf52_compat_nvmc = {
+    0U,           // CONFIG = read-only (REN), any write to CONFIG is accepted
+    NVMC_READY_READY_Ready,  // READY always ready
+    {0U},         // RESERVED[128]
+    0U,           // ERASEPAGE
+    0U            // ERASEALL = NoOperation
+};
+
+Nrf52CompatUicr g_nrf52_compat_uicr = {
+    0U,           // NFCPINS
+    {0U, 0U},     // PSELRESET[2]
+    0U,           // APPROTECT
+    0U,           // DEBUGCTRL
+    0U,           // RESERVED
+    {0U}          // NRFFW[15]
+};
 
 SchedulerClass Scheduler;
 HwPWMCompat HwPWM0;
 HwPWMCompat HwPWM1;
 
 extern "C" void sd_power_system_off(void) {
-  delaySystemOff(0UL);
+  // nRF52 sd_power_system_off() expects immediate power-off.
+  // On nRF54L, use WFI sleep since true SYSTEM OFF needs LFXO.
+  // Loop in WFI until next reset.
+  __disable_irq();
+  while (1) {
+    __WFI();
+  }
 }
 
 extern "C" void NVIC_SystemReset(void) {

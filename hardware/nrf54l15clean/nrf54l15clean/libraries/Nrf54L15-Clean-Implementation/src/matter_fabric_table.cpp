@@ -1,3 +1,4 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_fabric_table.h"
 
 #include <string.h>
@@ -115,4 +116,4 @@ uint8_t MatterFabricTable::addTestFabric(uint8_t fabricIndex,
   return addFabric(fabricId, nodeId, nullptr, label, true);
 }
 
-}  // namespace xiao_nrf54l15
+}  // namespace xiao_nrf54l15#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE
