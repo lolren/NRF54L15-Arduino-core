@@ -297,3 +297,12 @@ groups                       # verify you're in plugdev group
 If USB device is root-only, the udev rule didn't trigger. Replug the board or run `sudo udevadm trigger`.
 
 </div>
+
+## 🙏 Special Thanks
+
+This core would not have been possible without the invaluable help of:
+
+- **[msfujino](https://github.com/msfujino)** — Extensive testing, debugging, and feedback across PWM, analogWrite, and countless other areas. Every oscilloscope trace, every edge case report, every patient retest helped shape this core into what it is today.
+- **[lyusupov](https://github.com/lyusupov)** — Deep technical contributions, critical bug fixes, and ongoing collaboration that pushed this project forward.
+
+Thank you both for your time, expertise, and dedication. ❤️
