@@ -319,6 +319,23 @@ static inline void __NVIC_ClearPendingIRQ(IRQn_Type IRQn)
     }
 }
 
+#define NVIC_USER_IRQ_OFFSET  16
+
+static inline void __NVIC_SetVector(IRQn_Type IRQn, uint32_t vector)
+{
+    // SCB at 0xE000ED00, VTOR at offset 0x008
+    uint32_t vtor = *(volatile uint32_t*)0xE000ED08UL;
+    if (vtor == 0UL) vtor = 0x00000000UL;  // Default from startup
+    uint32_t *vectors = (uint32_t *)vtor;
+    vectors[(int32_t)IRQn + NVIC_USER_IRQ_OFFSET] = vector;
+    __DSB();
+}
+
+/* Macro mapping for standard CMSIS name */
+#ifndef NVIC_SetVector
+#define NVIC_SetVector          __NVIC_SetVector
+#endif
+
 #ifdef __cplusplus
 }
 #endif
