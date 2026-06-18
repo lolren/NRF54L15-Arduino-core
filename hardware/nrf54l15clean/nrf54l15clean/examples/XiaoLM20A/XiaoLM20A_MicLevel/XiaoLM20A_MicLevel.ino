@@ -8,6 +8,9 @@
  *   DAT = P1.14
  *   PDM instance = PDM20
  *
+ * NOTE: Only works on XIAO nRF54LM20A Sense (nRF54M20A).
+ * The base nRF54LM20A does not have the MEMS microphone populated.
+ *
  * Power: nPM1300 LDO1 (shared with IMU)
  *
  * Output: audio level in dBFS via Serial (115200 baud)
