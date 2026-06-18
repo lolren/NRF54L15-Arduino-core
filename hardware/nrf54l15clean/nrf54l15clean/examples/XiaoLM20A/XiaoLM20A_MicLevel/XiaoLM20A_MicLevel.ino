@@ -1,17 +1,18 @@
 /*
  * XiaoLM20A_MicLevel
  *
- * Reads the onboard PDM microphone on XIAO nRF54LM20A using the HAL Pdm class.
+ * Reads the onboard PDM microphone on XIAO nRF54LM20A Sense.
  *
- * LM20A PDM pins:
+ * LM20A PDM pins (per schematic):
  *   CLK = P1.13
  *   DAT = P1.14
  *   PDM instance = PDM20
+ *   Power = nPM1300 LDO1 (shared with IMU)
  *
- * NOTE: Only works on XIAO nRF54LM20A Sense (nRF54M20A).
- * The base nRF54LM20A does not have the MEMS microphone populated.
- *
- * Power: nPM1300 LDO1 (shared with IMU)
+ * If the MIC returns all zeros, check:
+ *   1. Board is the "Sense" variant with MSM261DGT006 populated
+ *   2. PDM_CLK is toggling (scope on P1.13)
+ *   3. PDM_DAT shows PDM pulses (scope on P1.14)
  *
  * Output: audio level in dBFS via Serial (115200 baud)
  */
@@ -20,14 +21,10 @@
 #include "nrf54l15_hal.h"
 #include "npm1300.h"
 
-#if !(defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B))
-#error "XiaoLM20A_MicLevel requires the XIAO nRF54LM20A board."
-#endif
-
 using namespace xiao_nrf54l15;
 
-static constexpr Pin kPdmClk{1, 12};
-static constexpr Pin kPdmDin{1, 13};
+static constexpr Pin kPdmClk{1, 13};
+static constexpr Pin kPdmDin{1, 14};
 static constexpr size_t kSampleCount = 512;
 
 static Pdm g_pdm;
@@ -37,12 +34,15 @@ void setup() {
     Serial.begin(115200);
     delay(250);
 
+    // Power IMU+MIC rail
+    npm1300_begin();
     if (!npm1300_imu_mic_power_enable(true)) {
-        Serial.println("ERROR: nPM1300 sensor rail enable failed");
+        Serial.println("ERROR: nPM1300 sensor rail failed");
     }
     delay(25);
 
-    if (!g_pdm.begin(kPdmClk, kPdmDin, true, 40, PDM_RATIO_RATIO_Ratio64,
+    // PDM: mono, prescaler=10 (~1.6 MHz PDM_CLK with PCLK32M), ratio=64
+    if (!g_pdm.begin(kPdmClk, kPdmDin, true, 10, PDM_RATIO_RATIO_Ratio64,
                      PdmEdge::kLeftRising)) {
         Serial.println("ERROR: PDM20 begin failed");
         return;
@@ -60,10 +60,18 @@ void loop() {
     }
 
     int64_t sum = 0;
+    bool hasAudio = false;
     for (size_t i = 0; i < kSampleCount; i++) {
-        int32_t s = g_samples[i];
-        sum += static_cast<int64_t>(s) * s;
+        sum += static_cast<int64_t>(g_samples[i]) * g_samples[i];
+        if (g_samples[i] != 0) hasAudio = true;
     }
+
+    if (!hasAudio) {
+        Serial.println("Mic: silence (all zeros)");
+        delay(100);
+        return;
+    }
+
     float rms = sqrtf(static_cast<float>(sum) / kSampleCount);
     float dbFS = 20.0f * log10f(rms / 32768.0f);
 

@@ -775,6 +775,18 @@ static void enterSystemOffWakeReset(uint32_t delayUs) __attribute__((noreturn));
 
 static void enterSystemOffWakeReset(uint32_t delayUs)
 {
+    // SYSTEM OFF wake requires LFXO running (LFRC stops in SYSTEM OFF).
+    // LM20B has no LFXO crystal — fall back to enterTimedSystemOff which
+    // uses WFI sleep with GRTC (works on both L15 and LM20B).
+    if (!lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
+        enterTimedSystemOff(true, delayUs);
+        // enterTimedSystemOff returns after WFI delay, then reset via AIRCR
+        __asm volatile("dsb 0xF" ::: "memory");
+        *(volatile uint32_t*)0xE000ED0CUL = 0x5FA0004UL;  // AIRCR reset
+        __asm volatile("dsb 0xF" ::: "memory");
+        while (1) { __asm volatile("wfe"); }
+    }
+
     NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
     programSystemOffWakeUs(delayUs);
     nrf54lm20b_core_prepare_system_off();
