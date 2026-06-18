@@ -5,8 +5,6 @@ This wrapper keeps Arduino upload integration cross-platform while relying on
 pyOCD for CMSIS-DAP flashing.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import platform
@@ -42,8 +40,7 @@ OPEN_NRF_OCD_RELEASE_BASE_URL = (
     "https://github.com/lolren/open-nrf-ocd/releases/download"
 )
 
-
-def run(cmd: list[str], timeout: float | None = None) -> subprocess.CompletedProcess[str]:
+def run(cmd: List[str], timeout: Optional[float] = None) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             cmd,
@@ -67,19 +64,16 @@ def run(cmd: list[str], timeout: float | None = None) -> subprocess.CompletedPro
             stderr=stderr,
         )
 
-
-def print_result(result: subprocess.CompletedProcess[str]) -> None:
+def print_result(result: subprocess.CompletedProcess) -> None:
     if result.stdout:
         print(result.stdout, end="")
     if result.returncode != 0 and result.stderr:
         print(result.stderr, file=sys.stderr, end="")
 
-
 def tool_available(name: str) -> bool:
     return shutil.which(name) is not None
 
-
-def normalize_tools_path(path: str | None) -> Path | None:
+def normalize_tools_path(path: Optional[str]) -> Optional[Path]:
     if not path:
         return None
     if "{" in path and "}" in path:
@@ -87,16 +81,14 @@ def normalize_tools_path(path: str | None) -> Path | None:
     candidate = Path(path)
     return candidate if candidate.exists() else None
 
-
-def unresolved_property(value: str | None) -> bool:
+def unresolved_property(value: Optional[str]) -> bool:
     if not value:
         return True
     if "{" in value and "}" in value:
         return True
     return value.strip().lower() in {"auto", "default", "none"}
 
-
-def normalize_tristate(value: str | None, default: str = "auto") -> str:
+def normalize_tristate(value: Optional[str], default: str = "auto") -> str:
     if unresolved_property(value):
         return default
     normalized = value.strip().lower()
@@ -106,12 +98,10 @@ def normalize_tristate(value: str | None, default: str = "auto") -> str:
         return "false"
     return default
 
-
-def split_csv(value: str | None) -> list[str]:
+def split_csv(value: Optional[str]) -> List[str]:
     if unresolved_property(value):
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
-
 
 def running_inside_virtual_machine() -> bool:
     env_override = normalize_tristate(os.environ.get("NRF54L15_PYOCD_SAFE"), default="")
@@ -152,8 +142,7 @@ def running_inside_virtual_machine() -> bool:
 
     return False
 
-
-def resolve_pyocd_safe_mode(requested: str | None) -> bool:
+def resolve_pyocd_safe_mode(requested: Optional[str]) -> bool:
     normalized = normalize_tristate(requested)
     if normalized == "true":
         return True
@@ -161,31 +150,26 @@ def resolve_pyocd_safe_mode(requested: str | None) -> bool:
         return False
     return running_inside_virtual_machine()
 
-
 def normalize_token(value: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", value.upper())
 
-
-def derived_uf2_path(hex_path: str, requested_uf2: str | None) -> Path:
+def derived_uf2_path(hex_path: str, requested_uf2: Optional[str]) -> Path:
     if not unresolved_property(requested_uf2):
         return Path(requested_uf2)
     return Path(hex_path).with_suffix(".uf2")
 
-
-def pyocd_tool_root(host_tools_path: Path | None) -> Path:
+def pyocd_tool_root(host_tools_path: Optional[Path]) -> Path:
     if host_tools_path is not None:
         return host_tools_path
     return Path(__file__).resolve().parent
 
-
-def bundled_pyocd_site_path(tool_root: Path | None) -> Path | None:
+def bundled_pyocd_site_path(tool_root: Optional[Path]) -> Optional[Path]:
     if tool_root is None:
         return None
     candidate = tool_root / "runtime" / "pyocd-site"
     return candidate if candidate.is_dir() else None
 
-
-def bundled_pyocd_command(tool_root: Path | None) -> list[str] | None:
+def bundled_pyocd_command(tool_root: Optional[Path]) -> List[str] | None:
     if tool_root is None:
         return None
 
@@ -218,8 +202,7 @@ def bundled_pyocd_command(tool_root: Path | None) -> list[str] | None:
         return [str(candidate), "-m", "pyocd"]
     return None
 
-
-def bundled_wheelhouse_path(tool_root: Path | None) -> Path | None:
+def bundled_wheelhouse_path(tool_root: Optional[Path]) -> Optional[Path]:
     if tool_root is None:
         return None
     wheelhouse_root = tool_root / "wheelhouse"
@@ -229,8 +212,7 @@ def bundled_wheelhouse_path(tool_root: Path | None) -> Path | None:
     candidate = wheelhouse_root / version_tag
     return candidate if candidate.is_dir() else None
 
-
-def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | None:
+def detect_pyocd_command(host_tools_path: Optional[Path] = None) -> List[str] | None:
     # First try bundled wrapper (system pyocd 0.44.1 for AppImage IDE)
     import pathlib
     _here = pathlib.Path(__file__).resolve().parent
@@ -259,8 +241,7 @@ def detect_pyocd_command(host_tools_path: Path | None = None) -> list[str] | Non
 
     return None
 
-
-def host_setup_hint(host_tools_path: Path | None = None, purpose: str = "python") -> str:
+def host_setup_hint(host_tools_path: Optional[Path] = None, purpose: str = "python") -> str:
     tool_root = pyocd_tool_root(host_tools_path)
     tools_dir = tool_root / "setup"
     if sys.platform.startswith("linux"):
@@ -277,8 +258,7 @@ def host_setup_hint(host_tools_path: Path | None = None, purpose: str = "python"
         )
     return "Install Python 3 and pyocd, then retry"
 
-
-def install_pyocd(host_tools_path: Path | None = None) -> bool:
+def install_pyocd(host_tools_path: Optional[Path] = None) -> bool:
     print("Attempting to install pyocd for automatic target recovery...")
     tool_root = pyocd_tool_root(host_tools_path)
     runtime_dir = tool_root / "runtime"
@@ -347,8 +327,7 @@ def install_pyocd(host_tools_path: Path | None = None) -> bool:
     print_result(verify)
     return verify.returncode == 0
 
-
-def resolve_tool(path_or_name: str) -> str | None:
+def resolve_tool(path_or_name: str) -> Optional[str]:
     if not path_or_name:
         return None
 
@@ -362,8 +341,7 @@ def resolve_tool(path_or_name: str) -> str | None:
 
     return shutil.which(path_or_name)
 
-
-def normalize_uid(requested_uid: str | None) -> str | None:
+def normalize_uid(requested_uid: Optional[str]) -> Optional[str]:
     if requested_uid is None:
         return None
 
@@ -372,13 +350,11 @@ def normalize_uid(requested_uid: str | None) -> str | None:
         return None
     return cleaned
 
-
-def bundled_import_path(host_tools_path: Path | None) -> Path | None:
+def bundled_import_path(host_tools_path: Optional[Path]) -> Optional[Path]:
     site_dir = bundled_pyocd_site_path(pyocd_tool_root(host_tools_path))
     return site_dir if site_dir is not None and site_dir.is_dir() else None
 
-
-def import_serial_list_ports(host_tools_path: Path | None = None):
+def import_serial_list_ports(host_tools_path: Optional[Path] = None):
     try:
         from serial.tools import list_ports
 
@@ -401,8 +377,7 @@ def import_serial_list_ports(host_tools_path: Path | None = None):
     except ModuleNotFoundError:
         return None
 
-
-def normalized_port_name(port: str | None) -> str:
+def normalized_port_name(port: Optional[str]) -> str:
     if not port:
         return ""
     cleaned = port.strip()
@@ -410,8 +385,7 @@ def normalized_port_name(port: str | None) -> str:
         cleaned = cleaned[4:]
     return cleaned.casefold()
 
-
-def serial_from_hwid(hwid: str | None) -> str | None:
+def serial_from_hwid(hwid: Optional[str]) -> Optional[str]:
     if not hwid:
         return None
 
@@ -420,8 +394,7 @@ def serial_from_hwid(hwid: str | None) -> str | None:
         return None
     return normalize_uid(match.group(1))
 
-
-def port_uid_from_list_ports(port: str | None, host_tools_path: Path | None = None) -> str | None:
+def port_uid_from_list_ports(port: Optional[str], host_tools_path: Optional[Path] = None) -> Optional[str]:
     if not port:
         return None
 
@@ -448,13 +421,12 @@ def port_uid_from_list_ports(port: str | None, host_tools_path: Path | None = No
 
     return None
 
-
-def matching_cmsis_dap_serial_ports(host_tools_path: Path | None = None) -> list[str]:
+def matching_cmsis_dap_serial_ports(host_tools_path: Optional[Path] = None) -> List[str]:
     list_ports = import_serial_list_ports(host_tools_path)
     if list_ports is None:
         return []
 
-    matches: list[str] = []
+    matches: List[str] = []
     vid = int(CMSIS_DAP_VENDOR_ID, 16)
     for info in list_ports.comports():
         info_vid = getattr(info, "vid", None)
@@ -473,8 +445,7 @@ def matching_cmsis_dap_serial_ports(host_tools_path: Path | None = None) -> list
 
     return matches
 
-
-def infer_uid_from_port(port: str | None, host_tools_path: Path | None = None) -> str | None:
+def infer_uid_from_port(port: Optional[str], host_tools_path: Optional[Path] = None) -> Optional[str]:
     if not port:
         return None
     # If port is an 8-char hex UID, return directly
@@ -519,8 +490,7 @@ def infer_uid_from_port(port: str | None, host_tools_path: Path | None = None) -
 
     return None
 
-
-def explicit_uf2_drive(path: str | None) -> Path | None:
+def explicit_uf2_drive(path: Optional[str]) -> Optional[Path]:
     if unresolved_property(path):
         env_path = os.environ.get("NRF54L15_UF2_DRIVE", "")
         if unresolved_property(env_path):
@@ -529,9 +499,8 @@ def explicit_uf2_drive(path: str | None) -> Path | None:
     candidate = Path(path).expanduser()
     return candidate if candidate.is_dir() else None
 
-
-def mounted_volume_candidates() -> list[Path]:
-    candidates: list[Path] = []
+def mounted_volume_candidates() -> List[Path]:
+    candidates: List[Path] = []
 
     if sys.platform.startswith("win"):
         for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
@@ -571,13 +540,11 @@ def mounted_volume_candidates() -> list[Path]:
             candidates.append(path)
     return candidates
 
-
 def safe_exists(path: Path) -> bool:
     try:
         return path.exists()
     except OSError:
         return False
-
 
 def uf2_marker_text(path: Path) -> str:
     info_path = path / "INFO_UF2.TXT"
@@ -588,12 +555,10 @@ def uf2_marker_text(path: Path) -> str:
     except OSError:
         return ""
 
-
 def contains_uf2_marker(path: Path) -> bool:
     return any(safe_exists(path / marker) for marker in UF2_MARKER_FILES)
 
-
-def looks_like_uf2_drive(path: Path, labels: list[str]) -> bool:
+def looks_like_uf2_drive(path: Path, labels: List[str]) -> bool:
     try:
         if not path.is_dir():
             return False
@@ -624,8 +589,7 @@ def looks_like_uf2_drive(path: Path, labels: list[str]) -> bool:
         return os.access(path, os.W_OK)
     return False
 
-
-def find_uf2_drives(drive: str | None, labels: list[str]) -> list[Path]:
+def find_uf2_drives(drive: Optional[str], labels: List[str]) -> List[Path]:
     if not unresolved_property(drive):
         candidate = Path(drive).expanduser()
         return [candidate] if candidate.is_dir() else []
@@ -635,8 +599,7 @@ def find_uf2_drives(drive: str | None, labels: list[str]) -> list[Path]:
         return [explicit]
     return [path for path in mounted_volume_candidates() if looks_like_uf2_drive(path, labels)]
 
-
-def print_uf2_bootloader_hint(labels: list[str]) -> None:
+def print_uf2_bootloader_hint(labels: List[str]) -> None:
     label_text = ", ".join(labels or list(DEFAULT_UF2_LABELS))
     print("ERROR: No writable UF2 bootloader drive was found.", file=sys.stderr)
     print(
@@ -659,7 +622,6 @@ def print_uf2_bootloader_hint(labels: list[str]) -> None:
         file=sys.stderr,
     )
 
-
 def copy_uf2_to_drive(uf2_path: Path, drive: Path) -> int:
     destination = drive / uf2_path.name.upper()
     print(f"Copying {uf2_path} to {destination}")
@@ -681,11 +643,10 @@ def copy_uf2_to_drive(uf2_path: Path, drive: Path) -> int:
     print("UF2 copy complete")
     return 0
 
-
 def upload_uf2(
     uf2_path: Path,
-    drive: str | None,
-    labels: list[str],
+    drive: Optional[str],
+    labels: List[str],
     timeout: float,
     *,
     quiet_missing: bool = False,
@@ -695,7 +656,7 @@ def upload_uf2(
         return 2
 
     deadline = time.monotonic() + max(0.0, timeout)
-    drives: list[Path] = []
+    drives: List[Path] = []
     while True:
         drives = find_uf2_drives(drive, labels)
         if drives or time.monotonic() >= deadline:
@@ -717,10 +678,9 @@ def upload_uf2(
     print(f"UF2 drive: {drives[0]}")
     return copy_uf2_to_drive(uf2_path, drives[0])
 
-
 def _sysfs_usb_identity_for_class_node(
     class_name: str, node_name: str
-) -> tuple[str | None, str | None]:
+) -> tuple[Optional[str], Optional[str]]:
     sys_device = Path("/sys/class") / class_name / node_name / "device"
     try:
         resolved = sys_device.resolve(strict=True)
@@ -741,32 +701,27 @@ def _sysfs_usb_identity_for_class_node(
 
     return None, None
 
-
-def _sysfs_usb_identity_for_hidraw(node: Path) -> tuple[str | None, str | None]:
+def _sysfs_usb_identity_for_hidraw(node: Path) -> tuple[Optional[str], Optional[str]]:
     return _sysfs_usb_identity_for_class_node("hidraw", node.name)
 
-
-def _sysfs_usb_identity_for_tty(node: Path) -> tuple[str | None, str | None]:
+def _sysfs_usb_identity_for_tty(node: Path) -> tuple[Optional[str], Optional[str]]:
     return _sysfs_usb_identity_for_class_node("tty", node.name)
 
-
-def matching_probe_hidraw_nodes() -> list[Path]:
+def matching_probe_hidraw_nodes() -> List[Path]:
     if not sys.platform.startswith("linux"):
         return []
 
-    matches: list[Path] = []
+    matches: List[Path] = []
     for node in sorted(Path("/dev").glob("hidraw*")):
         vendor, product = _sysfs_usb_identity_for_hidraw(node)
         if vendor == CMSIS_DAP_VENDOR_ID and f"{int(product, 16):04x}" in CMSIS_DAP_PRODUCT_IDS:
             matches.append(node)
     return matches
 
-
-def probe_hidraw_nodes_accessible(nodes: list[Path]) -> bool:
+def probe_hidraw_nodes_accessible(nodes: List[Path]) -> bool:
     return any(os.access(node, os.R_OK | os.W_OK) for node in nodes)
 
-
-def port_looks_like_probe_serial(port: str | None) -> bool:
+def port_looks_like_probe_serial(port: Optional[str]) -> bool:
     if not port:
         return False
     # Probe unique ID: 8 hex chars (e.g., "3377B9D6")
@@ -780,8 +735,7 @@ def port_looks_like_probe_serial(port: str | None) -> bool:
     vendor, product = _sysfs_usb_identity_for_tty(Path(port_name))
     return vendor == CMSIS_DAP_VENDOR_ID and f"{int(product, 16):04x}" in CMSIS_DAP_PRODUCT_IDS
 
-
-def looks_like_locked_target(result: subprocess.CompletedProcess[str]) -> bool:
+def looks_like_locked_target(result: subprocess.CompletedProcess) -> bool:
     details = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
     indicators = (
         "approtect",
@@ -794,8 +748,7 @@ def looks_like_locked_target(result: subprocess.CompletedProcess[str]) -> bool:
     )
     return any(token in details for token in indicators)
 
-
-def looks_like_nrf54l_mass_erase_timeout(result: subprocess.CompletedProcess[str]) -> bool:
+def looks_like_nrf54l_mass_erase_timeout(result: subprocess.CompletedProcess) -> bool:
     details = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
     indicators = (
         "mass erase timeout waiting for eraseallstatus",
@@ -803,8 +756,7 @@ def looks_like_nrf54l_mass_erase_timeout(result: subprocess.CompletedProcess[str
     )
     return any(token in details for token in indicators)
 
-
-def looks_like_no_probe_error(result: subprocess.CompletedProcess[str]) -> bool:
+def looks_like_no_probe_error(result: subprocess.CompletedProcess) -> bool:
     details = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
     indicators = (
         "no connected debug probes",
@@ -815,10 +767,9 @@ def looks_like_no_probe_error(result: subprocess.CompletedProcess[str]) -> bool:
     )
     return any(token in details for token in indicators)
 
-
 def force_nrf54l_unlock_workaround(
-    pyocd_cmd: list[str], target: str, uid: str | None, safe_mode: bool = False
-) -> subprocess.CompletedProcess[str]:
+    pyocd_cmd: List[str], target: str, uid: Optional[str], safe_mode: bool = False
+) -> subprocess.CompletedProcess:
     if target.strip().lower() not in ("nrf54l", "nrf54lm20a"):
         return subprocess.CompletedProcess(
             args=[*pyocd_cmd, "commander"], returncode=2, stdout="", stderr=""
@@ -862,9 +813,8 @@ def force_nrf54l_unlock_workaround(
         except OSError:
             pass
 
-
 def print_linux_probe_permission_hint(
-    result: subprocess.CompletedProcess[str], host_tools_path: Path | None = None
+    result: subprocess.CompletedProcess, host_tools_path: Optional[Path] = None
 ) -> None:
     if not looks_like_no_probe_error(result):
         return
@@ -894,9 +844,8 @@ def print_linux_probe_permission_hint(
         file=sys.stderr,
     )
 
-
 def preflight_linux_probe_access(
-    port: str | None, host_tools_path: Path | None = None
+    port: Optional[str], host_tools_path: Optional[Path] = None
 ) -> bool:
     if not sys.platform.startswith("linux"):
         return False
@@ -933,20 +882,17 @@ def preflight_linux_probe_access(
 
     return False
 
-
-def append_uid(cmd: list[str], uid: str | None) -> list[str]:
+def append_uid(cmd: List[str], uid: Optional[str]) -> List[str]:
     if uid:
         cmd.extend(["-u", uid])
     return cmd
 
-
-def append_connect_mode(cmd: list[str], connect_mode: str | None) -> list[str]:
+def append_connect_mode(cmd: List[str], connect_mode: Optional[str]) -> List[str]:
     if connect_mode:
         cmd.extend(["-M", connect_mode])
     return cmd
 
-
-def append_pyocd_target_script(cmd: list[str], target: str) -> list[str]:
+def append_pyocd_target_script(cmd: List[str], target: str) -> List[str]:
     if target.strip().lower() != "nrf54lm20a":
         return cmd
 
@@ -955,8 +901,7 @@ def append_pyocd_target_script(cmd: list[str], target: str) -> list[str]:
         cmd.extend(["--script", str(script)])
     return cmd
 
-
-def append_pyocd_safe_options(cmd: list[str], safe_mode: bool) -> list[str]:
+def append_pyocd_safe_options(cmd: List[str], safe_mode: bool) -> List[str]:
     if safe_mode:
         cmd.extend(
             [
@@ -971,7 +916,6 @@ def append_pyocd_safe_options(cmd: list[str], safe_mode: bool) -> list[str]:
             ]
         )
     return cmd
-
 
 def pyocd_timeout_seconds() -> float:
     value = os.environ.get("NRF54L15_PYOCD_TIMEOUT", "").strip()
@@ -991,8 +935,7 @@ def pyocd_install_timeout_seconds() -> float:
     except ValueError:
         return DEFAULT_PYOCD_INSTALL_TIMEOUT_SECONDS
 
-
-def retry_connect_mode(target: str, attempt: int, safe_mode: bool = False) -> str | None:
+def retry_connect_mode(target: str, attempt: int, safe_mode: bool = False) -> Optional[str]:
     if target.strip().lower() in ("nrf54l", "nrf54lm20a"):
         if safe_mode:
             return None
@@ -1005,7 +948,6 @@ def retry_connect_mode(target: str, attempt: int, safe_mode: bool = False) -> st
         return None
     return "halt"
 
-
 def maybe_wait_before_retry(attempt: int, retries: int, retry_delay: float) -> None:
     if attempt >= retries:
         return
@@ -1016,11 +958,10 @@ def maybe_wait_before_retry(attempt: int, retries: int, retry_delay: float) -> N
     )
     time.sleep(delay)
 
-
 def flash_hex(
-    pyocd_cmd: list[str], target: str, uid: str | None, hex_path: str,
-    *, auto_unlock: bool = True, connect_mode: str | None = None, safe_mode: bool = False
-) -> subprocess.CompletedProcess[str]:
+    pyocd_cmd: List[str], target: str, uid: Optional[str], hex_path: str,
+    *, auto_unlock: bool = True, connect_mode: Optional[str] = None, safe_mode: bool = False
+) -> subprocess.CompletedProcess:
     cmd = [*pyocd_cmd, "load"]
     cmd = append_pyocd_target_script(cmd, target)
     cmd.extend(["-W", "-t", target])
@@ -1034,11 +975,10 @@ def flash_hex(
     print_result(result)
     return result
 
-
 def recover_target(
-    pyocd_cmd: list[str], target: str, uid: str | None, *,
-    connect_mode: str | None = None, safe_mode: bool = False
-) -> subprocess.CompletedProcess[str]:
+    pyocd_cmd: List[str], target: str, uid: Optional[str], *,
+    connect_mode: Optional[str] = None, safe_mode: bool = False
+) -> subprocess.CompletedProcess:
     print("Detected protected target; attempting chip erase and retry...")
     cmd = [*pyocd_cmd, "erase"]
     cmd = append_pyocd_target_script(cmd, target)
@@ -1050,23 +990,20 @@ def recover_target(
     print_result(result)
     return result
 
-
-def choose_runner(requested: str, openocd_bin: str, host_tools_path: Path | None) -> str:
+def choose_runner(requested: str, openocd_bin: str, host_tools_path: Optional[Path]) -> str:
     normalized = requested.strip().lower()
     if normalized != "auto":
         return normalized
 
     return choose_recovery_runner(openocd_bin, host_tools_path)
 
-
-def choose_recovery_runner(openocd_bin: str, host_tools_path: Path | None) -> str:
+def choose_recovery_runner(openocd_bin: str, host_tools_path: Optional[Path]) -> str:
     if detect_pyocd_command(host_tools_path) is not None or host_tools_path is not None:
         return "pyocd"
     if resolve_tool(openocd_bin):
         return "openocd"
 
     raise RuntimeError("No supported uploader found (need pyocd or openocd in PATH)")
-
 
 def _ensure_lm20b_target():
     """Re-apply LM20B target patch if needed."""
@@ -1079,12 +1016,12 @@ def _ensure_lm20b_target():
 def upload_pyocd(
     hex_path: str,
     target: str,
-    requested_uid: str | None,
+    requested_uid: Optional[str],
     retries: int,
     retry_delay: float,
     allow_uid_fallback: bool = False,
-    pyocd_cmd: list[str] | None = None,
-    host_tools_path: Path | None = None,
+    pyocd_cmd: List[str] | None = None,
+    host_tools_path: Optional[Path] = None,
     safe_mode: bool = False,
 ) -> int:
     _ensure_lm20b_target()
@@ -1105,7 +1042,7 @@ def upload_pyocd(
 
     load_result = subprocess.CompletedProcess(args=[*pyocd_cmd, "load"], returncode=1)
     retries = max(1, retries)
-    last_connect_mode: str | None = None
+    last_connect_mode: Optional[str] = None
 
     for attempt in range(1, retries + 1):
         connect_mode = retry_connect_mode(target, attempt, safe_mode=safe_mode)
@@ -1222,7 +1159,6 @@ def upload_pyocd(
         pass
     return 0
 
-
 def open_nrf_ocd_asset_for_host() -> tuple[str, str] | None:
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -1242,7 +1178,6 @@ def open_nrf_ocd_asset_for_host() -> tuple[str, str] | None:
 
     return None
 
-
 def open_nrf_ocd_candidate_names() -> tuple[str, ...]:
     if sys.platform.startswith("win"):
         return ("nrf_ocd.exe", "nrf_ocd-win64.exe", "nrf_ocd")
@@ -1253,9 +1188,8 @@ def open_nrf_ocd_candidate_names() -> tuple[str, ...]:
         "nrf_ocd-linux-armhf",
     )
 
-
-def open_nrf_ocd_cache_roots(host_tools_path: Path | None = None) -> list[Path]:
-    roots: list[Path] = []
+def open_nrf_ocd_cache_roots(host_tools_path: Optional[Path] = None) -> List[Path]:
+    roots: List[Path] = []
     if host_tools_path is not None:
         roots.append(host_tools_path / "runtime" / "open-nrf-ocd" / OPEN_NRF_OCD_RELEASE)
 
@@ -1273,7 +1207,6 @@ def open_nrf_ocd_cache_roots(host_tools_path: Path | None = None) -> list[Path]:
     roots.append(Path.home() / ".cache" / "nrf54l15clean" / "open-nrf-ocd" / OPEN_NRF_OCD_RELEASE)
     return roots
 
-
 def make_executable_if_needed(path: Path) -> None:
     if sys.platform.startswith("win"):
         return
@@ -1283,8 +1216,7 @@ def make_executable_if_needed(path: Path) -> None:
     except OSError:
         pass
 
-
-def ensure_open_nrf_ocd_release_binary(host_tools_path: Path | None = None) -> list[str] | None:
+def ensure_open_nrf_ocd_release_binary(host_tools_path: Optional[Path] = None) -> List[str] | None:
     asset = open_nrf_ocd_asset_for_host()
     if asset is None:
         print(
@@ -1325,18 +1257,17 @@ def ensure_open_nrf_ocd_release_binary(host_tools_path: Path | None = None) -> l
 
     return None
 
-
 def detect_nrf_ocd_command(
-    host_tools_path: Path | None = None,
+    host_tools_path: Optional[Path] = None,
     allow_download: bool = False,
-) -> list[str] | None:
+) -> List[str] | None:
     override = os.environ.get("NRF54_NRF_OCD") or os.environ.get("OPEN_NRF_OCD")
     if override:
         return shlex.split(override)
 
-    candidates: list[Path] = []
+    candidates: List[Path] = []
     candidate_names = set(open_nrf_ocd_candidate_names())
-    search_roots: list[Path] = []
+    search_roots: List[Path] = []
     if host_tools_path is not None:
         search_roots.append(host_tools_path)
     search_roots.append(Path(__file__).resolve().parent)
@@ -1345,7 +1276,7 @@ def detect_nrf_ocd_command(
     )
     search_roots.extend(open_nrf_ocd_cache_roots(host_tools_path))
 
-    seen: set[str] = set()
+    seen: Set[str] = set()
     for root in search_roots:
         if not root.is_dir():
             continue
@@ -1371,12 +1302,11 @@ def detect_nrf_ocd_command(
 
     return None
 
-
 def upload_nrf_ocd(
     hex_path,
     target,
     uid,
-    host_tools_path: Path | None = None,
+    host_tools_path: Optional[Path] = None,
     nrf_ocd_cmd=None,
 ):
     nrf_ocd_cmd = (
@@ -1418,7 +1348,6 @@ def upload_nrf_ocd(
         print(f"nrf_ocd error: {e}", file=sys.stderr)
     return 1
 
-
 def upload_openocd(
     hex_path: str,
     openocd_script: str,
@@ -1426,8 +1355,8 @@ def upload_openocd(
     openocd_bin: str,
     retries: int,
     retry_delay: float,
-    host_tools_path: Path | None = None,
-) -> subprocess.CompletedProcess[str]:
+    host_tools_path: Optional[Path] = None,
+) -> subprocess.CompletedProcess:
     openocd_exe = resolve_tool(openocd_bin)
     if not openocd_exe:
         print(f"ERROR: openocd binary not found: {openocd_bin}", file=sys.stderr)
@@ -1463,7 +1392,6 @@ def upload_openocd(
     if result.returncode != 0:
         print_linux_probe_permission_hint(result, host_tools_path)
     return result
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -1704,7 +1632,6 @@ def main() -> int:
 
     print("Upload complete")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

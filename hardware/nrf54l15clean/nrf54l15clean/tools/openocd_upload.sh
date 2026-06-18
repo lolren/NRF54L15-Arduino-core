@@ -9,5 +9,5 @@ HEX_PATH="${4:?hex path required}"
 exec "${OPENOCD_BIN}" \
   -f "${OPENOCD_SCRIPT}" \
   -c "adapter speed ${OPENOCD_SPEED}" \
-  -c "program {${HEX_PATH}} reset" \
+  -c "program ${HEX_PATH} 0 verify reset exit" \
   -c "shutdown"
