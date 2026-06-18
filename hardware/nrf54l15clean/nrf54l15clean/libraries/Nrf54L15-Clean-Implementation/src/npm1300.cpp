@@ -159,8 +159,12 @@ static inline uint16_t adc10(uint8_t msb, uint8_t lsb, uint8_t shift) {
     return (uint16_t)(((uint16_t)msb << 2U) | ((lsb >> shift) & 0x03U));
 }
 
-static int32_t adc_to_mv(uint16_t code) {
-    return ((int32_t)code * 1800) / 512;
+// ADC full-scale voltages per nPM1300 datasheet (10-bit, 0-1023):
+//   VBAT: VFSVBAT = 5.0 V (internal voltage divider for battery)
+//   VSYS: VFSVSYS = 3.6 V (system voltage)
+//   VBUS: VFSVBUS = 5.0 V (USB VBUS input)
+static int32_t adc_to_mv(uint16_t code, int32_t vfs_mv) {
+    return ((int32_t)code * vfs_mv) / 1023;
 }
 
 static int32_t ibat_to_ma(uint16_t code, uint8_t stat) {
@@ -421,7 +425,7 @@ bool npm1300_vbus_status(uint8_t* s) { return npm1300_read_reg(NPM1300_BASE_VBUS
 
 int32_t npm1300_read_vbat_mv(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
-    return adc_to_mv(adc10(r.msbVbat, r.lsbA, kAdcLsbVbatShift));
+    return adc_to_mv(adc10(r.msbVbat, r.lsbA, kAdcLsbVbatShift), 5000);
 }
 int32_t npm1300_read_temp_mc(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
@@ -434,11 +438,11 @@ int32_t npm1300_read_ibat_ma(void) {
 }
 int32_t npm1300_read_vsys_mv(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
-    return adc_to_mv(adc10(r.msbVsys, r.lsbA, kAdcLsbVsysShift));
+    return adc_to_mv(adc10(r.msbVsys, r.lsbA, kAdcLsbVsysShift), 3600);
 }
 int32_t npm1300_read_vbus_mv(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
-    return adc_to_mv(adc10(r.msbVbus, r.lsbB, kAdcLsbVbusShift));
+    return adc_to_mv(adc10(r.msbVbus, r.lsbB, kAdcLsbVbusShift), 5000);
 }
 
 bool npm1300_enter_ship_mode(void) {
