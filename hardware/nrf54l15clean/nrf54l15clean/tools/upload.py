@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Optional, List, Set, Dict
 
 CMSIS_DAP_VENDOR_ID = "2886"
 CMSIS_DAP_PRODUCT_IDS = {"0066", "0068"}  # L15=0066, LM20B=0068
