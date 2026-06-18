@@ -88,7 +88,7 @@ tools.nrf54uf2.path={runtime.platform.path}/tools/uf2
 tools.nrf54uf2.cmd.path={tools.nrf54uf2.path}/uf2_emit.py
 tools.nrf54uf2.uf2conv.path={tools.nrf54uf2.path}/uf2conv.py
 
-tools.nrf54openocd.path={runtime.tools.openocd-0.11.0-arduino2.path}
+
 tools.nrf54openocd.cmd.path={runtime.platform.path}/tools/openocd_upload.sh
 tools.nrf54openocd.cmd.path.windows={runtime.platform.path}/tools/openocd_upload.bat
 tools.nrf54openocd.upload.pattern="{tools.nrf54openocd.cmd.path}" "{upload.openocd_bin}" "{upload.openocd_script}" "{upload.openocd_speed}" "{build.path}/{build.project_name}.hex"

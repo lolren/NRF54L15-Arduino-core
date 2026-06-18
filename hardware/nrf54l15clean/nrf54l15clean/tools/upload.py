@@ -1349,51 +1349,6 @@ def upload_nrf_ocd(
         print(f"nrf_ocd error: {e}", file=sys.stderr)
     return 1
 
-def upload_openocd(
-    hex_path: str,
-    openocd_script: str,
-    openocd_speed: int,
-    openocd_bin: str,
-    retries: int,
-    retry_delay: float,
-    host_tools_path: Optional[Path] = None,
-) -> subprocess.CompletedProcess:
-    openocd_exe = resolve_tool(openocd_bin)
-    if not openocd_exe:
-        print(f"ERROR: openocd binary not found: {openocd_bin}", file=sys.stderr)
-        return subprocess.CompletedProcess(args=[openocd_bin], returncode=4, stdout="", stderr="")
-
-    if not os.path.isfile(openocd_script):
-        print(f"ERROR: OpenOCD config not found: {openocd_script}", file=sys.stderr)
-        return subprocess.CompletedProcess(args=[openocd_script], returncode=2, stdout="", stderr="")
-
-    print(f"Flashing {hex_path}")
-    print("Runner: openocd")
-    print(f"Retries: {retries}")
-
-    retries = max(1, retries)
-    result = subprocess.CompletedProcess(args=[openocd_exe], returncode=1, stdout="", stderr="")
-    for attempt in range(1, retries + 1):
-        print(f"Upload attempt {attempt}/{retries} (openocd)")
-        cmd = [
-            openocd_exe,
-            "-f",
-            openocd_script,
-            "-c",
-            f"adapter speed {openocd_speed}",
-            "-c",
-            f'program "{hex_path}" verify reset exit',
-        ]
-        result = run(cmd)
-        print_result(result)
-        if result.returncode == 0:
-            return result
-        maybe_wait_before_retry(attempt, retries, retry_delay)
-
-    if result.returncode != 0:
-        print_linux_probe_permission_hint(result, host_tools_path)
-    return result
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hex", required=True, help="Path to firmware hex file")
@@ -1537,69 +1492,7 @@ def main() -> int:
             host_tools_path=host_tools_path,
             safe_mode=pyocd_safe_mode,
         )
-        if rc != 0 and requested_runner == "auto":
-            print("pyocd upload failed in auto mode; trying openocd...")
-            rc = upload_openocd(
-                args.hex,
-                args.openocd_script,
-                args.openocd_speed,
-                args.openocd_bin,
-                retries=args.retries,
-                retry_delay=args.retry_delay,
-                host_tools_path=host_tools_path,
-            ).returncode
-    elif runner == "openocd":
-        if preflight_linux_probe_access(args.port, host_tools_path):
-            return 7
-        openocd_result = upload_openocd(
-            args.hex,
-            args.openocd_script,
-            args.openocd_speed,
-            args.openocd_bin,
-            retries=args.retries,
-            retry_delay=args.retry_delay,
-            host_tools_path=host_tools_path,
-        )
-        rc = openocd_result.returncode
 
-        if rc != 0 and looks_like_locked_target(openocd_result):
-            pyocd_cmd = detect_pyocd_command(host_tools_path)
-            if pyocd_cmd is None and requested_runner == "auto":
-                if install_pyocd(host_tools_path):
-                    pyocd_cmd = detect_pyocd_command(host_tools_path)
-
-            if pyocd_cmd is not None:
-                print("OpenOCD indicates protected target; attempting pyocd recover/flash...")
-                rc = upload_pyocd(
-                    args.hex,
-                    args.target,
-                    selected_uid,
-                    allow_uid_fallback=allow_inferred_uid_fallback,
-                    retries=args.retries,
-                    retry_delay=args.retry_delay,
-                    pyocd_cmd=pyocd_cmd,
-                    host_tools_path=host_tools_path,
-                    safe_mode=pyocd_safe_mode,
-                )
-            elif requested_runner == "auto":
-                print(
-                    "ERROR: Target appears protected and OpenOCD cannot recover it. "
-                    "Install pyocd and retry (or select pyOCD upload method).",
-                    file=sys.stderr,
-                )
-                print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
-        elif rc != 0 and detect_pyocd_command(host_tools_path) is not None:
-            print("OpenOCD upload failed; falling back to pyocd...")
-            rc = upload_pyocd(
-                args.hex,
-                args.target,
-                selected_uid,
-                allow_uid_fallback=allow_inferred_uid_fallback,
-                retries=args.retries,
-                retry_delay=args.retry_delay,
-                host_tools_path=host_tools_path,
-                safe_mode=pyocd_safe_mode,
-            )
     elif runner == "nrf_ocd":
         nrf_rc = upload_nrf_ocd(
             args.hex,
