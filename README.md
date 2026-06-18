@@ -144,14 +144,16 @@ If pyOCD is blocked by a host Python or driver issue, use **Tools → Upload Met
 
 | Board family | External Arduino `SPI` pins | Implemented max on exposed pins | `SPI_HS` / 32 MHz status |
 |---|---|---|---|
-| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the nRF54L15 high-speed `SPIM00` route | 32 MHz requestable through `SPISettings(SPI_CLOCK_32M, ...)` | `SPI_HS` aliases `SPI`, so the normal header SPI path is the HS path |
-| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` SPI route on nRF54L15 `SPIM00` | 32 MHz requestable where board wiring and the attached device allow it | `SPI_HS` aliases `SPI` |
-| **XIAO nRF54LM20A / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on serial-fabric `SPIM22` | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
+| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on normal `SPI`; use `SPI_HS` for 32 MHz | `SPI_HS` is a real second object on `SPIM00` using P2.01/P2.04/P2.02 and P2.05 (`HS_SCK/HS_MISO/HS_MOSI/HS_SS`) |
+| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` SPI route on a serial-fabric SPIM | 8 MHz on normal `SPI`; use `SPI_HS` for 32 MHz where board wiring and the attached device allow it | `SPI_HS` is a real second object on `SPIM00` using the exposed P2.01/P2.04/P2.02/P2.05 route |
+| **XIAO nRF54LM20A / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
 
 Notes:
 
 - The **64 MHz / 128 MHz CPU menu does not set the SPI SCK ceiling**. SPI speed comes from the selected SPIM peripheral clock and its prescaler.
 - On **LM20A**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
+- On **L15**, `SPI_HS` is plain 1-bit SPI on the P2 high-speed route, not Quad SPI.
+- On **XIAO L15**, `HS_SS` is P2.05 and is shared with the RF switch select line, so avoid using `SPI_HS` while BLE/RF path switching is active.
 - On **LM20A**, the 32 MHz `SPI_HS` path is useful for the onboard QSPI flash and deliberate advanced probing of the flash pads. The schematic does not expose that HS bus on the normal XIAO header.
 - Examples: `File > Examples > Peripherals > HighSpeedSpi32MHzProbe`, `File > Examples > XiaoLM20A > QspiFlashInfo`, and `File > Examples > Adafruit SPIFlash > FlashInfo`.
 
@@ -170,6 +172,14 @@ Examples:
 - `File > Examples > XiaoLM20A > QspiFlashReadWrite`
 - `File > Examples > Adafruit SPIFlash > FlashInfo`
 - `File > Examples > Bluefruit52Lib > Diagnostics > lm20a_spiflash_sleep_adv`
+
+---
+
+## Timed System Off APIs
+
+- `delaySystemOff(ms)` and `delaySystemOffNoRetention(ms)` are Arduino-style timed sleeps: the sketch continues at the next statement after the timer expires.
+- `systemOffWakeReset(ms)` enters real no-retention `SYSTEMOFF`: the GRTC wake timer restarts the chip, so execution begins again from `setup()`.
+- `wasSystemOffWakeReset()`, `wasSystemOffWakeFromGrtc()`, and `clearSystemOffWakeResetReason()` are available for boot diagnostics. See `File > Examples > Power > SystemOffWakeReset`.
 
 ---
 

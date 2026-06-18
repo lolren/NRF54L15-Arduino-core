@@ -3,11 +3,14 @@
 
   Shows the dedicated HS-SPI path.
 
-  XIAO nRF54L15:
-    SPI and SPI_HS both use SPIM00 on D8/D9/D10 and can request 32 MHz.
+  nRF54L15 boards:
+    SPI uses the normal Arduino SPI pins on a serial-fabric SPIM, 8 MHz max.
+    SPI_HS uses SPIM00 on the P2 high-speed route and can request 32 MHz.
+    On XIAO nRF54L15, D8/D9/D10 are the same P2 SCK/MISO/MOSI pins and
+    HS_SS is P2.05, shared with RF_SW_CTL.
 
   XIAO nRF54LM20A:
-    SPI uses the XIAO header pins on SPIM22 and is limited to 8 MHz.
+    SPI uses the XIAO header pins on a serial-fabric SPIM and is limited to 8 MHz.
     SPI_HS uses SPIM00 on the onboard QSPI flash pads and can request 32 MHz.
     Do not wire external devices to SPI_HS unless you deliberately use those pads.
 */
@@ -24,11 +27,12 @@ void setup() {
 
 #if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
   Serial.println("Board: XIAO nRF54LM20A");
-  Serial.println("Default SPI: D8/D9/D10 on SPIM22, 8 MHz max.");
+  Serial.println("Default SPI: D8/D9/D10 on serial-fabric SPIM, 8 MHz max.");
   Serial.println("SPI_HS: onboard QSPI/HS pads on SPIM00, 32 MHz capable.");
 #elif defined(ARDUINO_NRF54L15)
   Serial.println("Board: nRF54L15");
-  Serial.println("SPI_HS aliases SPI on SPIM00, 32 MHz capable.");
+  Serial.println("Default SPI: Arduino SPI pins on serial-fabric SPIM, 8 MHz max.");
+  Serial.println("SPI_HS: P2.x HS pins on SPIM00, 32 MHz capable.");
 #else
   Serial.println("Board: unknown nRF54 clean-core target.");
 #endif

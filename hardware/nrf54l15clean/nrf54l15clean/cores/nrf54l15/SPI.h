@@ -20,7 +20,8 @@
 #define SPI_MODE2 0x02  // CPOL=1, CPHA=0
 #define SPI_MODE3 0x03  // CPOL=1, CPHA=1
 
-// Clock divider settings (nRF54L15 specific)
+// Clock settings. Default SPI uses a serial-fabric SPIM and is capped at
+// 8 MHz. SPI_HS uses SPIM00 on the P2 high-speed pins and can reach 32 MHz.
 #define SPI_CLOCK_32M    32000000UL
 #define SPI_CLOCK_16M    16000000UL
 #define SPI_CLOCK_8M      8000000UL
@@ -127,9 +128,9 @@ private:
     uint32_t getFrequencyValue(uint32_t clockHz);
 };
 
-// Global SPI instance (using SPIM00 on XIAO nRF54L15 headers)
+// Global SPI instance on the Arduino SPI pins, using a serial-fabric SPIM.
 extern SPIClass SPI;
-// Alias for sketches that want to make the HS-SPI intent explicit.
-extern SPIClass& SPI_HS;
+// Dedicated high-speed SPI instance on the P2.x HS-capable pin route.
+extern SPIClass SPI_HS;
 
 #endif // SPI_h

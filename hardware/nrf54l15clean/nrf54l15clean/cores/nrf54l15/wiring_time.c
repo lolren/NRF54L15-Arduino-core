@@ -765,6 +765,36 @@ static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
 #endif
 }
 
+static uint32_t systemOffDelayMsToUs(unsigned long ms)
+{
+    uint32_t delayMs = (uint32_t)ms;
+    if (delayMs > (0xFFFFFFFFUL / 1000UL)) {
+        delayMs = 0xFFFFFFFFUL / 1000UL;
+    }
+    return delayMs * 1000UL;
+}
+
+static void enterSystemOffWakeReset(uint32_t delayUs) __attribute__((noreturn));
+
+static void enterSystemOffWakeReset(uint32_t delayUs)
+{
+    NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+    programSystemOffWakeUs(delayUs);
+    nrf54l15_core_prepare_system_off();
+    nrf54l15_core_disable_system_off_retention();
+
+    __asm volatile("cpsid i" ::: "memory");
+    __asm volatile("dsb 0xF" ::: "memory");
+    __asm volatile("isb 0xF" ::: "memory");
+    NRF_RESET->RESETREAS = 0xFFFFFFFFUL;
+    __asm volatile("dsb 0xF" ::: "memory");
+    NRF_REGULATORS->SYSTEMOFF = REGULATORS_SYSTEMOFF_SYSTEMOFF_Enter;
+
+    while (1) {
+        __asm volatile("wfe");
+    }
+}
+
 void __attribute__((weak)) SysTick_Handler(void)
 {
     ++g_millis_ticks;
@@ -923,20 +953,32 @@ void delayLowPowerIdle(unsigned long ms)
 
 void delaySystemOff(unsigned long ms)
 {
-    uint32_t delayUs = (uint32_t)ms;
-    if (delayUs > (0xFFFFFFFFUL / 1000UL)) {
-        delayUs = 0xFFFFFFFFUL / 1000UL;
-    }
-    enterTimedSystemOff(false, delayUs * 1000UL);
+    enterTimedSystemOff(false, systemOffDelayMsToUs(ms));
 }
 
 void delaySystemOffNoRetention(unsigned long ms)
 {
-    uint32_t delayUs = (uint32_t)ms;
-    if (delayUs > (0xFFFFFFFFUL / 1000UL)) {
-        delayUs = 0xFFFFFFFFUL / 1000UL;
-    }
-    enterTimedSystemOff(true, delayUs * 1000UL);
+    enterTimedSystemOff(true, systemOffDelayMsToUs(ms));
+}
+
+void systemOffWakeReset(unsigned long ms)
+{
+    enterSystemOffWakeReset(systemOffDelayMsToUs(ms));
+}
+
+bool wasSystemOffWakeReset(void)
+{
+    return (NRF_RESET->RESETREAS & RESET_RESETREAS_OFF_Msk) != 0U;
+}
+
+bool wasSystemOffWakeFromGrtc(void)
+{
+    return (NRF_RESET->RESETREAS & RESET_RESETREAS_GRTC_Msk) != 0U;
+}
+
+void clearSystemOffWakeResetReason(void)
+{
+    NRF_RESET->RESETREAS = RESET_RESETREAS_OFF_Msk | RESET_RESETREAS_GRTC_Msk;
 }
 
 void delayMicroseconds(unsigned int us)

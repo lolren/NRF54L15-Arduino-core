@@ -129,11 +129,11 @@ void loop() {
   }
 
   if ((now - g_bootMs) >= kAnnounceWindowMs) {
-    Serial.print("entering_delaySystemOffNoRetention_ms=");
+    Serial.print("entering_systemOffWakeReset_ms=");
     Serial.println(kSleepMs);
     Serial.flush();
     writeGpregret(0U, kWakeMagic);
     delay(50);
-    delaySystemOffNoRetention(kSleepMs);
+    systemOffWakeReset(kSleepMs);
   }
 }

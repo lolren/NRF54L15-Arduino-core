@@ -142,6 +142,11 @@ enum {
 #define PIN_SPI_SCK  (PIN_D8)
 #define PIN_SPI_SS   (PIN_D2)
 
+#define PIN_HSPI_MOSI (PIN_P2_02)
+#define PIN_HSPI_MISO (PIN_P2_04)
+#define PIN_HSPI_SCK  (PIN_P2_01)
+#define PIN_HSPI_SS   (PIN_P2_05)
+
 typedef volatile uint32_t PortReg;
 typedef uint32_t PortMask;
 
@@ -314,6 +319,10 @@ static const uint8_t MOSI = PIN_SPI_MOSI;
 static const uint8_t MISO = PIN_SPI_MISO;
 static const uint8_t SCK  = PIN_SPI_SCK;
 static const uint8_t SS   = PIN_SPI_SS;
+static const uint8_t HS_MOSI = PIN_HSPI_MOSI;
+static const uint8_t HS_MISO = PIN_HSPI_MISO;
+static const uint8_t HS_SCK  = PIN_HSPI_SCK;
+static const uint8_t HS_SS   = PIN_HSPI_SS;
 static const uint8_t IMU_MIC_PWR = PIN_IMU_MIC_PWR;
 static const uint8_t IMU_INT1 = PIN_IMU_INT;
 static const uint8_t MIC_CLK_PAD = PIN_PDM_CLK;

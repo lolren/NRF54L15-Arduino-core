@@ -72,7 +72,7 @@ void setup() {
   blinkCode(1U, 500UL, 300UL);
   waitMs(1000UL);
   writeGpregret0(kWakeMagic);
-  delaySystemOffNoRetention(kWakeDelayMs);
+  systemOffWakeReset(kWakeDelayMs);
 }
 
 void loop() {}

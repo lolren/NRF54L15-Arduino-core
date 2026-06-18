@@ -217,6 +217,10 @@ void delayLowPowerIdle(unsigned long ms);
 void delayMicroseconds(unsigned int us);
 void delaySystemOff(unsigned long ms);
 void delaySystemOffNoRetention(unsigned long ms);
+void systemOffWakeReset(unsigned long ms) __attribute__((noreturn));
+bool wasSystemOffWakeReset(void);
+bool wasSystemOffWakeFromGrtc(void);
+void clearSystemOffWakeResetReason(void);
 
 // Tone generation (noTone is defined in C++ section with overloaded version)
 void tone(uint8_t pin, unsigned int frequency, unsigned long duration);
