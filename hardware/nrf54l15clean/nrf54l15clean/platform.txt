@@ -82,7 +82,7 @@ recipe.hooks.savehex.postsavehex.1.pattern.windows=cmd /c if exist "{build.path}
 # Upload helper.
 tools.nrf54upload.path={runtime.platform.path}/tools
 tools.nrf54upload.cmd.path={tools.nrf54upload.path}/upload.py
-# Direct nrf_ocd upload (no Python dependency)
+# Direct nrf_ocd upload (no Python dependency) — Linux: bundled in core, Win/Mac: not yet avail
 tools.nrf54ocd.path={runtime.platform.path}/tools
 tools.nrf54ocd.cmd.path={tools.nrf54ocd.path}/nrf_ocd
 tools.nrf54ocd.upload.pattern="{tools.nrf54ocd.cmd.path}" -p "{serial.port}" -t "{upload.target}" -f "{build.path}/{build.project_name}.hex" -e -R
