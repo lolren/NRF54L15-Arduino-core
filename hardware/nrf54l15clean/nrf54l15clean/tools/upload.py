@@ -1326,37 +1326,20 @@ def upload_nrf_ocd(
     args = [*nrf_ocd_cmd, "-t", ocd_target]
     if uid:
         args.extend(["-u", uid])
-    args.extend(["-e", "chip", "-R", "load", hex_path])
+    args.extend(["-e", "-f", hex_path, "-R"])
     print(f"Flashing {hex_path}")
     print(f"Runner: nrf_ocd")
     print(f"Probe UID: {uid or 'auto-select'}")
     try:
-        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, bufsize=1)
-        # Stream stdout in real-time (progress bar, status messages)
-        import select
-        import os
-        while True:
-            ret = proc.poll()
-            # Read any available output without blocking
-            if proc.stdout:
-                line = proc.stdout.readline()
-                if line:
-                    print(line, end='', flush=True)
-            if proc.stderr:
-                err = proc.stderr.readline()
-                if err and 'WARN' not in err:
-                    print(err, end='', flush=True, file=sys.stderr)
-            if ret is not None:
-                break
-        # Drain remaining output
-        for line in (proc.stdout or []):
-            if line.strip():
-                print(line, end='', flush=True)
-        for line in (proc.stderr or []):
-            if line.strip() and 'WARN' not in line:
-                print(line, end='', flush=True, file=sys.stderr)
-        return proc.returncode
+        # Run nrf_ocd, streaming all output in real-time
+        import subprocess as _sp
+        proc = _sp.Popen(args, stdout=_sp.PIPE, stderr=_sp.STDOUT, bufsize=0)
+        for line in iter(proc.stdout.readline, b''):
+            if line:
+                sys.stdout.buffer.write(line)
+                sys.stdout.buffer.flush()
+        proc.stdout.close()
+        return proc.wait()
     except subprocess.TimeoutExpired:
         proc.kill()
         print("nrf_ocd timed out", file=sys.stderr)
