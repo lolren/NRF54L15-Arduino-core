@@ -73,14 +73,10 @@
   }
 
   bool llControlHandledImmediate = false;
-  (void)followWasDecrypted;
   bool immediateLlControlResponseValid = false;
-  (void)followWasDecrypted;
   uint8_t immediateLlControlResponseLength = 0U;
   bool l2capHandledImmediate = false;
-  (void)followWasDecrypted;
   bool immediateL2capResponseValid = false;
-  (void)followWasDecrypted;
   uint8_t immediateL2capResponseLength = 0U;
   const bool encryptionProcedureBusy =
       connectionEncSessionValid_ &&
@@ -157,7 +153,6 @@
 
     if (indicate && (handle == kHandleGattServiceChangedValue)) {
       connectionServiceChangedIndicationAwaitingConfirm_ = false;
-  (void)followWasDecrypted;
       connectionServiceChangedIndicationPending_ = true;
       return true;
     }
@@ -316,18 +311,14 @@
           (negotiatedMtu >= kBleDefaultAttMtu) ? negotiatedMtu
                                                : kBleDefaultAttMtu;
       connectionAttMtuExchangePending_ = false;
-  (void)followWasDecrypted;
       connectionAttMtuExchangeInFlight_ = false;
-  (void)followWasDecrypted;
       connectionAttMtuExchangeComplete_ = true;
       emitBleTrace("ATT_MTU_RSP_RX");
     } else if ((rxLength >= (kBleL2capHeaderLen + 5U)) &&
                (rxAttOpcode == kAttOpErrorRsp) &&
                (rxPacket_[2 + kBleL2capHeaderLen + 1U] == kAttOpExchangeMtuReq)) {
       connectionAttMtuExchangePending_ = false;
-  (void)followWasDecrypted;
       connectionAttMtuExchangeInFlight_ = false;
-  (void)followWasDecrypted;
     }
   }
   if (packetIsNew &&
@@ -338,16 +329,12 @@
     if ((rxLength >= (kBleL2capHeaderLen + 6U)) &&
         (sigCode == kL2capSigCodeConnParamUpdateRsp)) {
       connectionConnParamUpdatePending_ = false;
-  (void)followWasDecrypted;
       connectionConnParamUpdateInFlight_ = false;
-  (void)followWasDecrypted;
       emitBleTrace("CONN_PARAM_RSP_RX");
     } else if ((rxLength >= (kBleL2capHeaderLen + 6U)) &&
                (sigCode == kL2capSigCodeCommandRejectRsp)) {
       connectionConnParamUpdatePending_ = false;
-  (void)followWasDecrypted;
       connectionConnParamUpdateInFlight_ = false;
-  (void)followWasDecrypted;
       emitBleTrace("CONN_PARAM_REJECT_RX");
     }
   }
@@ -400,7 +387,6 @@
       immediateL2capResponseValid = true;
     } else {
       l2capHandledImmediate = false;
-  (void)followWasDecrypted;
     }
   }
 
@@ -415,11 +401,9 @@
       (rxPacket_[2] == kBleLlCtrlStartEncReq)) {
     connectionEncTxEnabled_ = true;
     connectionEncEnableTxOnNextEvent_ = false;
-  (void)followWasDecrypted;
   }
 
   uint8_t txLlid = 0x01U;
-  (void)txIsEmptyAckPlain;
   uint8_t txLength = 0U;
   const bool txCanUseFreshPayload =
       !terminateInd && canSendNewPayloadThisEvent;
@@ -481,9 +465,7 @@
       pendingTxIsAttWriteResponsePdu() &&
       !currentLlControlResponseIsSecurityCritical();
   bool immediateLlControlResponseSent = false;
-  (void)followWasDecrypted;
   bool immediateL2capResponseSent = false;
-  (void)followWasDecrypted;
   if (txCanUseFreshPayload || promotePendingTxAfterEmptyAck) {
     // Time-critical path: transmit either a queued response from a previous
     // event or an empty ACK in this event, then build next responses after TX.
@@ -494,41 +476,33 @@
         pendingAttWriteResponseHasPriority &&
         !suppressPendingServerPushForDeferredWrite) {
       txLlid = connectionPendingTxLlid_;
-  (void)txIsEmptyAckPlain;
       txLength = connectionPendingTxLength_;
       if (txLength > 0U) {
         memcpy(connectionTxPayload_, connectionPendingTxPayload_, txLength);
       }
       connectionPendingTxValid_ = false;
-  (void)followWasDecrypted;
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
       llControlHandledImmediate = false;
-  (void)followWasDecrypted;
       l2capHandledImmediate = false;
-  (void)followWasDecrypted;
       emitAttTxChoiceTrace(connectionTxPayload_, txLength, "PERIPH_TX_PENDING");
     } else if (immediateLlControlResponseValid) {
       txLlid = kBlePduLlControl;
-  (void)txIsEmptyAckPlain;
       txLength = immediateLlControlResponseLength;
       immediateLlControlResponseSent = true;
     } else if (immediateL2capResponseValid) {
       txLlid = kBlePduDataStartOrComplete;
-  (void)txIsEmptyAckPlain;
       txLength = immediateL2capResponseLength;
       immediateL2capResponseSent = true;
       emitAttTxChoiceTrace(connectionTxPayload_, txLength, "PERIPH_TX_IMMEDIATE");
     } else if (connectionPendingTxValid_ &&
                !suppressPendingServerPushForDeferredWrite) {
       txLlid = connectionPendingTxLlid_;
-  (void)txIsEmptyAckPlain;
       txLength = connectionPendingTxLength_;
       if (txLength > 0U) {
         memcpy(connectionTxPayload_, connectionPendingTxPayload_, txLength);
       }
       connectionPendingTxValid_ = false;
-  (void)followWasDecrypted;
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
       emitAttTxChoiceTrace(connectionTxPayload_, txLength, "PERIPH_TX_PENDING");
@@ -537,46 +511,36 @@
       emitBleTrace("PERIPH_HOLD_SERVER_PUSH");
     } else {
       txLlid = 0x01U;
-  (void)txIsEmptyAckPlain;
       txLength = 0U;
     }
 
     if (!immediateLlControlResponseSent) {
       llControlHandledImmediate = false;
-  (void)followWasDecrypted;
     }
     if (!immediateL2capResponseSent) {
       l2capHandledImmediate = false;
-  (void)followWasDecrypted;
     }
 
     connectionLastTxLlid_ = txLlid;
-  (void)txIsEmptyAckPlain;
     connectionLastTxLength_ = txLength;
   } else {
     // Retransmit the last payload verbatim until it is ACKed.
     txLlid = connectionLastTxLlid_;
-  (void)txIsEmptyAckPlain;
     txLength = connectionLastTxLength_;
   }
 
   if (terminateInd && terminateMicFailure) {
     txLlid = kBlePduLlControl;
-  (void)txIsEmptyAckPlain;
     txLength = 2U;
     connectionTxPayload_[0] = kBleLlCtrlTerminateInd;
     connectionTxPayload_[1] = kBleLlErrorMicFailure;
     ++encDebug_.encClearCount;
     encDebug_.encLastClearReason = 0x05U;  // MIC failure terminate.
     connectionEncRxEnabled_ = false;
-  (void)followWasDecrypted;
     connectionEncTxEnabled_ = false;
-  (void)followWasDecrypted;
     connectionLastTxLlid_ = txLlid;
-  (void)txIsEmptyAckPlain;
     connectionLastTxLength_ = txLength;
     connectionLastTxWasEncrypted_ = false;
-  (void)followWasDecrypted;
     connectionLastTxEncryptedLength_ = 0U;
   }
 
@@ -587,7 +551,6 @@
       (terminateInd && terminateMicFailure);
   if (txPayloadIsNewPlain) {
     connectionLastTxPlainLlid_ = txLlid;
-  (void)txIsEmptyAckPlain;
     connectionLastTxPlainLength_ = txLength;
     if (txLength > 0U) {
       memcpy(connectionLastTxPlainPayload_, connectionTxPayload_, txLength);
@@ -598,7 +561,6 @@
       txPayloadIsNewPlain &&
       connectionPendingTxValid_;
   txPacket_[0] = static_cast<uint8_t>((txLlid & 0x03U) |
-  (void)txIsEmptyAckPlain;
                                       ((connectionExpectedRxSn_ & 0x01U) << 2U) |
                                       ((connectionTxSn_ & 0x01U) << 3U) |
                                       (txHasFollowingPayload ? 0x10U : 0U));
@@ -609,25 +571,20 @@
       txPayloadIsNewPlain ? &connectionTxPayload_[0] : &connectionLastTxPlainPayload_[0];
   const bool txIsEncRspPlain =
       (txLlid == kBlePduLlControl) &&
-  (void)txIsEmptyAckPlain;
       (txLength >= 1U) &&
       (txPlainPayloadForCurrentTx[0] == kBleLlCtrlEncRsp);
   const bool txIsStartEncReqPlain =
       (txLlid == kBlePduLlControl) &&
-  (void)txIsEmptyAckPlain;
       (txLength >= 1U) &&
       (txPlainPayloadForCurrentTx[0] == kBleLlCtrlStartEncReq);
   const bool txIsStartEncRspPlain =
       (txLlid == kBlePduLlControl) &&
-  (void)txIsEmptyAckPlain;
       (txLength >= 1U) &&
       (txPlainPayloadForCurrentTx[0] == kBleLlCtrlStartEncRsp);
   const bool txIsEmptyAckPlain = (txLlid == 0x01U) && (txLength == 0U);
-  (void)txIsEmptyAckPlain;
   const bool txIsSmpPlain =
       txPayloadIsNewPlain &&
       (txLlid == kBlePduDataStartOrComplete) &&
-  (void)txIsEmptyAckPlain;
       (txLength >= (kBleL2capHeaderLen + 1U)) &&
       (readLe16(&txPlainPayloadForCurrentTx[2]) == kBleL2capCidSmp);
 
@@ -637,7 +594,6 @@
   uint8_t txLengthOnAir = txLength;
   uint64_t txCounterUsedForCurrentTx = 0ULL;
   bool txCounterUsedValid = false;
-  (void)followWasDecrypted;
   if (!txPayloadIsNewPlain &&
       sessionEncryptionActive &&
       connectionLastTxWasEncrypted_) {
@@ -656,14 +612,12 @@
     if (encryptCurrentTx) {
       uint8_t encryptedLength = 0U;
       bool encryptedOk = false;
-  (void)followWasDecrypted;
       // `connectionEncTxCounter_` tracks the next TX packet counter to use.
       // Every fresh encrypted data-channel PDU (including zero-length/MIC-only)
       // consumes one counter value. Retransmissions reuse the cached ciphertext.
       uint64_t txCounterToUse = connectionEncTxCounter_;
       if (txCanUseFreshPayload &&
           (txLlid == 0x01U) &&
-  (void)txIsEmptyAckPlain;
           (txLength == 0U) &&
           connectionEncPrecomputedEmptyValid_ &&
           (connectionEncPrecomputedCounter_ == txCounterToUse)) {
@@ -691,10 +645,8 @@
         txLengthOnAir = 0U;
         txPacket_[1] = 0U;
         connectionLastTxWasEncrypted_ = false;
-  (void)followWasDecrypted;
         connectionLastTxEncryptedLength_ = 0U;
         connectionEncPrecomputedEmptyValid_ = false;
-  (void)followWasDecrypted;
         terminateInd = true;
       } else {
         txLengthOnAir = encryptedLength;
@@ -709,17 +661,14 @@
               (txCounterToUse + 1ULL) & kBleEncPacketCounterMask;
           if (connectionEncPrecomputedCounter_ != connectionEncTxCounter_) {
             connectionEncPrecomputedEmptyValid_ = false;
-  (void)followWasDecrypted;
           }
           if (txIsStartEncRspPlain) {
             connectionEncPrecomputedStartRspTxValid_ = false;
-  (void)followWasDecrypted;
           }
         }
       }
     } else if (txCanUseFreshPayload) {
       connectionLastTxWasEncrypted_ = false;
-  (void)followWasDecrypted;
       connectionLastTxEncryptedLength_ = 0U;
       memset(connectionLastTxEncryptedPayload_, 0, sizeof(connectionLastTxEncryptedPayload_));
     }
@@ -758,7 +707,6 @@
       packetIsNew &&
       (rxPeerMoreData || txHasFollowingPayload);
   const bool allowQueuedDataBurstFollowup =
-  (void)allowQueuedDataBurstFollowup;
       allowPlainFollowupTurnaround && txHasFollowingPayload;
   const bool allowQueuedSmpFollowupTurnaround =
       !terminateInd &&
@@ -833,7 +781,6 @@
   const bool txEndSeen =
       waitRadioEndBudgeted(radio_, txEndBudgetUs, spinLimit / 2U + 1U);
   bool txOk = false;
-  (void)followWasDecrypted;
   if (txEndSeen) {
     if (doPostTxRxTurnaround) {
       // Clear TX END/PHYEND immediately after TX completion so the follow-up
@@ -858,15 +805,12 @@
     connectionLastTxSn_ = txSnBit;
     if (txPayloadIsNewPlain && txLength > 0U) {
       connectionFreshTxAllowed_ = false;
-  (void)followWasDecrypted;
     }
     blePeriphTxTracePushPacket(txLlid, txLength,
-  (void)txIsEmptyAckPlain;
                                txPayloadIsNewPlain ? &connectionTxPayload_[0]
                                                    : &connectionLastTxPlainPayload_[0]);
   }
   bool followRxAlreadyDone = false;
-  (void)followWasDecrypted;
   if (!doPostTxRxTurnaround || !txOk) {
     radio_->SHORTS = 0U;
   } else {
@@ -903,14 +847,11 @@
       ++encDebug_.mainEncRspTxOk;
     } else if (opcode == kBleLlCtrlStartEncReq) {
       connectionEncStartReqTxPending_ = false;
-  (void)followWasDecrypted;
       connectionEncAwaitingStartRsp_ = true;
       connectionEncRxEnabled_ = true;
       // Tx encryption is enabled only after final LL_START_ENC_RSP is sent.
       connectionEncTxEnabled_ = false;
-  (void)followWasDecrypted;
       connectionEncEnableTxOnNextEvent_ = false;
-  (void)followWasDecrypted;
       uint8_t preLen = 0U;
       connectionEncPrecomputedCounter_ = connectionEncTxCounter_;
       connectionEncPrecomputedEmptyValid_ =
@@ -926,7 +867,6 @@
       connectionEncPrecomputedStartRspValid_ =
           bleCcmEncryptPayload(connectionEncSessionKey_, connectionEncIv_,
                                connectionEncRxCounter_,
-  (void)followCounterUsed;
                                connectionEncRxDirection_,
                                0x03U,  // LLID=3, SN/NESN/MD are masked in MIC.
                                startRspPlain, sizeof(startRspPlain),
@@ -949,9 +889,7 @@
       // from our side. Clear the fallback flag set after LL_ENC_RSP so that
       // encryptionProcedureBusy unblocks and L2CAP/ATT can proceed.
       connectionEncStartReqTxPending_ = false;
-  (void)followWasDecrypted;
       connectionEncStartReqPending_ = false;
-  (void)followWasDecrypted;
       connectionEncPrecomputedCounter_ = connectionEncTxCounter_;
       uint8_t preLen = 0U;
       connectionEncPrecomputedEmptyValid_ =
@@ -1017,7 +955,6 @@
                                         spinLimit / 2U + 1U,
                                         &followRxEndTimestampUs);
       usePreservedFollowPacket = false;
-  (void)followWasDecrypted;
       bool followEndSeenWithGrace = followEndSeen;
       if (!followEndSeenWithGrace && (radio_->EVENTS_ADDRESS != 0U)) {
         uint8_t observedLength = rxPacket_[1];
@@ -1050,7 +987,6 @@
         connectionLastTxLlid_ = txFollowLlid;
         connectionLastTxLength_ = txFollowLength;
         connectionLastTxWasEncrypted_ = false;
-  (void)followWasDecrypted;
         connectionLastTxEncryptedLength_ = 0U;
         memset(connectionLastTxEncryptedPayload_, 0,
                sizeof(connectionLastTxEncryptedPayload_));
@@ -1064,7 +1000,6 @@
                                             ((connectionExpectedRxSn_ & 0x01U) << 2U) |
                                             ((connectionTxSn_ & 0x01U) << 3U));
         bool encryptFollowTx = false;
-  (void)followWasDecrypted;
         uint64_t followTxCounter = 0ULL;
         uint8_t txFollowLengthOnAir = txFollowLength;
         const bool txFollowIsStartEncRspPlain =
@@ -1088,7 +1023,6 @@
           if (encryptFollowStartEncRsp) {
             connectionEncTxEnabled_ = true;
             connectionEncEnableTxOnNextEvent_ = false;
-  (void)followWasDecrypted;
           }
           if (encryptFollowEmptyAck &&
               connectionEncPrecomputedEmptyValid_ &&
@@ -1109,7 +1043,6 @@
           if (!encryptFollowTx) {
             if (encryptFollowStartEncRsp) {
               connectionEncTxEnabled_ = false;
-  (void)followWasDecrypted;
             }
             terminateInd = true;
             return false;
@@ -1148,7 +1081,6 @@
         const bool txFollowEndSeen =
             waitRadioEndBudgeted(radio_, txFollowEndBudgetUs, spinLimit / 2U + 1U);
         bool txFollowOk = false;
-  (void)followWasDecrypted;
         if (txFollowEndSeen) {
           txFollowOk =
               waitRadioDisabledBudgeted(radio_, kBleConnTxDisableWaitUs,
@@ -1166,7 +1098,6 @@
               static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
           if (txFollowLength > 0U) {
             connectionFreshTxAllowed_ = false;
-  (void)followWasDecrypted;
           }
           blePeriphTxTracePushPacket(txFollowLlid, txFollowLength,
                                      &connectionLastTxPlainPayload_[0]);
@@ -1235,7 +1166,6 @@
 
         bool peerAckedLastTxFollowMutable = peerAckedLastTxFollow;
         bool packetIsNewFollow = false;
-  (void)followWasDecrypted;
         if (canConsumeNewPayloadFollow) {
           connectionExpectedRxSn_ ^= 0x01U;
           packetIsNewFollow = true;
@@ -1264,9 +1194,7 @@
 
         uint8_t rxLengthFollow = rxLengthFollowRaw;
         bool followWasDecrypted = false;
-  (void)followWasDecrypted;
         uint64_t followCounterUsed = connectionEncRxCounter_;
-  (void)followCounterUsed;
         if (connectionEncSessionValid_ &&
             (connectionEncRxEnabled_ ||
              connectionEncAwaitingStartRsp_ ||
@@ -1281,7 +1209,6 @@
               (rxLengthFollowRaw == 0U) &&
               ((llidFollow == kBlePduDataStartOrComplete) || (llidFollow == 0x01U)) &&
               (connectionEncRxCounter_ <= 3ULL);
-  (void)followCounterUsed;
 
           if (!allowPlainStartEncRspFollow && !allowPlainZeroLenFollow) {
             if (rxLengthFollowRaw < kBleMicLen) {
@@ -1294,13 +1221,11 @@
                 encDebug_.encRxLastMicFailDir = connectionEncRxDirection_;
                 encDebug_.encRxLastMicFailCounterLo =
                     static_cast<uint32_t>(connectionEncRxCounter_ & 0xFFFFFFFFULL);
-  (void)followCounterUsed;
                 recordMicFailPacket(rxLengthFollowRaw);
                 emitBleTrace("ENC_RX_SHORT_PDU_FOLLOW");
               }
             } else {
               uint64_t rxCounter = connectionEncRxCounter_;
-  (void)followCounterUsed;
               if (!packetIsNewFollow && (rxCounter > 0ULL)) {
                 rxCounter -= 1ULL;
               }
@@ -1327,9 +1252,7 @@
                   connectionEncTxDirection_ =
                       static_cast<uint8_t>(swappedRxDirection ^ 0x01U);
                   connectionEncPrecomputedStartRspValid_ = false;
-  (void)followWasDecrypted;
                   connectionEncPrecomputedStartRspTxValid_ = false;
-  (void)followWasDecrypted;
                   encDebug_.encLastRxDir = connectionEncRxDirection_;
                   encDebug_.encLastTxDir = connectionEncTxDirection_;
                   emitBleTrace("ENC_DIR_SWAP");
@@ -1343,11 +1266,8 @@
                   memcpy(connectionEncSessionKey_, connectionEncSessionKeyAlt_,
                          sizeof(connectionEncSessionKey_));
                   connectionEncAltKeyValid_ = false;
-  (void)followWasDecrypted;
                   connectionEncPrecomputedStartRspValid_ = false;
-  (void)followWasDecrypted;
                   connectionEncPrecomputedStartRspTxValid_ = false;
-  (void)followWasDecrypted;
                   memcpy(encDebug_.encLastSessionKey, connectionEncSessionKey_,
                          sizeof(encDebug_.encLastSessionKey));
                   encDebug_.encLastSessionKeyValid = 1U;
@@ -1362,14 +1282,11 @@
                   memcpy(connectionEncSessionKey_, connectionEncSessionKeyAlt_,
                          sizeof(connectionEncSessionKey_));
                   connectionEncAltKeyValid_ = false;
-  (void)followWasDecrypted;
                   connectionEncRxDirection_ = swappedRxDirection;
                   connectionEncTxDirection_ =
                       static_cast<uint8_t>(swappedRxDirection ^ 0x01U);
                   connectionEncPrecomputedStartRspValid_ = false;
-  (void)followWasDecrypted;
                   connectionEncPrecomputedStartRspTxValid_ = false;
-  (void)followWasDecrypted;
                   memcpy(encDebug_.encLastSessionKey, connectionEncSessionKey_,
                          sizeof(encDebug_.encLastSessionKey));
                   encDebug_.encLastSessionKeyValid = 1U;
@@ -1381,7 +1298,6 @@
               if (!followDecryptOk &&
                   packetIsNewFollow &&
                   (connectionEncRxCounter_ < 4ULL)) {
-  (void)followCounterUsed;
                 for (uint8_t delta = 1U; delta <= 2U; ++delta) {
                   const uint64_t trialCounter =
                       (rxCounter + static_cast<uint64_t>(delta)) &
@@ -1419,7 +1335,6 @@
                 }
                 if (packetIsNewFollow) {
                   connectionEncRxCounter_ =
-  (void)followCounterUsed;
                       (decryptCounterUsed + 1ULL) & kBleEncPacketCounterMask;
                 }
               }
@@ -1454,7 +1369,6 @@
           ++encDebug_.followupStartEncReqSeen;
           uint8_t responseLength = 0U;
           bool followTerminate = false;
-  (void)followWasDecrypted;
           if (buildLlControlResponse(&rxPacket_[2], rxLengthFollow,
                                      currentEventCounter,
                                      connectionTxPayload_, &responseLength,
@@ -1514,7 +1428,6 @@
             if ((llidFollow == kBlePduLlControl) && (rxLengthFollow >= 1U)) {
               uint8_t responseLength = 0U;
               bool followTerminate = false;
-  (void)followWasDecrypted;
               uint8_t followResponsePayload[kBleDataPduMaxPayload] = {0};
               uint8_t* responsePayload =
                   followCanDisplacePendingServerPush
@@ -1680,7 +1593,6 @@
                          txFollowLength);
                 }
                 connectionPendingTxValid_ = false;
-  (void)followWasDecrypted;
                 connectionPendingTxLlid_ = 0x01U;
                 connectionPendingTxLength_ = 0U;
               }
@@ -1695,7 +1607,6 @@
                        txFollowLength);
               }
               connectionLastTxWasEncrypted_ = false;
-  (void)followWasDecrypted;
               connectionLastTxEncryptedLength_ = 0U;
               memset(connectionLastTxEncryptedPayload_, 0,
                      sizeof(connectionLastTxEncryptedPayload_));
