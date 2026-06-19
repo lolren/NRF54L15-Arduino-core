@@ -1331,19 +1331,34 @@ def upload_nrf_ocd(
     print(f"Runner: nrf_ocd")
     print(f"Probe UID: {uid or 'auto-select'}")
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-        if result.stdout:
-            for line in result.stdout.split("\n"):
-                if line.strip():
-                    print(line)
-        if result.stderr:
-            for line in result.stderr.split("\n"):
-                if line.strip() and "WARN" not in line:
-                    print(line, file=sys.stderr)
-        if result.returncode == 0:
-            return 0
-        return 1
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, bufsize=1)
+        # Stream stdout in real-time (progress bar, status messages)
+        import select
+        import os
+        while True:
+            ret = proc.poll()
+            # Read any available output without blocking
+            if proc.stdout:
+                line = proc.stdout.readline()
+                if line:
+                    print(line, end='', flush=True)
+            if proc.stderr:
+                err = proc.stderr.readline()
+                if err and 'WARN' not in err:
+                    print(err, end='', flush=True, file=sys.stderr)
+            if ret is not None:
+                break
+        # Drain remaining output
+        for line in (proc.stdout or []):
+            if line.strip():
+                print(line, end='', flush=True)
+        for line in (proc.stderr or []):
+            if line.strip() and 'WARN' not in line:
+                print(line, end='', flush=True, file=sys.stderr)
+        return proc.returncode
     except subprocess.TimeoutExpired:
+        proc.kill()
         print("nrf_ocd timed out", file=sys.stderr)
     except Exception as e:
         print(f"nrf_ocd error: {e}", file=sys.stderr)
