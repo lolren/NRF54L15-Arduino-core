@@ -943,7 +943,7 @@ uint32_t Secp256r1::randomWord() {
 // ─── ECDSA ─────────────────────────────────────────────────────────────────
 
 void Secp256r1::generateKeyPair(Secp256r1Scalar* outPriv, Secp256r1Point* outPub) {
-  if(!outPriv||!outPub)return; generateRandomScalar(outPriv); scalarMultiplyBase(*outPriv,outPub);
+  if(!outPriv||!outPub)return; { generateRandomScalar(outPriv); scalarMultiplyBase(*outPriv,outPub); }
 }
 
 bool Secp256r1::ecdsaSign(const Secp256r1Scalar& priv, const uint8_t hash[32], uint8_t r[32], uint8_t s[32]) {
@@ -974,7 +974,7 @@ bool Secp256r1::ecdsaVerify(const Secp256r1Point& pub, const uint8_t hash[32], c
   Secp256r1Scalar u1s,u2s; bnToBytes(u1,u1s.bytes); bnToBytes(u2,u2s.bytes);
   Secp256r1Point R1,R2,Rp; if(!scalarMultiplyBase(u1s,&R1))return false;
   if(!scalarMultiply(u2s,pub,&R2))return false;
-  if(!pointAdd(R1,R2,&Rp))return false; if(isInfinity(Rp))return false;
+  if(!pointAdd(R1,R2,&Rp))return false; { if(isInfinity(Rp))return false; }
   BigNum256 rpBn; bnFromBytes(Rp.x,&rpBn); if(bnCompare(rpBn,n)>=0)bnSub(rpBn,n,&rpBn);
   return bnEquals(rBn,rpBn);
 }
