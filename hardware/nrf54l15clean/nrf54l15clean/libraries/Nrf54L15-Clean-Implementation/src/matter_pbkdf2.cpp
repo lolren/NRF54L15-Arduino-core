@@ -1,3 +1,5 @@
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
+
 #include "matter_pbkdf2.h"
 
 #include <string.h>
