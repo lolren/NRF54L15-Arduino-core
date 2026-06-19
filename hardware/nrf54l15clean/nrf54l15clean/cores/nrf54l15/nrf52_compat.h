@@ -2,7 +2,7 @@
 #define NRF52_COMPAT_H_
 
 #include <stdint.h>
-#include "nrf54lm20b_types.h"
+#include "nrf54l15_types.h"
 
 #ifndef NRF_FICR
 #define NRF_FICR (reinterpret_cast<NRF_FICR_Type*>(0x00FFC000UL))

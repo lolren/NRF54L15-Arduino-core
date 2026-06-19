@@ -134,4 +134,5 @@ bool MatterScenes::sceneExists(uint16_t groupId, uint8_t sceneId) const {
   return findScene(groupId, sceneId) >= 0;
 }
 
-}  // namespace xiao_nrf54l15#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE
+}  // namespace xiao_nrf54l15
+#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

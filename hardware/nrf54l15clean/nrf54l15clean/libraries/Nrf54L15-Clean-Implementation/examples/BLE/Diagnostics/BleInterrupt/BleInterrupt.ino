@@ -31,9 +31,8 @@ static BleRadio g_ble;
 
 static volatile bool g_timerFired = false;
 
+// Functions provided by the core
 extern "C" void nrf54l15_clean_idle_service(void);
-extern "C" uint32_t nrf54l15_core_enter_idle_cpu_scaling(void);
-extern "C" void nrf54l15_core_exit_idle_cpu_scaling(uint32_t restoreRaw);
 
 namespace {
 
@@ -125,12 +124,10 @@ static void sleepUntilTimer() {
 
   while (!g_timerFired) {
     nrf54l15_clean_idle_service();
-    const uint32_t restoreRaw = nrf54l15_core_enter_idle_cpu_scaling();
     *kScbScr &= ~(kScbScrSleepDeep_Msk | kScbScrSleepOnExit_Msk);
     __asm volatile("dsb 0xF" ::: "memory");
     __asm volatile("isb 0xF" ::: "memory");
     __asm volatile("wfi");
-    nrf54l15_core_exit_idle_cpu_scaling(restoreRaw);
   }
 }
 
@@ -145,9 +142,9 @@ static void ledPulse() {
 
 // ============================================================================
 // GRTC compare IRQ handler — fires when the 2-second alarm expires
-// ============================================================================
-
-extern "C" void GRTC_0_IRQHandler(void) {
+// Note: core wiring_time.c provides the default GRTC_0_IRQHandler. This example
+// uses a weak override to handle the compare event for its timer.
+extern "C" __attribute__((weak)) void GRTC_0_IRQHandler(void) {
   if (NRF_GRTC->EVENTS_COMPARE[kGrtcChannel] == 0U) {
     return;
   }

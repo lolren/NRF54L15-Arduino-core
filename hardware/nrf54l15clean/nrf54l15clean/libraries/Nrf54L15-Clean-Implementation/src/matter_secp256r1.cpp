@@ -1,4 +1,3 @@
-#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
 #include "matter_secp256r1.h"
 #include <Arduino.h>
 #include <string.h>
@@ -981,4 +980,5 @@ bool Secp256r1::ecdsaVerify(const Secp256r1Point& pub, const uint8_t hash[32], c
 }
 
 }  // namespace xiao_nrf54l15
+
 #endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE

@@ -192,3 +192,25 @@ void nrf54lm20b_core_exit_idle_cpu_scaling(uint32_t prev) {
     setPllFrequency(prev);
     SystemCoreClockUpdate();
 }
+
+/* nrf54l15_core_* aliases for library compatibility (Arduino.h declares nrf54l15_core_*) */
+__attribute__((alias("nrf54lm20b_core_set_cpu_frequency_hz")))
+bool nrf54l15_core_set_cpu_frequency_hz(uint32_t);
+
+__attribute__((alias("nrf54lm20b_core_get_cpu_frequency_hz")))
+uint32_t nrf54l15_core_get_cpu_frequency_hz(void);
+
+__attribute__((alias("nrf54lm20b_core_set_idle_cpu_scaling_hz")))
+bool nrf54l15_core_set_idle_cpu_scaling_hz(uint32_t, bool);
+
+__attribute__((alias("nrf54lm20b_core_get_idle_cpu_scaling_enabled")))
+bool nrf54l15_core_get_idle_cpu_scaling_enabled(void);
+
+__attribute__((alias("nrf54lm20b_core_get_idle_cpu_frequency_hz")))
+uint32_t nrf54l15_core_get_idle_cpu_frequency_hz(void);
+
+__attribute__((alias("nrf54lm20b_core_enter_idle_cpu_scaling")))
+uint32_t nrf54l15_core_enter_idle_cpu_scaling(void);
+
+__attribute__((alias("nrf54lm20b_core_exit_idle_cpu_scaling")))
+void nrf54l15_core_exit_idle_cpu_scaling(uint32_t);

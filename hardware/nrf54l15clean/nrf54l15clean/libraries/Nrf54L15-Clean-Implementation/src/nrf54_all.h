@@ -24,9 +24,12 @@
 // Thread (OpenThread staged)
 #include "nrf54_thread_experimental.h"
 
-// Matter Crypto
-#include "matter_secp256r1.h"
+// PBKDF2 (used by both Matter and Thread PSK)
 #include "matter_pbkdf2.h"
+
+// Matter Crypto (only when Matter core is enabled)
+#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
+#include "matter_secp256r1.h"
 
 // Matter PASE
 #include "matter_pase_commissioning.h"
@@ -36,6 +39,7 @@
 
 // Matter Platform
 #include "matter_platform_stage.h"
+#endif
 
 // VPR Softperipheral (RISC-V coprocessor)
 #include "nrf54l15_vpr.h"
