@@ -55,17 +55,31 @@ echo ""
 
 # === SCENARIO 1: LM20A default flags (Matter=OFF, Thread=OFF, BLE=ON) ===
 echo "--- Scenario 1: LM20A Default ---"
+declare -A SEEN
 for ino in $(find "$BASE/examples" -name "*.ino" | sort); do
     dir=$(dirname "$ino")
     name=$(basename "$dir")
+    # Skip duplicates (same example in multiple dirs)
+    if [[ -n "${SEEN[$name]:-}" ]]; then continue; fi
+    SEEN[$name]=1
+    # Skip board-specific examples (require different board selection)
+    case "$name" in
+        Holyiot*|Nrf54L15Dk*) continue ;;
+    esac
     compile "LM20A_DEF_$name" "$BOARD_LM20A" "$dir" ""
 done
 
 # === SCENARIO 2: L15 default flags ===
 echo "--- Scenario 2: L15 Default ---"
-for ino in $(find "$BASE/examples" -name "*.ino" | sort | head -5); do
+declare -A SEEN2
+for ino in $(find "$BASE/examples" -name "*.ino" | sort | head -10); do
     dir=$(dirname "$ino")
     name=$(basename "$dir")
+    if [[ -n "${SEEN2[$name]:-}" ]]; then continue; fi
+    SEEN2[$name]=1
+    case "$name" in
+        Holyiot*|Nrf54L15Dk*) continue ;;
+    esac
     compile "L15_DEF_$name" "$BOARD_L15" "$dir" ""
 done
 

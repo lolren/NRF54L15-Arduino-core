@@ -114,6 +114,14 @@ enum {
 #define PIN_PDM_DATA (41)       // P1.14
 #define IMU_INT      PIN_IMU_INT
 #define IMU_CS       PIN_IMU_CS
+// VBAT monitoring — LM20A uses nPM1300 PMIC (npm1300_read_vbat_mv()), not GPIO divider
+#define VBAT_EN      0xFF
+#define VBAT_READ    0xFF
+// RF switch control — not present on LM20A
+#define RF_SW        0xFF
+#define RF_SW_CTL    0xFF
+// IMU/MIC power — controlled by nPM1300 LDO1 on LM20A, not GPIO
+#define IMU_MIC_EN   0xFF
 #define PDM_CLK      PIN_PDM_CLK
 #define PDM_DATA     PIN_PDM_DATA
 #define MIC_CLK      PIN_PDM_CLK
