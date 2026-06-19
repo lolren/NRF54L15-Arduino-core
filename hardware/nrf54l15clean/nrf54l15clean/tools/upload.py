@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Optional, List, Set, Dict
+from typing import Optional, List, Set, Dict, Tuple
 
 CMSIS_DAP_VENDOR_ID = "2886"
 CMSIS_DAP_PRODUCT_IDS = {"0066", "0068"}  # L15=0066, LM20B=0068
@@ -681,7 +681,7 @@ def upload_uf2(
 
 def _sysfs_usb_identity_for_class_node(
     class_name: str, node_name: str
-) -> tuple[Optional[str], Optional[str]]:
+) -> Tuple[Optional[str], Optional[str]]:
     sys_device = Path("/sys/class") / class_name / node_name / "device"
     try:
         resolved = sys_device.resolve(strict=True)
@@ -702,10 +702,10 @@ def _sysfs_usb_identity_for_class_node(
 
     return None, None
 
-def _sysfs_usb_identity_for_hidraw(node: Path) -> tuple[Optional[str], Optional[str]]:
+def _sysfs_usb_identity_for_hidraw(node: Path) -> Tuple[Optional[str], Optional[str]]:
     return _sysfs_usb_identity_for_class_node("hidraw", node.name)
 
-def _sysfs_usb_identity_for_tty(node: Path) -> tuple[Optional[str], Optional[str]]:
+def _sysfs_usb_identity_for_tty(node: Path) -> Tuple[Optional[str], Optional[str]]:
     return _sysfs_usb_identity_for_class_node("tty", node.name)
 
 def matching_probe_hidraw_nodes() -> List[Path]:
@@ -1178,7 +1178,7 @@ def open_nrf_ocd_asset_for_host() -> Optional[tuple]:
 
     return None
 
-def open_nrf_ocd_candidate_names() -> tuple[str, ...]:
+def open_nrf_ocd_candidate_names() -> Tuple[str, ...]:
     if sys.platform.startswith("win"):
         return ("nrf_ocd.exe", "nrf_ocd-win64.exe", "nrf_ocd")
     return (
