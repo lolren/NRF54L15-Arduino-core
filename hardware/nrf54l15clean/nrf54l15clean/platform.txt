@@ -85,7 +85,7 @@ tools.nrf54upload.cmd.path={tools.nrf54upload.path}/upload.py
 # Direct nrf_ocd upload (no Python dependency)
 tools.nrf54ocd.path={runtime.platform.path}/tools
 tools.nrf54ocd.cmd.path={tools.nrf54ocd.path}/nrf_ocd
-tools.nrf54ocd.upload.pattern="{tools.nrf54ocd.cmd.path}" -p "{serial.port}" -t "{upload.target}" -e chip -R load "{build.path}/{build.project_name}.hex"
+tools.nrf54ocd.upload.pattern="{tools.nrf54ocd.cmd.path}" -p "{serial.port}" -t "{upload.target}" -f "{build.path}/{build.project_name}.hex" -e -R
 
 tools.nrf54upload.upload.pattern="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54upload.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "{upload.runner}" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
 
