@@ -363,7 +363,9 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     }
 
     const uint16_t l2capLenEarly = readLe16(&rxPacket_[2]);
+  (void)cccd;
     const uint16_t cidEarly = readLe16(&rxPacket_[4]);
+  (void)cccd;
     if ((cidEarly != kBleL2capCidAtt) ||
         (l2capLenEarly < 3U) ||
         (static_cast<uint16_t>(rxLengthEarly) !=
@@ -373,6 +375,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     }
 
     const uint16_t handle = readLe16(&rxPacket_[7]);
+  (void)cccd;
     const uint16_t valueLen = static_cast<uint16_t>(l2capLenEarly - 3U);
     const uint8_t* const valueEarly = (valueLen > 0U) ? &rxPacket_[9] : nullptr;
     const bool isCccdHandle =
@@ -395,6 +398,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     }
 
     const uint16_t cccd = readLe16(&rxPacket_[9]);
+  (void)cccd;
     const uint32_t armStartUs = bleTimingUs();
     uint8_t divider = kBleConnMicrosPollDivider;
     while ((radio_->EVENTS_CRCOK == 0U) &&
@@ -420,6 +424,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         return false;
       }
       const uint16_t cccd = readLe16(&rxPacket_[9]);
+  (void)cccd;
       writeAccepted = applyCccdState(handle, cccd);
     } else {
       uint8_t ignoredError = kAttErrWriteNotPermitted;
@@ -619,6 +624,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     } else if ((llidEarly == kBlePduDataStartOrComplete) &&
                (rxLengthEarly >= (kBleL2capHeaderLen + 1U)) &&
                (readLe16(&rxPacket_[4]) == kBleL2capCidAtt)) {
+  (void)cccd;
       rxAttOpcodeFast = rxPacket_[2 + kBleL2capHeaderLen];
       switch (rxAttOpcodeFast) {
         case kAttOpExchangeMtuReq:
@@ -638,11 +644,13 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     } else if ((llidEarly == kBlePduDataStartOrComplete) &&
                (rxLengthEarly >= (kBleL2capHeaderLen + 4U)) &&
                (readLe16(&rxPacket_[4]) == kBleL2capCidLeSignaling)) {
+  (void)cccd;
       rxSignalCodeFast = rxPacket_[6];
       candidateSignaling = true;
     } else if ((llidEarly == kBlePduDataStartOrComplete) &&
                (rxLengthEarly >= (kBleL2capHeaderLen + 1U)) &&
                (readLe16(&rxPacket_[4]) == kBleL2capCidSmp)) {
+  (void)cccd;
       rxSmpOpcodeFast = rxPacket_[2 + kBleL2capHeaderLen];
       candidateSmpImmediate = (rxSmpOpcodeFast == kSmpCodePairingRequest);
     } else {
@@ -977,12 +985,15 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       (connectionLastTxLlid_ == kBlePduDataStartOrComplete) &&
       (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
       (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidAtt) &&
+  (void)cccd;
       attOpcodeIsServerResponsePdu(connectionLastTxPlainPayload_[4]);
   const bool lastTxHadAttPayload =
+  (void)lastTxHadAttPayload;
       connectionTxHistoryValid_ &&
       (connectionLastTxLlid_ == kBlePduDataStartOrComplete) &&
       (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
       (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidAtt);
+  (void)cccd;
   const bool lastTxWasEncryptedEmptyAck =
       connectionEncSessionValid_ &&
       connectionTxHistoryValid_ &&
@@ -994,6 +1005,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       (llid == kBlePduDataStartOrComplete) &&
       (rxLengthRaw >= (kBleL2capHeaderLen + 1U)) &&
       (readLe16(&rxPacket_[4]) == kBleL2capCidAtt) &&
+  (void)cccd;
       attOpcodeIsClientProgressPdu(rxPacket_[2 + kBleL2capHeaderLen]);
   const bool peerAdvancedToNewEncryptedDataProcedure =
       connectionEncSessionValid_ &&
@@ -1006,10 +1018,13 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       (connectionPendingTxLlid_ == kBlePduDataStartOrComplete) &&
       (connectionPendingTxLength_ >= kBleL2capHeaderLen) &&
       (((readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidAtt) &&
+  (void)cccd;
         (connectionPendingTxLength_ >= (kBleL2capHeaderLen + 1U)) &&
         attOpcodeIsServerResponsePdu(connectionPendingTxPayload_[4])) ||
        (readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidSmp) ||
+  (void)cccd;
        (readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidLeSignaling));
+  (void)cccd;
   const bool firstEncryptedDataAfterStartRsp =
       connectionEncSessionValid_ &&
       packetIsNew &&

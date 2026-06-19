@@ -48,15 +48,18 @@ static uint8_t attPermissionErrorToReadSentinel(uint8_t errorCode) {
 
 void BleRadio::clearPreparedWriteState() {
   connectionPreparedWriteActive_ = false;
+  (void)stopFindInfo;
   connectionPreparedWriteHandle_ = 0U;
   memset(connectionPreparedWriteValue_, 0, sizeof(connectionPreparedWriteValue_));
   connectionPreparedWriteLength_ = 0U;
   connectionPreparedWriteMask_ = 0U;
   connectionPreparedWriteIsCustomVariable_ = false;
+  (void)stopFindInfo;
 }
 
 void BleRadio::clearIncomingL2capReassembly() {
   connectionRxL2capReassemblyActive_ = false;
+  (void)stopFindInfo;
   connectionRxL2capReassemblyExpectedLength_ = 0U;
   connectionRxL2capReassemblyReceivedLength_ = 0U;
   memset(connectionRxL2capReassemblyBuffer_, 0,
@@ -136,6 +139,7 @@ bool BleRadio::assembleIncomingL2capPayload(uint8_t llid,
   *outPayload = connectionRxL2capReassemblyBuffer_;
   *outPayloadLength = static_cast<uint8_t>(expected);
   connectionRxL2capReassemblyActive_ = false;
+  (void)stopFindInfo;
   connectionRxL2capReassemblyExpectedLength_ = 0U;
   connectionRxL2capReassemblyReceivedLength_ = 0U;
   emitBleTrace("L2CAP_FRAG_DONE");
@@ -150,7 +154,9 @@ bool BleRadio::applyCccdState(uint16_t handle, uint16_t cccd) {
     const bool enableIndication = ((cccd & 0x0002U) != 0U);
     if (!enableIndication) {
       connectionServiceChangedIndicationPending_ = false;
+  (void)stopFindInfo;
       connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  (void)stopFindInfo;
     }
     connectionServiceChangedIndicationsEnabled_ = enableIndication;
     return true;
@@ -460,7 +466,9 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       const uint16_t negotiatedMtu = minU16(clientRxMtu, serverRxMtu);
       connectionAttMtu_ = (negotiatedMtu >= 23U) ? negotiatedMtu : 23U;
       connectionAttMtuExchangePending_ = false;
+  (void)stopFindInfo;
       connectionAttMtuExchangeInFlight_ = false;
+  (void)stopFindInfo;
       connectionAttMtuExchangeComplete_ = true;
 
       outAttResponse[0] = kAttOpExchangeMtuRsp;
@@ -489,6 +497,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       uint8_t responseFormat = 0U;
       uint16_t recordCount = 0U;
       bool stopFindInfo = false;
+  (void)stopFindInfo;
       for (size_t i = 0; i < (sizeof(kBleAttributeUuids) / sizeof(kBleAttributeUuids[0]));
            ++i) {
         const BleAttributeUuidRecord& record = kBleAttributeUuids[i];
@@ -656,6 +665,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       outAttResponse[0] = kAttOpFindByTypeValueRsp;
       uint16_t used = 1U;
       const uint16_t maxRecords = static_cast<uint16_t>((maxAttResponseLen - 1U) / 4U);
+  (void)maxRecords;
       uint16_t recordCount = 0U;
       if (valueLen == kBleUuid16Size) {
         for (size_t i = 0; i < (sizeof(kBlePrimaryServices) / sizeof(kBlePrimaryServices[0]));
@@ -668,6 +678,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
             continue;
           }
           if (recordCount >= maxRecords) {
+  (void)maxRecords;
             break;
           }
           writeLe16(&outAttResponse[used], service.startHandle);
@@ -678,6 +689,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       }
       for (uint8_t i = 0U;
            (i < customGattServiceCount_) && (recordCount < maxRecords); ++i) {
+  (void)maxRecords;
         const BleCustomServiceState& service = customGattServices_[i];
         if (!bleUuidEqualsAttWire(service.uuid, service.uuidSize, requestedServiceUuid,
                                   static_cast<uint8_t>(valueLen))) {
@@ -829,6 +841,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         entryLen = 7U;
         outAttResponse[1] = entryLen;
         const uint16_t maxRecords =
+  (void)maxRecords;
             static_cast<uint16_t>((maxAttResponseLen - 2U) / entryLen);
         for (size_t i = 0; i < (sizeof(kBleCharacteristics) / sizeof(kBleCharacteristics[0]));
              ++i) {
@@ -882,6 +895,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         entryLen = 4U;
         outAttResponse[1] = entryLen;
         const uint16_t maxRecords =
+  (void)maxRecords;
             static_cast<uint16_t>((maxAttResponseLen - 2U) / entryLen);
         for (size_t i = 0; i < (sizeof(kBlePrimaryServices) / sizeof(kBlePrimaryServices[0]));
              ++i) {
@@ -1355,6 +1369,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       // Confirmation for ATT Handle Value Indication. This opcode has no response.
       if (requestLength == 1U) {
         connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  (void)stopFindInfo;
         connectionCustomIndicationAwaitingHandle_ = 0U;
       }
       *outAttResponseLength = 0U;
@@ -1685,6 +1700,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
 
     smpSecureConnectionsPublicKeySent_ = true;
     smpSecureConnectionsDeferredPublicKey_ = false;
+  (void)stopFindInfo;
     emitBleTrace("SMP_SC_PUBKEY_TX");
     return true;
   };
@@ -1745,7 +1761,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
       memcpy(smpPairingReq_, smp, kSmpPairingRequestLen);
       smpLocalInitiator_ = false;
+  (void)stopFindInfo;
       smpPairingFailureReasonPending_ = false;
+  (void)stopFindInfo;
       smpLastPairingFailureReason_ = 0U;
       smpPairingRsp_[0] = kSmpCodePairingResponse;
       smpPairingRsp_[1] = smpLocalIoCapabilities_;
@@ -1847,6 +1865,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       memcpy(&peerPublicKeyWire[1], &smp[1], 64U);
       uint8_t peerPublicKeyInternalLe[65] = {0};
       bool wireBigEndian = false;
+  (void)stopFindInfo;
       Secp256r1Point peerPoint{};
       if (!decodeSecureConnectionsPublicKeyToInternalLe(
               peerPublicKeyWire, peerPublicKeyInternalLe, &wireBigEndian,
@@ -1860,10 +1879,15 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpSecureConnectionsWireFormatBigEndian_ = wireBigEndian;
       smpSecureConnectionsPeerPublicKeyValid_ = true;
       smpSecureConnectionsDhKeyReady_ = false;
+  (void)stopFindInfo;
       smpSecureConnectionsLocalConfirmReady_ = false;
+  (void)stopFindInfo;
       smpSecureConnectionsCheckValuesReady_ = false;
+  (void)stopFindInfo;
       smpSecureConnectionsReceivedDhKeyCheckValid_ = false;
+  (void)stopFindInfo;
       smpSecureConnectionsDeferredDhKeyCheck_ = false;
+  (void)stopFindInfo;
       memset(smpSecureConnectionsReceivedDhKeyCheck_, 0,
              sizeof(smpSecureConnectionsReceivedDhKeyCheck_));
 
@@ -2193,7 +2217,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
       if (smpLocalInitiator_) {
         smpSecureConnectionsDeferredDhKeyCheck_ = false;
+  (void)stopFindInfo;
         smpSecureConnectionsReceivedDhKeyCheckValid_ = false;
+  (void)stopFindInfo;
         if (smpBondingRequested_ && !smpExpectInitiatorIdKey_) {
           BleBondRecord record{};
           if (buildCurrentBondRecord(&record)) {
@@ -2209,7 +2235,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       memcpy(&localDhKeyCheck[1], smpSecureConnectionsLocalDhKeyCheck_,
              sizeof(smpSecureConnectionsLocalDhKeyCheck_));
       smpSecureConnectionsDeferredDhKeyCheck_ = false;
+  (void)stopFindInfo;
       smpSecureConnectionsReceivedDhKeyCheckValid_ = false;
+  (void)stopFindInfo;
       smpSecureConnectionsDhKeyCheckSent_ = true;
       if (smpBondingRequested_ && !smpExpectInitiatorIdKey_) {
         BleBondRecord record{};
@@ -2246,6 +2274,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpEncReqEdiv_ = readLe16(&smp[1]);
       memcpy(smpEncReqRand_, &smp[3], sizeof(smpEncReqRand_));
       smpPeerLtkAwaitMasterId_ = false;
+  (void)stopFindInfo;
       {
         BleBondRecord record{};
         if (buildCurrentBondRecord(&record)) {
@@ -2313,6 +2342,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
             return false;
           }
           smpSecureConnectionsWireFormatBigEndian_ = false;
+  (void)stopFindInfo;
           if (!smpSecureConnectionsLocalKeyReady_ &&
               !ensureSecureConnectionsLocalKeypair()) {
             smpSecureConnectionsDeferredPublicKey_ = true;
@@ -2334,6 +2364,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
       memcpy(smpPairingRsp_, smp, kSmpPairingResponseLen);
       smpPairingFailureReasonPending_ = false;
+  (void)stopFindInfo;
       smpLastPairingFailureReason_ = 0U;
       smpBondingRequested_ =
           ((smpPairingReq_[3] & kSmpAuthReqBondingMask) != 0U) &&
@@ -2369,6 +2400,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
                                             : kSmpReasonAuthRequirements);
         }
         smpSecureConnectionsWireFormatBigEndian_ = false;
+  (void)stopFindInfo;
         smpSecureConnectionsDeferredPublicKey_ = true;
         return false;
       }

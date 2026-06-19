@@ -131,6 +131,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   // request as a duplicate or miss it entirely. Wait for a fresh TX state
   // before promoting any queued central request.
   const bool promotePendingTxAfterEmptyAck = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   uint8_t txLlid = 0x01U;
   uint8_t txLength = 0U;
   if (canSendNewPayloadThisEvent || promotePendingTxAfterEmptyAck) {
@@ -143,6 +145,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
       connectionPendingTxValid_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     }
     connectionLastTxLlid_ = txLlid;
     connectionLastTxLength_ = txLength;
@@ -171,6 +175,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   const bool reuseEncryptedTx =
       !canSendNewPayloadThisEvent && connectionLastTxWasEncrypted_;
   bool txBuiltFreshEncrypted = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   uint64_t txEncryptedCounter = connectionEncTxCounter_;
   if (reuseEncryptedTx) {
     txLength = connectionLastTxEncryptedLength_;
@@ -196,6 +202,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       txBuiltFreshEncrypted = true;
     } else {
       connectionLastTxWasEncrypted_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       connectionLastTxEncryptedLength_ = 0U;
       txPacket_[1] = txLength;
       if (txLength > 0U) {
@@ -205,6 +213,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     }
   } else {
     connectionLastTxWasEncrypted_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     connectionLastTxEncryptedLength_ = 0U;
     txPacket_[1] = txLength;
     if (txLength > 0U) {
@@ -245,6 +255,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   const bool txEndSeen =
       waitRadioEndBudgeted(radio_, txEndBudgetUs, spinLimit / 2U + 1U);
   bool txOk = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   if (txEndSeen) {
     radio_->EVENTS_END = 0U;
     radio_->EVENTS_PHYEND = 0U;
@@ -278,9 +290,13 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       emitBleTrace("LL_ENC_REQ_TX");
     } else if (opcode == kBleLlCtrlStartEncReq) {
       connectionEncStartReqTxPending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       connectionEncAwaitingStartRsp_ = true;
       connectionEncRxEnabled_ = true;
       connectionEncEnableTxOnNextEvent_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       emitBleTrace("LL_START_ENC_REQ_TX");
     }
   }
@@ -439,6 +455,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     radio_->SHORTS = 0U;
     clearRadioCoreEvents(radio_);
     connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     ++connectionMissedEventCount_;
     if (centralMissingPeerDisconnectEvents_ != 0U &&
         connectionMissedEventCount_ >= centralMissingPeerDisconnectEvents_) {
@@ -514,6 +532,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
 
   if (!crcOk) {
     connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     ++connectionMissedEventCount_;
     clearRadioCoreEvents(radio_);
     return true;
@@ -534,7 +554,11 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     connectionExpectedRxSn_ ^= 0x01U;
   }
   bool terminateInd = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   bool peerTerminateIndReceived = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   uint8_t peerTerminateErrorCode = 0U;
   if (packetIsNew &&
       connectionEncSessionValid_ &&
@@ -562,6 +586,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
           memcpy(connectionEncSessionKey_, connectionEncSessionKeyAlt_,
                  sizeof(connectionEncSessionKey_));
           connectionEncAltKeyValid_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
           memcpy(encDebug_.encLastSessionKey, connectionEncSessionKey_,
                  sizeof(encDebug_.encLastSessionKey));
           encDebug_.encLastSessionKeyValid = 1U;
@@ -634,6 +660,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
           memcpy(connectionEncSessionKey_, connectionEncSessionKeyAlt_,
                  sizeof(connectionEncSessionKey_));
           connectionEncAltKeyValid_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
           memcpy(encDebug_.encLastSessionKey, connectionEncSessionKey_,
                  sizeof(encDebug_.encLastSessionKey));
           encDebug_.encLastSessionKeyValid = 1U;
@@ -681,6 +709,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     }
   }
   bool implicitEmptyAck = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   const bool lastTxWasEmptyAck =
       connectionTxHistoryValid_ &&
       (connectionLastTxLlid_ == 0x01U) &&
@@ -719,6 +749,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     connectionFreshTxAllowed_ = true;
   } else {
     connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
   }
   if ((llid == kBlePduLlControl) &&
       (rxLength >= 2U) &&
@@ -780,16 +812,26 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     if (opcode == kBleLlCtrlRejectInd && rxLength >= 2U &&
         rxPacket_[3] == kBleLlCtrlLengthReq) {
       connectionDataLengthUpdatePending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       connectionDataLengthUpdateInFlight_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     } else if (opcode == kBleLlCtrlRejectExtInd && rxLength >= 3U &&
                rxPacket_[3] == kBleLlCtrlLengthReq) {
       connectionDataLengthUpdatePending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       connectionDataLengthUpdateInFlight_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     }
 
     if (!terminateInd) {
       uint8_t responseLength = 0U;
       bool responseTerminate = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       uint8_t* responseBuffer =
           connectionPendingTxValid_ ? deferredLlControlResponse
                                     : connectionPendingTxPayload_;
@@ -824,7 +866,11 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                             ? negotiatedMtu
                             : kBleDefaultAttMtu;
     connectionAttMtuExchangePending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     connectionAttMtuExchangeInFlight_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
     connectionAttMtuExchangeComplete_ = true;
     emitBleTrace("ATT_MTU_RSP_RX");
   }
@@ -951,6 +997,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         connectionPendingTxLlid_ = 0x01U;
         connectionPendingTxLength_ = 0U;
         connectionPendingTxValid_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         emitBleTrace("CENTRAL_FOLLOW_TX_HVCFM");
       } else if (!followMustAckPeerServerPush &&
                  !currentFollowupPeerMoreData &&
@@ -964,6 +1012,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         connectionPendingTxLlid_ = 0x01U;
         connectionPendingTxLength_ = 0U;
         connectionPendingTxValid_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         emitBleTrace("CENTRAL_FOLLOW_TX_PENDING");
       } else if (connectionPendingTxValid_) {
         emitBleTrace("CENTRAL_FOLLOW_HOLD_PENDING");
@@ -986,6 +1036,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                           ((connectionTxSn_ & 0x01U) << 3U) |
                                           (txFollowHasFollowingPayload ? 0x10U : 0U));
       bool encryptFollowTx = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       uint64_t followTxCounter = connectionEncTxCounter_;
       uint8_t txFollowLengthOnAir = txFollowLength;
       const bool txFollowIsEmptyAck =
@@ -1025,6 +1077,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         }
       } else {
         connectionLastTxWasEncrypted_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         connectionLastTxEncryptedLength_ = 0U;
         txPacket_[1] = txFollowLength;
         if (txFollowLength > 0U) {
@@ -1064,6 +1118,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       const bool txFollowEndSeen =
           waitRadioEndBudgeted(radio_, txFollowEndBudgetUs, spinLimit / 2U + 1U);
       bool txFollowOk = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       if (txFollowEndSeen) {
         radio_->EVENTS_END = 0U;
         radio_->EVENTS_PHYEND = 0U;
@@ -1121,6 +1177,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         // ciphertext instead of consuming a new CCM counter on another fresh
         // empty/data PDU.
         connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         break;
       }
 
@@ -1133,6 +1191,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                   spinLimit / 2U + 1U);
         radio_->SHORTS = 0U;
         connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         break;
       }
       const uint32_t remainingUs = followListenUs - elapsedUsAfterTx;
@@ -1162,6 +1222,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                   spinLimit / 2U + 1U);
         radio_->SHORTS = 0U;
         connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         break;
       }
 
@@ -1187,6 +1249,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
           (followCrcStatus == RADIO_CRCSTATUS_CRCSTATUS_CRCOk);
       if (!followCrcOk) {
         connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         break;
       }
 
@@ -1232,6 +1296,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                 memcpy(connectionEncSessionKey_, connectionEncSessionKeyAlt_,
                        sizeof(connectionEncSessionKey_));
                 connectionEncAltKeyValid_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
                 memcpy(encDebug_.encLastSessionKey, connectionEncSessionKey_,
                        sizeof(encDebug_.encLastSessionKey));
                 encDebug_.encLastSessionKeyValid = 1U;
@@ -1274,6 +1340,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       }
 
       bool implicitEmptyAckFollow = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       const bool lastTxWasEmptyAckFollow =
           connectionTxHistoryValid_ &&
           (connectionLastTxLlid_ == 0x01U) &&
@@ -1308,6 +1376,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         connectionFreshTxAllowed_ = true;
       } else {
         connectionFreshTxAllowed_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
       }
 
       if ((llidFollow == kBlePduLlControl) &&
@@ -1344,16 +1414,26 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         if (opcode == kBleLlCtrlRejectInd && rxLengthFollow >= 2U &&
             rxPacket_[3] == kBleLlCtrlLengthReq) {
           connectionDataLengthUpdatePending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
           connectionDataLengthUpdateInFlight_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         } else if (opcode == kBleLlCtrlRejectExtInd && rxLengthFollow >= 3U &&
                    rxPacket_[3] == kBleLlCtrlLengthReq) {
           connectionDataLengthUpdatePending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
           connectionDataLengthUpdateInFlight_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         }
 
         if (!terminateInd) {
           uint8_t responseLength = 0U;
           bool responseTerminate = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
           uint8_t* responseBuffer =
               connectionPendingTxValid_ ? deferredLlControlResponse
                                         : connectionPendingTxPayload_;
@@ -1389,7 +1469,11 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                 ? negotiatedMtu
                                 : kBleDefaultAttMtu;
         connectionAttMtuExchangePending_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         connectionAttMtuExchangeInFlight_ = false;
+  (void)peerTerminateIndReceived;
+  (void)implicitEmptyAckFollow;
         connectionAttMtuExchangeComplete_ = true;
       }
 
