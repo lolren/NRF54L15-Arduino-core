@@ -170,7 +170,7 @@ def bundled_pyocd_site_path(tool_root: Optional[Path]) -> Optional[Path]:
     candidate = tool_root / "runtime" / "pyocd-site"
     return candidate if candidate.is_dir() else None
 
-def bundled_pyocd_command(tool_root: Optional[Path]) -> List[str] | None:
+def bundled_pyocd_command(tool_root: Optional[Path]) -> Optional[List[str]]:
     if tool_root is None:
         return None
 
@@ -213,7 +213,7 @@ def bundled_wheelhouse_path(tool_root: Optional[Path]) -> Optional[Path]:
     candidate = wheelhouse_root / version_tag
     return candidate if candidate.is_dir() else None
 
-def detect_pyocd_command(host_tools_path: Optional[Path] = None) -> List[str] | None:
+def detect_pyocd_command(host_tools_path: Optional[Path] = None) -> Optional[List[str]]:
     # First try bundled wrapper (system pyocd 0.44.1 for AppImage IDE)
     import pathlib
     _here = pathlib.Path(__file__).resolve().parent
@@ -1021,7 +1021,7 @@ def upload_pyocd(
     retries: int,
     retry_delay: float,
     allow_uid_fallback: bool = False,
-    pyocd_cmd: List[str] | None = None,
+    pyocd_cmd: Optional[List[str]] = None,
     host_tools_path: Optional[Path] = None,
     safe_mode: bool = False,
 ) -> int:
@@ -1159,7 +1159,7 @@ def upload_pyocd(
         pass
     return 0
 
-def open_nrf_ocd_asset_for_host() -> tuple[str, str] | None:
+def open_nrf_ocd_asset_for_host() -> Optional[tuple]:
     system = platform.system().lower()
     machine = platform.machine().lower()
 
@@ -1216,7 +1216,7 @@ def make_executable_if_needed(path: Path) -> None:
     except OSError:
         pass
 
-def ensure_open_nrf_ocd_release_binary(host_tools_path: Optional[Path] = None) -> List[str] | None:
+def ensure_open_nrf_ocd_release_binary(host_tools_path: Optional[Path] = None) -> Optional[List[str]]:
     asset = open_nrf_ocd_asset_for_host()
     if asset is None:
         print(
@@ -1260,7 +1260,7 @@ def ensure_open_nrf_ocd_release_binary(host_tools_path: Optional[Path] = None) -
 def detect_nrf_ocd_command(
     host_tools_path: Optional[Path] = None,
     allow_download: bool = False,
-) -> List[str] | None:
+) -> Optional[List[str]]:
     override = os.environ.get("NRF54_NRF_OCD") or os.environ.get("OPEN_NRF_OCD")
     if override:
         return shlex.split(override)
