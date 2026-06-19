@@ -1324,7 +1324,12 @@ def upload_nrf_ocd(
     if ocd_target in target_map:
         ocd_target = target_map[ocd_target]
     args = [*nrf_ocd_cmd, "-t", ocd_target]
-    if uid and uid.strip() != '':
+    # nrf_ocd needs -u (probe serial). Auto-select if none given.
+    if not uid:
+        ports = matching_cmsis_dap_serial_ports(host_tools_path)
+        if ports:
+            uid = ports[0]
+    if uid:
         args.extend(["-u", uid])
     args.extend(["-e", "-f", hex_path, "-R"])
     print(f"Flashing {hex_path}")
