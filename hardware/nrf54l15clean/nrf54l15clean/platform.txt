@@ -1,5 +1,5 @@
 name=nRF54L15 Boards
-version=0.9.148
+version=0.9.149
 category=Arduino
 
 # Python launcher for upload helper.
