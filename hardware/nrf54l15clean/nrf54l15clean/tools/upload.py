@@ -1147,10 +1147,9 @@ def upload_pyocd(
             ocd_tgt = target.strip().lower()
             if ocd_tgt in ("nrf54l",):
                 ocd_tgt = "nrf54l15"
-            reset_cmd = [*nrf_ocd, "-t", ocd_tgt]
+            reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-R"]
             if uid:
-                reset_cmd.extend(["-u", uid])
-            reset_cmd.extend(["reset"])
+                reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-u", uid, "-R"]
             result = subprocess.run(reset_cmd, timeout=15.0, capture_output=True, text=True)
             if result.returncode != 0:
                 for line in (result.stderr or "").split("\n"):
