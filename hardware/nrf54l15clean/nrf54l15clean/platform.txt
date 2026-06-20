@@ -4,10 +4,10 @@ category=Arduino
 
 # Python launcher for upload helper.
 tools.python3.cmd=python3
-tools.python3.cmd.windows=py
+tools.python3.cmd.windows=python
 tools.python3.cmd.macosx=python3
 tools.python3.args=
-tools.python3.args.windows=-3
+tools.python3.args.windows=
 tools.python3.args.macosx=
 
 # Compiler toolchain (Arduino Board Manager dependency: arduino:arm-none-eabi-gcc).
