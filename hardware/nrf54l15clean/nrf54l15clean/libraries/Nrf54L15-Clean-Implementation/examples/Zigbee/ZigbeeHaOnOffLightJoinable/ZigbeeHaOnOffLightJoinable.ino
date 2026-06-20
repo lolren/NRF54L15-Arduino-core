@@ -59,6 +59,14 @@
 #define NRF54L15_CLEAN_ZIGBEE_INTERVIEW_DIRECT_LISTEN_US 25000UL
 #endif
 
+#ifndef NRF54L15_CLEAN_ZIGBEE_POST_COMMAND_LISTEN_US
+#define NRF54L15_CLEAN_ZIGBEE_POST_COMMAND_LISTEN_US 120000UL
+#endif
+
+#ifndef NRF54L15_CLEAN_ZIGBEE_END_DEVICE_TIMEOUT_RETRY_MS
+#define NRF54L15_CLEAN_ZIGBEE_END_DEVICE_TIMEOUT_RETRY_MS 10000UL
+#endif
+
 #ifndef NRF54L15_CLEAN_ZIGBEE_COORDINATOR_REALIGNMENT_TIMEOUT_MS
 #define NRF54L15_CLEAN_ZIGBEE_COORDINATOR_REALIGNMENT_TIMEOUT_MS 400UL
 #endif
@@ -231,9 +239,19 @@ struct RecentInboundAps {
   uint32_t expiresMs = 0U;
 };
 
+struct InboundNwkSecurityCounter {
+  bool used = false;
+  uint16_t sourceShort = 0U;
+  uint64_t sourceIeee = 0U;
+  uint32_t frameCounter = 0U;
+};
+
 static constexpr uint8_t kPendingApsAckSlots = 3U;
 static PendingApsAck g_pendingApsAcks[kPendingApsAckSlots]{};
 static RecentInboundAps g_recentInboundAps{};
+static constexpr uint8_t kInboundNwkSecurityCounterSlots = 6U;
+static InboundNwkSecurityCounter
+    g_inboundNwkSecurityCounters[kInboundNwkSecurityCounterSlots]{};
 static constexpr uint32_t kApsAckTimeoutMs = 900U;
 static constexpr uint32_t kRecentInboundApsWindowMs = 4000U;
 static constexpr uint8_t kApsAckRetryLimit = 2U;
@@ -242,12 +260,14 @@ static constexpr uint8_t kSleepyEndDeviceCapability = 0xC4U;
 
 void armInterviewGraceWindow();
 bool interviewGraceActive(uint32_t nowMs);
+void listenForDirectTraffic(uint32_t listenUs);
 void maybeReceiveDirectInterviewTraffic(uint32_t nowMs);
 static bool g_transportCoordinatorPollToggle = false;
 
 void clearPendingApsAck();
 void clearPendingApsAckSlot(uint8_t slot);
 void clearRecentInboundAps();
+void clearInboundNwkSecurityCounters();
 void printEnergyDetectSweep();
 
 ZigbeeCommissioningPolicy commissioningPolicy() {
@@ -268,6 +288,8 @@ ZigbeeCommissioningPolicy commissioningPolicy() {
       NRF54L15_CLEAN_ZIGBEE_COORDINATOR_REALIGNMENT_TIMEOUT_MS);
   policy.nwkRejoinResponseTimeoutMs = static_cast<uint32_t>(
       NRF54L15_CLEAN_ZIGBEE_NWK_REJOIN_RESPONSE_TIMEOUT_MS);
+  policy.endDeviceTimeoutRetryDelayMs = static_cast<uint32_t>(
+      NRF54L15_CLEAN_ZIGBEE_END_DEVICE_TIMEOUT_RETRY_MS);
   policy.preferredPanId = kPreferredPanId;
   policy.preferredExtendedPanId =
       (g_extendedPanId != 0U) ? g_extendedPanId
@@ -399,6 +421,8 @@ void clearActiveNetworkKey() {
   memset(g_activeNetworkKey, 0, sizeof(g_activeNetworkKey));
   g_activeNetworkKeySequence = 0U;
   g_haveActiveNetworkKey = false;
+  g_lastInboundSecurityFrameCounter = 0U;
+  clearInboundNwkSecurityCounters();
 }
 
 bool persistState() {
@@ -460,6 +484,7 @@ void clearJoinState(bool clearStore) {
   ZigbeeCommissioning::clearEndDeviceState(&g_network, clearStore);
   clearPendingApsAck();
   clearRecentInboundAps();
+  clearInboundNwkSecurityCounters();
   if (clearStore) {
     memset(&g_restoredState, 0, sizeof(g_restoredState));
     g_haveRestoredState = false;
@@ -515,6 +540,10 @@ void clearPendingApsAckSlot(uint8_t slot) {
 
 void clearRecentInboundAps() {
   memset(&g_recentInboundAps, 0, sizeof(g_recentInboundAps));
+}
+
+void clearInboundNwkSecurityCounters() {
+  memset(g_inboundNwkSecurityCounters, 0, sizeof(g_inboundNwkSecurityCounters));
 }
 
 bool matchesPendingApsAck(const PendingApsAck& pending,
@@ -629,6 +658,79 @@ bool isRecentInboundApsDuplicate(uint16_t sourceShort,
          g_recentInboundAps.destinationEndpoint == aps.destinationEndpoint &&
          g_recentInboundAps.sourceEndpoint == aps.sourceEndpoint &&
          g_recentInboundAps.deliveryMode == aps.deliveryMode;
+}
+
+bool isTrustedNwkSourceShort(uint16_t sourceShort) {
+  if (sourceShort == 0x0000U || sourceShort == g_parentShort ||
+      sourceShort == g_network.coordinatorShort) {
+    return true;
+  }
+
+  return g_parentShort == 0U && g_network.coordinatorShort == 0U;
+}
+
+bool isCoordinatorNwkSource(uint16_t sourceShort) {
+  return sourceShort == 0x0000U ||
+         (g_network.coordinatorShort != 0U &&
+          sourceShort == g_network.coordinatorShort);
+}
+
+bool acceptInboundNwkSecurityCounter(uint16_t sourceShort, uint64_t sourceIeee,
+                                     uint32_t frameCounter) {
+  if (frameCounter == 0U) {
+    return false;
+  }
+
+  uint8_t emptySlot = kInboundNwkSecurityCounterSlots;
+  uint8_t replaceSlot = 0U;
+  uint32_t oldestCounter = 0xFFFFFFFFUL;
+  for (uint8_t i = 0U; i < kInboundNwkSecurityCounterSlots; ++i) {
+    InboundNwkSecurityCounter& entry = g_inboundNwkSecurityCounters[i];
+    if (!entry.used) {
+      if (emptySlot == kInboundNwkSecurityCounterSlots) {
+        emptySlot = i;
+      }
+      continue;
+    }
+
+    const bool sameIeee =
+        sourceIeee != 0U && entry.sourceIeee != 0U &&
+        sourceIeee == entry.sourceIeee;
+    const bool sameShort =
+        sourceIeee == 0U && entry.sourceIeee == 0U &&
+        sourceShort == entry.sourceShort;
+    if (sameIeee || sameShort) {
+      if (frameCounter <= entry.frameCounter) {
+        return false;
+      }
+      entry.sourceShort = sourceShort;
+      entry.sourceIeee = sourceIeee;
+      entry.frameCounter = frameCounter;
+      return true;
+    }
+
+    if (entry.frameCounter < oldestCounter) {
+      oldestCounter = entry.frameCounter;
+      replaceSlot = i;
+    }
+  }
+
+  const uint64_t expectedTc = expectedTrustCenterIeee();
+  if (expectedTc != 0U && sourceIeee == expectedTc &&
+      g_lastInboundSecurityFrameCounter != 0U &&
+      frameCounter <= g_lastInboundSecurityFrameCounter) {
+    return false;
+  }
+
+  InboundNwkSecurityCounter& entry =
+      g_inboundNwkSecurityCounters[(emptySlot != kInboundNwkSecurityCounterSlots)
+                                       ? emptySlot
+                                       : replaceSlot];
+  entry.used = true;
+  entry.sourceShort = sourceShort;
+  entry.sourceIeee = sourceIeee;
+  entry.frameCounter = frameCounter;
+  return true;
 }
 
 bool sendNwkCommand(uint16_t destinationShort, const uint8_t* payload,
@@ -1005,6 +1107,7 @@ bool handleApsCommand(const uint8_t* frame, uint8_t length, uint16_t sourceShort
     ZigbeeCommissioning::applyTransportKeyInstall(&g_network, transportInstall);
     if (transportInstall.activatesNetworkKey) {
       g_lastInboundSecurityFrameCounter = 0U;
+      clearInboundNwkSecurityCounters();
     }
     persistState();
     if (transportInstall.stagesAlternateKey) {
@@ -1078,6 +1181,7 @@ bool handleApsCommand(const uint8_t* frame, uint8_t length, uint16_t sourceShort
           length, installCodeKey, haveInstallCodeKey, &switchKey)) {
     ZigbeeCommissioning::applySwitchKey(&g_network, switchKey);
     g_lastInboundSecurityFrameCounter = 0U;
+    clearInboundNwkSecurityCounters();
     configureDeviceForCurrentNetwork();
     applyLedState();
     persistState();
@@ -1225,12 +1329,19 @@ void processIncomingFrame(const ZigbeeFrame& frame) {
     nwkValid = ZigbeeSecurity::parseSecuredNwkFrame(
         macData.payload, macData.payloadLength, g_activeNetworkKey, &nwk,
         &security, decryptedPayload, &decryptedPayloadLength, expectedTc);
-    if (nwkValid &&
-        (!security.valid ||
-         (expectedTc != 0U && security.sourceIeee != expectedTc) ||
-         security.keySequence != g_activeNetworkKeySequence ||
-         security.frameCounter <= g_lastInboundSecurityFrameCounter)) {
-      return;
+    if (nwkValid) {
+      const bool coordinatorSource = isCoordinatorNwkSource(nwk.sourceShort);
+      const bool tcSourceMismatch =
+          coordinatorSource && expectedTc != 0U && security.sourceIeee != 0U &&
+          security.sourceIeee != expectedTc;
+      if (!security.valid || !isTrustedNwkSourceShort(nwk.sourceShort) ||
+          tcSourceMismatch ||
+          security.keySequence != g_activeNetworkKeySequence ||
+          !acceptInboundNwkSecurityCounter(nwk.sourceShort,
+                                           security.sourceIeee,
+                                           security.frameCounter)) {
+        return;
+      }
     }
     if (!nwkValid) {
       ZigbeeNetworkFrame plainNwk{};
@@ -1257,7 +1368,10 @@ void processIncomingFrame(const ZigbeeFrame& frame) {
     return;
   }
   if (security.valid) {
-    g_lastInboundSecurityFrameCounter = security.frameCounter;
+    const uint64_t expectedTc = expectedTrustCenterIeee();
+    if (expectedTc != 0U && security.sourceIeee == expectedTc) {
+      g_lastInboundSecurityFrameCounter = security.frameCounter;
+    }
   }
 
   if (nwk.frameType == ZigbeeNwkFrameType::kCommand) {
@@ -1507,20 +1621,30 @@ bool interviewGraceActive(uint32_t nowMs) {
   return static_cast<int32_t>(g_interviewGraceUntilMs - nowMs) > 0;
 }
 
+void listenForDirectTraffic(uint32_t listenUs) {
+  const uint32_t startUs = micros();
+  while (static_cast<uint32_t>(micros() - startUs) < listenUs) {
+    const uint32_t elapsedUs = static_cast<uint32_t>(micros() - startUs);
+    const uint32_t remainingUs =
+        (elapsedUs < listenUs) ? (listenUs - elapsedUs) : 0U;
+    if (remainingUs == 0U) {
+      break;
+    }
+    ZigbeeFrame frame{};
+    if (!g_radio.receive(&frame, remainingUs, 350000UL)) {
+      continue;
+    }
+    processIncomingFrame(frame);
+  }
+}
+
 void maybeReceiveDirectInterviewTraffic(uint32_t nowMs) {
   if (!interviewGraceActive(nowMs)) {
     return;
   }
 
-  ZigbeeFrame frame{};
-  if (!g_radio.receive(
-          &frame,
-          static_cast<uint32_t>(
-              NRF54L15_CLEAN_ZIGBEE_INTERVIEW_DIRECT_LISTEN_US),
-          350000UL)) {
-    return;
-  }
-  processIncomingFrame(frame);
+  listenForDirectTraffic(static_cast<uint32_t>(
+      NRF54L15_CLEAN_ZIGBEE_INTERVIEW_DIRECT_LISTEN_US));
 }
 
 void handleSerialCommands() {
@@ -1706,6 +1830,11 @@ void loop() {
     Serial.print("end_device_timeout_req ");
     Serial.print(ok ? "OK" : "FAIL");
     Serial.print("\r\n");
+    if (ok) {
+      listenForDirectTraffic(
+          static_cast<uint32_t>(NRF54L15_CLEAN_ZIGBEE_POST_COMMAND_LISTEN_US));
+      pollCoordinator();
+    }
   } else if (action == ZigbeeCommissioningAction::kSendDeviceAnnounce) {
     const bool ok = sendDeviceAnnounce();
     Serial.print("device_announce ");
