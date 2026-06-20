@@ -1057,6 +1057,7 @@ def upload_pyocd(
     pyocd_cmd: Optional[List[str]] = None,
     host_tools_path: Optional[Path] = None,
     safe_mode: bool = False,
+    port: Optional[str] = None,
 ) -> int:
     _ensure_lm20b_target()
     pyocd_cmd = pyocd_cmd if pyocd_cmd is not None else detect_pyocd_command(host_tools_path)
@@ -1170,8 +1171,8 @@ def upload_pyocd(
         print("If the sketch does not start, press RESET or power-cycle the board.")
         return 0
 
-    # Reset the board after upload so the sketch starts immediately
-    # Reset board after upload using nrf_ocd
+    # pyOCD is invoked with --no-reset above so flashing stays stable across
+    # retry modes. Start the sketch explicitly after a successful load.
     import time as _time
     _time.sleep(1)
     try:
@@ -1180,9 +1181,11 @@ def upload_pyocd(
             ocd_tgt = target.strip().lower()
             if ocd_tgt in ("nrf54l",):
                 ocd_tgt = "nrf54l15"
-            reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-R"]
+            reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "reset"]
             if uid:
-                reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-u", uid, "-R"]
+                reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-u", uid, "reset"]
+            elif port:
+                reset_cmd = [*nrf_ocd, "-p", port, "-t", ocd_tgt, "reset"]
             result = subprocess.run(reset_cmd, timeout=15.0, capture_output=True, text=True)
             if result.returncode != 0:
                 for line in (result.stderr or "").split("\n"):
@@ -1526,6 +1529,7 @@ def main() -> int:
             retry_delay=args.retry_delay,
             host_tools_path=host_tools_path,
             safe_mode=pyocd_safe_mode,
+            port=args.port,
         )
 
     elif runner == "nrf_ocd":

@@ -1494,6 +1494,5 @@ constexpr uint32_t kBleBondRetentionMagic = 0x444E4F42U;  // "BOND"
 constexpr uint16_t kBleBondRetentionVersion = 2U;
 constexpr uint32_t kBleCccdRetentionMagic = 0x44434343U;  // "CCCD"
 constexpr uint16_t kBleCccdRetentionVersion = 1U;
-constexpr uint32_t kBleBondRramcBase = 0x5004B000UL;
 constexpr uint32_t kBleBondRramcSpinLimit = 600000UL;
 constexpr uint32_t kBleBondAarSpinLimit = 250000UL;

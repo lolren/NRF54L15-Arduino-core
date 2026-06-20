@@ -569,7 +569,7 @@ void convertLegacyBondRecord(const BleBondRecordV1& legacy,
 }
 
 NRF_RRAMC_Type* bondRramc() {
-  return reinterpret_cast<NRF_RRAMC_Type*>(kBleBondRramcBase);
+  return NRF_RRAMC;
 }
 
 bool waitForBondRramcReady(NRF_RRAMC_Type* rramc, uint32_t spinLimit) {

@@ -5,6 +5,8 @@
 #include <Preferences.h>
 #include <string.h>
 
+#include "nrf54l15_hal_ficr.h"
+
 namespace xiao_nrf54l15 {
 namespace {
 
@@ -22,6 +24,10 @@ void copyText(char* destination, size_t length, const char* source) {
 
   strncpy(destination, source, length - 1U);
   destination[length - 1U] = '\0';
+}
+
+bool hardwareUniqueIdUsable(uint64_t deviceId) {
+  return deviceId != 0ULL && deviceId != 0xFFFFFFFFFFFFFFFFULL;
 }
 
 }  // namespace
@@ -279,12 +285,11 @@ bool MatterPlatform::getUniqueId(uint8_t outId[16]) {
     return false;
   }
 
-  // Use FICR INFO device UUID + derivation
-  const uint64_t deviceId =
-      *reinterpret_cast<const volatile uint32_t*>(0xFFC000A0UL) |
-      (static_cast<uint64_t>(
-           *reinterpret_cast<const volatile uint32_t*>(0xFFC000A4UL))
-       << 32U);
+  const uint64_t deviceId = getHardwareUniqueId();
+  if (!hardwareUniqueIdUsable(deviceId)) {
+    memset(outId, 0, 16U);
+    return false;
+  }
 
   for (size_t i = 0; i < 8; ++i) {
     outId[i] = static_cast<uint8_t>(deviceId >> (i * 8U));
@@ -295,10 +300,7 @@ bool MatterPlatform::getUniqueId(uint8_t outId[16]) {
 }
 
 uint64_t MatterPlatform::getHardwareUniqueId() {
-  return *reinterpret_cast<const volatile uint32_t*>(0xFFC000A0UL) |
-         (static_cast<uint64_t>(
-              *reinterpret_cast<const volatile uint32_t*>(0xFFC000A4UL))
-          << 32U);
+  return Ficr::deviceId();
 }
 
 void MatterPlatform::secureZero(void* ptr, size_t length) {

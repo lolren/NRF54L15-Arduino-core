@@ -112,6 +112,7 @@ struct MatterOnNetworkReadinessSummary {
   Nrf54ThreadExperimental::AttachSummary threadAttachSummary = {};
   Nrf54ThreadExperimental::DatasetRestoreDiagnostics
       threadRestoreDiagnostics = {};
+  char beginFailureName[48] = {0};
   char phaseName[32] = {0};
   char blockerName[48] = {0};
 };
@@ -172,6 +173,9 @@ struct MatterOnNetworkOnOffLightConfig {
   bool wipeThreadSettings = false;
   bool autoStartThread = true;
   bool autoRequestRouterRole = false;
+  bool autoOpenCommissioningWindow = false;
+  uint16_t commissioningWindowSeconds = 900U;
+  bool deriveDefaultIdentityFromHardware = true;
   bool useDemoDataset = false;
   MatterOnNetworkIdentity identity = {};
   const otOperationalDataset* explicitThreadDataset = nullptr;
@@ -200,6 +204,7 @@ struct MatterOnNetworkOnOffLightStatus {
   bool readyForOnNetworkCommissioning = false;
   bool buildSeamsAligned = false;
   bool commissioningWindowPending = false;
+  char beginFailureName[48] = {0};
   MatterOnNetworkDatasetSource datasetSource =
       MatterOnNetworkDatasetSource::kNone;
   MatterCommissioningWindowState commissioningWindowState =
@@ -386,6 +391,7 @@ class Nrf54MatterOnNetworkOnOffLightNode {
   uint32_t commissioningWindowEndMs_ = 0U;
   MatterOnNetworkDatasetSource datasetSource_ =
       MatterOnNetworkDatasetSource::kNone;
+  char beginFailureName_[48] = "not_started";
   MatterOnNetworkIdentity identity_ = {};
   bool discoveryPublicationAttempted_ = false;
   bool discoveryPublicationActive_ = false;

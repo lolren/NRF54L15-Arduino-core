@@ -179,6 +179,8 @@ void printStatus(const char* reason) {
   Serial.println(status.threadDatasetExportable ? 1 : 0);
   Serial.print("matter_node_demo ready=");
   Serial.println(status.readyForOnNetworkCommissioning ? 1 : 0);
+  Serial.print("matter_node_demo begin_failure=");
+  Serial.println(status.beginFailureName);
   printReadinessSummary(status.readinessSummary);
   printDiscoverySummary(status.discoverySummary);
   Serial.print("matter_node_demo on=");
@@ -244,6 +246,8 @@ void setup() {
   config.restorePersistentState = true;
   config.wipeThreadSettings = false;
   config.autoStartThread = true;
+  config.autoOpenCommissioningWindow = true;
+  config.commissioningWindowSeconds = 900U;
 
   const bool beginOk = g_node.begin(&config);
   Serial.print("matter_node_demo begin=");

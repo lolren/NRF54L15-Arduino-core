@@ -19,7 +19,6 @@ constexpr uint16_t kPrefsMinSupportedEntryCount = 28U;
 constexpr size_t kPrefsNamespaceMaxLen = 15U;
 constexpr size_t kPrefsKeyMaxLen = 15U;
 constexpr size_t kPrefsValueMaxLen = 48U;
-constexpr uint32_t kPrefsRramcBase = 0x5004B000UL;
 constexpr uint32_t kPrefsRramcSpinLimit = 600000UL;
 
 constexpr uint8_t kTypeAny = 0U;
@@ -145,7 +144,7 @@ bool validateBlobBuffer(const uint8_t* blobData, size_t availableLen, uint16_t* 
 }
 
 NRF_RRAMC_Type* prefsRramc() {
-    return reinterpret_cast<NRF_RRAMC_Type*>(kPrefsRramcBase);
+    return NRF_RRAMC;
 }
 
 bool waitRramcReady(NRF_RRAMC_Type* rramc, uint32_t spinLimit) {

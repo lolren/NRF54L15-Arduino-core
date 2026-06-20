@@ -9,6 +9,8 @@
 #include <lib/support/BytesToHex.h>
 #endif
 
+#include "nrf54l15_hal_ficr.h"
+
 namespace xiao_nrf54l15 {
 namespace {
 
@@ -33,6 +35,58 @@ void setFixedText(char* destination, size_t length, const char* source) {
   }
   strncpy(destination, source, length - 1U);
   destination[length - 1U] = '\0';
+}
+
+bool factoryDeviceIdUsable(uint64_t deviceId) {
+  return deviceId != 0ULL && deviceId != 0xFFFFFFFFFFFFFFFFULL;
+}
+
+uint32_t foldDeviceId32(uint64_t deviceId) {
+  uint32_t folded = static_cast<uint32_t>(deviceId) ^
+                    static_cast<uint32_t>(deviceId >> 32U);
+  folded ^= (folded >> 16U);
+  folded *= 0x7FEB352DU;
+  folded ^= (folded >> 15U);
+  folded *= 0x846CA68BU;
+  folded ^= (folded >> 16U);
+  return folded;
+}
+
+uint16_t discriminatorFromDeviceId(uint64_t deviceId) {
+  uint16_t discriminator =
+      static_cast<uint16_t>(foldDeviceId32(deviceId) & 0x0FFFU);
+  if (discriminator == 0U || discriminator == kDefaultDiscriminator) {
+    discriminator =
+        static_cast<uint16_t>((discriminator + 0x0357U) & 0x0FFFU);
+  }
+  return discriminator == 0U ? 1U : discriminator;
+}
+
+bool identityIsMatterSpecDefault(const MatterOnNetworkIdentity& identity) {
+  return identity.setupPinCode == kDefaultSetupPinCode &&
+         identity.discriminator == kDefaultDiscriminator &&
+         identity.vendorId == kDefaultVendorId &&
+         identity.productId == kDefaultProductId &&
+         identity.commissioningFlow == MatterCommissioningFlow::kStandard;
+}
+
+void buildDefaultSerialNumber(uint8_t outSerialNumber[32]) {
+  if (outSerialNumber == nullptr) {
+    return;
+  }
+
+  memset(outSerialNumber, 0, 32U);
+  const uint64_t deviceId = Ficr::deviceId();
+  if (!factoryDeviceIdUsable(deviceId)) {
+    memcpy(outSerialNumber, "NRF54-ARC", 9U);
+    return;
+  }
+
+  char text[32] = {0};
+  snprintf(text, sizeof(text), "NRF54-%08lX%08lX",
+           static_cast<unsigned long>(deviceId >> 32U),
+           static_cast<unsigned long>(deviceId & 0xFFFFFFFFUL));
+  memcpy(outSerialNumber, text, strlen(text));
 }
 
 }  // namespace
@@ -183,8 +237,12 @@ void Nrf54MatterOnNetworkOnOffLightNode::buildDiscoveryHostName(
 bool Nrf54MatterOnNetworkOnOffLightNode::begin(
     const MatterOnNetworkOnOffLightConfig* config) {
   if (storageOpen_) {
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "already_started");
     return false;
   }
+  setFixedText(beginFailureName_, sizeof(beginFailureName_),
+               "begin_in_progress");
 
   const MatterOnNetworkOnOffLightConfig defaultConfig = {};
   const MatterOnNetworkOnOffLightConfig& effectiveConfig =
@@ -195,6 +253,9 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
           ? effectiveConfig.storageNamespace
           : "matter_node";
   if (!prefs_.begin(storageNamespace, false)) {
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "prefs_begin_failed");
+    resetDiscoveryPublication(beginFailureName_);
     return false;
   }
 
@@ -210,27 +271,38 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
   endpoint_.attach(&light_);
   endpoint_.setAccessControl(&accessControl_);
   buildDefaultIdentity(&identity_);
+  const MatterOnNetworkIdentity hardwareDefaultIdentity = identity_;
 
   // Initialize DAC attestation chain
   uint8_t serialNumber[32] = {0};
-  memcpy(serialNumber, "NRF54L15-ARC", 12);
+  buildDefaultSerialNumber(serialNumber);
   attestationReady_ = attestation_.generateTestChain(
       identity_.vendorId, identity_.productId, serialNumber);
 
   // Initialize ACL with default view access
   accessControlReady_ = accessControl_.addDefaultViewEntry();
 
-  if (identityValid(effectiveConfig.identity)) {
+  if (identityValid(effectiveConfig.identity) &&
+      (!effectiveConfig.deriveDefaultIdentityFromHardware ||
+       !identityIsMatterSpecDefault(effectiveConfig.identity))) {
     identity_ = effectiveConfig.identity;
   }
   if (effectiveConfig.restorePersistentState) {
     MatterOnNetworkIdentity restoredIdentity = {};
     if (loadPersistentIdentity(&restoredIdentity)) {
-      identity_ = restoredIdentity;
+      if (!effectiveConfig.deriveDefaultIdentityFromHardware ||
+          !identityIsMatterSpecDefault(restoredIdentity)) {
+        identity_ = restoredIdentity;
+      } else {
+        identity_ = hardwareDefaultIdentity;
+      }
     }
   }
   if (!savePersistentIdentity()) {
     end();
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "identity_persist_failed");
+    resetDiscoveryPublication(beginFailureName_);
     return false;
   }
 
@@ -243,6 +315,9 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
       light_.begin(lightStorageNamespace, effectiveConfig.restorePersistentState);
   if (!lightReady_) {
     end();
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "light_begin_failed");
+    resetDiscoveryPublication(beginFailureName_);
     return false;
   }
 
@@ -254,11 +329,17 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
   if (effectiveConfig.explicitThreadDataset != nullptr) {
     if (!useThreadDataset(*effectiveConfig.explicitThreadDataset)) {
       end();
+      setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                   "explicit_dataset_failed");
+      resetDiscoveryPublication(beginFailureName_);
       return false;
     }
   } else if (havePersistentThreadDataset) {
     if (!useThreadDatasetTlvs(persistentDatasetTlvs, false)) {
       end();
+      setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                   "persistent_dataset_failed");
+      resetDiscoveryPublication(beginFailureName_);
       return false;
     }
     datasetSource_ = MatterOnNetworkDatasetSource::kPersistent;
@@ -272,19 +353,38 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
                                         effectiveConfig.threadNetworkName,
                                         effectiveConfig.threadExtPanId)) {
       end();
+      setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                   "passphrase_dataset_failed");
+      resetDiscoveryPublication(beginFailureName_);
       return false;
     }
   } else if (effectiveConfig.useDemoDataset && !useDemoThreadDataset()) {
     end();
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "demo_dataset_failed");
+    resetDiscoveryPublication(beginFailureName_);
     return false;
   }
 
   if (effectiveConfig.autoStartThread &&
       !thread_.begin(effectiveConfig.wipeThreadSettings)) {
     end();
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "thread_begin_failed");
+    resetDiscoveryPublication(beginFailureName_);
     return false;
   }
 
+  if (effectiveConfig.autoOpenCommissioningWindow &&
+      !openCommissioningWindow(effectiveConfig.commissioningWindowSeconds)) {
+    end();
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "commissioning_window_open_failed");
+    resetDiscoveryPublication(beginFailureName_);
+    return false;
+  }
+
+  setFixedText(beginFailureName_, sizeof(beginFailureName_), "none");
   return true;
 }
 
@@ -378,6 +478,8 @@ bool Nrf54MatterOnNetworkOnOffLightNode::snapshot(
   outStatus->readyForOnNetworkCommissioning =
       outStatus->readinessSummary.ready;
   outStatus->commissioningWindowPending = commissioningWindowPending_;
+  setFixedText(outStatus->beginFailureName, sizeof(outStatus->beginFailureName),
+               beginFailureName_);
   outStatus->commissioningWindowState = commissioningWindowState();
   outStatus->commissioningWindowSecondsRemaining =
       commissioningWindowSecondsRemaining();
@@ -587,6 +689,8 @@ bool Nrf54MatterOnNetworkOnOffLightNode::readinessSummary(
   (void)thread_.getAttachSummary(&outSummary->threadAttachSummary);
   (void)thread_.getDatasetRestoreDiagnostics(
       &outSummary->threadRestoreDiagnostics);
+  setFixedText(outSummary->beginFailureName,
+               sizeof(outSummary->beginFailureName), beginFailureName_);
   outSummary->ready =
       outSummary->storageOpen && outSummary->lightReady &&
       outSummary->foundationReady && outSummary->threadStarted &&
@@ -597,7 +701,8 @@ bool Nrf54MatterOnNetworkOnOffLightNode::readinessSummary(
     setFixedText(outSummary->phaseName, sizeof(outSummary->phaseName),
                  "storage");
     setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
-                 "storage_closed");
+                 beginFailureName_[0] != '\0' ? beginFailureName_
+                                               : "storage_closed");
   } else if (!outSummary->lightReady) {
     setFixedText(outSummary->phaseName, sizeof(outSummary->phaseName), "light");
     setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
@@ -658,10 +763,13 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoverySummary(
   outSummary->productId = identity_.productId;
   outSummary->deviceTypeId =
       Nrf54MatterOnOffLightFoundation::kOnOffLightDeviceTypeId;
-  outSummary->commissioningWindowOpen = commissioningWindowOpen();
+  const MatterCommissioningWindowState windowState = commissioningWindowState();
+  outSummary->commissioningWindowOpen =
+      windowState == MatterCommissioningWindowState::kOpen;
   outSummary->threadAttached = thread_.attached();
   outSummary->commissioningMode =
-      outSummary->commissioningWindowOpen
+      (windowState == MatterCommissioningWindowState::kOpen ||
+       windowState == MatterCommissioningWindowState::kPendingReadiness)
           ? MatterDiscoveryCommissioningMode::kBasicCommissioning
           : MatterDiscoveryCommissioningMode::kNotCommissioning;
   (void)foundation_.discoveryCapabilities(&outSummary->capabilities);
@@ -699,7 +807,13 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoverySummary(
       outSummary->threadAttached &&
       outSummary->capabilities.canRegisterCommissionableNode;
 
-  if (!outSummary->commissioningWindowOpen) {
+  if (windowState == MatterCommissioningWindowState::kPendingReadiness) {
+    setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
+                 "commissioning_window_pending_readiness");
+  } else if (windowState == MatterCommissioningWindowState::kExpired) {
+    setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
+                 "commissioning_window_expired");
+  } else if (!outSummary->commissioningWindowOpen) {
     setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
                  "commissioning_window_closed");
   } else if (!outSummary->threadAttached) {
@@ -1456,6 +1570,10 @@ void Nrf54MatterOnNetworkOnOffLightNode::buildDefaultIdentity(
 
   outIdentity->setupPinCode = kDefaultSetupPinCode;
   outIdentity->discriminator = kDefaultDiscriminator;
+  const uint64_t deviceId = Ficr::deviceId();
+  if (factoryDeviceIdUsable(deviceId)) {
+    outIdentity->discriminator = discriminatorFromDeviceId(deviceId);
+  }
   outIdentity->vendorId = kDefaultVendorId;
   outIdentity->productId = kDefaultProductId;
   outIdentity->commissioningFlow = MatterCommissioningFlow::kStandard;

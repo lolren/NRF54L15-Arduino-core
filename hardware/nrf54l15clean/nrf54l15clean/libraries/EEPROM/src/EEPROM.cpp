@@ -12,7 +12,6 @@ namespace {
 
 constexpr uint32_t kEepromMagic = 0x45455052UL;  // "EEPR"
 constexpr uint16_t kEepromVersion = 1U;
-constexpr uint32_t kEepromRramcBase = 0x5004B000UL;
 constexpr uint32_t kEepromRramcSpinLimit = 600000UL;
 
 struct EepromBlob {
@@ -44,7 +43,7 @@ uint32_t crc32(const uint8_t* data, size_t len) {
 }
 
 NRF_RRAMC_Type* eepromRramc() {
-    return reinterpret_cast<NRF_RRAMC_Type*>(kEepromRramcBase);
+    return NRF_RRAMC;
 }
 
 bool waitReady(NRF_RRAMC_Type* rramc, uint32_t spinLimit) {
