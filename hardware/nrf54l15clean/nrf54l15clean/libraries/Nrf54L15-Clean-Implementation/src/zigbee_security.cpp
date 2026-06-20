@@ -1,4 +1,5 @@
-#if defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE
+#if (defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE) || \
+    (defined(NRF54L15_CLEAN_ZIGBEE_ENABLED) && NRF54L15_CLEAN_ZIGBEE_ENABLED)
 #include "zigbee_security.h"
 
 #include <string.h>
@@ -1402,4 +1403,4 @@ bool ZigbeeSecurity::parseSecuredApsSwitchKeyCommand(
 }
 
 }  // namespace xiao_nrf54l15
-#endif // NRF54L15_CLEAN_ZIGBEE_ENABLE
+#endif  // NRF54L15_CLEAN_ZIGBEE_ENABLE || NRF54L15_CLEAN_ZIGBEE_ENABLED

@@ -33,13 +33,20 @@ hardened.
   Matter builds.
 - The staged Matter include surface is now consistent across all supported
   staged board profiles.
+- The on-network On/Off Light node derives the default discriminator from the
+  hardware FICR device ID, avoiding identical default `_matterc._udp`
+  identities when two boards use the stock demo settings.
+- Local two-board XIAO nRF54L15 + XIAO nRF54LM20A validation reaches
+  `discovery_ready=1`, `discovery_srp_client=1`, and
+  `discovery_register_capable=1` with the commissioning window open.
 
 ### Not Yet Production Complete
 
 - Home Assistant commissioning through a real OTBR still needs repeated
   hardware validation.
-- SRP/mDNS/DNS-SD behavior must be verified against an external Thread Border
-  Router, not only two-board demos.
+- SRP/DNS-SD behavior must still be verified against an external Thread Border
+  Router and Home Assistant Matter Server, not only local two-board SRP client
+  readiness.
 - Long-duration attach/reconnect/payload soak tests need pass/fail logs from
   two real boards.
 - Matter operational certificate/fabric behavior needs validation beyond local
@@ -146,6 +153,37 @@ Expected coverage:
 - On/Off/Toggle/Identify request encoding.
 - Command response parsing.
 - Serial output showing command result and endpoint state.
+- Node demo serial output showing `identity_discriminator`,
+  `commissioning_window`, `discovery_ready`, `discovery_srp_client`, and
+  `discovery_register_capable`.
+
+### Two-Board Matter SRP Probe
+
+Use one XIAO nRF54L15 and one XIAO nRF54LM20A when available:
+
+```bash
+scripts/test_matter_between_boards.py \
+  --ports /dev/ttyACM0 /dev/ttyACM1 \
+  --boards xiao_nrf54l15 xiao_nrf54lm20b \
+  --duration-sec 120 \
+  --settle-sec 2 \
+  --keep
+```
+
+Expected current local pass condition:
+
+```text
+role=child/leader
+attached=1
+ready=1
+srp=1
+matter_lines=1
+blocker=none
+```
+
+This proves local attach, commissioning-window readiness, hardware-derived
+identity separation, and SRP client queueing. It does not prove external
+Border Router DNS-SD visibility or Home Assistant commissioning.
 
 ### Home Assistant / OTBR
 
@@ -167,8 +205,8 @@ Expected validation:
 
 1. Add a host-side SRP/DNS-SD validation helper that can observe expected
    service records from OTBR tooling.
-2. Extend `test_matter_between_boards.py` to use dynamic ports, local checkout
-   compilation, and clear pass/fail parsing like `test_thread_udp_soak.py`.
+2. Extend `test_matter_between_boards.py` to auto-detect safe dynamic ports and
+   make the two-board SRP pass condition part of the default regression suite.
 3. Add an OTBR/Home Assistant commissioning transcript parser for failed PASE,
    CASE, fabric, or DNS-SD stages.
 4. Verify and document Thread channel/panid/dataset migration behavior.

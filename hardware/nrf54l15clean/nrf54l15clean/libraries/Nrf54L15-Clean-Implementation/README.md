@@ -549,9 +549,13 @@ Thread example organization:
     reports the first blocked phase (`storage`, `light`, `foundation`,
     `thread`, `onboarding`, `dataset`, or `ready`) with a short blocker string.
     It also now emits a staged commissionable DNS-SD summary for `_matterc._udp`
-    (`D`, `VP`, `CM`, `DT`, `DN`) and reports the current discovery blocker;
-    today that blocker remains `openthread_mdns_srp_disabled` because the
-    staged OpenThread config still has mDNS/SRP registration disabled.
+    (`D`, `VP`, `CM`, `DT`, `DN`) and reports the current discovery blocker.
+    In staged Thread/Matter builds the commissionable record is queued through
+    the OpenThread SRP client once Thread is attached and the commissioning
+    window is open. Local two-board XIAO nRF54L15 + XIAO nRF54LM20A validation
+    reaches `discovery_ready=1`, `discovery_srp_client=1`, and
+    `discovery_register_capable=1`; external OTBR/Home Assistant discovery and
+    commissioning remain the production validation gate.
   - the new bootstrap example lives at
     `examples/Matter/MatterOnNetworkOnOffLightNodeDemo`, showing the intended
     staged bring-up path: build a Thread dataset from passphrase inputs, start
@@ -560,7 +564,8 @@ Thread example organization:
     public node snapshot now also carries Thread attach diagnostics and the
     latest OpenThread state-change flags, plus the hidden attach-state-machine
     snapshot from the staged Thread runtime, plus the Matter readiness
-    `phase` / `blocker` summary.
+    `phase` / `blocker` summary, effective Matter identity, commissioning
+    window state, and SRP discovery fields.
   - the new command-surface example lives at
     `examples/Matter/MatterOnNetworkOnOffLightCommandSurfaceDemo`, showing how
     to route `On`, `Off`, `Toggle`, and `Identify` plus attribute reads
@@ -590,16 +595,19 @@ Thread example organization:
 - `Sensors`: always-on temperature + battery sensor examples.
 - `LowPower`: sleepy sensor examples that wake, report state, check for pending work, then return to `SYSTEM OFF`.
 - `Interoperability`: small ping/pong sketches for radio-path validation.
+- `Diagnostics`: local ZDO/table probes that exercise API behavior without requiring a full network.
 
 Current Zigbee Home Automation device coverage in this core:
 
 - on/off light
 - dimmable light / level control
 - temperature sensor with battery/power cluster reporting
+- ZDO descriptors, bind/unbind, management bind, and sketch-configurable management LQI / routing table responses
 
 Current Zigbee non-goal:
 
 - RGB/color-light clusters are not implemented yet, so there is no true color-bulb example in this release.
+- OTA upgrade and automatic full-mesh route maintenance are not production-claimed yet.
 
 ## Bluefruit Compatibility
 

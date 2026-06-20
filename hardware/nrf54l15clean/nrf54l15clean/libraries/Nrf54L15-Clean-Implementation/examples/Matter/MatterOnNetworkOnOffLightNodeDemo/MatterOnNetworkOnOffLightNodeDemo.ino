@@ -100,6 +100,8 @@ void printDiscoverySummary(
   Serial.println(summary.blockerName);
   Serial.print("matter_node_demo discovery_service=");
   Serial.println(summary.serviceType != nullptr ? summary.serviceType : "n/a");
+  Serial.print("matter_node_demo discovery_port=");
+  Serial.println(summary.port);
   Serial.print("matter_node_demo discovery_instance=");
   Serial.println(summary.instanceName);
   Serial.print("matter_node_demo discovery_mode=");
@@ -181,6 +183,20 @@ void printStatus(const char* reason) {
   Serial.println(status.readyForOnNetworkCommissioning ? 1 : 0);
   Serial.print("matter_node_demo begin_failure=");
   Serial.println(status.beginFailureName);
+  Serial.print("matter_node_demo identity_pin=");
+  Serial.println(status.identity.setupPinCode);
+  Serial.print("matter_node_demo identity_discriminator=");
+  Serial.println(status.identity.discriminator);
+  Serial.print("matter_node_demo identity_vid=");
+  Serial.println(status.identity.vendorId);
+  Serial.print("matter_node_demo identity_pid=");
+  Serial.println(status.identity.productId);
+  Serial.print("matter_node_demo commissioning_window=");
+  Serial.println(xiao_nrf54l15::Nrf54MatterOnNetworkOnOffLightNode::
+                     commissioningWindowStateName(
+                         status.commissioningWindowState));
+  Serial.print("matter_node_demo commissioning_window_seconds=");
+  Serial.println(status.commissioningWindowSecondsRemaining);
   printReadinessSummary(status.readinessSummary);
   printDiscoverySummary(status.discoverySummary);
   Serial.print("matter_node_demo on=");

@@ -189,9 +189,9 @@ Examples:
 |---|---|---|---|
 | **Arduino Core** | ~150K | ✅ Mature | Yes — GPIO, PWM, ADC, I2C, SPI, UART, I2S, PDM, NFC |
 | **BLE** | ~80K | ✅ Mature | Yes — advertising, scanning, connections, GATT, Bluefruit |
-| **Zigbee** | ~40K | ⚠️ Good | Partial — ZCL clusters missing, no OTA |
+| **Zigbee** | ~40K | ⚠️ Good | Partial — HA device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
-| **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; HA/OTBR commissioning still needs full validation |
+| **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
 | **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2 works on 2‑board, needs VPR coprocessor |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes — all nPM1300 features, GPIO bit‑bang I²C |
 
@@ -200,8 +200,8 @@ Examples:
 ## ⚠️ Known Limitations
 
 - **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
-- **Thread and Matter are staged protocol stacks.** OpenThread FTD/MeshCoP/SRP/UDP and custom Matter command-surface demos compile on all staged boards; production-grade HA/OTBR commissioning and long soak validation are still pending.
-- **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and multi‑hop routing are missing.
+- **Thread and Matter are staged protocol stacks.** OpenThread FTD/MeshCoP/SRP/UDP and custom Matter command-surface demos compile on all staged boards; local two-board SRP readiness is working, but production-grade HA/OTBR commissioning and long soak validation are still pending.
+- **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
 - **Channel Sounding Mode 2** needs the VPR RISC‑V coprocessor — M33 alone can't keep up with subevent timing.

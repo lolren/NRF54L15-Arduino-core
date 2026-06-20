@@ -122,6 +122,28 @@ enum class ZigbeeLogicalType : uint8_t {
   kEndDevice = 2U,
 };
 
+enum class ZigbeeNeighborRelationship : uint8_t {
+  kParent = 0U,
+  kChild = 1U,
+  kSibling = 2U,
+  kNoneOfAbove = 3U,
+  kPreviousChild = 4U,
+};
+
+enum class ZigbeePermitJoinState : uint8_t {
+  kNotAccepting = 0U,
+  kAccepting = 1U,
+  kUnknown = 2U,
+};
+
+enum class ZigbeeRouteStatus : uint8_t {
+  kActive = 0U,
+  kDiscoveryUnderway = 1U,
+  kDiscoveryFailed = 2U,
+  kInactive = 3U,
+  kValidationUnderway = 4U,
+};
+
 enum class ZigbeeNwkFrameType : uint8_t {
   kData = 0U,
   kCommand = 1U,
@@ -632,6 +654,32 @@ struct ZigbeeResolvedBindingDestination {
   uint8_t endpoint = 0U;
 };
 
+static constexpr uint8_t kZigbeeMaxNeighborTableEntries = 8U;
+static constexpr uint8_t kZigbeeMaxRoutingTableEntries = 8U;
+
+struct ZigbeeNeighborTableEntry {
+  bool used = false;
+  uint64_t extendedPanId = 0U;
+  uint64_t ieeeAddress = 0U;
+  uint16_t networkAddress = 0xFFFFU;
+  ZigbeeLogicalType deviceType = ZigbeeLogicalType::kEndDevice;
+  bool rxOnWhenIdle = false;
+  ZigbeeNeighborRelationship relationship =
+      ZigbeeNeighborRelationship::kNoneOfAbove;
+  ZigbeePermitJoinState permitJoin = ZigbeePermitJoinState::kUnknown;
+  uint8_t depth = 0xFFU;
+  uint8_t lqi = 0U;
+};
+
+struct ZigbeeRoutingTableEntry {
+  bool used = false;
+  uint16_t destinationAddress = 0xFFFFU;
+  ZigbeeRouteStatus status = ZigbeeRouteStatus::kInactive;
+  bool manyToOne = false;
+  bool routeRecordRequired = false;
+  uint16_t nextHopAddress = 0xFFFFU;
+};
+
 struct ZigbeeHomeAutomationConfig {
   ZigbeeLogicalType logicalType = ZigbeeLogicalType::kEndDevice;
   uint16_t manufacturerCode = 0U;
@@ -651,6 +699,8 @@ struct ZigbeeHomeAutomationConfig {
   ZigbeeLevelControlState level{};
   ZigbeeColorControlState color{};
   ZigbeeBindingEntry bindings[8] = {};
+  ZigbeeNeighborTableEntry neighbors[kZigbeeMaxNeighborTableEntries] = {};
+  ZigbeeRoutingTableEntry routes[kZigbeeMaxRoutingTableEntries] = {};
 };
 
 class ZigbeeCodec {
@@ -1101,6 +1151,26 @@ class ZigbeeHomeAutomationDevice {
   bool resolveBindingDestination(uint8_t sourceEndpoint, uint16_t clusterId,
                                  uint64_t* outDestinationIeee,
                                  uint8_t* outDestinationEndpoint) const;
+  bool clearNeighborTable();
+  bool setNeighborTableEntry(uint8_t index,
+                             const ZigbeeNeighborTableEntry& entry);
+  bool removeNeighborTableEntry(uint8_t index);
+  uint8_t neighborTableCount() const;
+  const ZigbeeNeighborTableEntry* neighborTableEntries() const;
+  bool clearRoutingTable();
+  bool setRoutingTableEntry(uint8_t index,
+                            const ZigbeeRoutingTableEntry& entry);
+  bool removeRoutingTableEntry(uint8_t index);
+  uint8_t routingTableCount() const;
+  const ZigbeeRoutingTableEntry* routingTableEntries() const;
+  bool buildMgmtLqiResponse(uint8_t transactionSequence, uint8_t startIndex,
+                            const ZigbeeNeighborTableEntry* entries,
+                            uint8_t entryCount, uint8_t* outPayload,
+                            uint8_t* outLength) const;
+  bool buildMgmtRtgResponse(uint8_t transactionSequence, uint8_t startIndex,
+                            const ZigbeeRoutingTableEntry* entries,
+                            uint8_t entryCount, uint8_t* outPayload,
+                            uint8_t* outLength) const;
   bool isInGroup(uint16_t groupId) const;
   bool leaveRequested() const;
   uint8_t leaveRequestFlags() const;

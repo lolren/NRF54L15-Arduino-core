@@ -1,4 +1,5 @@
-#if defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE
+#if (defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE) || \
+    (defined(NRF54L15_CLEAN_ZIGBEE_ENABLED) && NRF54L15_CLEAN_ZIGBEE_ENABLED)
 #include "zigbee_stack.h"
 
 #include <Arduino.h>
@@ -351,6 +352,49 @@ bool appendMgmtBindEntry(const ZigbeeHomeAutomationConfig& config,
   }
 
   return false;
+}
+
+bool appendMgmtLqiEntry(const ZigbeeNeighborTableEntry& entry,
+                        uint8_t* outPayload, uint8_t maxLength,
+                        uint8_t* ioOffset) {
+  if (outPayload == nullptr || ioOffset == nullptr) {
+    return false;
+  }
+
+  const uint8_t deviceAndRelationship =
+      (static_cast<uint8_t>(entry.deviceType) & 0x03U) |
+      ((entry.rxOnWhenIdle ? 1U : 0U) << 2U) |
+      ((static_cast<uint8_t>(entry.relationship) & 0x07U) << 4U);
+  const uint8_t permitJoin = static_cast<uint8_t>(entry.permitJoin) & 0x03U;
+  return appendLe64(outPayload, maxLength, ioOffset, entry.extendedPanId) &&
+         appendLe64(outPayload, maxLength, ioOffset, entry.ieeeAddress) &&
+         appendLe16(outPayload, maxLength, ioOffset, entry.networkAddress) &&
+         appendBytes(outPayload, maxLength, ioOffset, &deviceAndRelationship,
+                     1U) &&
+         appendBytes(outPayload, maxLength, ioOffset, &permitJoin, 1U) &&
+         appendBytes(outPayload, maxLength, ioOffset, &entry.depth, 1U) &&
+         appendBytes(outPayload, maxLength, ioOffset, &entry.lqi, 1U);
+}
+
+bool appendMgmtRtgEntry(const ZigbeeRoutingTableEntry& entry,
+                        uint8_t* outPayload, uint8_t maxLength,
+                        uint8_t* ioOffset) {
+  if (outPayload == nullptr || ioOffset == nullptr) {
+    return false;
+  }
+
+  uint8_t status = static_cast<uint8_t>(entry.status) & 0x07U;
+  if (entry.manyToOne) {
+    status |= 0x08U;
+  }
+  if (entry.routeRecordRequired) {
+    status |= 0x10U;
+  }
+
+  return appendLe16(outPayload, maxLength, ioOffset,
+                    entry.destinationAddress) &&
+         appendBytes(outPayload, maxLength, ioOffset, &status, 1U) &&
+         appendLe16(outPayload, maxLength, ioOffset, entry.nextHopAddress);
 }
 
 ZigbeeGroupEntry* findGroupEntry(ZigbeeGroupsState* groups, uint16_t groupId) {
@@ -5095,6 +5139,86 @@ bool ZigbeeHomeAutomationDevice::buildExtendedActiveEndpointsResponse(
   return true;
 }
 
+bool ZigbeeHomeAutomationDevice::buildMgmtLqiResponse(
+    uint8_t transactionSequence, uint8_t startIndex,
+    const ZigbeeNeighborTableEntry* entries, uint8_t entryCount,
+    uint8_t* outPayload, uint8_t* outLength) const {
+  if (outPayload == nullptr || outLength == nullptr ||
+      (entryCount > 0U && entries == nullptr)) {
+    return false;
+  }
+
+  uint8_t offset = 0U;
+  uint8_t responseEntryCount = 0U;
+  if (!appendBytes(outPayload, 127U, &offset, &transactionSequence, 1U) ||
+      !appendBytes(outPayload, 127U, &offset,
+                   reinterpret_cast<const uint8_t*>(&kZdoStatusSuccess), 1U) ||
+      !appendBytes(outPayload, 127U, &offset, &entryCount, 1U) ||
+      !appendBytes(outPayload, 127U, &offset, &startIndex, 1U)) {
+    return false;
+  }
+
+  const uint8_t entryCountOffset = offset;
+  if (!appendBytes(outPayload, 127U, &offset, &responseEntryCount, 1U)) {
+    return false;
+  }
+
+  if (startIndex < entryCount) {
+    for (uint8_t i = startIndex; i < entryCount; ++i) {
+      const uint8_t previousOffset = offset;
+      if (!appendMgmtLqiEntry(entries[i], outPayload, 127U, &offset)) {
+        offset = previousOffset;
+        break;
+      }
+      ++responseEntryCount;
+    }
+  }
+
+  outPayload[entryCountOffset] = responseEntryCount;
+  *outLength = offset;
+  return true;
+}
+
+bool ZigbeeHomeAutomationDevice::buildMgmtRtgResponse(
+    uint8_t transactionSequence, uint8_t startIndex,
+    const ZigbeeRoutingTableEntry* entries, uint8_t entryCount,
+    uint8_t* outPayload, uint8_t* outLength) const {
+  if (outPayload == nullptr || outLength == nullptr ||
+      (entryCount > 0U && entries == nullptr)) {
+    return false;
+  }
+
+  uint8_t offset = 0U;
+  uint8_t responseEntryCount = 0U;
+  if (!appendBytes(outPayload, 127U, &offset, &transactionSequence, 1U) ||
+      !appendBytes(outPayload, 127U, &offset,
+                   reinterpret_cast<const uint8_t*>(&kZdoStatusSuccess), 1U) ||
+      !appendBytes(outPayload, 127U, &offset, &entryCount, 1U) ||
+      !appendBytes(outPayload, 127U, &offset, &startIndex, 1U)) {
+    return false;
+  }
+
+  const uint8_t entryCountOffset = offset;
+  if (!appendBytes(outPayload, 127U, &offset, &responseEntryCount, 1U)) {
+    return false;
+  }
+
+  if (startIndex < entryCount) {
+    for (uint8_t i = startIndex; i < entryCount; ++i) {
+      const uint8_t previousOffset = offset;
+      if (!appendMgmtRtgEntry(entries[i], outPayload, 127U, &offset)) {
+        offset = previousOffset;
+        break;
+      }
+      ++responseEntryCount;
+    }
+  }
+
+  outPayload[entryCountOffset] = responseEntryCount;
+  *outLength = offset;
+  return true;
+}
+
 bool ZigbeeHomeAutomationDevice::buildMgmtBindResponse(
     uint8_t transactionSequence, uint8_t startIndex, uint8_t* outPayload,
     uint8_t* outLength) const {
@@ -5787,6 +5911,86 @@ const ZigbeeBindingEntry* ZigbeeHomeAutomationDevice::bindings() const {
   return config_.bindings;
 }
 
+bool ZigbeeHomeAutomationDevice::clearNeighborTable() {
+  memset(config_.neighbors, 0, sizeof(config_.neighbors));
+  return true;
+}
+
+bool ZigbeeHomeAutomationDevice::setNeighborTableEntry(
+    uint8_t index, const ZigbeeNeighborTableEntry& entry) {
+  if (index >= kZigbeeMaxNeighborTableEntries) {
+    return false;
+  }
+
+  config_.neighbors[index] = entry;
+  config_.neighbors[index].used = true;
+  return true;
+}
+
+bool ZigbeeHomeAutomationDevice::removeNeighborTableEntry(uint8_t index) {
+  if (index >= kZigbeeMaxNeighborTableEntries) {
+    return false;
+  }
+
+  config_.neighbors[index] = ZigbeeNeighborTableEntry{};
+  return true;
+}
+
+uint8_t ZigbeeHomeAutomationDevice::neighborTableCount() const {
+  uint8_t count = 0U;
+  for (uint8_t i = 0U; i < kZigbeeMaxNeighborTableEntries; ++i) {
+    if (config_.neighbors[i].used) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+const ZigbeeNeighborTableEntry*
+ZigbeeHomeAutomationDevice::neighborTableEntries() const {
+  return config_.neighbors;
+}
+
+bool ZigbeeHomeAutomationDevice::clearRoutingTable() {
+  memset(config_.routes, 0, sizeof(config_.routes));
+  return true;
+}
+
+bool ZigbeeHomeAutomationDevice::setRoutingTableEntry(
+    uint8_t index, const ZigbeeRoutingTableEntry& entry) {
+  if (index >= kZigbeeMaxRoutingTableEntries) {
+    return false;
+  }
+
+  config_.routes[index] = entry;
+  config_.routes[index].used = true;
+  return true;
+}
+
+bool ZigbeeHomeAutomationDevice::removeRoutingTableEntry(uint8_t index) {
+  if (index >= kZigbeeMaxRoutingTableEntries) {
+    return false;
+  }
+
+  config_.routes[index] = ZigbeeRoutingTableEntry{};
+  return true;
+}
+
+uint8_t ZigbeeHomeAutomationDevice::routingTableCount() const {
+  uint8_t count = 0U;
+  for (uint8_t i = 0U; i < kZigbeeMaxRoutingTableEntries; ++i) {
+    if (config_.routes[i].used) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+const ZigbeeRoutingTableEntry*
+ZigbeeHomeAutomationDevice::routingTableEntries() const {
+  return config_.routes;
+}
+
 bool ZigbeeHomeAutomationDevice::resolveBindingDestination(
     uint8_t sourceEndpoint, uint16_t clusterId,
     ZigbeeResolvedBindingDestination* outDestination) const {
@@ -6191,22 +6395,36 @@ bool ZigbeeHomeAutomationDevice::handleZdoRequest(
       return buildSimpleZdoStatusResponse(transactionSequence, kZdoStatusSuccess,
                                           outPayload, outLength);
     }
-    case kZigbeeZdoMgmtLqiRequest:
+    case kZigbeeZdoMgmtLqiRequest: {
       if (requestLength < 2U) {
         return false;
       }
       *outResponseClusterId = kZigbeeZdoMgmtLqiResponse;
-      return buildSimpleZdoStatusResponse(transactionSequence,
-                                          kZdoStatusNotSupported, outPayload,
-                                          outLength);
-    case kZigbeeZdoMgmtRtgRequest:
+      ZigbeeNeighborTableEntry entries[kZigbeeMaxNeighborTableEntries] = {};
+      uint8_t entryCount = 0U;
+      for (uint8_t i = 0U; i < kZigbeeMaxNeighborTableEntries; ++i) {
+        if (config_.neighbors[i].used) {
+          entries[entryCount++] = config_.neighbors[i];
+        }
+      }
+      return buildMgmtLqiResponse(transactionSequence, request[1], entries,
+                                  entryCount, outPayload, outLength);
+    }
+    case kZigbeeZdoMgmtRtgRequest: {
       if (requestLength < 2U) {
         return false;
       }
       *outResponseClusterId = kZigbeeZdoMgmtRtgResponse;
-      return buildSimpleZdoStatusResponse(transactionSequence,
-                                          kZdoStatusNotSupported, outPayload,
-                                          outLength);
+      ZigbeeRoutingTableEntry entries[kZigbeeMaxRoutingTableEntries] = {};
+      uint8_t entryCount = 0U;
+      for (uint8_t i = 0U; i < kZigbeeMaxRoutingTableEntries; ++i) {
+        if (config_.routes[i].used) {
+          entries[entryCount++] = config_.routes[i];
+        }
+      }
+      return buildMgmtRtgResponse(transactionSequence, request[1], entries,
+                                  entryCount, outPayload, outLength);
+    }
     case kZigbeeZdoMgmtBindRequest:
       if (requestLength < 2U) {
         return false;
@@ -7128,4 +7346,4 @@ bool ZigbeeHomeAutomationDevice::buildDeviceAnnounce(
 }
 
 }  // namespace xiao_nrf54l15
-#endif // NRF54L15_CLEAN_ZIGBEE_ENABLE
+#endif  // NRF54L15_CLEAN_ZIGBEE_ENABLE || NRF54L15_CLEAN_ZIGBEE_ENABLED
