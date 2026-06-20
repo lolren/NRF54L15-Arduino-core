@@ -395,6 +395,35 @@ def serial_from_hwid(hwid: Optional[str]) -> Optional[str]:
         return None
     return normalize_uid(match.group(1))
 
+def port_uid_from_wmic(port: Optional[str]) -> Optional[str]:
+    """Windows-only: resolve COM port -> USB serial via wmic."""
+    if not port or not sys.platform.startswith("win"):
+        return None
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["wmic", "path", "Win32_PnPEntity", "get", "DeviceID,PNPClass,Name",
+             "/format:csv"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            return None
+        wanted = normalized_port_name(port)
+        for line in result.stdout.splitlines():
+            if "COM" not in line or "USB" not in line:
+                continue
+            if normalized_port_name(line.split(",")[-1] if "," in line else "") == wanted:
+                continue
+            # Extract serial from DeviceID: USB\VID_2886&PID_0068\3377B9D6
+            parts = line.split(",")
+            for p in parts:
+                m = re.search(r"([A-F0-9]{8})$", p.strip())
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return None
+
 def port_uid_from_list_ports(port: Optional[str], host_tools_path: Optional[Path] = None) -> Optional[str]:
     if not port:
         return None
@@ -457,7 +486,11 @@ def infer_uid_from_port(port: Optional[str], host_tools_path: Optional[Path] = N
     if inferred is not None:
         return inferred
 
-    if not sys.platform.startswith("linux"):
+    # Windows fallback: parse wmic output
+    if sys.platform.startswith("win"):
+        inferred = port_uid_from_wmic(port)
+        if inferred is not None:
+            return inferred
         return None
 
     if tool_available("udevadm"):
