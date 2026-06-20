@@ -1335,6 +1335,7 @@ void ZigbeeCommissioning::initializeEndDeviceState(
   state->apsCounter = 1U;
   state->endDeviceTimeoutIndex = policy.requestedEndDeviceTimeout;
   state->endDeviceConfiguration = policy.endDeviceConfiguration;
+  state->endDeviceTimeoutRequestAttempts = 0U;
   state->parentPollIntervalMs = defaultPollIntervalMs(*state);
   state->state = ZigbeeCommissioningState::kIdle;
   state->lastFailure = ZigbeeCommissioningFailure::kNone;
@@ -1416,6 +1417,7 @@ void ZigbeeCommissioning::restoreEndDeviceState(
   state->endDeviceTimeoutNegotiated = false;
   state->lastDeviceAnnounceMs = 0U;
   state->lastEndDeviceTimeoutRequestMs = 0U;
+  state->endDeviceTimeoutRequestAttempts = 0U;
   state->parentPollIntervalMs = defaultPollIntervalMs(*state);
 
   if (haveRetainedAddress && state->securityEnabled &&
@@ -1546,6 +1548,7 @@ void ZigbeeCommissioning::requestNetworkSteering(
   state->endDeviceTimeoutNegotiated = false;
   state->lastDeviceAnnounceMs = 0U;
   state->lastEndDeviceTimeoutRequestMs = 0U;
+  state->endDeviceTimeoutRequestAttempts = 0U;
   state->parentInformation = 0U;
   state->parentPollIntervalMs = defaultPollIntervalMs(*state);
 
@@ -1703,12 +1706,14 @@ void ZigbeeCommissioning::markEndDeviceTimeoutPending(
     state->endDeviceTimeoutPending = false;
     state->endDeviceTimeoutNegotiated = false;
     state->lastEndDeviceTimeoutRequestMs = 0U;
+    state->endDeviceTimeoutRequestAttempts = 0U;
     state->parentInformation = 0U;
     return;
   }
   state->endDeviceTimeoutPending = state->joined;
   state->endDeviceTimeoutNegotiated = false;
   state->lastEndDeviceTimeoutRequestMs = 0U;
+  state->endDeviceTimeoutRequestAttempts = 0U;
   state->parentInformation = 0U;
   state->endDeviceTimeoutIndex = state->policy.requestedEndDeviceTimeout;
   state->endDeviceConfiguration = state->policy.endDeviceConfiguration;
@@ -1721,6 +1726,9 @@ void ZigbeeCommissioning::recordEndDeviceTimeoutRequest(
     return;
   }
   state->lastEndDeviceTimeoutRequestMs = nowMs;
+  if (state->endDeviceTimeoutRequestAttempts < 0xFFU) {
+    ++state->endDeviceTimeoutRequestAttempts;
+  }
 }
 
 bool ZigbeeCommissioning::acceptEndDeviceTimeoutResponse(
@@ -1749,6 +1757,7 @@ void ZigbeeCommissioning::applyEndDeviceTimeoutResponse(
     state->endDeviceTimeoutPending = false;
     state->endDeviceTimeoutNegotiated = true;
     state->lastEndDeviceTimeoutRequestMs = 0U;
+    state->endDeviceTimeoutRequestAttempts = 0U;
     state->parentInformation = response.parentInformation;
     state->parentPollIntervalMs =
         negotiatedPollIntervalMs(*state, state->endDeviceTimeoutIndex);
@@ -1756,6 +1765,7 @@ void ZigbeeCommissioning::applyEndDeviceTimeoutResponse(
     state->endDeviceTimeoutPending = false;
     state->endDeviceTimeoutNegotiated = false;
     state->lastEndDeviceTimeoutRequestMs = 0U;
+    state->endDeviceTimeoutRequestAttempts = 0U;
     state->parentInformation = response.parentInformation;
     state->parentPollIntervalMs = defaultPollIntervalMs(*state);
   }
@@ -1776,11 +1786,19 @@ ZigbeeCommissioningAction ZigbeeCommissioning::nextAction(
     return ZigbeeCommissioningAction::kSendDeviceAnnounce;
   }
 
-  if (shouldRequestEndDeviceTimeout(*state) &&
-      (state->lastEndDeviceTimeoutRequestMs == 0U ||
-       (nowMs - state->lastEndDeviceTimeoutRequestMs) >=
-           endDeviceTimeoutRetryDelayMs(*state))) {
-    return ZigbeeCommissioningAction::kRequestEndDeviceTimeout;
+  if (shouldRequestEndDeviceTimeout(*state)) {
+    if (state->policy.maxEndDeviceTimeoutRequests != 0U &&
+        state->endDeviceTimeoutRequestAttempts >=
+            state->policy.maxEndDeviceTimeoutRequests) {
+      state->endDeviceTimeoutPending = false;
+      state->endDeviceTimeoutNegotiated = false;
+      state->lastEndDeviceTimeoutRequestMs = 0U;
+      state->parentPollIntervalMs = defaultPollIntervalMs(*state);
+    } else if (state->lastEndDeviceTimeoutRequestMs == 0U ||
+               (nowMs - state->lastEndDeviceTimeoutRequestMs) >=
+                   endDeviceTimeoutRetryDelayMs(*state)) {
+      return ZigbeeCommissioningAction::kRequestEndDeviceTimeout;
+    }
   }
 
   if (state->joined) {

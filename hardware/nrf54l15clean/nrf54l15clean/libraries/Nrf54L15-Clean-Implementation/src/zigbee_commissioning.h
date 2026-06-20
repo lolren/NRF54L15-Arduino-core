@@ -36,6 +36,7 @@ struct ZigbeeCommissioningPolicy {
   uint64_t pinnedTrustCenterIeee = 0U;
   uint8_t maxJoinAttempts = 0U;
   uint8_t maxRejoinAttempts = 0U;
+  uint8_t maxEndDeviceTimeoutRequests = 3U;
   uint8_t requestedEndDeviceTimeout = 0x03U;
   uint8_t endDeviceConfiguration = 0x00U;
   bool requirePermitJoin = true;
@@ -138,6 +139,7 @@ struct ZigbeeEndDeviceCommonState {
   uint32_t parentPollIntervalMs = 250UL;
   uint32_t lastDeviceAnnounceMs = 0U;
   uint32_t lastEndDeviceTimeoutRequestMs = 0U;
+  uint8_t endDeviceTimeoutRequestAttempts = 0U;
   bool joined = false;
   bool rejoinPending = false;
   bool networkSteeringRequested = false;
