@@ -65,7 +65,7 @@ recipe.c.combine.pattern="{compiler.path}{compiler.c.cmd}" {compiler.c.elf.flags
 recipe.objcopy.hex.pattern="{compiler.path}{compiler.objcopy.cmd}" -O ihex "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.hex"
 recipe.objcopy.bin.pattern="{compiler.path}{compiler.objcopy.cmd}" -O binary "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.bin"
 recipe.objcopy.uf2.pattern="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54uf2.cmd.path}" --input "{build.path}/{build.project_name}.hex" --output "{build.path}/{build.project_name}.uf2" --family "{build.uf2_family}" --base-address "{build.uf2_base_address}" --uf2conv "{tools.nrf54uf2.uf2conv.path}"
-recipe.objcopy.uf2.pattern.windows=copy /y "{build.path}\{build.project_name}.hex" "{build.path}\{build.project_name}.uf2" >nul 2>&1
+recipe.objcopy.uf2.pattern.windows=cmd /c copy /y "{build.path}\\{build.project_name}.hex" "{build.path}\\{build.project_name}.uf2" >nul
 recipe.size.pattern="{compiler.path}{compiler.size.cmd}" -A "{build.path}/{build.project_name}.elf"
 recipe.size.regex=^(?:\.text|\.data|\.rodata)\s+([0-9]+).*
 recipe.size.regex.data=^(?:\.data|\.bss)\s+([0-9]+).*
@@ -74,7 +74,6 @@ recipe.size.regex.data=^(?:\.data|\.bss)\s+([0-9]+).*
 recipe.output.tmp_file={build.project_name}.hex
 recipe.output.save_file={build.project_name}.{build.board}.hex
 recipe.hooks.savehex.postsavehex.1.pattern=/usr/bin/env bash -c "test ! -f '{build.path}/{build.project_name}.uf2' || cp -f '{build.path}/{build.project_name}.uf2' '{build.source.path}/{build.project_name}.{build.board}.uf2'"
-recipe.hooks.savehex.postsavehex.1.pattern.windows=copy /y "{build.path}\{build.project_name}.uf2" "{build.source.path}\{build.project_name}.{build.board}.uf2" >nul 2>&1 || exit 0
 recipe.hooks.savehex.postsavehex.1.pattern.windows=cmd /c if exist "{build.path}\\{build.project_name}.uf2" copy /y "{build.path}\\{build.project_name}.uf2" "{build.source.path}\\{build.project_name}.{build.board}.uf2" >nul
 
 # Upload helper.
