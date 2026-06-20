@@ -284,6 +284,18 @@ SPIM00_IRQHandler:
     bx lr
     .size SPIM00_IRQHandler, .-SPIM00_IRQHandler
 
+    .weak SPIM20_IRQHandler
+    .type SPIM20_IRQHandler, %function
+SPIM20_IRQHandler:
+    bx lr
+    .size SPIM20_IRQHandler, .-SPIM20_IRQHandler
+
+    .weak SPIM21_IRQHandler
+    .type SPIM21_IRQHandler, %function
+SPIM21_IRQHandler:
+    bx lr
+    .size SPIM21_IRQHandler, .-SPIM21_IRQHandler
+
     .weak EGU10_IRQHandler
     .type EGU10_IRQHandler, %function
 EGU10_IRQHandler:
