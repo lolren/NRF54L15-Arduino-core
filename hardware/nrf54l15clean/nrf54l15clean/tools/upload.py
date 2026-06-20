@@ -1201,12 +1201,14 @@ def open_nrf_ocd_asset_for_host() -> Optional[tuple]:
 
     if system == "windows":
         if machine in {"amd64", "x86_64"}:
-            return "nrf_ocd-win64.exe", "nrf_ocd.exe"
+            return "nrf_ocd-windows-amd64.exe", "nrf_ocd.exe"
+        if machine in {"x86", "i386", "i686"}:
+            return "nrf_ocd-windows-i386.exe", "nrf_ocd.exe"
         return None
 
     if system == "linux":
         if machine in {"x86_64", "amd64"}:
-            return "nrf_ocd-linux-x64", "nrf_ocd"
+            return "nrf_ocd-linux-amd64", "nrf_ocd"
         if machine in {"aarch64", "arm64"}:
             return "nrf_ocd-linux-arm64", "nrf_ocd"
         if machine.startswith("arm") or machine in {"armv7l", "armhf"}:
@@ -1216,9 +1218,16 @@ def open_nrf_ocd_asset_for_host() -> Optional[tuple]:
 
 def open_nrf_ocd_candidate_names() -> Tuple[str, ...]:
     if sys.platform.startswith("win"):
-        return ("nrf_ocd.exe", "nrf_ocd-win64.exe", "nrf_ocd")
+        return (
+            "nrf_ocd.exe",
+            "nrf_ocd-windows-amd64.exe",
+            "nrf_ocd-windows-i386.exe",
+            "nrf_ocd-win64.exe",
+            "nrf_ocd",
+        )
     return (
         "nrf_ocd",
+        "nrf_ocd-linux-amd64",
         "nrf_ocd-linux-x64",
         "nrf_ocd-linux-arm64",
         "nrf_ocd-linux-armhf",

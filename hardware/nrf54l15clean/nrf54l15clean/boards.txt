@@ -24,7 +24,7 @@ xiao_nrf54l15.upload.maximum_data_size=155648
 xiao_nrf54l15.upload.wait_for_upload_port=false
 xiao_nrf54l15.upload.use_1200bps_touch=false
 xiao_nrf54l15.upload.disable_flushing=true
-xiao_nrf54l15.upload.runner=auto
+xiao_nrf54l15.upload.runner=nrf_ocd
 xiao_nrf54l15.upload.target=nrf54l
 xiao_nrf54l15.upload.uid=
 xiao_nrf54l15.upload.pyocd_safe=auto
@@ -120,10 +120,10 @@ xiao_nrf54l15.menu.clean_antenna.ceramic.build.antenna_flags=
 xiao_nrf54l15.menu.clean_antenna.external=External U.FL
 xiao_nrf54l15.menu.clean_antenna.external.build.antenna_flags=-DNRF54L15_CLEAN_ANTENNA_EXTERNAL
 
-xiao_nrf54l15.menu.clean_upload.auto=Auto Recover (Default)
-xiao_nrf54l15.menu.clean_upload.auto.upload.tool=nrf54upload
-xiao_nrf54l15.menu.clean_upload.auto.upload.tool.serial=nrf54upload
-xiao_nrf54l15.menu.clean_upload.auto.upload.runner=auto
+xiao_nrf54l15.menu.clean_upload.auto=nRF OCD Native (Default)
+xiao_nrf54l15.menu.clean_upload.auto.upload.tool=nrf54ocd
+xiao_nrf54l15.menu.clean_upload.auto.upload.tool.serial=nrf54ocd
+xiao_nrf54l15.menu.clean_upload.auto.upload.runner=nrf_ocd
 xiao_nrf54l15.menu.clean_upload.auto.upload.use_1200bps_touch=false
 xiao_nrf54l15.menu.clean_upload.auto.upload.wait_for_upload_port=false
 xiao_nrf54l15.menu.clean_upload.auto.upload.pyocd_safe=auto
@@ -174,7 +174,7 @@ xiao_nrf54lm20b.upload.maximum_data_size=458752
 xiao_nrf54lm20b.upload.wait_for_upload_port=false
 xiao_nrf54lm20b.upload.use_1200bps_touch=false
 xiao_nrf54lm20b.upload.disable_flushing=true
-xiao_nrf54lm20b.upload.runner=pyocd
+xiao_nrf54lm20b.upload.runner=nrf_ocd
 xiao_nrf54lm20b.upload.target=nrf54lm20a
 xiao_nrf54lm20b.upload.uid=
 xiao_nrf54lm20b.upload.pyocd_safe=auto
@@ -254,10 +254,10 @@ xiao_nrf54lm20b.menu.clean_matter.stage=Experimental Compile Target (On-Network 
 xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_flags=-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1 -DNRF54L15_CLEAN_MATTER_TRANSPORT_THREAD=1 -DNRF54L15_CLEAN_MATTER_RENDEZVOUS_ON_NETWORK_ONLY=1 -DNRF54L15_CLEAN_MATTER_BLE_RENDEZVOUS=0 -DNRF54L15_CLEAN_MATTER_FIRST_DEVICE_ONOFF_LIGHT=1
 xiao_nrf54lm20b.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN_MATTER_HEADER_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_SUPPORT_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_ERROR_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_KEY_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_TIME_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_HEX_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_THREAD_DATASET_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_DATA_MODEL_SEED_AVAILABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/matter_core_stage -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/config/arduino -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/support -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/system -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/inet -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/crypto -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/protocols -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/transport -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/messaging -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/platform/arduino
 
-xiao_nrf54lm20b.menu.clean_upload.auto=Auto Recover (Default)
-xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool=nrf54upload
-xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool.serial=nrf54upload
-xiao_nrf54lm20b.menu.clean_upload.auto.upload.runner=pyocd
+xiao_nrf54lm20b.menu.clean_upload.auto=nRF OCD Native (Default)
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool=nrf54ocd
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.tool.serial=nrf54ocd
+xiao_nrf54lm20b.menu.clean_upload.auto.upload.runner=nrf_ocd
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.use_1200bps_touch=false
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.wait_for_upload_port=false
 xiao_nrf54lm20b.menu.clean_upload.auto.upload.pyocd_safe=auto
@@ -278,15 +278,15 @@ xiao_nrf54lm20b.menu.clean_upload.pyocd.upload.pyocd_safe=auto
 
 holyiot_25007_nrf54l15.name=HOLYIOT-25007 nRF54L15 Module
 
-holyiot_25007_nrf54l15.upload.tool=nrf54upload
-holyiot_25007_nrf54l15.upload.tool.serial=nrf54upload
+holyiot_25007_nrf54l15.upload.tool=nrf54ocd
+holyiot_25007_nrf54l15.upload.tool.serial=nrf54ocd
 holyiot_25007_nrf54l15.upload.protocol=cmsis-dap
 holyiot_25007_nrf54l15.upload.maximum_size=1556480
 holyiot_25007_nrf54l15.upload.maximum_data_size=155648
 holyiot_25007_nrf54l15.upload.wait_for_upload_port=false
 holyiot_25007_nrf54l15.upload.use_1200bps_touch=false
 holyiot_25007_nrf54l15.upload.disable_flushing=true
-holyiot_25007_nrf54l15.upload.runner=pyocd
+holyiot_25007_nrf54l15.upload.runner=nrf_ocd
 holyiot_25007_nrf54l15.upload.target=nrf54l
 holyiot_25007_nrf54l15.upload.uid=
 holyiot_25007_nrf54l15.upload.openocd_script={runtime.platform.path}/tools/openocd/nrf54l15.cfg
@@ -375,7 +375,14 @@ holyiot_25007_nrf54l15.menu.clean_matter.stage=Experimental Compile Target (On-N
 holyiot_25007_nrf54l15.menu.clean_matter.stage.build.matter_flags=-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1 -DNRF54L15_CLEAN_MATTER_TRANSPORT_THREAD=1 -DNRF54L15_CLEAN_MATTER_RENDEZVOUS_ON_NETWORK_ONLY=1 -DNRF54L15_CLEAN_MATTER_BLE_RENDEZVOUS=0 -DNRF54L15_CLEAN_MATTER_FIRST_DEVICE_ONOFF_LIGHT=1
 holyiot_25007_nrf54l15.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN_MATTER_HEADER_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_SUPPORT_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_ERROR_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_KEY_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_TIME_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_HEX_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_THREAD_DATASET_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_DATA_MODEL_SEED_AVAILABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/matter_core_stage -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/config/arduino -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/support -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/system -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/inet -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/crypto -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/protocols -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/transport -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/messaging -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/platform/arduino
 
-holyiot_25007_nrf54l15.menu.clean_upload.pyocd=pyOCD (CMSIS-DAP, Default)
+holyiot_25007_nrf54l15.menu.clean_upload.auto=nRF OCD Native (Default)
+holyiot_25007_nrf54l15.menu.clean_upload.auto.upload.tool=nrf54ocd
+holyiot_25007_nrf54l15.menu.clean_upload.auto.upload.tool.serial=nrf54ocd
+holyiot_25007_nrf54l15.menu.clean_upload.auto.upload.runner=nrf_ocd
+holyiot_25007_nrf54l15.menu.clean_upload.auto.upload.use_1200bps_touch=false
+holyiot_25007_nrf54l15.menu.clean_upload.auto.upload.wait_for_upload_port=false
+
+holyiot_25007_nrf54l15.menu.clean_upload.pyocd=pyOCD Recovery (CMSIS-DAP)
 holyiot_25007_nrf54l15.menu.clean_upload.pyocd.upload.tool=nrf54upload
 holyiot_25007_nrf54l15.menu.clean_upload.pyocd.upload.tool.serial=nrf54upload
 holyiot_25007_nrf54l15.menu.clean_upload.pyocd.upload.runner=pyocd
@@ -405,15 +412,15 @@ holyiot_25007_nrf54l15.menu.clean_upload.uf2.upload.wait_for_upload_port=false
 
 holyiot_25008_nrf54l15.name=HOLYIOT-25008 nRF54L15 Module
 
-holyiot_25008_nrf54l15.upload.tool=nrf54upload
-holyiot_25008_nrf54l15.upload.tool.serial=nrf54upload
+holyiot_25008_nrf54l15.upload.tool=nrf54ocd
+holyiot_25008_nrf54l15.upload.tool.serial=nrf54ocd
 holyiot_25008_nrf54l15.upload.protocol=cmsis-dap
 holyiot_25008_nrf54l15.upload.maximum_size=1556480
 holyiot_25008_nrf54l15.upload.maximum_data_size=155648
 holyiot_25008_nrf54l15.upload.wait_for_upload_port=false
 holyiot_25008_nrf54l15.upload.use_1200bps_touch=false
 holyiot_25008_nrf54l15.upload.disable_flushing=true
-holyiot_25008_nrf54l15.upload.runner=pyocd
+holyiot_25008_nrf54l15.upload.runner=nrf_ocd
 holyiot_25008_nrf54l15.upload.target=nrf54l
 holyiot_25008_nrf54l15.upload.uid=
 holyiot_25008_nrf54l15.upload.openocd_script={runtime.platform.path}/tools/openocd/nrf54l15.cfg
@@ -508,7 +515,14 @@ holyiot_25008_nrf54l15.menu.clean_serial.header.build.serial_flags=-DNRF54L15_CL
 holyiot_25008_nrf54l15.menu.clean_serial.disabled=GPIO on D0/D1 (Serial disabled)
 holyiot_25008_nrf54l15.menu.clean_serial.disabled.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_DISABLED
 
-holyiot_25008_nrf54l15.menu.clean_upload.pyocd=pyOCD (CMSIS-DAP, Default)
+holyiot_25008_nrf54l15.menu.clean_upload.auto=nRF OCD Native (Default)
+holyiot_25008_nrf54l15.menu.clean_upload.auto.upload.tool=nrf54ocd
+holyiot_25008_nrf54l15.menu.clean_upload.auto.upload.tool.serial=nrf54ocd
+holyiot_25008_nrf54l15.menu.clean_upload.auto.upload.runner=nrf_ocd
+holyiot_25008_nrf54l15.menu.clean_upload.auto.upload.use_1200bps_touch=false
+holyiot_25008_nrf54l15.menu.clean_upload.auto.upload.wait_for_upload_port=false
+
+holyiot_25008_nrf54l15.menu.clean_upload.pyocd=pyOCD Recovery (CMSIS-DAP)
 holyiot_25008_nrf54l15.menu.clean_upload.pyocd.upload.tool=nrf54upload
 holyiot_25008_nrf54l15.menu.clean_upload.pyocd.upload.tool.serial=nrf54upload
 holyiot_25008_nrf54l15.menu.clean_upload.pyocd.upload.runner=pyocd
@@ -538,15 +552,15 @@ holyiot_25008_nrf54l15.menu.clean_upload.uf2.upload.wait_for_upload_port=false
 
 generic_nrf54l15_module_36pin.name=Generic nRF54L15 Module (36-pad)
 
-generic_nrf54l15_module_36pin.upload.tool=nrf54upload
-generic_nrf54l15_module_36pin.upload.tool.serial=nrf54upload
+generic_nrf54l15_module_36pin.upload.tool=nrf54ocd
+generic_nrf54l15_module_36pin.upload.tool.serial=nrf54ocd
 generic_nrf54l15_module_36pin.upload.protocol=cmsis-dap
 generic_nrf54l15_module_36pin.upload.maximum_size=1556480
 generic_nrf54l15_module_36pin.upload.maximum_data_size=155648
 generic_nrf54l15_module_36pin.upload.wait_for_upload_port=false
 generic_nrf54l15_module_36pin.upload.use_1200bps_touch=false
 generic_nrf54l15_module_36pin.upload.disable_flushing=true
-generic_nrf54l15_module_36pin.upload.runner=pyocd
+generic_nrf54l15_module_36pin.upload.runner=nrf_ocd
 generic_nrf54l15_module_36pin.upload.target=nrf54l
 generic_nrf54l15_module_36pin.upload.uid=
 generic_nrf54l15_module_36pin.upload.openocd_script={runtime.platform.path}/tools/openocd/nrf54l15.cfg
@@ -635,7 +649,14 @@ generic_nrf54l15_module_36pin.menu.clean_matter.stage=Experimental Compile Targe
 generic_nrf54l15_module_36pin.menu.clean_matter.stage.build.matter_flags=-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1 -DNRF54L15_CLEAN_MATTER_TRANSPORT_THREAD=1 -DNRF54L15_CLEAN_MATTER_RENDEZVOUS_ON_NETWORK_ONLY=1 -DNRF54L15_CLEAN_MATTER_BLE_RENDEZVOUS=0 -DNRF54L15_CLEAN_MATTER_FIRST_DEVICE_ONOFF_LIGHT=1
 generic_nrf54l15_module_36pin.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN_MATTER_HEADER_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_SUPPORT_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_ERROR_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_KEY_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_TIME_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_HEX_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_THREAD_DATASET_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_DATA_MODEL_SEED_AVAILABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/matter_core_stage -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/config/arduino -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/support -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/system -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/inet -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/crypto -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/protocols -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/transport -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/messaging -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/platform/arduino
 
-generic_nrf54l15_module_36pin.menu.clean_upload.pyocd=pyOCD (CMSIS-DAP, Default)
+generic_nrf54l15_module_36pin.menu.clean_upload.auto=nRF OCD Native (Default)
+generic_nrf54l15_module_36pin.menu.clean_upload.auto.upload.tool=nrf54ocd
+generic_nrf54l15_module_36pin.menu.clean_upload.auto.upload.tool.serial=nrf54ocd
+generic_nrf54l15_module_36pin.menu.clean_upload.auto.upload.runner=nrf_ocd
+generic_nrf54l15_module_36pin.menu.clean_upload.auto.upload.use_1200bps_touch=false
+generic_nrf54l15_module_36pin.menu.clean_upload.auto.upload.wait_for_upload_port=false
+
+generic_nrf54l15_module_36pin.menu.clean_upload.pyocd=pyOCD Recovery (CMSIS-DAP)
 generic_nrf54l15_module_36pin.menu.clean_upload.pyocd.upload.tool=nrf54upload
 generic_nrf54l15_module_36pin.menu.clean_upload.pyocd.upload.tool.serial=nrf54upload
 generic_nrf54l15_module_36pin.menu.clean_upload.pyocd.upload.runner=pyocd
@@ -665,15 +686,15 @@ generic_nrf54l15_module_36pin.menu.clean_upload.uf2.upload.wait_for_upload_port=
 
 nrf54l15dk_pca10156.name=Nordic PCA10156 nRF54L15 DK
 
-nrf54l15dk_pca10156.upload.tool=nrf54upload
-nrf54l15dk_pca10156.upload.tool.serial=nrf54upload
+nrf54l15dk_pca10156.upload.tool=nrf54ocd
+nrf54l15dk_pca10156.upload.tool.serial=nrf54ocd
 nrf54l15dk_pca10156.upload.protocol=cmsis-dap
 nrf54l15dk_pca10156.upload.maximum_size=1556480
 nrf54l15dk_pca10156.upload.maximum_data_size=155648
 nrf54l15dk_pca10156.upload.wait_for_upload_port=false
 nrf54l15dk_pca10156.upload.use_1200bps_touch=false
 nrf54l15dk_pca10156.upload.disable_flushing=true
-nrf54l15dk_pca10156.upload.runner=pyocd
+nrf54l15dk_pca10156.upload.runner=nrf_ocd
 nrf54l15dk_pca10156.upload.target=nrf54l
 nrf54l15dk_pca10156.upload.uid=
 nrf54l15dk_pca10156.upload.openocd_script={runtime.platform.path}/tools/openocd/nrf54l15.cfg
@@ -763,7 +784,14 @@ nrf54l15dk_pca10156.menu.clean_serial.altuart.build.serial_flags=
 nrf54l15dk_pca10156.menu.clean_serial.disabled=GPIO on UART pads (Serial disabled)
 nrf54l15dk_pca10156.menu.clean_serial.disabled.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_DISABLED
 
-nrf54l15dk_pca10156.menu.clean_upload.pyocd=pyOCD (CMSIS-DAP, Default)
+nrf54l15dk_pca10156.menu.clean_upload.auto=nRF OCD Native (Default)
+nrf54l15dk_pca10156.menu.clean_upload.auto.upload.tool=nrf54ocd
+nrf54l15dk_pca10156.menu.clean_upload.auto.upload.tool.serial=nrf54ocd
+nrf54l15dk_pca10156.menu.clean_upload.auto.upload.runner=nrf_ocd
+nrf54l15dk_pca10156.menu.clean_upload.auto.upload.use_1200bps_touch=false
+nrf54l15dk_pca10156.menu.clean_upload.auto.upload.wait_for_upload_port=false
+
+nrf54l15dk_pca10156.menu.clean_upload.pyocd=pyOCD Recovery (CMSIS-DAP)
 nrf54l15dk_pca10156.menu.clean_upload.pyocd.upload.tool=nrf54upload
 nrf54l15dk_pca10156.menu.clean_upload.pyocd.upload.tool.serial=nrf54upload
 nrf54l15dk_pca10156.menu.clean_upload.pyocd.upload.runner=pyocd

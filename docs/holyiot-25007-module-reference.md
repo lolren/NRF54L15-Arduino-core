@@ -99,7 +99,7 @@ It does **not** mean the bare module has a guaranteed onboard LED on that pin.
 
 The module boards default to:
 
-- `Upload Method = pyOCD (CMSIS-DAP, Default)`
+- `Upload Method = nRF OCD Native (Default)`
 
 That path is validated with Raspberry Pi Pico Debugprobe.
 

@@ -25,7 +25,7 @@ Use:
 
 Default upload method:
 
-- `pyOCD (CMSIS-DAP, Default)`
+- `nRF OCD Native (Default)`
 
 Validated external programmer path:
 

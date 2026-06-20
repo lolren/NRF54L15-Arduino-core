@@ -147,7 +147,7 @@ Current Sense examples:
 
 ## Tools Menu Options
 
-- Upload method: Auto Recover / pyOCD / OpenOCD / UF2 Bootloader (manual optional)
+- Upload method: nRF OCD Native / pyOCD Recovery / UF2 Bootloader (manual optional)
 - BLE support: On / Off
 - BLE trace: Off / On
 - Zigbee support: On / Off

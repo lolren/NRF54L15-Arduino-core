@@ -28,7 +28,7 @@ void setup() { Serial.begin(115200); Serial.println("Hello nRF54!"); }
 void loop() {}
 ```
 
-If pyOCD is blocked by a host Python or driver issue, use **Tools → Upload Method → nRF OCD (Native Fallback)**. The uploader downloads the matching `open-nrf-ocd` binary from the permanent release on first use (`linux-x64`, `linux-arm64`, `linux-armhf`, or `win64`) and caches it locally.
+Normal uploads use the bundled native **nRF OCD** tool on Linux and Windows, so Windows does not need a separate Python install just to upload. If native upload fails, switch **Tools -> Upload Method** to **pyOCD Recovery**; that recovery path still uses the packaged Python host tools.
 
 ---
 
@@ -189,7 +189,7 @@ Examples:
 |---|---|---|---|
 | **Arduino Core** | ~150K | ✅ Mature | Yes — GPIO, PWM, ADC, I2C, SPI, UART, I2S, PDM, NFC |
 | **BLE** | ~80K | ✅ Mature | Yes — advertising, scanning, connections, GATT, Bluefruit |
-| **Zigbee** | ~40K | ⚠️ Good | Partial — HA device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
+| **Zigbee** | ~40K | ⚠️ Good | Partial — HA/Zigbee2MQTT device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
 | **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
 | **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2 works on 2‑board, needs VPR coprocessor |
@@ -201,7 +201,7 @@ Examples:
 
 - **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
 - **Thread and Matter are staged protocol stacks.** OpenThread FTD/MeshCoP/SRP/UDP and custom Matter command-surface demos compile on all staged boards; local two-board SRP readiness is working, but production-grade HA/OTBR commissioning and long soak validation are still pending.
-- **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries.
+- **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
 - **Channel Sounding Mode 2** needs the VPR RISC‑V coprocessor — M33 alone can't keep up with subevent timing.
@@ -213,6 +213,7 @@ Examples:
 - **[Board Reference & Pinouts](docs/board-reference.md)**
 - **[Development Guide](docs/development.md)**
 - **[BLE Status & Resume Checklist](docs/BLE_COMPLIANCE_RESUME.md)**
+- **[Zigbee2MQTT Integration](docs/ZIGBEE2MQTT_INTEGRATION.md)**
 - **[Thread & Matter Implementation Plan](docs/THREAD_MATTER_IMPLEMENTATION_PLAN.md)**
 - **[Thread & Matter Hardening Status](docs/THREAD_MATTER_FINISH_PLAN.md)**
 - **[Power Profile Measurements](POWER_PROFILE_MEASUREMENTS.md)**
