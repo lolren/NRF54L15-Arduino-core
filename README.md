@@ -88,7 +88,7 @@ If pyOCD is blocked by a host Python or driver issue, use **Tools → Upload Met
 | **MAC / NWK / APS** | — | ✅ | ⚠️ | ⚠️ | — | — |
 | **Coordinator / Router** | — | — | ⚠️ | ⚠️ | — | — |
 | **End Device** | — | — | ⚠️ | ⚠️ | — | — |
-| **UDP Transport** | — | — | ⚠️ | — | — | — |
+| **UDP Transport** | — | — | ✅ | — | ⚠️ | — |
 | **ZCL (OnOff / Level / Temp)** | — | — | — | ⚠️ | — | — |
 | **On/Off Light + commissioning** | — | — | — | — | ⚠️ | — |
 
@@ -190,8 +190,8 @@ Examples:
 | **Arduino Core** | ~150K | ✅ Mature | Yes — GPIO, PWM, ADC, I2C, SPI, UART, I2S, PDM, NFC |
 | **BLE** | ~80K | ✅ Mature | Yes — advertising, scanning, connections, GATT, Bluefruit |
 | **Zigbee** | ~40K | ⚠️ Good | Partial — ZCL clusters missing, no OTA |
-| **Thread** | ~30K | ⚠️ Early | No — compile‑only, no commissioner validation |
-| **Matter** | ~25K | ⚠️ Early | No — data models compile, no network‑layer completion |
+| **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
+| **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; HA/OTBR commissioning still needs full validation |
 | **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2 works on 2‑board, needs VPR coprocessor |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes — all nPM1300 features, GPIO bit‑bang I²C |
 
@@ -200,7 +200,7 @@ Examples:
 ## ⚠️ Known Limitations
 
 - **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
-- **Thread and Matter are compile‑targets only** — not functional protocol stacks. End‑to‑end commissioner validation is pending.
+- **Thread and Matter are staged protocol stacks.** OpenThread FTD/MeshCoP/SRP/UDP and custom Matter command-surface demos compile on all staged boards; production-grade HA/OTBR commissioning and long soak validation are still pending.
 - **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and multi‑hop routing are missing.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
@@ -214,6 +214,7 @@ Examples:
 - **[Development Guide](docs/development.md)**
 - **[BLE Status & Resume Checklist](docs/BLE_COMPLIANCE_RESUME.md)**
 - **[Thread & Matter Implementation Plan](docs/THREAD_MATTER_IMPLEMENTATION_PLAN.md)**
+- **[Thread & Matter Hardening Status](docs/THREAD_MATTER_FINISH_PLAN.md)**
 - **[Power Profile Measurements](POWER_PROFILE_MEASUREMENTS.md)**
 
 ---

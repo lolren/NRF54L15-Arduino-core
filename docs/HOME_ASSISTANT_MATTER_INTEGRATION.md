@@ -2,17 +2,17 @@
 
 ## Overview
 
-The XIAO nRF54L15 Matter On/Off Light is fully functional. This guide covers Home Assistant integration.
+The XIAO nRF54L15 staged Matter On/Off Light can run on-network Thread command-surface demos. This guide tracks the Home Assistant integration path; treat it as a validation guide until a full Home Assistant + OTBR commissioning log has passed.
 
 ## What Works
 
-- ✅ Thread networking (Leader + Child)
-- ✅ Matter command transport (UDP over Thread)
-- ✅ On/Off cluster (ON, OFF, TOGGLE, IDENTIFY)
-- ✅ PASE commissioning (SPAKE2+ with passcode)
-- ✅ CASE session (Sigma1/2/3, AEAD encryption)
-- ✅ SRP/mDNS discovery (enabled in build)
-- ✅ Manual pairing code + QR code generation
+- ✅ Thread networking examples compile and have two-board validation paths
+- ✅ Matter command transport demos compile over Thread UDP
+- ✅ On/Off cluster command surface exists (ON, OFF, TOGGLE, IDENTIFY)
+- ✅ PASE/CASE demo code compiles
+- ✅ SRP Client is enabled in staged Thread builds
+- ✅ Manual pairing code + QR code generation helpers exist
+- ⚠️ Full Home Assistant + OTBR commissioning still needs a complete hardware log
 
 ## What's Needed for Home Assistant
 
