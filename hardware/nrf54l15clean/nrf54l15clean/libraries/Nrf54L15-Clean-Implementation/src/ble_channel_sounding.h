@@ -35,26 +35,28 @@ constexpr uint8_t kBleCsSubeventDoneComplete = 0x0U;
 constexpr uint8_t kBleCsSubeventDonePartial = 0x1U;
 constexpr uint8_t kBleCsSubeventDoneAborted = 0xFU;
 constexpr uint16_t kBleCsHciOpReadRemoteSupportedCapabilities = 0x208AU;
+constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilities = 0x208BU;
 constexpr uint16_t kBleCsHciOpSecurityEnable = 0x208CU;
 constexpr uint16_t kBleCsHciOpSetDefaultSettings = 0x208DU;
+constexpr uint16_t kBleCsHciOpReadRemoteFaeTable = 0x208EU;
+constexpr uint16_t kBleCsHciOpWriteCachedRemoteFaeTable = 0x208FU;
 constexpr uint16_t kBleCsHciOpCreateConfig = 0x2090U;
 constexpr uint16_t kBleCsHciOpRemoveConfig = 0x2091U;
+constexpr uint16_t kBleCsHciOpSetChannelClassification = 0x2092U;
 constexpr uint16_t kBleCsHciOpSetProcedureParameters = 0x2093U;
 constexpr uint16_t kBleCsHciOpProcedureEnable = 0x2094U;
 constexpr uint16_t kBleCsHciOpTest = 0x2095U;
-constexpr uint16_t kBleCsHciOpSetChannelClassification = 0x2096U;
-constexpr uint16_t kBleCsHciOpReadRemoteFaeTable = 0x2097U;
-constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilities = 0x2098U;
-constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2 = 0x2099U;
-constexpr uint16_t kBleCsHciOpWriteCachedRemoteFaeTable = 0x209AU;
-constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x33U;
+constexpr uint16_t kBleCsHciOpTestEnd = 0x2096U;
+constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2 = 0x20A6U;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
+constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
 constexpr uint8_t kBleCsHciEvtSecurityEnableComplete = 0x2EU;
 constexpr uint8_t kBleCsHciEvtConfigComplete = 0x2FU;
 constexpr uint8_t kBleCsHciEvtProcedureEnableComplete = 0x30U;
 constexpr uint8_t kBleCsHciEvtSubeventResult = 0x31U;
 constexpr uint8_t kBleCsHciEvtSubeventResultContinue = 0x32U;
+constexpr uint8_t kBleCsHciEvtTestEndComplete = 0x33U;
 constexpr uint8_t kBleHciPacketTypeCommand = 0x01U;
 constexpr uint8_t kBleHciPacketTypeAcl = 0x02U;
 constexpr uint8_t kBleHciPacketTypeSco = 0x03U;
@@ -65,6 +67,28 @@ constexpr uint8_t kBleHciEvtCommandStatus = 0x0FU;
 constexpr uint8_t kBleHciEvtLeMeta = 0x3EU;
 constexpr uint8_t kBleHciEvtVendor = 0xFFU;
 constexpr size_t kBleCsMaxControllerStepDataBytes = 1024U;
+constexpr size_t kBleCsMaxHciCommandPayloadBytes = 128U;
+constexpr size_t kBleCsFaeTableValueCount = 72U;
+constexpr size_t kBleCsMaxTestChannelCount = 37U;
+constexpr uint16_t kBleCsTestOverrideChannelSelection = (1U << 0U);
+constexpr uint16_t kBleCsTestOverrideMainModeSteps = (1U << 2U);
+constexpr uint16_t kBleCsTestOverrideToneExtension = (1U << 3U);
+constexpr uint16_t kBleCsTestOverrideAntennaPermutation = (1U << 4U);
+constexpr uint16_t kBleCsTestOverrideAccessAddresses = (1U << 5U);
+constexpr uint16_t kBleCsTestOverrideMarkerPositions = (1U << 6U);
+constexpr uint16_t kBleCsTestOverrideMarkerValue = (1U << 7U);
+constexpr uint16_t kBleCsTestOverridePayload = (1U << 8U);
+constexpr uint16_t kBleCsTestOverrideStablePhase = (1U << 10U);
+constexpr uint16_t kBleCsTestSupportedOverrideMask =
+    kBleCsTestOverrideChannelSelection |
+    kBleCsTestOverrideMainModeSteps |
+    kBleCsTestOverrideToneExtension |
+    kBleCsTestOverrideAntennaPermutation |
+    kBleCsTestOverrideAccessAddresses |
+    kBleCsTestOverrideMarkerPositions |
+    kBleCsTestOverrideMarkerValue |
+    kBleCsTestOverridePayload |
+    kBleCsTestOverrideStablePhase;
 
 struct BleCsToneSample {
   bool valid = false;
@@ -221,7 +245,7 @@ struct BleCsSubeventResult {
 
 struct BleCsHciCommand {
   uint16_t opcode = 0U;
-  uint8_t payload[64] = {0};
+  uint8_t payload[kBleCsMaxHciCommandPayloadBytes] = {0};
   uint8_t payloadLen = 0U;
 };
 
@@ -388,44 +412,56 @@ struct BleCsProcedureEnableComplete {
 // ─── Zephyr Parity: CS Test Mode ─────────────────────────────────
 
 struct BleCsTestParams {
-  uint16_t connHandle = 0U;
-  uint8_t configId = 0U;
   uint8_t mainModeType = kBleCsMainMode2;
   uint8_t subModeType = 0xFFU;
-  uint8_t minMainModeSteps = 3U;
-  uint8_t maxMainModeSteps = 5U;
   uint8_t mainModeRepetition = 1U;
   uint8_t mode0Steps = 0U;
-  uint8_t role = 2U;
+  uint8_t role = 0U;
   uint8_t rttType = 0U;
   uint8_t csSyncPhy = 1U;
-  uint8_t channelMap[kBleCsChannelMapBytes] = {0};
+  uint8_t csSyncAntennaSelection = 0xFFU;
+  uint32_t subeventLenUs = 1250U;
+  uint16_t subeventInterval = 0U;
+  uint8_t maxNumSubevents = 1U;
+  uint8_t transmitPowerLevel = 0x7FU;
+  uint8_t tIp1TimeUs = 10U;
+  uint8_t tIp2TimeUs = 10U;
+  uint8_t tFcsTimeUs = 15U;
+  uint8_t tPmTimeUs = 10U;
+  uint8_t tSwTimeUs = 0U;
+  uint8_t toneAntennaConfigSelection = 0U;
+  uint8_t csEnhancements1 = 0U;
+  uint8_t snrControlInitiator = 0xFFU;
+  uint8_t snrControlReflector = 0xFFU;
+  uint16_t drbgNonce = 0U;
   uint8_t channelMapRepetition = 1U;
-  uint8_t channelSelectionType = 1U;
-  uint8_t ch3cShape = 1U;
-  uint8_t ch3cJump = 3U;
-  uint8_t csEnhancements1 = 0x01U;
-  // Override config bitmask (bit 0-9 select which fields override)
   uint16_t overrideConfig = 0U;
-  // Override fields (only used if corresponding bit is set in overrideConfig)
-  uint8_t overrideChannelList[37] = {0};
+
+  // Override 0 always contributes data: a channel list when bit 0 is set,
+  // otherwise a channel map and channel-selection parameters.
+  uint8_t overrideChannelList[kBleCsMaxTestChannelCount] = {0};
   uint8_t overrideChannelListLen = 0U;
+  uint8_t channelMap[kBleCsChannelMapBytes] = {0};
+  uint8_t channelSelectionType = 0U;
+  uint8_t ch3cShape = 0U;
+  uint8_t ch3cJump = 2U;
+
   uint8_t overrideMainModeSteps = 0U;
-  uint16_t overrideTpmToneExtensionUs = 0U;
+  uint8_t overrideTpmToneExtension = 0U;
   uint8_t overrideToneAntennaPermutationIndex = 0U;
-  uint32_t overrideCsSyncAccessAddress = 0U;
+  uint32_t overrideCsSyncAccessAddressInitiator = 0U;
+  uint32_t overrideCsSyncAccessAddressReflector = 0U;
   uint8_t overrideSsMarkerPositions[2] = {0};
-  uint32_t overrideSsMarkerValue = 0U;
+  uint8_t overrideSsMarkerValue = 0U;
   uint8_t overrideCsSyncPayloadPattern = 0U;
-  bool overrideStablePhaseTest = false;
+  uint8_t overrideCsSyncUserPayload[16] = {0};
 };
 
-struct BleCsTestComplete {
+struct BleCsTestEndComplete {
   uint8_t status = 0U;
-  uint16_t connHandle = 0U;
-  uint8_t configId = 0U;
-  uint8_t procedureCounter = 0U;
 };
+
+using BleCsTestComplete = BleCsTestEndComplete;
 
 // ─── Zephyr Parity: Channel Classification ───────────────────────
 
@@ -435,14 +471,11 @@ struct BleCsChannelClassification {
 
 // ─── Zephyr Parity: FAE Table ────────────────────────────────────
 
-struct BleCsFaeEntry {
-  uint8_t faeValue = 0U;
-};
-
 struct BleCsFaeTable {
+  bool valid = false;
+  uint8_t status = 0U;
   uint16_t connHandle = 0U;
-  uint8_t numFaeValues = 0U;
-  BleCsFaeEntry entries[10] = {};
+  int8_t values[kBleCsFaeTableValueCount] = {0};
 };
 
 // ─── Zephyr Parity: Cached Capabilities ──────────────────────────
@@ -647,9 +680,15 @@ class BleChannelSoundingRadio {
       BleCsProcedureEnableComplete* outEvent);
 
   // ─── Zephyr Parity: CS Test Mode HCI ───────────────────────
-  static bool buildHciTestCommand(uint16_t connHandle,
-                                   const BleCsTestParams& params,
-                                   BleCsHciCommand* outCommand);
+  static bool buildHciTestCommand(const BleCsTestParams& params,
+                                  BleCsHciCommand* outCommand);
+  static bool buildHciTestCommand(uint16_t unusedConnHandle,
+                                  const BleCsTestParams& params,
+                                  BleCsHciCommand* outCommand);
+  static bool buildHciTestEndCommand(BleCsHciCommand* outCommand);
+  static bool parseHciTestEndCompleteEvent(const uint8_t* eventData,
+                                           size_t eventLen,
+                                           BleCsTestEndComplete* outEvent);
   static bool parseHciTestCompleteEvent(const uint8_t* eventData,
                                          size_t eventLen,
                                          BleCsTestComplete* outEvent);
@@ -666,6 +705,10 @@ class BleChannelSoundingRadio {
       const uint8_t* eventData,
       size_t eventLen,
       BleCsFaeTable* outTable);
+  static bool buildHciWriteCachedRemoteFaeTableCommand(
+      uint16_t connHandle,
+      const int8_t faeTable[kBleCsFaeTableValueCount],
+      BleCsHciCommand* outCommand);
 
   // ─── Zephyr Parity: Cached Capabilities HCI ────────────────
   static bool buildHciWriteCachedRemoteSupportedCapabilitiesCommand(
@@ -1394,6 +1437,21 @@ class BleCsControllerVprHost {
       bool enableProcedure,
       BleCsControllerVprWorkflowStartStatus* outWorkflowStatus = nullptr);
   bool directReadRemoteSupportedCapabilities(uint8_t* outStatus);
+  bool directWriteCachedRemoteSupportedCapabilities(
+      const BleCsControllerCapabilities& capabilities,
+      uint8_t* outStatus);
+  bool directWriteCachedRemoteSupportedCapabilitiesV2(
+      const BleCsControllerCapabilities& capabilities,
+      uint8_t* outStatus);
+  bool directReadRemoteFaeTable(BleCsFaeTable* outTable, uint8_t* outStatus);
+  bool directWriteCachedRemoteFaeTable(
+      const int8_t faeTable[kBleCsFaeTableValueCount],
+      uint8_t* outStatus);
+  bool directSetChannelClassification(
+      const BleCsChannelClassification& classification,
+      uint8_t* outStatus);
+  bool directStartTest(const BleCsTestParams& params, uint8_t* outStatus);
+  bool directStopTest(BleCsTestEndComplete* outComplete, uint8_t* outStatus);
   bool directSetDefaultSettings(const BleCsDefaultSettings& settings, uint8_t* outStatus);
   bool directCreateConfig(const BleCsControllerCreateConfig& config, uint8_t* outStatus);
   bool directRemoveConfig(uint8_t configId, uint8_t* outStatus);
@@ -1501,6 +1559,10 @@ class BleCsControllerVprHost {
   const BleCsSubeventResult& peerResult() const;
   const BleCsSubeventResult& completedLocalResult() const;
   const BleCsSubeventResult& completedPeerResult() const;
+  bool lastRemoteFaeTableValid() const;
+  const BleCsFaeTable& lastRemoteFaeTable() const;
+  bool lastTestEndCompleteValid() const;
+  const BleCsTestEndComplete& lastTestEndComplete() const;
 
   VprSharedTransportStream& transport();
   const VprSharedTransportStream& transport() const;
@@ -1508,6 +1570,7 @@ class BleCsControllerVprHost {
  private:
   bool currentConnHandle(uint16_t* outConnHandle) const;
   bool sendDirectBuiltCommand(const BleCsHciCommand& command, uint8_t* outStatus);
+  bool consumeDirectAuxiliaryEvent(const uint8_t* packet, size_t packetLen);
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
                                    size_t responseLen);
@@ -1517,6 +1580,9 @@ class BleCsControllerVprHost {
   BleCsControllerVprHostState vprState_;
   VprSharedTransportStream transport_;
   BleCsControllerStreamHost host_;
+  BleCsFaeTable lastRemoteFaeTable_;
+  BleCsTestEndComplete lastTestEndComplete_;
+  bool lastTestEndCompleteValid_;
 };
 
 }  // namespace xiao_nrf54l15

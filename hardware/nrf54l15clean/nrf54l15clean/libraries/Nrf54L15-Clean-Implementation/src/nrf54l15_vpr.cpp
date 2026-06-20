@@ -1403,6 +1403,13 @@ bool VprControllerServiceHost::popPendingH4Event(uint8_t* packet,
   return true;
 }
 
+bool VprControllerServiceHost::readNextH4Event(uint8_t* packet,
+                                               size_t packetSize,
+                                               size_t* packetLen,
+                                               uint32_t timeoutMs) {
+  return readH4Event(packet, packetSize, packetLen, timeoutMs);
+}
+
 bool VprControllerServiceHost::popPendingTickerEvent(VprTickerEvent* event) {
   if (event == nullptr || pendingTickerEventCount_ == 0U) {
     return false;

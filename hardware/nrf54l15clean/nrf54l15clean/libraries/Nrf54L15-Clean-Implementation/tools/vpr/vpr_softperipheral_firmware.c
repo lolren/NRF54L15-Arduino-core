@@ -4,7 +4,7 @@
 // Compile with: riscv32-unknown-elf-gcc -march=rv32imc -mabi=ilp32
 //
 // Memory layout:
-//   .text:  0x2003CD00 (VPR_IMAGE_BASE)
+//   .text:  0x2003C900 (VPR_IMAGE_BASE)
 //   .data:  follows .text
 //   .bss:   follows .data
 //   Stack:  grows down from end of VPR RAM

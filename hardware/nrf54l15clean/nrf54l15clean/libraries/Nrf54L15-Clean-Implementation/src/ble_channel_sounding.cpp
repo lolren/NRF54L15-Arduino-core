@@ -104,6 +104,13 @@ inline void writeLe24(uint8_t* data, uint32_t value) {
   data[2] = static_cast<uint8_t>((value >> 16U) & 0xFFU);
 }
 
+inline void writeLe32(uint8_t* data, uint32_t value) {
+  data[0] = static_cast<uint8_t>(value & 0xFFU);
+  data[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
+  data[2] = static_cast<uint8_t>((value >> 16U) & 0xFFU);
+  data[3] = static_cast<uint8_t>((value >> 24U) & 0xFFU);
+}
+
 inline void writeVolatileLe16(volatile uint8_t* data, uint16_t value) {
   if (data == nullptr) {
     return;
@@ -2088,56 +2095,181 @@ bool BleChannelSoundingRadio::parseHciProcedureEnableCompleteEvent(
 
 // ─── Zephyr Parity: CS Test Mode ─────────────────────────────────
 
-static constexpr size_t kBleCsTestParamsLen = 21U;
-
-bool BleChannelSoundingRadio::buildHciTestCommand(uint16_t connHandle,
-                                                   const BleCsTestParams& params,
-                                                   BleCsHciCommand* outCommand) {
-  if (outCommand == nullptr) return false;
-
-  BleCsHciCommand cmd = {};
-  cmd.opcode = kBleCsHciOpTest;
-  cmd.payload[0U] = static_cast<uint8_t>(connHandle & 0xFFU);
-  cmd.payload[1U] = static_cast<uint8_t>((connHandle >> 8U) & 0xFFU);
-  cmd.payload[2U] = params.configId;
-  cmd.payload[3U] = params.mainModeType;
-  cmd.payload[4U] = params.subModeType;
-  cmd.payload[5U] = params.minMainModeSteps;
-  cmd.payload[6U] = params.maxMainModeSteps;
-  cmd.payload[7U] = params.mainModeRepetition;
-  cmd.payload[8U] = params.mode0Steps;
-  cmd.payload[9U] = params.role;
-  cmd.payload[10U] = params.rttType;
-  cmd.payload[11U] = params.csSyncPhy;
-  memcpy(&cmd.payload[12U], params.channelMap, kBleCsChannelMapBytes);
-  cmd.payload[22U] = params.channelMapRepetition;
-  cmd.payload[23U] = params.channelSelectionType;
-  cmd.payload[24U] = params.ch3cShape;
-  cmd.payload[25U] = params.ch3cJump;
-  cmd.payload[26U] = params.csEnhancements1;
-  // Override config bitmask
-  cmd.payloadLen = 27U;
-  if (params.overrideConfig != 0U) {
-    const uint16_t oc = params.overrideConfig;
-    cmd.payload[cmd.payloadLen++] = static_cast<uint8_t>(oc & 0xFFU);
-    cmd.payload[cmd.payloadLen++] = static_cast<uint8_t>((oc >> 8U) & 0xFFU);
-    // Override fields follow based on bits set in overrideConfig
-    // (Implementation supports reading/writing these fields)
+bool BleChannelSoundingRadio::buildHciTestCommand(
+    const BleCsTestParams& params, BleCsHciCommand* outCommand) {
+  if (outCommand == nullptr ||
+      params.subeventLenUs < 1250U ||
+      params.subeventLenUs > 4000000U ||
+      (params.overrideConfig & ~kBleCsTestSupportedOverrideMask) != 0U ||
+      ((params.overrideConfig & kBleCsTestOverrideChannelSelection) != 0U &&
+       (params.overrideChannelListLen == 0U ||
+        params.overrideChannelListLen > kBleCsMaxTestChannelCount))) {
+    return false;
   }
+
+  BleCsHciCommand cmd{};
+  cmd.opcode = kBleCsHciOpTest;
+  size_t offset = 0U;
+  const auto appendByte = [&cmd, &offset](uint8_t value) -> bool {
+    if (offset >= sizeof(cmd.payload)) {
+      return false;
+    }
+    cmd.payload[offset++] = value;
+    return true;
+  };
+  const auto appendBytes = [&cmd, &offset](const uint8_t* data, size_t len) -> bool {
+    if ((data == nullptr && len != 0U) || len > (sizeof(cmd.payload) - offset)) {
+      return false;
+    }
+    if (len != 0U) {
+      memcpy(cmd.payload + offset, data, len);
+      offset += len;
+    }
+    return true;
+  };
+  const auto appendLe16 = [&cmd, &offset](uint16_t value) -> bool {
+    if (2U > (sizeof(cmd.payload) - offset)) {
+      return false;
+    }
+    writeLe16(cmd.payload + offset, value);
+    offset += 2U;
+    return true;
+  };
+  const auto appendLe32 = [&cmd, &offset](uint32_t value) -> bool {
+    if (4U > (sizeof(cmd.payload) - offset)) {
+      return false;
+    }
+    writeLe32(cmd.payload + offset, value);
+    offset += 4U;
+    return true;
+  };
+
+  if (!appendByte(params.mainModeType) ||
+      !appendByte(params.subModeType) ||
+      !appendByte(params.mainModeRepetition) ||
+      !appendByte(params.mode0Steps) ||
+      !appendByte(params.role) ||
+      !appendByte(params.rttType) ||
+      !appendByte(params.csSyncPhy) ||
+      !appendByte(params.csSyncAntennaSelection)) {
+    return false;
+  }
+  if (3U > (sizeof(cmd.payload) - offset)) {
+    return false;
+  }
+  writeLe24(cmd.payload + offset, params.subeventLenUs);
+  offset += 3U;
+  if (!appendLe16(params.subeventInterval) ||
+      !appendByte(params.maxNumSubevents) ||
+      !appendByte(params.transmitPowerLevel) ||
+      !appendByte(params.tIp1TimeUs) ||
+      !appendByte(params.tIp2TimeUs) ||
+      !appendByte(params.tFcsTimeUs) ||
+      !appendByte(params.tPmTimeUs) ||
+      !appendByte(params.tSwTimeUs) ||
+      !appendByte(params.toneAntennaConfigSelection) ||
+      !appendByte(params.csEnhancements1) ||
+      !appendByte(params.snrControlInitiator) ||
+      !appendByte(params.snrControlReflector) ||
+      !appendLe16(params.drbgNonce) ||
+      !appendByte(params.channelMapRepetition) ||
+      !appendLe16(params.overrideConfig)) {
+    return false;
+  }
+
+  const size_t overrideLengthOffset = offset;
+  if (!appendByte(0U)) {
+    return false;
+  }
+  const size_t overrideStart = offset;
+
+  if ((params.overrideConfig & kBleCsTestOverrideChannelSelection) != 0U) {
+    if (!appendByte(params.overrideChannelListLen) ||
+        !appendBytes(params.overrideChannelList, params.overrideChannelListLen)) {
+      return false;
+    }
+  } else if (!appendBytes(params.channelMap, kBleCsChannelMapBytes) ||
+             !appendByte(params.channelSelectionType) ||
+             !appendByte(params.ch3cShape) ||
+             !appendByte(params.ch3cJump)) {
+    return false;
+  }
+
+  if ((params.overrideConfig & kBleCsTestOverrideMainModeSteps) != 0U &&
+      !appendByte(params.overrideMainModeSteps)) {
+    return false;
+  }
+  if ((params.overrideConfig & kBleCsTestOverrideToneExtension) != 0U &&
+      !appendByte(params.overrideTpmToneExtension)) {
+    return false;
+  }
+  if ((params.overrideConfig & kBleCsTestOverrideAntennaPermutation) != 0U &&
+      !appendByte(params.overrideToneAntennaPermutationIndex)) {
+    return false;
+  }
+  if ((params.overrideConfig & kBleCsTestOverrideAccessAddresses) != 0U &&
+      (!appendLe32(params.overrideCsSyncAccessAddressInitiator) ||
+       !appendLe32(params.overrideCsSyncAccessAddressReflector))) {
+    return false;
+  }
+  if ((params.overrideConfig & kBleCsTestOverrideMarkerPositions) != 0U &&
+      !appendBytes(params.overrideSsMarkerPositions,
+                   sizeof(params.overrideSsMarkerPositions))) {
+    return false;
+  }
+  if ((params.overrideConfig & kBleCsTestOverrideMarkerValue) != 0U &&
+      !appendByte(params.overrideSsMarkerValue)) {
+    return false;
+  }
+  if ((params.overrideConfig & kBleCsTestOverridePayload) != 0U &&
+      (!appendByte(params.overrideCsSyncPayloadPattern) ||
+       !appendBytes(params.overrideCsSyncUserPayload,
+                    sizeof(params.overrideCsSyncUserPayload)))) {
+    return false;
+  }
+
+  const size_t overrideLength = offset - overrideStart;
+  if (overrideLength > 0xFFU || offset > 0xFFU) {
+    return false;
+  }
+  cmd.payload[overrideLengthOffset] = static_cast<uint8_t>(overrideLength);
+  cmd.payloadLen = static_cast<uint8_t>(offset);
   *outCommand = cmd;
+  return true;
+}
+
+bool BleChannelSoundingRadio::buildHciTestCommand(
+    uint16_t unusedConnHandle,
+    const BleCsTestParams& params,
+    BleCsHciCommand* outCommand) {
+  (void)unusedConnHandle;
+  return buildHciTestCommand(params, outCommand);
+}
+
+bool BleChannelSoundingRadio::buildHciTestEndCommand(
+    BleCsHciCommand* outCommand) {
+  if (outCommand == nullptr) {
+    return false;
+  }
+  *outCommand = BleCsHciCommand{};
+  outCommand->opcode = kBleCsHciOpTestEnd;
+  return true;
+}
+
+bool BleChannelSoundingRadio::parseHciTestEndCompleteEvent(
+    const uint8_t* eventData,
+    size_t eventLen,
+    BleCsTestEndComplete* outEvent) {
+  if (eventData == nullptr || outEvent == nullptr || eventLen != 1U) {
+    return false;
+  }
+  outEvent->status = eventData[0U];
   return true;
 }
 
 bool BleChannelSoundingRadio::parseHciTestCompleteEvent(
     const uint8_t* eventData, size_t eventLen, BleCsTestComplete* outEvent) {
-  if (eventData == nullptr || outEvent == nullptr || eventLen < 4U) return false;
-  BleCsTestComplete evt{};
-  evt.status = eventData[0U];
-  evt.connHandle = readLe16(eventData + 1U);
-  evt.configId = eventData[3U];
-  if (eventLen >= 5U) evt.procedureCounter = eventData[4U];
-  *outEvent = evt;
-  return true;
+  return parseHciTestEndCompleteEvent(eventData, eventLen, outEvent);
 }
 
 // ─── Zephyr Parity: Channel Classification ───────────────────────
@@ -2158,33 +2290,48 @@ bool BleChannelSoundingRadio::buildHciSetChannelClassificationCommand(
 
 // ─── Zephyr Parity: FAE Table ───────────────────────────────────
 
-static constexpr size_t kBleCsFaeTableCompleteMinLen = 3U;
-
 bool BleChannelSoundingRadio::buildHciReadRemoteFaeTableCommand(
     uint16_t connHandle, BleCsHciCommand* outCommand) {
-  if (outCommand == nullptr) return false;
-  BleCsHciCommand cmd = {};
-  cmd.opcode = kBleCsHciOpReadRemoteFaeTable;
-  cmd.payload[0U] = static_cast<uint8_t>(connHandle & 0xFFU);
-  cmd.payload[1U] = static_cast<uint8_t>((connHandle >> 8U) & 0xFFU);
-  cmd.payloadLen = 2U;
-  *outCommand = cmd;
+  if (outCommand == nullptr) {
+    return false;
+  }
+  *outCommand = BleCsHciCommand{};
+  outCommand->opcode = kBleCsHciOpReadRemoteFaeTable;
+  writeLe16(outCommand->payload, connHandle);
+  outCommand->payloadLen = 2U;
   return true;
 }
 
 bool BleChannelSoundingRadio::parseHciReadRemoteFaeTableCompleteEvent(
     const uint8_t* eventData, size_t eventLen, BleCsFaeTable* outTable) {
-  if (eventData == nullptr || outTable == nullptr || eventLen < 3U) return false;
-  BleCsFaeTable table{};
-  table.connHandle = readLe16(eventData + 1U);
-  if (eventLen >= 3U) {
-    table.numFaeValues = eventData[3U];
-    const uint8_t maxEntries = (table.numFaeValues < 10U) ? table.numFaeValues : 10U;
-    for (uint8_t i = 0U; i < maxEntries && (4U + i) < eventLen; i++) {
-      table.entries[i].faeValue = eventData[4U + i];
-    }
+  static constexpr size_t kFaeCompleteEventLen =
+      3U + kBleCsFaeTableValueCount;
+  if (eventData == nullptr || outTable == nullptr ||
+      eventLen != kFaeCompleteEventLen) {
+    return false;
   }
+  BleCsFaeTable table{};
+  table.status = eventData[0U];
+  table.connHandle = readLe16(eventData + 1U);
+  memcpy(table.values, eventData + 3U, sizeof(table.values));
+  table.valid = (table.status == 0U);
   *outTable = table;
+  return true;
+}
+
+bool BleChannelSoundingRadio::buildHciWriteCachedRemoteFaeTableCommand(
+    uint16_t connHandle,
+    const int8_t faeTable[kBleCsFaeTableValueCount],
+    BleCsHciCommand* outCommand) {
+  if (faeTable == nullptr || outCommand == nullptr) {
+    return false;
+  }
+  *outCommand = BleCsHciCommand{};
+  outCommand->opcode = kBleCsHciOpWriteCachedRemoteFaeTable;
+  writeLe16(outCommand->payload, connHandle);
+  memcpy(outCommand->payload + 2U, faeTable, kBleCsFaeTableValueCount);
+  outCommand->payloadLen =
+      static_cast<uint8_t>(2U + kBleCsFaeTableValueCount);
   return true;
 }
 
@@ -2194,16 +2341,42 @@ bool BleChannelSoundingRadio::buildHciWriteCachedRemoteSupportedCapabilitiesComm
     uint16_t connHandle,
     const BleCsControllerCapabilities& capabilities,
     BleCsHciCommand* outCommand) {
-  if (outCommand == nullptr) return false;
-  BleCsHciCommand cmd = {};
-  cmd.opcode = kBleCsHciOpWriteCachedRemoteSupportedCapabilities;
-  cmd.payload[0U] = static_cast<uint8_t>(connHandle & 0xFFU);
-  cmd.payload[1U] = static_cast<uint8_t>((connHandle >> 8U) & 0xFFU);
-  cmd.payload[2U] = capabilities.numConfigSupported;
-  cmd.payload[3U] = static_cast<uint8_t>(capabilities.maxConsecutiveProceduresSupported & 0xFFU);
-  cmd.payload[4U] = static_cast<uint8_t>((capabilities.maxConsecutiveProceduresSupported >> 8U) & 0xFFU);
-  cmd.payloadLen = 5U;
-  *outCommand = cmd;
+  if (outCommand == nullptr) {
+    return false;
+  }
+  *outCommand = BleCsHciCommand{};
+  outCommand->opcode = kBleCsHciOpWriteCachedRemoteSupportedCapabilities;
+  uint8_t* payload = outCommand->payload;
+  writeLe16(payload + 0U, connHandle);
+  payload[2U] = capabilities.numConfigSupported;
+  writeLe16(payload + 3U, capabilities.maxConsecutiveProceduresSupported);
+  payload[5U] = capabilities.numAntennasSupported;
+  payload[6U] = capabilities.maxAntennaPathsSupported;
+  payload[7U] = static_cast<uint8_t>(
+      (capabilities.initiatorSupported ? 0x01U : 0U) |
+      (capabilities.reflectorSupported ? 0x02U : 0U));
+  payload[8U] = capabilities.mode3Supported ? 0x01U : 0U;
+  payload[9U] = capabilities.rttCapability;
+  payload[10U] = capabilities.rttAaOnlyN;
+  payload[11U] = capabilities.rttSoundingN;
+  payload[12U] = capabilities.rttRandomPayloadN;
+  writeLe16(payload + 13U, capabilities.nadmSoundingCapability);
+  writeLe16(payload + 15U, capabilities.nadmRandomCapability);
+  payload[17U] = static_cast<uint8_t>(
+      (capabilities.csSync2mPhySupported ? 0x02U : 0U) |
+      (capabilities.csSync2m2btPhySupported ? 0x04U : 0U));
+  const uint16_t subfeatures = static_cast<uint16_t>(
+      (capabilities.csWithoutFaeSupported ? 0x0002U : 0U) |
+      (capabilities.chselAlg3cSupported ? 0x0004U : 0U) |
+      (capabilities.pbrFromRttSoundingSeqSupported ? 0x0008U : 0U));
+  writeLe16(payload + 18U, subfeatures);
+  writeLe16(payload + 20U, capabilities.tIp1TimesSupported);
+  writeLe16(payload + 22U, capabilities.tIp2TimesSupported);
+  writeLe16(payload + 24U, capabilities.tFcsTimesSupported);
+  writeLe16(payload + 26U, capabilities.tPmTimesSupported);
+  payload[28U] = capabilities.tSwTimeSupported;
+  payload[29U] = capabilities.txSnrCapability;
+  outCommand->payloadLen = 30U;
   return true;
 }
 
@@ -2211,16 +2384,20 @@ bool BleChannelSoundingRadio::buildHciWriteCachedRemoteSupportedCapabilitiesV2Co
     uint16_t connHandle,
     const BleCsControllerCapabilities& capabilities,
     BleCsHciCommand* outCommand) {
-  if (outCommand == nullptr) return false;
-  BleCsHciCommand cmd = {};
-  cmd.opcode = kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2;
-  cmd.payload[0U] = static_cast<uint8_t>(connHandle & 0xFFU);
-  cmd.payload[1U] = static_cast<uint8_t>((connHandle >> 8U) & 0xFFU);
-  cmd.payload[2U] = capabilities.numConfigSupported;
-  cmd.payload[3U] = static_cast<uint8_t>(capabilities.maxConsecutiveProceduresSupported & 0xFFU);
-  cmd.payload[4U] = static_cast<uint8_t>((capabilities.maxConsecutiveProceduresSupported >> 8U) & 0xFFU);
-  cmd.payloadLen = 5U;
-  *outCommand = cmd;
+  if (!buildHciWriteCachedRemoteSupportedCapabilitiesCommand(
+          connHandle, capabilities, outCommand)) {
+    return false;
+  }
+  outCommand->opcode = kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2;
+  uint16_t subfeatures = readLe16(outCommand->payload + 18U);
+  if (capabilities.csIptReflectorSupported) {
+    subfeatures |= 0x0010U;
+  }
+  writeLe16(outCommand->payload + 18U, subfeatures);
+  writeLe16(outCommand->payload + 30U,
+            capabilities.tIp2IptTimesSupported);
+  outCommand->payload[32U] = capabilities.tSwIptTimeSupported;
+  outCommand->payloadLen = 33U;
   return true;
 }
 
@@ -3942,12 +4119,21 @@ void BleCsControllerVprHost::fillDemoConfig(BleCsControllerVprHostConfig* outCon
 }
 
 BleCsControllerVprHost::BleCsControllerVprHost()
-    : config_{}, vprState_{}, transport_{}, host_{} {}
+    : config_{},
+      vprState_{},
+      transport_{},
+      host_{},
+      lastRemoteFaeTable_{},
+      lastTestEndComplete_{},
+      lastTestEndCompleteValid_(false) {}
 
 void BleCsControllerVprHost::reset() {
   config_ = BleCsControllerVprHostConfig{};
   vprState_ = BleCsControllerVprHostState{};
   host_.reset();
+  lastRemoteFaeTable_ = BleCsFaeTable{};
+  lastTestEndComplete_ = BleCsTestEndComplete{};
+  lastTestEndCompleteValid_ = false;
 }
 
 bool BleCsControllerVprHost::resetTransport(bool clearScripts) {
@@ -4327,7 +4513,7 @@ bool BleCsControllerVprHost::currentConnHandle(uint16_t* outConnHandle) const {
 
 bool BleCsControllerVprHost::sendDirectBuiltCommand(const BleCsHciCommand& command,
                                                     uint8_t* outStatus) {
-  uint8_t response[64] = {0};
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t responseLen = 0U;
   if (!sendDirectHciCommand(command.opcode, command.payload, command.payloadLen, response,
                             sizeof(response), &responseLen)) {
@@ -4343,6 +4529,111 @@ bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outS
          BleChannelSoundingRadio::buildHciReadRemoteSupportedCapabilitiesCommand(connHandle,
                                                                                  &command) &&
          sendDirectBuiltCommand(command, outStatus);
+}
+
+bool BleCsControllerVprHost::directWriteCachedRemoteSupportedCapabilities(
+    const BleCsControllerCapabilities& capabilities,
+    uint8_t* outStatus) {
+  uint16_t connHandle = 0U;
+  BleCsHciCommand command{};
+  return currentConnHandle(&connHandle) &&
+         BleChannelSoundingRadio::
+             buildHciWriteCachedRemoteSupportedCapabilitiesCommand(
+                 connHandle, capabilities, &command) &&
+         sendDirectBuiltCommand(command, outStatus);
+}
+
+bool BleCsControllerVprHost::directWriteCachedRemoteSupportedCapabilitiesV2(
+    const BleCsControllerCapabilities& capabilities,
+    uint8_t* outStatus) {
+  uint16_t connHandle = 0U;
+  BleCsHciCommand command{};
+  return currentConnHandle(&connHandle) &&
+         BleChannelSoundingRadio::
+             buildHciWriteCachedRemoteSupportedCapabilitiesV2Command(
+                 connHandle, capabilities, &command) &&
+         sendDirectBuiltCommand(command, outStatus);
+}
+
+bool BleCsControllerVprHost::directReadRemoteFaeTable(BleCsFaeTable* outTable,
+                                                      uint8_t* outStatus) {
+  if (outTable == nullptr || outStatus == nullptr) {
+    return false;
+  }
+  *outTable = BleCsFaeTable{};
+  lastRemoteFaeTable_ = BleCsFaeTable{};
+
+  uint16_t connHandle = 0U;
+  BleCsHciCommand command{};
+  if (!currentConnHandle(&connHandle) ||
+      !BleChannelSoundingRadio::buildHciReadRemoteFaeTableCommand(
+          connHandle, &command) ||
+      !sendDirectBuiltCommand(command, outStatus)) {
+    return false;
+  }
+  if (*outStatus != 0U) {
+    return true;
+  }
+  if (!lastRemoteFaeTable_.valid ||
+      lastRemoteFaeTable_.connHandle != connHandle) {
+    return false;
+  }
+  *outTable = lastRemoteFaeTable_;
+  return true;
+}
+
+bool BleCsControllerVprHost::directWriteCachedRemoteFaeTable(
+    const int8_t faeTable[kBleCsFaeTableValueCount],
+    uint8_t* outStatus) {
+  uint16_t connHandle = 0U;
+  BleCsHciCommand command{};
+  return currentConnHandle(&connHandle) &&
+         BleChannelSoundingRadio::buildHciWriteCachedRemoteFaeTableCommand(
+             connHandle, faeTable, &command) &&
+         sendDirectBuiltCommand(command, outStatus);
+}
+
+bool BleCsControllerVprHost::directSetChannelClassification(
+    const BleCsChannelClassification& classification,
+    uint8_t* outStatus) {
+  BleCsHciCommand command{};
+  return BleChannelSoundingRadio::buildHciSetChannelClassificationCommand(
+             classification, &command) &&
+         sendDirectBuiltCommand(command, outStatus);
+}
+
+bool BleCsControllerVprHost::directStartTest(const BleCsTestParams& params,
+                                             uint8_t* outStatus) {
+  lastTestEndComplete_ = BleCsTestEndComplete{};
+  lastTestEndCompleteValid_ = false;
+  BleCsHciCommand command{};
+  return BleChannelSoundingRadio::buildHciTestCommand(params, &command) &&
+         sendDirectBuiltCommand(command, outStatus);
+}
+
+bool BleCsControllerVprHost::directStopTest(
+    BleCsTestEndComplete* outComplete,
+    uint8_t* outStatus) {
+  if (outComplete == nullptr || outStatus == nullptr) {
+    return false;
+  }
+  *outComplete = BleCsTestEndComplete{};
+  lastTestEndComplete_ = BleCsTestEndComplete{};
+  lastTestEndCompleteValid_ = false;
+
+  BleCsHciCommand command{};
+  if (!BleChannelSoundingRadio::buildHciTestEndCommand(&command) ||
+      !sendDirectBuiltCommand(command, outStatus)) {
+    return false;
+  }
+  if (*outStatus != 0U) {
+    return true;
+  }
+  if (!lastTestEndCompleteValid_) {
+    return false;
+  }
+  *outComplete = lastTestEndComplete_;
+  return true;
 }
 
 bool BleCsControllerVprHost::directSetDefaultSettings(const BleCsDefaultSettings& settings,
@@ -4858,10 +5149,85 @@ const BleCsSubeventResult& BleCsControllerVprHost::completedPeerResult() const {
   return host_.completedPeerResult();
 }
 
+bool BleCsControllerVprHost::lastRemoteFaeTableValid() const {
+  return lastRemoteFaeTable_.valid;
+}
+
+const BleCsFaeTable& BleCsControllerVprHost::lastRemoteFaeTable() const {
+  return lastRemoteFaeTable_;
+}
+
+bool BleCsControllerVprHost::lastTestEndCompleteValid() const {
+  return lastTestEndCompleteValid_;
+}
+
+const BleCsTestEndComplete& BleCsControllerVprHost::lastTestEndComplete() const {
+  return lastTestEndComplete_;
+}
+
 VprSharedTransportStream& BleCsControllerVprHost::transport() { return transport_; }
 
 const VprSharedTransportStream& BleCsControllerVprHost::transport() const {
   return transport_;
+}
+
+bool BleCsControllerVprHost::consumeDirectAuxiliaryEvent(
+    const uint8_t* packet,
+    size_t packetLen) {
+  BleCsHciCommandStatusEvent statusEvent{};
+  if (BleChannelSoundingRadio::parseHciCommandStatusEvent(
+          packet, packetLen, &statusEvent)) {
+    switch (statusEvent.opcode) {
+      case kBleCsHciOpWriteCachedRemoteSupportedCapabilities:
+      case kBleCsHciOpReadRemoteFaeTable:
+      case kBleCsHciOpWriteCachedRemoteFaeTable:
+      case kBleCsHciOpSetChannelClassification:
+      case kBleCsHciOpTest:
+      case kBleCsHciOpTestEnd:
+      case kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (BleChannelSoundingRadio::parseHciCommandCompleteEvent(
+          packet, packetLen, &completeEvent)) {
+    switch (completeEvent.opcode) {
+      case kBleCsHciOpWriteCachedRemoteSupportedCapabilities:
+      case kBleCsHciOpReadRemoteFaeTable:
+      case kBleCsHciOpWriteCachedRemoteFaeTable:
+      case kBleCsHciOpSetChannelClassification:
+      case kBleCsHciOpTest:
+      case kBleCsHciOpTestEnd:
+      case kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  BleCsHciLeMetaEvent metaEvent{};
+  if (!BleChannelSoundingRadio::parseHciLeMetaEvent(
+          packet, packetLen, &metaEvent)) {
+    return false;
+  }
+  if (metaEvent.subeventCode == kBleCsHciEvtReadRemoteFaeTableComplete) {
+    return BleChannelSoundingRadio::parseHciReadRemoteFaeTableCompleteEvent(
+        metaEvent.payload, metaEvent.payloadLen, &lastRemoteFaeTable_);
+  }
+  if (metaEvent.subeventCode == kBleCsHciEvtTestEndComplete) {
+    BleCsTestEndComplete complete{};
+    if (!BleChannelSoundingRadio::parseHciTestEndCompleteEvent(
+            metaEvent.payload, metaEvent.payloadLen, &complete)) {
+      return false;
+    }
+    lastTestEndComplete_ = complete;
+    lastTestEndCompleteValid_ = true;
+    return true;
+  }
+  return false;
 }
 
 bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHost* directHost,
@@ -4873,18 +5239,23 @@ bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHos
 
   bool ok = true;
   if (response != nullptr && responseLen > 0U) {
-    ok = host_.consumeControllerPacket(response, responseLen);
+    ok = consumeDirectAuxiliaryEvent(response, responseLen) ||
+         host_.consumeControllerPacket(response, responseLen);
   }
 
   uint8_t packet[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t packetLen = 0U;
   while (ok && directHost->popPendingH4Event(packet, sizeof(packet), &packetLen)) {
-    ok = host_.consumeControllerPacket(packet, packetLen);
+    ok = consumeDirectAuxiliaryEvent(packet, packetLen) ||
+         host_.consumeControllerPacket(packet, packetLen);
   }
 
   uint8_t pollCount = 0U;
   while (ok && transport_.available() > 0 && pollCount < 8U) {
-    ok = host_.pollController();
+    packetLen = 0U;
+    ok = directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U) &&
+         (consumeDirectAuxiliaryEvent(packet, packetLen) ||
+          host_.consumeControllerPacket(packet, packetLen));
     ++pollCount;
   }
   return ok;

@@ -534,6 +534,10 @@ class VprControllerServiceHost {
                                     uint32_t timeoutMs = 5000UL);
   bool waitBleConnectionEvent(VprBleConnectionEvent* event,
                               uint32_t timeoutMs = 5000UL);
+  bool readNextH4Event(uint8_t* packet,
+                       size_t packetSize,
+                       size_t* packetLen,
+                       uint32_t timeoutMs = 5000UL);
   bool popPendingH4Event(uint8_t* packet, size_t packetSize, size_t* packetLen);
   uint32_t pendingH4EventDropCount() const;
   uint32_t pendingTickerEventDropCount() const;

@@ -1,5 +1,8 @@
 # Zigbee2MQTT Integration
 
+For the remaining stack work, implementation order, and complete validation
+matrix, see [Zigbee Full-Support Handoff](ZIGBEE_FULL_SUPPORT_HANDOFF.md).
+
 The Zigbee HA examples use honest `CleanCore` manufacturer/model strings. A
 stock Zigbee2MQTT install can still interview them and generate exposes, but it
 will mark them as generated/unsupported until Zigbee2MQTT has a converter for

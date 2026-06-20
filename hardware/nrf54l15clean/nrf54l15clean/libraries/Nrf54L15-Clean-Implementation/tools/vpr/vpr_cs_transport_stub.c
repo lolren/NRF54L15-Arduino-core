@@ -22,12 +22,22 @@
 #define BLE_CS_MAIN_MODE2 0x02U
 
 #define BLE_CS_HCI_OP_READ_REMOTE_SUPPORTED_CAPABILITIES 0x208AU
+#define BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_SUPPORTED_CAPABILITIES 0x208BU
 #define BLE_CS_HCI_OP_SECURITY_ENABLE 0x208CU
 #define BLE_CS_HCI_OP_SET_DEFAULT_SETTINGS 0x208DU
+#define BLE_CS_HCI_OP_READ_REMOTE_FAE_TABLE 0x208EU
+#define BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_FAE_TABLE 0x208FU
 #define BLE_CS_HCI_OP_CREATE_CONFIG 0x2090U
 #define BLE_CS_HCI_OP_REMOVE_CONFIG 0x2091U
+#define BLE_CS_HCI_OP_SET_CHANNEL_CLASSIFICATION 0x2092U
 #define BLE_CS_HCI_OP_SET_PROCEDURE_PARAMETERS 0x2093U
 #define BLE_CS_HCI_OP_PROCEDURE_ENABLE 0x2094U
+#define BLE_CS_HCI_OP_TEST 0x2095U
+#define BLE_CS_HCI_OP_TEST_END 0x2096U
+#define BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_SUPPORTED_CAPABILITIES_V2 0x20A6U
+#define BLE_CS_TEST_SUPPORTED_OVERRIDE_MASK 0x05FDU
+#define BLE_CS_FAE_TABLE_LEN 72U
+#define BLE_CS_CHANNEL_CLASSIFICATION_LEN 10U
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -92,11 +102,13 @@
 #endif
 
 #define BLE_CS_HCI_EVT_READ_REMOTE_SUPPORTED_CAPS_COMPLETE_V2 0x38U
+#define BLE_CS_HCI_EVT_READ_REMOTE_FAE_TABLE_COMPLETE 0x2DU
 #define BLE_CS_HCI_EVT_SECURITY_ENABLE_COMPLETE 0x2EU
 #define BLE_CS_HCI_EVT_CONFIG_COMPLETE 0x2FU
 #define BLE_CS_HCI_EVT_PROCEDURE_ENABLE_COMPLETE 0x30U
 #define BLE_CS_HCI_EVT_SUBEVENT_RESULT 0x31U
 #define BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE 0x32U
+#define BLE_CS_HCI_EVT_TEST_END_COMPLETE 0x33U
 
 #define BLE_HCI_PACKET_TYPE_EVENT 0x04U
 #define BLE_HCI_EVT_COMMAND_COMPLETE 0x0EU
@@ -229,6 +241,7 @@ static uint32_t g_ble_connection_event_queue_tail = 0U;
 static uint32_t g_ble_connection_event_queue_count = 0U;
 #endif
 static uint8_t g_pending_cs_result_stage = 0U;
+static uint8_t g_cs_test_active = 0U;
 #if VPR_CS_DEDICATED_IMAGE
 static uint32_t g_cs_next_procedure_heartbeat = 0U;
 static uint32_t g_cs_next_subevent_heartbeat = 0U;
@@ -438,13 +451,13 @@ static uint32_t g_restored_from_hibernate = 0U;
 
 static bool host_request_pending(void);
 
-#if VPR_CS_DEDICATED_IMAGE
 enum {
   BLE_CS_HCI_STATUS_SUCCESS = 0x00U,
   BLE_CS_HCI_STATUS_COMMAND_DISALLOWED = 0x0CU,
   BLE_CS_HCI_STATUS_INVALID_PARAMS = 0x12U,
 };
 
+#if VPR_CS_DEDICATED_IMAGE
 static void clear_active_cs_state(void);
 static uint32_t pack_demo_channels_from_map(const uint8_t *channel_map);
 static vpr_cs_config_slot_t *find_cs_slot(uint8_t config_id);
@@ -2736,6 +2749,17 @@ static size_t build_remote_caps_payload(uint8_t *payload, size_t max_len, uint16
   return 34U;
 }
 
+static size_t build_remote_fae_payload(uint8_t *payload, size_t max_len,
+                                       uint16_t conn_handle, uint8_t status) {
+  if (payload == NULL || max_len < (3U + BLE_CS_FAE_TABLE_LEN)) {
+    return 0U;
+  }
+  payload[0] = status;
+  write_le16(&payload[1], conn_handle);
+  bytes_zero(&payload[3], BLE_CS_FAE_TABLE_LEN);
+  return 3U + BLE_CS_FAE_TABLE_LEN;
+}
+
 static size_t build_security_complete_payload(uint8_t *payload, size_t max_len,
                                               uint16_t conn_handle) {
   if (payload == NULL || max_len < 3U) {
@@ -3677,6 +3701,38 @@ static void build_unknown_command_response(uint16_t opcode) {
   g_vpr_transport->vprLen = 7U;
 }
 
+static bool command_layout_is_exact(size_t payload_len) {
+  return g_host_transport->hostLen == (4U + payload_len) &&
+         g_host_transport->hostData[0] == 0x01U &&
+         g_host_transport->hostData[3] == payload_len;
+}
+
+static uint8_t validate_conn_scoped_command(size_t payload_len) {
+  if (!command_layout_is_exact(payload_len)) {
+    return BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  }
+#if VPR_CS_DEDICATED_IMAGE
+  if (!command_conn_handle_matches_active_link()) {
+    return (g_cs_session_open != 0U) ? BLE_CS_HCI_STATUS_INVALID_PARAMS
+                                     : BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
+  }
+#endif
+  return BLE_CS_HCI_STATUS_SUCCESS;
+}
+
+static uint8_t validate_cs_test_command(void) {
+  if (g_host_transport->hostLen < 34U ||
+      g_host_transport->hostData[0] != 0x01U ||
+      g_host_transport->hostData[3] != (g_host_transport->hostLen - 4U) ||
+      g_host_transport->hostLen != (34U + g_host_transport->hostData[33])) {
+    return BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  }
+  return (read_le16(&g_host_transport->hostData[31]) &
+          (uint16_t)~BLE_CS_TEST_SUPPORTED_OVERRIDE_MASK) == 0U
+             ? BLE_CS_HCI_STATUS_SUCCESS
+             : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+}
+
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
   /* Keep this comfortably above the largest vendor command-complete payload. */
   uint8_t payload[192];
@@ -3725,6 +3781,58 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       size_t len = append_h4_command_complete((uint8_t *)g_vpr_transport->vprData + offset,
                                               NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
                                               opcode, 0U);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_SUPPORTED_CAPABILITIES:
+    case BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_SUPPORTED_CAPABILITIES_V2: {
+      const size_t payload_len =
+          opcode == BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_SUPPORTED_CAPABILITIES ? 30U : 33U;
+      const uint8_t status = validate_conn_scoped_command(payload_len);
+      size_t len = append_h4_command_complete(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, status);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case BLE_CS_HCI_OP_READ_REMOTE_FAE_TABLE: {
+      const uint8_t status = validate_conn_scoped_command(2U);
+      size_t len = append_h4_command_status(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, status);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      if (status != BLE_CS_HCI_STATUS_SUCCESS) {
+        break;
+      }
+      len = build_remote_fae_payload(payload, sizeof(payload), conn_handle, status);
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_le_meta(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
+          BLE_CS_HCI_EVT_READ_REMOTE_FAE_TABLE_COMPLETE, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case BLE_CS_HCI_OP_WRITE_CACHED_REMOTE_FAE_TABLE: {
+      const uint8_t status =
+          validate_conn_scoped_command(2U + BLE_CS_FAE_TABLE_LEN);
+      size_t len = append_h4_command_complete(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, status);
       if (len == 0U) {
         return false;
       }
@@ -3847,6 +3955,20 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       offset += len;
       break;
     }
+    case BLE_CS_HCI_OP_SET_CHANNEL_CLASSIFICATION: {
+      const uint8_t status =
+          command_layout_is_exact(BLE_CS_CHANNEL_CLASSIFICATION_LEN)
+              ? BLE_CS_HCI_STATUS_SUCCESS
+              : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+      size_t len = append_h4_command_complete(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, status);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
     case BLE_CS_HCI_OP_SET_PROCEDURE_PARAMETERS: {
       uint8_t status = 0U;
 #if VPR_CS_DEDICATED_IMAGE
@@ -3955,6 +4077,50 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         g_cs_local_chunk_start_step = 0U;
         g_cs_peer_chunk_start_step = 0U;
       }
+      break;
+    }
+    case BLE_CS_HCI_OP_TEST: {
+      const uint8_t status = validate_cs_test_command();
+      if (status == BLE_CS_HCI_STATUS_SUCCESS) {
+        g_cs_test_active = 1U;
+      }
+      size_t len = append_h4_command_complete(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, status);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case BLE_CS_HCI_OP_TEST_END: {
+      uint8_t status = BLE_CS_HCI_STATUS_SUCCESS;
+      if (!command_layout_is_exact(0U)) {
+        status = BLE_CS_HCI_STATUS_INVALID_PARAMS;
+      } else if (g_cs_test_active == 0U) {
+        status = BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
+      } else {
+        g_cs_test_active = 0U;
+      }
+      size_t len = append_h4_command_complete(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, status);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      if (status != BLE_CS_HCI_STATUS_SUCCESS) {
+        break;
+      }
+      payload[0] = status;
+      len = append_h4_le_meta(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
+          BLE_CS_HCI_EVT_TEST_END_COMPLETE, payload, 1U);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
       break;
     }
 #if !VPR_CS_DEDICATED_IMAGE

@@ -214,6 +214,8 @@ Examples:
 - **[Development Guide](docs/development.md)**
 - **[BLE Status & Resume Checklist](docs/BLE_COMPLIANCE_RESUME.md)**
 - **[Zigbee2MQTT Integration](docs/ZIGBEE2MQTT_INTEGRATION.md)**
+- **[Zigbee Full-Support Handoff](docs/ZIGBEE_FULL_SUPPORT_HANDOFF.md)**
+- **[Channel Sounding Zephyr-Parity Status](docs/CHANNEL_SOUNDING_ZEPHYR_PARITY.md)**
 - **[Thread & Matter Implementation Plan](docs/THREAD_MATTER_IMPLEMENTATION_PLAN.md)**
 - **[Thread & Matter Hardening Status](docs/THREAD_MATTER_FINISH_PLAN.md)**
 - **[Power Profile Measurements](POWER_PROFILE_MEASUREMENTS.md)**
