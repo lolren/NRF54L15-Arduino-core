@@ -5491,6 +5491,10 @@ bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHos
           host_.consumeControllerPacket(packet, packetLen));
     ++pollCount;
   }
+  /* Clear vprFlags=PENDING in shared memory so the VPR main loop can
+   * produce background results (e.g. CS test stream). pullResponse() is
+   * called by poll() which is called by available(). */
+  (void)transport_.available();
   return ok;
 }
 
