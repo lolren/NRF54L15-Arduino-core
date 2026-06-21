@@ -953,6 +953,11 @@ class BleCsControllerSession {
                                     bool securityEnabled,
                                     bool procedureParametersApplied,
                                     bool procedureEnabled);
+  /* Most recently consumed subevent result abort reasons (0 = no abort).
+   * Updated by accumulateProcedureResult() whenever a result carries a
+   * non-zero abort reason. */
+  uint8_t lastProcedureAbortReason() const;
+  uint8_t lastSubeventAbortReason() const;
 
  private:
   static bool onWorkflowPacket(const uint8_t* packet, size_t packetLen, void* userData);
@@ -987,6 +992,8 @@ class BleCsControllerSession {
   uint8_t accumulatedPeerStepData_[kBleCsMaxControllerStepDataBytes];
   uint8_t completedLocalStepData_[kBleCsMaxControllerStepDataBytes];
   uint8_t completedPeerStepData_[kBleCsMaxControllerStepDataBytes];
+  uint8_t lastProcedureAbortReason_ = 0U;
+  uint8_t lastSubeventAbortReason_ = 0U;
 };
 
 using BleCsControllerSendPacketCallback =
@@ -1048,6 +1055,8 @@ class BleCsControllerHost {
                                     bool securityEnabled,
                                     bool procedureParametersApplied,
                                     bool procedureEnabled);
+  uint8_t lastProcedureAbortReason() const;
+  uint8_t lastSubeventAbortReason() const;
 
  private:
   static bool onControllerPacket(const uint8_t* packet, size_t packetLen, void* userData);
@@ -1112,6 +1121,8 @@ class BleCsControllerStreamHost {
                                     bool securityEnabled,
                                     bool procedureParametersApplied,
                                     bool procedureEnabled);
+  uint8_t lastProcedureAbortReason() const;
+  uint8_t lastSubeventAbortReason() const;
 
  private:
   static bool onSendPacket(const uint8_t* packet, size_t packetLen, void* userData);
@@ -1568,6 +1579,8 @@ class BleCsControllerVprHost {
   const BleCsSubeventResult& peerResult() const;
   const BleCsSubeventResult& completedLocalResult() const;
   const BleCsSubeventResult& completedPeerResult() const;
+  uint8_t lastProcedureAbortReason() const;
+  uint8_t lastSubeventAbortReason() const;
   bool lastRemoteFaeTableValid() const;
   const BleCsFaeTable& lastRemoteFaeTable() const;
   bool lastTestEndCompleteValid() const;

@@ -3263,6 +3263,8 @@ void BleCsControllerSession::reset() {
   accumulatedPeerResult_ = BleCsSubeventResult{};
   completedLocalResult_ = BleCsSubeventResult{};
   completedPeerResult_ = BleCsSubeventResult{};
+  lastProcedureAbortReason_ = 0U;
+  lastSubeventAbortReason_ = 0U;
 }
 
 bool parseDirectStatusResponse(const uint8_t* packet,
@@ -3361,6 +3363,14 @@ const BleCsControllerWorkflowState& BleCsControllerSession::workflowState() cons
   return workflow_.state();
 }
 
+uint8_t BleCsControllerSession::lastProcedureAbortReason() const {
+  return lastProcedureAbortReason_;
+}
+
+uint8_t BleCsControllerSession::lastSubeventAbortReason() const {
+  return lastSubeventAbortReason_;
+}
+
 const BleCsSubeventResult& BleCsControllerSession::localResult() const {
   return localResult_;
 }
@@ -3417,6 +3427,18 @@ void BleCsControllerSession::resetAccumulatedProcedureResult(
 bool BleCsControllerSession::accumulateProcedureResult(BleCsControllerResultSource source,
                                                        const BleCsSubeventResult& result) {
   if (!result.isComplete || result.stepData == nullptr || result.stepDataLen == 0U) {
+    return false;
+  }
+
+  /* Reject aborted results.  The VPR may tag subevent results with a non-zero
+   * abort reason (e.g. 0x06 = LL Procedure Timeout, 0x0B = Connection Terminated
+   * by Local Host).  Accumulating aborted data would produce invalid distance
+   * estimates later, so treat them as rejected. */
+  if (result.header.procedureAbortReason != 0U ||
+      result.header.subeventAbortReason != 0U) {
+    lastProcedureAbortReason_ = result.header.procedureAbortReason;
+    lastSubeventAbortReason_ = result.header.subeventAbortReason;
+    state_.estimateValid = false;
     return false;
   }
 
@@ -3554,6 +3576,14 @@ void BleCsControllerSession::updateEstimateIfComplete() {
   }
   if (accumulatedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
       accumulatedPeerResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete) {
+    /* If either result indicates abort, clean up so stale data doesn't
+     * contaminate the next procedure. */
+    if (accumulatedLocalResult_.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
+        accumulatedPeerResult_.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
+        accumulatedLocalResult_.header.procedureAbortReason != 0U ||
+        accumulatedPeerResult_.header.procedureAbortReason != 0U) {
+      resetAccumulatedProcedureResults();
+    }
     return;
   }
   if (accumulatedLocalResult_.header.connHandle != accumulatedPeerResult_.header.connHandle ||
@@ -3829,6 +3859,14 @@ bool BleCsControllerHost::failed() const { return session_.failed(); }
 
 bool BleCsControllerHost::estimateValid() const { return session_.estimateValid(); }
 
+uint8_t BleCsControllerHost::lastProcedureAbortReason() const {
+  return session_.lastProcedureAbortReason();
+}
+
+uint8_t BleCsControllerHost::lastSubeventAbortReason() const {
+  return session_.lastSubeventAbortReason();
+}
+
 const BleCsControllerHostState& BleCsControllerHost::state() const { return state_; }
 
 const BleCsControllerSessionState& BleCsControllerHost::sessionState() const {
@@ -3989,6 +4027,14 @@ bool BleCsControllerStreamHost::ready() const { return host_.ready(); }
 bool BleCsControllerStreamHost::failed() const { return host_.failed(); }
 
 bool BleCsControllerStreamHost::estimateValid() const { return host_.estimateValid(); }
+
+uint8_t BleCsControllerStreamHost::lastProcedureAbortReason() const {
+  return host_.lastProcedureAbortReason();
+}
+
+uint8_t BleCsControllerStreamHost::lastSubeventAbortReason() const {
+  return host_.lastSubeventAbortReason();
+}
 
 const BleCsControllerStreamHostState& BleCsControllerStreamHost::state() const { return state_; }
 
@@ -5183,6 +5229,14 @@ bool BleCsControllerVprHost::ready() const { return host_.ready(); }
 bool BleCsControllerVprHost::failed() const { return host_.failed(); }
 
 bool BleCsControllerVprHost::estimateValid() const { return host_.estimateValid(); }
+
+uint8_t BleCsControllerVprHost::lastProcedureAbortReason() const {
+  return host_.lastProcedureAbortReason();
+}
+
+uint8_t BleCsControllerVprHost::lastSubeventAbortReason() const {
+  return host_.lastSubeventAbortReason();
+}
 
 const BleCsControllerVprHostState& BleCsControllerVprHost::vprState() const {
   return vprState_;

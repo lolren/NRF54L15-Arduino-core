@@ -473,7 +473,26 @@ static uint32_t g_restored_from_hibernate = 0U;
 static uint8_t g_cs_procedure_abort_reason = 0U;
 static uint8_t g_cs_subevent_abort_reason = 0U;
 static uint32_t g_cs_peer_exchange_deadline = 0U;
-static uint8_t g_cs_peer_exchange_stage = 0U;  /* 0=idle, 1=awaiting_peer */
+
+/* Peer-exchange state machine stages (Parity item #3b).
+ * Replaces the previous 0/1 flag so the timeout handler can report
+ * the correct abort reason for each phase. */
+enum {
+  VPR_CS_PEER_STAGE_IDLE = 0,
+  VPR_CS_PEER_STAGE_AWAITING_CS_RSP,
+  VPR_CS_PEER_STAGE_AWAITING_CS_CFG,
+  VPR_CS_PEER_STAGE_AWAITING_PROC_RSP,
+  VPR_CS_PEER_STAGE_AWAITING_SEC_RSP,
+  VPR_CS_PEER_STAGE_AWAITING_START,
+  VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE,
+};
+static uint8_t g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
+
+/* Forward declarations for functions defined later in the dedicated-image
+ * section.  They are called from arm sites inside publish_builtin_response_
+ * for_opcode which precedes their definitions. */
+static uint32_t peer_deadline_for_stage(uint8_t stage);
+static uint8_t abort_reason_for_peer_stage(uint8_t stage);
 
 static bool host_request_pending(void);
 
@@ -2359,6 +2378,10 @@ static void clear_active_runtime_state(void) {
   g_cs_active_subevent_index = 0U;
   g_cs_local_chunk_start_step = 0U;
   g_cs_peer_chunk_start_step = 0U;
+  g_cs_procedure_abort_reason = 0U;
+  g_cs_subevent_abort_reason = 0U;
+  g_cs_peer_exchange_deadline = 0U;
+  g_cs_peer_exchange_stage = 0U;
 }
 
 static void clear_active_config_selection(void) {
@@ -3924,9 +3947,9 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       }
       offset += len;
 #if VPR_CS_DEDICATED_IMAGE
-      g_cs_peer_exchange_stage = 1U;
+      g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_CS_RSP;
       g_cs_peer_exchange_deadline =
-          g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+          peer_deadline_for_stage(g_cs_peer_exchange_stage);
 #endif
       break;
     }
@@ -4014,9 +4037,9 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       }
       offset += len;
 #if VPR_CS_DEDICATED_IMAGE
-      g_cs_peer_exchange_stage = 1U;
+      g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_SEC_RSP;
       g_cs_peer_exchange_deadline =
-          g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+          peer_deadline_for_stage(g_cs_peer_exchange_stage);
 #endif
       break;
     }
@@ -4050,9 +4073,9 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       }
       offset += len;
 #if VPR_CS_DEDICATED_IMAGE
-      g_cs_peer_exchange_stage = 1U;
+      g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_PROC_RSP;
       g_cs_peer_exchange_deadline =
-          g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+          peer_deadline_for_stage(g_cs_peer_exchange_stage);
 #endif
       break;
     }
@@ -4149,9 +4172,9 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       }
 #if VPR_CS_DEDICATED_IMAGE
       if (enable != 0U) {
-        g_cs_peer_exchange_stage = 1U;
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
         g_cs_peer_exchange_deadline =
-            g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+            peer_deadline_for_stage(g_cs_peer_exchange_stage);
       }
 #endif
       break;
@@ -4880,18 +4903,112 @@ static void detect_and_handle_disconnect(void) {
   }
 }
 
+/* Per-stage deadline in VPR heartbeat ticks. */
+static uint32_t peer_deadline_for_stage(uint8_t stage) {
+  switch (stage) {
+    case VPR_CS_PEER_STAGE_AWAITING_CS_RSP:
+    case VPR_CS_PEER_STAGE_AWAITING_CS_CFG:
+      return g_vpr_transport->heartbeat + 500U;   /* ~5 connection events */
+    case VPR_CS_PEER_STAGE_AWAITING_PROC_RSP:
+    case VPR_CS_PEER_STAGE_AWAITING_SEC_RSP:
+      return g_vpr_transport->heartbeat + 300U;   /* ~3 connection events */
+    case VPR_CS_PEER_STAGE_AWAITING_START:
+      return g_vpr_transport->heartbeat +
+             ((uint32_t)g_cs_min_procedure_interval * 8U);
+    default:
+      return g_vpr_transport->heartbeat + 5000U;  /* generous fallback */
+  }
+}
+
+/* Map peer-exchange stage to the appropriate HCI abort reason. */
+static uint8_t abort_reason_for_peer_stage(uint8_t stage) {
+  switch (stage) {
+    case VPR_CS_PEER_STAGE_AWAITING_CS_RSP:
+    case VPR_CS_PEER_STAGE_AWAITING_CS_CFG:
+      return 0x07U;  /* Configuration Timeout */
+    case VPR_CS_PEER_STAGE_AWAITING_SEC_RSP:
+      return 0x09U;  /* Security Timeout */
+    case VPR_CS_PEER_STAGE_AWAITING_PROC_RSP:
+    case VPR_CS_PEER_STAGE_AWAITING_START:
+    default:
+      return 0x06U;  /* LL Procedure Timeout */
+  }
+}
+
 /* Check if a peer-exchange operation has exceeded its deadline.
  * Called from the main loop after disconnect detection. */
 static void check_peer_exchange_timeout(void) {
-  if (g_cs_peer_exchange_stage == 0U) { return; }
+  if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_IDLE) { return; }
+  if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) { return; }
   if (g_vpr_transport->heartbeat < g_cs_peer_exchange_deadline) { return; }
-  g_cs_procedure_abort_reason = 0x06U;  /* LL Procedure Timeout */
-  g_cs_peer_exchange_stage = 0U;
+  g_cs_procedure_abort_reason =
+      abort_reason_for_peer_stage(g_cs_peer_exchange_stage);
+  g_cs_subevent_abort_reason = g_cs_procedure_abort_reason;
+  g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
   g_cs_peer_exchange_deadline = 0U;
   if (g_pending_cs_result_stage != 0U) {
     g_cs_procedure_enabled = 0U;
     clear_active_runtime_state();
     g_pending_cs_result_stage = 0U;
+  }
+}
+
+/* Callback for an incoming CS LL Control PDU from the peer.
+ * Advances the peer-exchange state machine when the expected response
+ * arrives.  In the current single-board configuration no real PDUs
+ * arrive — the function is a framework placeholder wired for future
+ * over-the-air exchange.  The timeout handler remains the exercised
+ * path. */
+static void handle_peer_cs_pdu(const uint8_t *pdu, size_t pdu_len) {
+  if (pdu == NULL || pdu_len < 2U) { return; }
+  const uint8_t opcode = pdu[0];
+  switch (g_cs_peer_exchange_stage) {
+    case VPR_CS_PEER_STAGE_AWAITING_CS_RSP:
+      if (opcode == VPR_CS_LL_CS_RSP) {
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_CS_CFG;
+        g_cs_peer_exchange_deadline =
+            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+      }
+      break;
+    case VPR_CS_PEER_STAGE_AWAITING_CS_CFG:
+      if (opcode == VPR_CS_LL_CS_CFG) {
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_PROC_RSP;
+        g_cs_peer_exchange_deadline =
+            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+      }
+      break;
+    case VPR_CS_PEER_STAGE_AWAITING_PROC_RSP:
+      if (opcode == VPR_CS_LL_CS_PROC_RSP) {
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_SEC_RSP;
+        g_cs_peer_exchange_deadline =
+            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+      }
+      break;
+    case VPR_CS_PEER_STAGE_AWAITING_SEC_RSP:
+      if (opcode == VPR_CS_LL_CS_SEC_RSP) {
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
+        g_cs_peer_exchange_deadline =
+            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+      }
+      break;
+    case VPR_CS_PEER_STAGE_AWAITING_START:
+      if (opcode == VPR_CS_LL_CS_START) {
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE;
+        g_cs_peer_exchange_deadline = 0U;
+      }
+      break;
+    case VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE:
+      if (opcode == VPR_CS_LL_CS_TERMINATE || opcode == VPR_CS_LL_CS_ABORT) {
+        if (pdu_len >= 3U) {
+          g_cs_procedure_abort_reason = pdu[2];
+          g_cs_subevent_abort_reason = pdu[2];
+        }
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
+        g_cs_peer_exchange_deadline = 0U;
+      }
+      break;
+    default:
+      break;
   }
 }
 #endif  /* VPR_CS_DEDICATED_IMAGE */
