@@ -282,6 +282,10 @@ This confirms: normal flow (Phase 1), disconnect mid-procedure via resetTranspor
 cache coherency workaround in `resetTransport()` — see the nRF54L15 write-back
 cache note below.
 
+Phase 4 (timeout resilience) has been added to the example and compiles; it
+verifies that the VPR peer-exchange timeout handler fires without destabilising
+the transport. Hardware verification of Phase 4 is pending the next upload cycle.
+
 `BleChannelSoundingVprHciParity` was previously verified on the same hardware
 with probe UID `E91217E8`:
 
