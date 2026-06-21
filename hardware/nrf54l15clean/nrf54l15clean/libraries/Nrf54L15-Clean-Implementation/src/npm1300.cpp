@@ -154,6 +154,7 @@ static uint8_t g_chargerStatus = 0;
 static uint8_t g_chargerError = 0;
 static uint8_t g_vbusStatus = 0;
 static int32_t g_chargeCurrentUa = 32000;
+static int32_t g_dischargeLimitUa = 1000000;
 
 static inline uint16_t adc10(uint8_t msb, uint8_t lsb, uint8_t shift) {
     return (uint16_t)(((uint16_t)msb << 2U) | ((lsb >> shift) & 0x03U));
