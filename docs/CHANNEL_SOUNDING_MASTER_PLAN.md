@@ -1,0 +1,546 @@
+# Channel Sounding — Master Plan & Progress Tracker
+
+```
+CHANNEL SOUNDING — FULL ZEPHYR PARITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░  42%
+        done           |        remaining
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+| Done | Task | Status |
+|------|------|--------|
+| ██ | HCI/VPR command parity | ✅ Hardware-verified |
+| ██ | Cached capability & FAE state | ✅ Hardware-verified |
+| ██ | Disconnect framework (Phases 1–3) | ✅ Hardware-verified |
+| ██ | Timeout resilience (Phase 4) | ✅ Hardware-verified |
+| ██ | LL Control PDU definitions | ✅ Code complete |
+| ██ | VPR peer-exchange state machine | ✅ Code complete |
+| ██ | `directStartTest` transport fix | ✅ Hardware-verified |
+| ▓▓ | Duplicate CS Test rejection | ⚠️ Code complete, unreachable |
+| ░░ | Host abort reason reaction | 📋 Planned below |
+| ░░ | CS Test result stream (handle 0x0FFF) | 🔒 VPR memory window |
+| ░░ | CS Test End (`end=0xFF` fix) | 📋 Needs investigation |
+| ░░ | Error-path testing (examples) | 📋 Planned below |
+| ░░ | Multi-config slot testing | 📋 Planned below |
+| ░░ | LL Control PDU over-the-air exchange | 🔒 Second board |
+| ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
+| ░░ | Physical RF ranging / measurements | 🔒 Second board |
+| ░░ | Two-board interoperability | 🔒 Second board |
+| ░░ | Power / soak / stress testing | 📋 Planned below |
+
+---
+
+## Legend
+
+- ✅ Hardware-verified — compiled, uploaded, tested on XIAO nRF54L15
+- ✅ Code complete — implemented, compiles, pending hardware upload
+- ⚠️ Code complete, unreachable — implemented but not yet exercised by any example
+- 📋 Planned below — detailed implementation plan follows
+- 🔒 Blocked — requires second board, RADIO access, or VPR memory work
+
+---
+
+# Item 1 — HCI/VPR Command Parity
+
+```
+████████████████ 100%
+```
+
+All 14 HCI opcodes (`0x208A`–`0x2096`, `0x20A6`) and 9 LE Meta subevents (`0x2C`–`0x33`, `0x38`) match Zephyr definitions. Verified via `BleChannelSoundingVprHciParity` on hardware.
+
+**No remaining work.**
+
+---
+
+# Item 2 — Cached Capability & FAE State
+
+```
+████████████████ 100%
+```
+
+Host maintains per-connection cached remote capabilities (v1, 30 bytes; v2, 33 bytes) and FAE table (72 values). Lifecycle invalidation via `reset()` on disconnect. Verified via `BleChannelSoundingVprCachedCapabilities`.
+
+**No remaining work.**
+
+---
+
+# Item 3 — Disconnect / Timeout / Abort Framework
+
+```
+███████████████░ 90%
+```
+
+### 3a — Disconnect Detection & Cleanup (Phase 1–3)
+
+```
+████████████████ 100% Hardware-verified
+```
+
+- **VPR `detect_and_handle_disconnect()`** — fires when `g_cs_session_open → 0`, aborts active procedures with reason `0x0B` (Connection Terminated by Local Host)
+- **Host `handleDisconnect()`** — resets inner host, test reassembler, FAE table, cached caps
+- **`syncVprState()`** detects `linkSessionOpen` 1→0 transition → calls `handleDisconnect()`
+- **`reconcileReadyShadowState()`** drops workflow phase to `kIdle` on session close
+- **`resetTransport()` force-disconnect** — bypasses cache-dependent transition detection
+- Verified: `cs_vpr_disconnect=PASS phase1=1 phase2=1 phase3=1`
+
+### 3b — Timeout Tracking & Abort Reasons
+
+```
+████████████████ 100% Hardware-verified
+```
+
+- **VPR `check_peer_exchange_timeout()`** — fires when heartbeat exceeds deadline, aborts with reason `0x06` (LL Procedure Timeout)
+- **Abort reason propagation** in `build_demo_subevent_payload()` — initial and continuation headers carry abort reasons; `procedure_done_status` / `subevent_done_status` set to `0x0F` (aborted)
+- **`handleDisconnect()`** host-side — detects 1→0 transition, resets cached state
+- Phase 4 verified: `phase4=1` (5 s delay >> ~800 ms deadline, host reaches ready after timeout)
+
+### 3c — Peer-Exchange State Machine (Part 3b)
+
+```
+████████████████ 100% Code complete
+```
+
+- **7-stage enum** replaces 0/1 flag:
+  `IDLE → AWAITING_CS_RSP → AWAITING_CS_CFG → AWAITING_PROC_RSP → AWAITING_SEC_RSP → AWAITING_START → PROCEDURE_ACTIVE`
+- **`peer_deadline_for_stage()`** — per-stage timeout calculation (500 ticks for caps/CFG, 300 for procedure/security, `min_procedure_interval × 8` for START)
+- **`abort_reason_for_peer_stage()`** — stage-specific abort mapping (0x06=procedure, 0x07=config, 0x09=security)
+- **`handle_peer_cs_pdu()`** — callback framework wired, advances stage on expected PDU arrival
+- All arm sites updated to use stage-specific enum values
+
+### 3d — LL Control PDU Definitions
+
+```
+████████████████ 100% Code complete
+```
+
+- `vpr_cs_ll_control.h` — CS LL Control PDU opcodes `0x2C`–`0x35` with packed structs
+- Serialization helpers: `vpr_cs_ll_encode_pdu()`, `vpr_cs_ll_decode_header()`
+- Framework-ready; no over-the-air exchange without second board
+
+### 3e — Host Abort Reason Reaction
+
+```
+░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+```
+
+**The gap:** The host parses `procedureAbortReason` and `subeventAbortReason` from HCI subevent result packets (lines 1536-1538, 1571-1573 of `ble_channel_sounding.cpp`). The values are stored in `BleCsSubeventResultHeader` (lines 231-232 of the header). However, `accumulateProcedureResult()` (line 3437) never checks them — an aborted subevent is accumulated just like a successful one. `updateEstimateIfComplete()` (line 3585) checks `procedureDoneStatus != kBleCsProcedureDoneComplete` and returns early, but never cleans up the accumulated buffers.
+
+**What to do (~30 lines):**
+
+**Step 1** — `accumulateProcedureResult()` (line 3437 of `ble_channel_sounding.cpp`):
+After the existing guard at line 3439, add:
+```cpp
+/* Reject aborted results. The VPR tags subevent results with a non-zero
+ * abort reason (e.g. 0x06 = LL Procedure Timeout, 0x0B = Connection
+ * Terminated). Accumulating aborted data would produce invalid distance
+ * estimates. */
+if (result.header.procedureAbortReason != 0U ||
+    result.header.subeventAbortReason != 0U) {
+  return false;
+}
+```
+
+**Step 2** — `updateEstimateIfComplete()` (line 3585 of `ble_channel_sounding.cpp`):
+In the existing early-return block for non-Complete done status, add cleanup:
+```cpp
+if (accumulatedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
+    accumulatedPeerResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete) {
+  /* If either result indicates abort, clean up so stale data doesn't
+   * contaminate the next procedure. */
+  if (accumulatedLocalResult_.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
+      accumulatedPeerResult_.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
+      accumulatedLocalResult_.header.procedureAbortReason != 0U ||
+      accumulatedPeerResult_.header.procedureAbortReason != 0U) {
+    resetAccumulatedProcedureResults();
+  }
+  return;
+}
+```
+
+**Step 3** — Verify:
+- Compile all CS examples (no regression)
+- Upload `BleChannelSoundingVprDisconnectHandling` — Phase 2 resetTransport should trigger abort → the host should clean up gracefully
+- Can be tested by injecting a synthetic aborted subevent via `consumeDirectAuxiliaryEvent`
+
+**Files:** `src/ble_channel_sounding.cpp` only.
+
+---
+
+# Item 4 — CS Test Result Stream
+
+```
+███░░░░░░░░░░░░░ 25%
+```
+
+### 4a — `directStartTest` Transport Fix
+
+```
+████████████████ 100% Hardware-verified
+```
+
+**The fix:** `BleChannelSoundingVprCsTestResults.ino` now sets `gConfig.session.workflow.procedureEnable.enable = 0U` before `beginFreshHost()`. This configures the session (boots VPR, creates config, sets parameters) without enabling the connected procedure, so the transport is clear when `directStartTest` sends the CS Test command.
+
+**Why it matters:** CS Test mode is mutually exclusive with an active connected CS procedure. The demo workflow's `procedureEnable.enable = 1U` keeps the transport saturated with connected demo subevent results, so `directStartTest`'s command write is permanently rejected.
+
+**Verified:** `start=0x0` consistently on hardware.
+
+### 4b — Duplicate CS Test Rejection
+
+```
+████████████████ 100% Code complete
+⚠️ Not yet exercised by any example
+```
+
+`validate_cs_test_command()` in `vpr_cs_transport_stub.c` now checks `g_cs_test_active != 0U` and returns `BLE_CS_HCI_STATUS_COMMAND_DISALLOWED (0x0C)`. The CsTestResults example tests this at lines 77–79:
+```cpp
+uint8_t secondStartStatus = 0x00U;
+ok = ok && gHost.directStartTest(testParams, &secondStartStatus) &&
+     secondStartStatus == kBleCsHciStatusCommandDisallowed;
+```
+This code is unreachable until the test stream produces results (Item 4c).
+
+### 4c — CS Test Result Stream (handle 0x0FFF)
+
+```
+░░░░░░░░░░░░░░░░ 0% 🔒 VPR memory-constrained
+```
+
+**The gap:** `g_pending_cs_test_result_stage` is defined but never activated. The VPR `LE CS Test` handler sets `g_cs_test_active = 1` but no code schedules results on handle `0x0FFF`. The connected path continues to emit results on the session handle.
+
+**What's needed:**
+
+1. **Test staging initialization** — in the `LE CS Test` handler (`case BLE_CS_HCI_OP_TEST`):
+   ```c
+   g_cs_test_procedure_counter = 1U;
+   g_pending_cs_test_result_stage = 1U;
+   g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + 50U;
+   ```
+
+2. **Test result publisher** — emits `0x31`/`0x32` subevent results on `0x0FFF` with `config_id=0`, `acl_event_counter=0`, `frequency_compensation=0`, `reference_power_level=0` per Zephyr test-mode spec. Emits initial + continuation pairs and re-schedules procedures at `BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS (200)`.
+
+3. **Main loop wiring** — test publisher must have priority over the connected-path scheduler to avoid starvation.
+
+4. **Cleanup** — in `LE CS Test End` handler and `reset_dedicated_cs_state()`.
+
+**The blocker:** The VPR firmware window is 13568 bytes. Current firmware is 12816 bytes with the payload optimization. Adding the test stream code (~340 bytes for the publisher function) causes `directStartTest` to fail even when the code is gated to be no-op. This appears to be a code-size / memory-layout sensitivity — the additional code shifts sections in a way that affects the `publish_builtin_response_for_opcode` call path for CS Test.
+
+**Investigation needed:**
+- Check if the `publish_builtin_response_for_opcode` stack frame is overflowing (payload buffer is now 80 bytes, was 192)
+- Profile VPR memory with the RISC-V toolchain: `riscv64-unknown-elf-size` on the ELF to see exact section sizes
+- Experiment with compiler flags (`-Os` vs `-Oz`, different inlining settings)
+- Consider moving the test publisher to a separate compilation unit to isolate section shifts
+
+**Estimated effort:** 1–2 days of VPR memory debugging.
+
+### 4d — CS Test End (`end=0xFF`)
+
+```
+░░░░░░░░░░░░░░░░ 0% 📋 Needs investigation
+```
+
+`directStopTest` returns `end=0xFF` because `sendDirectHciCommand` fails. This is a pre-existing issue (present before any changes). The symptom is the same as the `directStartTest` transport contention — likely the same root cause (connected procedure saturating the transport). When the test stream is implemented (4c), `procedures` will be satisfied, `ok` will be true, and `directStopTest` will be reachable.
+
+**Investigation plan:**
+- After Item 4c is done, test with `enable=0` — if `end=0xFF` persists, the issue is in `sendDirectHciCommand` for the Test End opcode specifically
+- Check if `BLE_CS_HCI_OP_TEST_END` response is properly handled by `drainDirectControllerEvents`
+
+---
+
+# Item 5 — Error-Path Testing
+
+```
+░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+```
+
+Write example sketches that exercise error paths. **Pure software, testable on existing board.**
+
+### 5a — Invalid Parameter Coverage
+
+**Example:** `BleChannelSoundingVprInvalidParams`
+
+Send malformed HCI commands through `directCreateConfig()`, `directProcedureEnable()`, `directSetProcedureParameters()`, `directSecurityEnable()`, `directStartTest()`, `directStopTest()`, etc. and verify the VPR returns `BLE_CS_HCI_STATUS_INVALID_PARAMS (0x12)`.
+
+**Test coverage:** ~50 lines.
+- Wrong configId
+- Bad mainModeType / subModeType values
+- Invalid channel map lengths
+- Invalid CS Test override mask bits
+- Malformed procedure enable
+
+### 5b — Config Removal While Active
+
+**Example:** `BleChannelSoundingVprConfigRemoveActive`
+
+1. `beginFreshHost` — creates config, enables procedure
+2. `directRemoveConfig(configId=1)` while procedure is active
+3. Verify VPR returns `COMMAND_DISALLOWED (0x0C)` or succeeds with proper cleanup
+4. Verify host state machine transitions correctly
+
+**Test coverage:** ~40 lines.
+
+### 5c — Contradictory Commands
+
+**Example:** `BleChannelSoundingVprEdgeCases`
+
+- Procedure enable without prior config creation
+- Security enable on a non-existent config
+- Set procedure parameters with mismatched configId
+- Remove non-existent config
+
+**Test coverage:** ~80 lines.
+
+### 5d — HCI Queue Saturation
+
+Send N commands in rapid succession without draining responses; verify the VPR transport doesn't deadlock and responses are eventually received.
+
+**Test coverage:** ~60 lines.
+
+**Files to create:** 3–4 new `.ino` files under `examples/BLE/ChannelSounding/`.
+
+---
+
+# Item 6 — Multi-Config Slot Operations
+
+```
+░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+```
+
+The VPR supports up to 8 config slots via `g_cs_slots[]`. No example exercises multiple configs.
+
+### 6a — Multiple Config Create/Select/Evict
+
+**Example:** `BleChannelSoundingVprMultiConfig`
+
+1. Create config 1 → verify config complete
+2. Create config 2 → verify config complete
+3. Create config 3 → verify config complete
+4. Remove config 1 → verify eviction tracking
+5. Switch active config from 2 to 3
+6. Create config 4 → verify slot reuse
+
+**Files:** `src/ble_channel_sounding.cpp` — may need `directSelectConfig()` or verify existing API covers this.
+
+**Test coverage:** ~80 lines.
+
+### 6b — Retained Config State After Reset
+
+1. Create configs in multiple slots
+2. `resetTransport()` — verify VPR clears all slots
+3. Re-create configs — verify IDs and slot state
+
+**Test coverage:** ~50 lines.
+
+---
+
+# Item 7 — Soak / Stress / Power Testing
+
+```
+░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+```
+
+### 7a — Long-Running Stability
+
+**Example:** `BleChannelSoundingVprSoakTest`
+
+- `beginFreshHost` → pump 1000+ subevent results → verify all procedures complete
+- Disconnect + reconnect cycle × 100 — verify no state corruption
+- Create/remove config × 50 — verify no memory leak
+
+**Test coverage:** ~100 lines, runs for minutes.
+
+### 7b — Controller Reset While VPR Active
+
+- `beginFreshHost` → `resetTransport()` while procedure is mid-flow
+- Verify `handleDisconnect()` cleans state correctly
+- Verify `beginFreshHost` works after reset
+
+**Test coverage:** ~40 lines.
+
+### 7c — Maximum Payload Sizes
+
+- Max subevent result payload (step data fills entire fragment)
+- Max continuation fragment count
+- Max number of subevents per procedure
+
+**Test coverage:** ~60 lines.
+
+---
+
+# Item 8 — Real LL Control PDU Exchange
+
+```
+░░░░░░░░░░░░░░░░ 0% 🔒 Second board required
+```
+
+### Requires:
+1. **Second nRF54L15 board** (or Zephyr board) to act as peer
+2. **RADIO access from VPR** — VPR currently has no RADIO peripheral access
+3. **LL Control PDU transmission** — build actual LL data-channel PDUs with CID `0x0025` (CS)
+4. **Connection-event-relative timing** — schedule CS exchanges in µs windows between BLE events
+
+### Implementation steps (after hardware access):
+
+**Step 1** — VPR RADIO initialization:
+- Configure `NRF_RADIO` for CS tone exchange
+- Set up PPI channels for event chaining
+- Configure `TIMER` instances for µs-precision scheduling
+
+**Step 2** — LL Control PDU construction:
+- Use `vpr_cs_ll_control.h` structs to build real CS PDUs
+- Inject into the BLE data channel (LLID = data, CID = `0x0025`)
+
+**Step 3** — Peer negotiation state machine:
+- Wire `handle_peer_cs_pdu()` into the BLE connection event dequeue
+- Verify state transitions through the 7-stage peer-exchange enum
+
+**Step 4** — Procedure execution:
+- Schedule CS subevents at connection-event-anchor-relative times
+- Execute TX/RX tone exchange
+- Capture RTT timestamps and IQ samples
+
+**Estimated effort:** 1–2 weeks with hardware access.
+
+---
+
+# Item 9 — Hardware Event Scheduler
+
+```
+░░░░░░░░░░░░░░░░ 0% 🔒 Second board + RADIO docs required
+```
+
+Replace the VPR heartbeat-driven (polling) scheduler with a hardware-event-driven scheduler. Requires:
+- `NRF_RADIO` CS/RTT register configuration
+- PPI (Programmable Peripheral Interconnect) for task/event routing
+- FLPR (Fast Lightweight Processor) for latency-sensitive radio sequencing
+- CPUAPP sleep management during active CS procedures
+
+**Blocked on:** Hardware documentation and second board.
+
+---
+
+# Item 10 — Physical Ranging & Security
+
+```
+░░░░░░░░░░░░░░░░ 0% 🔒 Second board + RADIO hardware required
+```
+
+Replace synthetic mode-2 step data with real RF measurements. Requires:
+- RTT calculation from TX/RX timestamps
+- Phase extraction from IQ samples across tones
+- Frequency compensation (CFO correction)
+- Antenna path delay calibration
+- FAE correction curves
+- Quality/confidence scoring
+- CS1 nonce derivation, DRBG
+
+**Blocked on:** Items 8 and 9.
+
+---
+
+# Item 11 — Two-Board Interoperability
+
+```
+░░░░░░░░░░░░░░░░ 0% 🔒 Second board required
+```
+
+- Arduino initiator ↔ Arduino reflector
+- Arduino initiator ↔ Zephyr reflector
+- Capture and compare HCI traces between implementations
+
+**Blocked on:** Items 8, 9, 10.
+
+---
+
+# Implementation Order (Recommended)
+
+```
+Phase A — Quick wins (software only, 1 day)
+─────────────────────────────────────────
+Item 3e   Host abort reason reaction       ~30 lines
+Item 5a   Invalid param example            ~50 lines
+Item 5b   Config remove example            ~40 lines
+
+Phase B — Multi-config (software only, 1 day)
+─────────────────────────────────────────
+Item 6a   Multi-config example             ~80 lines
+Item 6b   Retained config test             ~50 lines
+
+Phase C — Stress & soak (software only, 1 day)
+─────────────────────────────────────────
+Item 7a   Soak test example                ~100 lines
+Item 7b   Reset mid-procedure test         ~40 lines
+Item 5c   Edge cases example               ~80 lines
+
+Phase D — CS Test stream (VPR memory work, 1–2 days)
+─────────────────────────────────────────
+Item 4c   Test stream implementation       ~100 lines VPR
+Item 4d   CS Test End fix                  ~20 lines
+
+Phase E — Hardware (2nd board, 1–2 weeks)
+─────────────────────────────────────────
+Item 8    LL PDU exchange
+Item 9    Hardware event scheduler
+Item 10   Physical ranging
+Item 11   Two-board interoperability
+```
+
+---
+
+# Current Commit History
+
+```
+b5d8cc13 fix: disable connected procedure in CsTestResults example (enable=0)
+6bf86d7d perf: shrink publish_builtin_response_for_opcode payload buffer 192->80 B
+477c3da5 fix: add duplicate LE CS Test rejection in validate_cs_test_command
+b5dbcd64 docs: update CsTestResults status — standalone test stream implemented
+93f34a89 fix: implement standalone CS Test result stream (handle 0x0FFF)
+f50a1907 feat: host abort handling + LL Control PDU framework (Parity item #3b)
+3b4fa671 docs: note Phase 4 timeout test addition to disconnect handling example
+d1443995 feat: add Phase 4 timeout resilience test to disconnect handling example
+c7925a13 docs: comprehensive CS handover and master plan document
+```
+
+---
+
+# File Reference
+
+| File | Purpose |
+|------|---------|
+| `src/ble_channel_sounding.cpp` (6601 L) | Host HCI handling, workflow state machine, VPR host |
+| `src/ble_channel_sounding.h` (1622 L) | Public API, command/event structs |
+| `src/nrf54l15_vpr.cpp` (2665 L) | VPR transport layer, shared-memory I/O |
+| `tools/vpr/vpr_cs_transport_stub.c` | VPR firmware source (dedicated + transport images) |
+| `tools/vpr/vpr_cs_ll_control.h` | **New** — CS LL Control PDU definitions |
+| `tools/vpr/vpr_cs_transport_stub.ld` | VPR linker script (stack at 0x120) |
+| `tools/generate_vpr_cs_controller_stub.py` | RISC-V cross-compiler + header generator |
+| `docs/CHANNEL_SOUNDING_ZEPHYR_PARITY.md` | Detailed parity status and completion log |
+| `docs/CHANNEL_SOUNDING_HANDOVER.md` | Handover + architecture + technical notes |
+| `docs/CHANNEL_SOUNDING_MASTER_PLAN.md` | This file |
+
+---
+
+# Build & Test Quick Reference
+
+```bash
+# Regenerate VPR firmware
+cd hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation
+python3 tools/generate_vpr_cs_controller_stub.py
+
+# Compile an example
+ARDUINO_DIRECTORIES_USER=/tmp/nrf54-cs-sketchbook
+arduino-cli compile --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  hardware/.../examples/BLE/ChannelSounding/<ExampleName>
+
+# Upload (probe UID E91217E8)
+arduino-cli upload --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  -p /dev/ttyACM3 hardware/.../examples/BLE/ChannelSounding/<ExampleName>
+
+# Read serial output
+nrf_ocd -u E91217E8 reset   # reset via SWD
+cat /dev/ttyACM3             # read virtual COM port
+
+# Sync to installed Arduino library
+DST=~/.arduino15/packages/nrf54l15clean/hardware/nrf54l15clean/0.9.196/...
+cp <source_file> $DST/<dest_file>
+```
