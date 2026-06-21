@@ -4585,6 +4585,69 @@ static void publish_response_for_opcode(uint16_t opcode) {
 }
 
 #if VPR_CS_DEDICATED_IMAGE
+static size_t build_test_subevent_payload(uint8_t *payload, size_t max_len,
+                                          uint16_t conn_handle, bool continuation,
+                                          uint16_t procedure_counter) {
+  /* Build a synthetic CS subevent result for test mode.
+   * Uses minimal header + 4 mode-2 step entries (RTT only, no phase).
+   * Initial (0x31): 15-byte header + 4*8=32 bytes step data = 47 bytes.
+   * Continue (0x32): 8-byte header + 4*8=32 bytes step data = 40 bytes.
+   * Both fit in 40-byte payload buffer. */
+  if (payload == NULL || max_len < 40U) {
+    return 0U;
+  }
+
+  bytes_zero(payload, max_len);
+  write_le16(&payload[0], conn_handle);
+  payload[2] = BLE_CS_HCI_TEST_CONFIG_ID;  /* config_id = 0 for test mode */
+
+  if (!continuation) {
+    /* Initial subevent result (0x31) — 15-byte header. */
+    write_le16(&payload[3], 0U);           /* start_acl_conn_event = 0 */
+    write_le16(&payload[5], procedure_counter); /* procedure_counter */
+    write_le16(&payload[7], 0U);           /* frequency_compensation = 0 */
+    payload[9] = 0U;                       /* reference_power_level = 0 */
+    payload[10] = 0U;                      /* num_antenna_paths = 0 (RTT only) */
+    payload[11] = 2U;                      /* main_mode_type = 2 (RTT+PBR) */
+    payload[12] = 0U;                      /* sub_mode_type = 0 */
+    payload[13] = 0U;                      /* rtt_type = 0 */
+    payload[14] = 0U;                      /* procedure_abort_reason = 0 */
+    /* Step data starts at offset 15. */
+    const size_t step_offset = 15U;
+    for (uint8_t i = 0U; i < 4U; ++i) {
+      payload[step_offset + i * 8U + 0U] = (uint8_t)(0x01U + i); /* channel */
+      payload[step_offset + i * 8U + 1U] = 0x00U;                /* rtt_valid = 1 */
+      write_le16(&payload[step_offset + i * 8U + 2U], 1000U + i * 100U); /* rtt_sample */
+      payload[step_offset + i * 8U + 4U] = 0x00U;                /* phase_valid = 0 */
+      payload[step_offset + i * 8U + 5U] = 0x00U;                /* tone_quality = 0 */
+      payload[step_offset + i * 8U + 6U] = 0x00U;                /* antenna_path = 0 */
+      payload[step_offset + i * 8U + 7U] = 0x00U;                /* rssi = 0 */
+    }
+    payload[14] = 0x01U;  /* procedure_done_status = partial */
+    return 15U + 4U * 8U;
+  } else {
+    /* Continue subevent result (0x32) — 8-byte header. */
+    write_le16(&payload[0], conn_handle);   /* already written above, but repeat for clarity */
+    payload[2] = BLE_CS_HCI_TEST_CONFIG_ID;
+    write_le16(&payload[3], procedure_counter);
+    payload[5] = 0U;                        /* subevent_abort_reason = 0 */
+    payload[6] = 0x02U;                     /* procedure_done_status = complete */
+    payload[7] = 0x00U;                     /* subevent_done_status = complete */
+    /* Step data starts at offset 8. */
+    const size_t step_offset = 8U;
+    for (uint8_t i = 0U; i < 4U; ++i) {
+      payload[step_offset + i * 8U + 0U] = (uint8_t)(0x04U + i); /* channel */
+      payload[step_offset + i * 8U + 1U] = 0x00U;                /* rtt_valid = 1 */
+      write_le16(&payload[step_offset + i * 8U + 2U], 2000U + i * 100U); /* rtt_sample */
+      payload[step_offset + i * 8U + 4U] = 0x00U;                /* phase_valid = 0 */
+      payload[step_offset + i * 8U + 5U] = 0x00U;                /* tone_quality = 0 */
+      payload[step_offset + i * 8U + 6U] = 0x00U;                /* antenna_path = 0 */
+      payload[step_offset + i * 8U + 7U] = 0x00U;                /* rssi = 0 */
+    }
+    return 8U + 4U * 8U;
+  }
+}
+
 static bool publish_pending_cs_test_result_packet(void) {
   union {
     uint8_t payload[40];
@@ -4609,11 +4672,9 @@ static bool publish_pending_cs_test_result_packet(void) {
 
   if (g_pending_cs_test_result_stage == 1U) {
     /* Initial CS Subevent Result (0x31) — partial, mode 2, 4 steps. */
-    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), test_handle,
-                                      false, false, 0U, &steps_built, &has_more);
+    len = build_test_subevent_payload(u.payload, sizeof(u.payload), test_handle,
+                                      false, g_cs_test_procedure_counter);
     if (len == 0U) return false;
-    /* Override config_id to 0 for test mode. */
-    u.payload[0] = BLE_CS_HCI_TEST_CONFIG_ID;
     len = append_h4_le_meta(u.packet, sizeof(u.packet),
                             BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
     if (len == 0U) return false;
@@ -4621,10 +4682,9 @@ static bool publish_pending_cs_test_result_packet(void) {
     g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS;
   } else if (g_pending_cs_test_result_stage == 2U) {
     /* Continuation CS Subevent Result Continue (0x32) — complete. */
-    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), test_handle,
-                                      false, true, 4U, &steps_built, &has_more);
+    len = build_test_subevent_payload(u.payload, sizeof(u.payload), test_handle,
+                                      true, g_cs_test_procedure_counter);
     if (len == 0U) return false;
-    u.payload[0] = BLE_CS_HCI_TEST_CONFIG_ID;
     len = append_h4_le_meta(u.packet, sizeof(u.packet),
                             BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE, u.payload, len);
     if (len == 0U) return false;
