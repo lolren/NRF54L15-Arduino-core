@@ -2,7 +2,7 @@ ENTRY(_start)
 
 MEMORY
 {
-  RAM (rwx) : ORIGIN = 0x2003C900, LENGTH = 0x3500
+  RAM (rwx) : ORIGIN = 0x2003C900, LENGTH = 0x3580
 }
 
 __stack_top = ORIGIN(RAM) + LENGTH(RAM);
@@ -36,7 +36,7 @@ SECTIONS
   .stack (NOLOAD) :
   {
     . = ALIGN(16);
-    . = . + 0x280;
+    . = . + 0x120;
     . = ALIGN(16);
   } > RAM
 

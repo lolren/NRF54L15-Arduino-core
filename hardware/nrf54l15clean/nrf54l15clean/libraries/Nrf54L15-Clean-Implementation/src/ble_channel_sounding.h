@@ -1406,6 +1406,9 @@ class BleCsControllerVprHost {
   bool loadDefaultTransportImage();
   bool bootTransport(uint32_t readySpinLimit = 100000UL);
   bool refreshLinkSession();
+  /* Parity item #3: detect BLE disconnect and clean CS state. Returns true
+   * when session was open and has now been cleaned. */
+  bool handleDisconnect();
   bool beginHost(uint16_t connHandle, const BleCsControllerVprHostConfig& config);
   bool beginFreshHost(uint16_t connHandle,
                       const BleCsControllerVprHostConfig& config,
@@ -1546,6 +1549,12 @@ class BleCsControllerVprHost {
   bool pumpCommands();
   bool poll();
   bool loopOnce();
+  /* Drains pending asynchronous controller events (e.g. the standalone CS Test
+   * result stream) via the direct controller-service path. Use this, not
+   * poll()/loopOnce(), to collect test results on handle 0x0FFF, because the
+   * stream path feeds the connected-procedure session. Returns false if the
+   * host is not begun. */
+  bool drainPendingControllerEvents();
 
   bool ready() const;
   bool failed() const;
@@ -1563,6 +1572,19 @@ class BleCsControllerVprHost {
   const BleCsFaeTable& lastRemoteFaeTable() const;
   bool lastTestEndCompleteValid() const;
   const BleCsTestEndComplete& lastTestEndComplete() const;
+  /* Standalone CS Test result stream (handle 0x0FFF). These report the most
+   * recently reassembled test subevent and the count of completed test
+   * procedures drained since directStartTest(). */
+  bool lastTestResultValid() const;
+  const BleCsSubeventResult& lastTestResult() const;
+  uint16_t testResultCount() const;
+
+  /* Cached remote capabilities populated by a successful
+   * directReadRemoteSupportedCapabilities / V2 round-trip through
+   * the controller. Returns false if no cached data is available
+   * (not yet read or invalidated). */
+  bool cachedRemoteCapabilitiesV1(BleCsControllerCapabilities* outCapabilities) const;
+  bool cachedRemoteCapabilitiesV2(BleCsControllerCapabilities* outCapabilities) const;
 
   VprSharedTransportStream& transport();
   const VprSharedTransportStream& transport() const;
@@ -1571,6 +1593,8 @@ class BleCsControllerVprHost {
   bool currentConnHandle(uint16_t* outConnHandle) const;
   bool sendDirectBuiltCommand(const BleCsHciCommand& command, uint8_t* outStatus);
   bool consumeDirectAuxiliaryEvent(const uint8_t* packet, size_t packetLen);
+  bool consumeTestResultEvent(uint8_t subeventCode,
+                              const uint8_t* payload, size_t payloadLen);
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
                                    size_t responseLen);
@@ -1583,6 +1607,16 @@ class BleCsControllerVprHost {
   BleCsFaeTable lastRemoteFaeTable_;
   BleCsTestEndComplete lastTestEndComplete_;
   bool lastTestEndCompleteValid_;
+  /* Cached remote capabilities populated when consumeDirectAuxiliaryEvent
+   * receives ReadRemoteSupportedCapabilitiesComplete / V2 events. */
+  BleCsControllerCapabilities cachedRemoteCapabilitiesV1_;
+  BleCsControllerCapabilities cachedRemoteCapabilitiesV2_;
+  bool cachedRemoteCapabilitiesV1Valid_;
+  bool cachedRemoteCapabilitiesV2Valid_;
+  BleCsSubeventResultReassembler testReassembler_;
+  BleCsSubeventResult lastTestResult_;
+  bool lastTestResultValid_;
+  uint16_t testResultCount_;
 };
 
 }  // namespace xiao_nrf54l15

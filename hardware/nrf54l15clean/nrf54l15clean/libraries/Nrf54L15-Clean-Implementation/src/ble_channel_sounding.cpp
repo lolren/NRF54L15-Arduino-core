@@ -42,6 +42,9 @@ constexpr size_t kBleCsMode3StepBaseLen = 7U;
 constexpr size_t kBleCsMode3SsRttStepBaseLen = 15U;
 constexpr size_t kBleCsHciSubeventResultHeaderLen = 15U;
 constexpr size_t kBleCsHciSubeventResultContinueHeaderLen = 8U;
+/* Reserved connection handle for standalone CS Test subevent results
+ * (Zephyr BT_HCI_LE_CS_TEST_CONN_HANDLE). */
+constexpr uint16_t kBleCsHciTestConnHandle = 0x0FFFU;
 constexpr size_t kBleCsHciReadRemoteCapsCompleteLen = 31U;
 constexpr size_t kBleCsHciReadRemoteCapsCompleteV2Len = 34U;
 constexpr size_t kBleCsHciSecurityEnableCompleteLen = 3U;
@@ -2971,6 +2974,8 @@ void BleCsControllerWorkflow::reconcileReadyShadowState(uint8_t selectedConfigId
     state_.procedureEnabled = false;
     state_.procedureEnableComplete = BleCsProcedureEnableComplete{};
     state_.procedureEnableComplete.connHandle = state_.connHandle;
+    /* Parity item #3: return workflow state machine to idle on disconnect. */
+    state_.phase = BleCsControllerWorkflowPhase::kIdle;
     return;
   }
 
@@ -4125,7 +4130,14 @@ BleCsControllerVprHost::BleCsControllerVprHost()
       host_{},
       lastRemoteFaeTable_{},
       lastTestEndComplete_{},
-      lastTestEndCompleteValid_(false) {}
+      lastTestEndCompleteValid_(false),
+      cachedRemoteCapabilitiesV1_{},
+      cachedRemoteCapabilitiesV2_{},
+      cachedRemoteCapabilitiesV1Valid_(false),
+      cachedRemoteCapabilitiesV2Valid_(false),
+      lastTestResult_{},
+      lastTestResultValid_(false),
+      testResultCount_(0U) {}
 
 void BleCsControllerVprHost::reset() {
   config_ = BleCsControllerVprHostConfig{};
@@ -4134,46 +4146,47 @@ void BleCsControllerVprHost::reset() {
   lastRemoteFaeTable_ = BleCsFaeTable{};
   lastTestEndComplete_ = BleCsTestEndComplete{};
   lastTestEndCompleteValid_ = false;
+  cachedRemoteCapabilitiesV1_ = BleCsControllerCapabilities{};
+  cachedRemoteCapabilitiesV2_ = BleCsControllerCapabilities{};
+  cachedRemoteCapabilitiesV1Valid_ = false;
+  cachedRemoteCapabilitiesV2Valid_ = false;
+  testReassembler_.reset();
+  lastTestResult_ = BleCsSubeventResult{};
+  lastTestResultValid_ = false;
+  testResultCount_ = 0U;
 }
 
 bool BleCsControllerVprHost::resetTransport(bool clearScripts) {
+  /* Stop the VPR first so it cannot write new data into shared memory
+   * between the clear and the read — otherwise the VPR's main loop would
+   * overwrite the zeroed reserved field with a stale session-open bit and
+   * syncVprState would never see the 1→0 transition. */
+  transport_.stop();
   const bool ok = transport_.resetSharedState(clearScripts);
-  vprState_.linkSessionOpen = false;
-  vprState_.linkConnHandle = 0U;
-  vprState_.linkProcedureIntervalSelector = 0U;
-  vprState_.linkStoredConfigCount = 0U;
-  vprState_.linkPeerGapTicks = 0U;
-  vprState_.linkConfigId = 0U;
-  vprState_.linkSlot0ConfigId = 0U;
-  vprState_.linkSlot1ConfigId = 0U;
-  vprState_.linkPreviousConfigId = 0U;
-  vprState_.linkAuthority0ConfigId = 0U;
-  vprState_.linkAuthority1ConfigId = 0U;
-  vprState_.linkAuthority2ConfigId = 0U;
-  vprState_.linkActivePrimarySlotIndex = 0xFFU;
-  vprState_.linkFreePrimarySlotCount = 0U;
-  vprState_.linkProcedureCounter = 0U;
-  vprState_.linkConfigCreated = false;
-  vprState_.linkSecurityEnabled = false;
-  vprState_.linkProcedureParamsApplied = false;
-  vprState_.linkProcedureEnabled = false;
-  vprState_.linkSlot0InUse = false;
-  vprState_.linkSlot1InUse = false;
-  vprState_.linkPreviousSlotInUse = false;
-  vprState_.linkActiveConfigMirroredInPrevious = false;
-  vprState_.linkSelectedConfigRunnable = false;
-  vprState_.linkSlot0Runnable = false;
-  vprState_.linkSlot1Runnable = false;
-  vprState_.linkPreviousSlotRunnable = false;
-  vprState_.linkSelectedConfigSecurityEnabled = false;
-  vprState_.linkSlot0SecurityEnabled = false;
-  vprState_.linkSlot1SecurityEnabled = false;
-  vprState_.linkPreviousSlotSecurityEnabled = false;
-  vprState_.linkSelectedConfigProcedureParamsApplied = false;
-  vprState_.linkSlot0ProcedureParamsApplied = false;
-  vprState_.linkSlot1ProcedureParamsApplied = false;
-  vprState_.linkPreviousSlotProcedureParamsApplied = false;
+  /* syncVprState should detect the session-open→closed transition and call
+   * handleDisconnect() → host_.reset() + workflow cleanup.  However the
+   * nRF54L15's write-back data cache coherency bug prevents this: the memsets
+   * in resetSharedState create dirty cache lines in the write-back cache, and
+   * each transport getter calls invalidateCpuSystemCache() before reading,
+   * which discards the dirty zeroes and reads stale VPR data from SRAM
+   * (linkSessionOpen is still seen as true, so handleDisconnect is skipped).
+   *
+   * The Cache HAL at 0x4004B000 claims a DCLEANALL register but writing to it
+   * causes a board hang (not implemented on this hardware).  The NRF_CACHE
+   * ENABLE register at 0xE0082404 similarly appears to be locked from
+   * non-secure writes.  With no working cache-clean primitive available, we
+   * force the disconnect cleanup here whenever resetTransport is called —
+   * the transport shared memory has been zeroed and the VPR stopped, so it is
+   * logically disconnected regardless of what the cache-coherent read returns.
+   *
+   * This is equivalent to what handleDisconnect() does after its
+   * refreshLinkSession + linkSessionOpen guard. */
   syncVprState();
+  host_.reset();
+  testReassembler_.reset();
+  lastTestResultValid_ = false;
+  testResultCount_ = 0U;
+  vprState_.linkSessionOpen = false;
   return ok;
 }
 
@@ -4204,6 +4217,25 @@ bool BleCsControllerVprHost::bootTransport(uint32_t readySpinLimit) {
 bool BleCsControllerVprHost::refreshLinkSession() {
   syncVprState();
   return vprState_.running && vprState_.transportStatus != 0U;
+}
+
+bool BleCsControllerVprHost::handleDisconnect() {
+  refreshLinkSession();
+  if (vprState_.linkSessionOpen) {
+    return false;
+  }
+  host_.reset();
+  testReassembler_.reset();
+  lastTestResultValid_ = false;
+  testResultCount_ = 0U;
+  lastRemoteFaeTable_ = BleCsFaeTable{};
+  lastTestEndComplete_ = BleCsTestEndComplete{};
+  lastTestEndCompleteValid_ = false;
+  cachedRemoteCapabilitiesV1_ = BleCsControllerCapabilities{};
+  cachedRemoteCapabilitiesV2_ = BleCsControllerCapabilities{};
+  cachedRemoteCapabilitiesV1Valid_ = false;
+  cachedRemoteCapabilitiesV2Valid_ = false;
+  return true;
 }
 
 bool BleCsControllerVprHost::beginHost(uint16_t connHandle,
@@ -4481,6 +4513,16 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
     host_.resetProcedureRunState();
   }
 
+  /* Pre-drain any pending VPR events before sending the command.
+   * The VPR may produce background events (e.g. demo-mode CS subevent
+   * results) that set vprFlags=PENDING in shared memory, which causes
+   * writeInternal to reject the write.  Draining those events into a
+   * scratch host ensures the transport is clear for the new command. */
+  {
+    VprControllerServiceHost scratch(&transport_);
+    (void)drainDirectControllerEvents(&scratch, nullptr, 0U);
+  }
+
   VprControllerServiceHost directHost(&transport_);
   const bool ok =
       directHost.sendHciCommand(opcode, params, paramsLen, response, responseSize, responseLen);
@@ -4536,11 +4578,16 @@ bool BleCsControllerVprHost::directWriteCachedRemoteSupportedCapabilities(
     uint8_t* outStatus) {
   uint16_t connHandle = 0U;
   BleCsHciCommand command{};
-  return currentConnHandle(&connHandle) &&
+  const bool ok = currentConnHandle(&connHandle) &&
          BleChannelSoundingRadio::
              buildHciWriteCachedRemoteSupportedCapabilitiesCommand(
                  connHandle, capabilities, &command) &&
          sendDirectBuiltCommand(command, outStatus);
+  if (ok && (outStatus == nullptr || *outStatus == 0U)) {
+    cachedRemoteCapabilitiesV1_ = capabilities;
+    cachedRemoteCapabilitiesV1Valid_ = capabilities.valid;
+  }
+  return ok;
 }
 
 bool BleCsControllerVprHost::directWriteCachedRemoteSupportedCapabilitiesV2(
@@ -4548,11 +4595,16 @@ bool BleCsControllerVprHost::directWriteCachedRemoteSupportedCapabilitiesV2(
     uint8_t* outStatus) {
   uint16_t connHandle = 0U;
   BleCsHciCommand command{};
-  return currentConnHandle(&connHandle) &&
+  const bool ok = currentConnHandle(&connHandle) &&
          BleChannelSoundingRadio::
              buildHciWriteCachedRemoteSupportedCapabilitiesV2Command(
                  connHandle, capabilities, &command) &&
          sendDirectBuiltCommand(command, outStatus);
+  if (ok && (outStatus == nullptr || *outStatus == 0U)) {
+    cachedRemoteCapabilitiesV2_ = capabilities;
+    cachedRemoteCapabilitiesV2Valid_ = capabilities.valid;
+  }
+  return ok;
 }
 
 bool BleCsControllerVprHost::directReadRemoteFaeTable(BleCsFaeTable* outTable,
@@ -4587,10 +4639,17 @@ bool BleCsControllerVprHost::directWriteCachedRemoteFaeTable(
     uint8_t* outStatus) {
   uint16_t connHandle = 0U;
   BleCsHciCommand command{};
-  return currentConnHandle(&connHandle) &&
+  const bool ok = currentConnHandle(&connHandle) &&
          BleChannelSoundingRadio::buildHciWriteCachedRemoteFaeTableCommand(
              connHandle, faeTable, &command) &&
          sendDirectBuiltCommand(command, outStatus);
+  if (ok && (outStatus == nullptr || *outStatus == 0U)) {
+    memcpy(lastRemoteFaeTable_.values, faeTable, sizeof(lastRemoteFaeTable_.values));
+    lastRemoteFaeTable_.valid = true;
+    lastRemoteFaeTable_.status = 0U;
+    lastRemoteFaeTable_.connHandle = connHandle;
+  }
+  return ok;
 }
 
 bool BleCsControllerVprHost::directSetChannelClassification(
@@ -4606,6 +4665,10 @@ bool BleCsControllerVprHost::directStartTest(const BleCsTestParams& params,
                                              uint8_t* outStatus) {
   lastTestEndComplete_ = BleCsTestEndComplete{};
   lastTestEndCompleteValid_ = false;
+  testReassembler_.reset();
+  lastTestResult_ = BleCsSubeventResult{};
+  lastTestResultValid_ = false;
+  testResultCount_ = 0U;
   BleCsHciCommand command{};
   return BleChannelSoundingRadio::buildHciTestCommand(params, &command) &&
          sendDirectBuiltCommand(command, outStatus);
@@ -5107,6 +5170,14 @@ bool BleCsControllerVprHost::loopOnce() {
   return ok;
 }
 
+bool BleCsControllerVprHost::drainPendingControllerEvents() {
+  if (!host_.hostState().began) {
+    return false;
+  }
+  VprControllerServiceHost directHost(&transport_);
+  return drainDirectControllerEvents(&directHost, nullptr, 0U);
+}
+
 bool BleCsControllerVprHost::ready() const { return host_.ready(); }
 
 bool BleCsControllerVprHost::failed() const { return host_.failed(); }
@@ -5165,6 +5236,36 @@ const BleCsTestEndComplete& BleCsControllerVprHost::lastTestEndComplete() const 
   return lastTestEndComplete_;
 }
 
+bool BleCsControllerVprHost::lastTestResultValid() const {
+  return lastTestResultValid_;
+}
+
+const BleCsSubeventResult& BleCsControllerVprHost::lastTestResult() const {
+  return lastTestResult_;
+}
+
+uint16_t BleCsControllerVprHost::testResultCount() const {
+  return testResultCount_;
+}
+
+bool BleCsControllerVprHost::cachedRemoteCapabilitiesV1(
+    BleCsControllerCapabilities* outCapabilities) const {
+  if (outCapabilities == nullptr || !cachedRemoteCapabilitiesV1Valid_) {
+    return false;
+  }
+  *outCapabilities = cachedRemoteCapabilitiesV1_;
+  return true;
+}
+
+bool BleCsControllerVprHost::cachedRemoteCapabilitiesV2(
+    BleCsControllerCapabilities* outCapabilities) const {
+  if (outCapabilities == nullptr || !cachedRemoteCapabilitiesV2Valid_) {
+    return false;
+  }
+  *outCapabilities = cachedRemoteCapabilitiesV2_;
+  return true;
+}
+
 VprSharedTransportStream& BleCsControllerVprHost::transport() { return transport_; }
 
 const VprSharedTransportStream& BleCsControllerVprHost::transport() const {
@@ -5217,6 +5318,26 @@ bool BleCsControllerVprHost::consumeDirectAuxiliaryEvent(
     return BleChannelSoundingRadio::parseHciReadRemoteFaeTableCompleteEvent(
         metaEvent.payload, metaEvent.payloadLen, &lastRemoteFaeTable_);
   }
+  if (metaEvent.subeventCode == kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete) {
+    BleCsControllerCapabilities caps{};
+    if (!BleChannelSoundingRadio::parseHciRemoteSupportedCapabilitiesCompleteEvent(
+            metaEvent.payload, metaEvent.payloadLen, &caps)) {
+      return false;
+    }
+    cachedRemoteCapabilitiesV1_ = caps;
+    cachedRemoteCapabilitiesV1Valid_ = caps.valid;
+    return true;
+  }
+  if (metaEvent.subeventCode == kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2) {
+    BleCsControllerCapabilities caps{};
+    if (!BleChannelSoundingRadio::parseHciRemoteSupportedCapabilitiesCompleteV2Event(
+            metaEvent.payload, metaEvent.payloadLen, &caps)) {
+      return false;
+    }
+    cachedRemoteCapabilitiesV2_ = caps;
+    cachedRemoteCapabilitiesV2Valid_ = caps.valid;
+    return true;
+  }
   if (metaEvent.subeventCode == kBleCsHciEvtTestEndComplete) {
     BleCsTestEndComplete complete{};
     if (!BleChannelSoundingRadio::parseHciTestEndCompleteEvent(
@@ -5227,7 +5348,58 @@ bool BleCsControllerVprHost::consumeDirectAuxiliaryEvent(
     lastTestEndCompleteValid_ = true;
     return true;
   }
+  if (metaEvent.subeventCode == kBleCsHciEvtSubeventResult ||
+      metaEvent.subeventCode == kBleCsHciEvtSubeventResultContinue) {
+    /* Standalone CS Test results arrive on the reserved 0x0FFF handle and are
+     * collected here, independent of the connected-procedure session. Connected
+     * handles fall through (return false) so host_.consumeControllerPacket keeps
+     * owning them. */
+    BleCsSubeventResult probe{};
+    const bool isInitial = (metaEvent.subeventCode == kBleCsHciEvtSubeventResult);
+    const bool parsed = isInitial
+        ? BleChannelSoundingRadio::parseHciSubeventResultEvent(
+              metaEvent.payload, metaEvent.payloadLen, &probe)
+        : BleChannelSoundingRadio::parseHciSubeventResultContinueEvent(
+              metaEvent.payload, metaEvent.payloadLen, &probe);
+    if (parsed && probe.header.connHandle == kBleCsHciTestConnHandle) {
+      return consumeTestResultEvent(metaEvent.subeventCode, metaEvent.payload,
+                                    metaEvent.payloadLen);
+    }
+    return false;
+  }
   return false;
+}
+
+bool BleCsControllerVprHost::consumeTestResultEvent(uint8_t subeventCode,
+                                                    const uint8_t* payload,
+                                                    size_t payloadLen) {
+  BleCsSubeventResult result{};
+  bool ok = false;
+  if (subeventCode == kBleCsHciEvtSubeventResult) {
+    ok = BleChannelSoundingRadio::parseHciSubeventResultEvent(payload, payloadLen, &result);
+  } else if (subeventCode == kBleCsHciEvtSubeventResultContinue) {
+    ok = BleChannelSoundingRadio::parseHciSubeventResultContinueEvent(payload, payloadLen,
+                                                                       &result);
+  } else {
+    return false;
+  }
+  if (!ok || result.header.connHandle != kBleCsHciTestConnHandle) {
+    return false;
+  }
+  if (subeventCode == kBleCsHciEvtSubeventResult) {
+    ok = testReassembler_.consumeInitialEvent(payload, payloadLen, &lastTestResult_);
+  } else {
+    ok = testReassembler_.consumeContinuationEvent(payload, payloadLen, &lastTestResult_);
+  }
+  if (!ok) {
+    return false;
+  }
+  lastTestResultValid_ = true;
+  if (lastTestResult_.isComplete &&
+      lastTestResult_.header.procedureDoneStatus != kBleCsProcedureDonePartial) {
+    testResultCount_ = static_cast<uint16_t>(testResultCount_ + 1U);
+  }
+  return true;
 }
 
 bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHost* directHost,
@@ -5327,6 +5499,9 @@ void BleCsControllerVprHost::syncVprState() {
       (previous.linkConfigId != 0U && previous.linkConfigId != nextState.linkConfigId);
   if (linkSessionInvalidated || linkConfigInvalidated) {
     host_.resetProcedureRunState();
+  }
+  if (linkSessionInvalidated) {
+    handleDisconnect();
   }
   host_.reconcileReadyWorkflowShadow(nextState.linkConfigId, nextState.linkSessionOpen,
                                      nextState.linkConfigCreated,

@@ -603,6 +603,7 @@ bool VprSharedTransportStream::resetSharedState(bool clearScripts) {
   vpr->version = NRF54L15_VPR_TRANSPORT_VERSION;
   vpr->status = NRF54L15_VPR_TRANSPORT_STATUS_STOPPED;
   dataSyncBarrier();
+  fullSyncBarrier();
   rxLen_ = 0U;
   rxIndex_ = 0U;
   return true;

@@ -132,7 +132,7 @@ static uint32_t compute_prescaler(NRF_SPIM_Type* spim, uint32_t target_hz) {
 
 }  // namespace
 
-SPIClass SPI(NRF_SPIM30, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
+SPIClass SPI(NRF_SPIM22, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
 SPIClass SPI_HS(NRF_SPIM00, PIN_HSPI_MOSI, PIN_HSPI_MISO, PIN_HSPI_SCK, PIN_HSPI_SS);
 
 SPIClass::SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck, uint8_t cs)

@@ -110,6 +110,14 @@
 #define BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE 0x32U
 #define BLE_CS_HCI_EVT_TEST_END_COMPLETE 0x33U
 
+/* CS Test mode emits standalone subevent results on this reserved handle
+ * (Zephyr BT_HCI_LE_CS_TEST_CONN_HANDLE). config_id and the ACL event
+ * counter are forced to 0 for test results per the host cs.c handling. */
+#define BLE_CS_HCI_TEST_CONN_HANDLE 0x0FFFU
+#define BLE_CS_HCI_TEST_CONFIG_ID 0x00U
+#define BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS 200U
+#define BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS 8U
+
 #define BLE_HCI_PACKET_TYPE_EVENT 0x04U
 #define BLE_HCI_EVT_COMMAND_COMPLETE 0x0EU
 #define BLE_HCI_EVT_COMMAND_STATUS 0x0FU
@@ -242,6 +250,14 @@ static uint32_t g_ble_connection_event_queue_count = 0U;
 #endif
 static uint8_t g_pending_cs_result_stage = 0U;
 static uint8_t g_cs_test_active = 0U;
+#if VPR_CS_DEDICATED_IMAGE
+/* Standalone CS Test result stream (LE CS Test Start/End): emits 0x31/0x32 on
+ * BLE_CS_HCI_TEST_CONN_HANDLE while g_cs_test_active != 0.  Mutually exclusive
+ * with the connected-session result staging (g_pending_cs_result_stage). */
+static uint8_t g_pending_cs_test_result_stage = 0U;
+static uint16_t g_cs_test_procedure_counter = 0U;
+static uint32_t g_cs_test_next_stage_heartbeat = 0U;
+#endif
 #if VPR_CS_DEDICATED_IMAGE
 static uint32_t g_cs_next_procedure_heartbeat = 0U;
 static uint32_t g_cs_next_subevent_heartbeat = 0U;
@@ -449,7 +465,22 @@ static uint32_t g_pending_hibernate = 0U;
 static uint32_t g_restored_from_hibernate = 0U;
 #endif
 
+/* Parity item #3: abort/timeout/disconnect framework.
+ * These live outside the dedicated-image guard because
+ * build_demo_subevent_payload() reads them in the shared code path.
+ * The transport image always keeps them at 0, which is correct since
+ * it does not do connected CS. */
+static uint8_t g_cs_procedure_abort_reason = 0U;
+static uint8_t g_cs_subevent_abort_reason = 0U;
+static uint32_t g_cs_peer_exchange_deadline = 0U;
+static uint8_t g_cs_peer_exchange_stage = 0U;  /* 0=idle, 1=awaiting_peer */
+
 static bool host_request_pending(void);
+
+/* Subevent result done-status values matching the host-side constants
+ * kBleCsProcedureDoneAborted / kBleCsSubeventDoneAborted (0x0F). */
+#define BLE_CS_PROCEDURE_DONE_ABORTED 0x0FU
+#define BLE_CS_SUBEVENT_DONE_ABORTED 0x0FU
 
 enum {
   BLE_CS_HCI_STATUS_SUCCESS = 0x00U,
@@ -568,6 +599,10 @@ static void reset_dedicated_cs_state(void) {
   g_cs_active_subevent_index = 0U;
   g_cs_local_chunk_start_step = 0U;
   g_cs_peer_chunk_start_step = 0U;
+  g_cs_procedure_abort_reason = 0U;
+  g_cs_subevent_abort_reason = 0U;
+  g_cs_peer_exchange_deadline = 0U;
+  g_cs_peer_exchange_stage = 0U;
 }
 #endif
 
@@ -1305,7 +1340,7 @@ static size_t append_h4_command_complete_payload(uint8_t *dst, size_t max_len,
   dst[2] = (uint8_t)(3U + payload_len);
   dst[3] = 1U;
   write_le16(&dst[4], opcode);
-  bytes_copy(&dst[6], payload, payload_len);
+  bytes_copy(&dst[6], payload,payload_len);
   return 6U + payload_len;
 }
 
@@ -1318,7 +1353,7 @@ static size_t append_h4_le_meta(uint8_t *dst, size_t max_len, uint8_t subevent_c
   dst[1] = BLE_HCI_EVT_LE_META;
   dst[2] = (uint8_t)(1U + payload_len);
   dst[3] = subevent_code;
-  bytes_copy(&dst[4], payload, payload_len);
+  bytes_copy(&dst[4], payload,payload_len);
   return 4U + payload_len;
 }
 
@@ -1331,7 +1366,7 @@ static size_t append_h4_vendor_event(uint8_t *dst, size_t max_len, uint8_t subev
   dst[1] = BLE_HCI_EVT_VENDOR;
   dst[2] = (uint8_t)(1U + payload_len);
   dst[3] = subevent_code;
-  bytes_copy(&dst[4], payload, payload_len);
+  bytes_copy(&dst[4], payload,payload_len);
   return 4U + payload_len;
 }
 
@@ -2556,6 +2591,7 @@ static uint32_t current_chunk_stage_delay_ticks(void) {
 }
 
 static bool schedule_next_cs_procedure(void) {
+  if (g_cs_session_open == 0U) { return false; }
   if (g_cs_procedure_enabled == 0U || g_pending_cs_result_stage != 0U ||
       g_cs_procedure_counter == 0U || g_cs_procedure_counter >= g_cs_max_procedure_count ||
       host_request_pending() ||
@@ -2581,6 +2617,7 @@ static bool schedule_next_cs_procedure(void) {
 
 static bool schedule_next_cs_subevent(void) {
   const uint8_t subevent_count = current_demo_subevent_count();
+  if (g_cs_session_open == 0U) { return false; }
   if (g_cs_procedure_enabled == 0U || g_pending_cs_result_stage != 0U ||
       g_cs_procedure_counter == 0U || subevent_count <= 1U ||
       g_cs_active_subevent_index + 1U >= subevent_count || host_request_pending() ||
@@ -2983,9 +3020,18 @@ static size_t build_demo_subevent_payload(uint8_t *payload, size_t max_len,
 #else
         0U;
 #endif
-    payload[10] = procedure_partial ? 0x01U : 0x00U;
-    payload[11] = subevent_partial ? 0x01U : 0x00U;
-    payload[12] = 0U;
+#if VPR_CS_DEDICATED_IMAGE
+    if (g_cs_procedure_abort_reason != 0U) {
+      payload[10] = BLE_CS_PROCEDURE_DONE_ABORTED;
+      payload[11] = BLE_CS_SUBEVENT_DONE_ABORTED;
+      payload[12] = g_cs_procedure_abort_reason;
+    } else
+#endif
+    {
+      payload[10] = procedure_partial ? 0x01U : 0x00U;
+      payload[11] = subevent_partial ? 0x01U : 0x00U;
+      payload[12] = 0U;
+    }
     payload[13] =
 #if VPR_CS_DEDICATED_IMAGE
         current_demo_num_antenna_paths();
@@ -2994,9 +3040,18 @@ static size_t build_demo_subevent_payload(uint8_t *payload, size_t max_len,
 #endif
     payload[14] = chunk_steps;
   } else {
-    payload[3] = procedure_partial ? 0x01U : 0x00U;
-    payload[4] = subevent_partial ? 0x01U : 0x00U;
-    payload[5] = 0U;
+#if VPR_CS_DEDICATED_IMAGE
+    if (g_cs_subevent_abort_reason != 0U) {
+      payload[3] = BLE_CS_PROCEDURE_DONE_ABORTED;
+      payload[4] = BLE_CS_SUBEVENT_DONE_ABORTED;
+      payload[5] = g_cs_subevent_abort_reason;
+    } else
+#endif
+    {
+      payload[3] = procedure_partial ? 0x01U : 0x00U;
+      payload[4] = subevent_partial ? 0x01U : 0x00U;
+      payload[5] = 0U;
+    }
     payload[6] =
 #if VPR_CS_DEDICATED_IMAGE
         current_demo_num_antenna_paths();
@@ -3868,6 +3923,11 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         return false;
       }
       offset += len;
+#if VPR_CS_DEDICATED_IMAGE
+      g_cs_peer_exchange_stage = 1U;
+      g_cs_peer_exchange_deadline =
+          g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+#endif
       break;
     }
     case BLE_CS_HCI_OP_REMOVE_CONFIG: {
@@ -3953,6 +4013,11 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         return false;
       }
       offset += len;
+#if VPR_CS_DEDICATED_IMAGE
+      g_cs_peer_exchange_stage = 1U;
+      g_cs_peer_exchange_deadline =
+          g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+#endif
       break;
     }
     case BLE_CS_HCI_OP_SET_CHANNEL_CLASSIFICATION: {
@@ -3984,6 +4049,11 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         return false;
       }
       offset += len;
+#if VPR_CS_DEDICATED_IMAGE
+      g_cs_peer_exchange_stage = 1U;
+      g_cs_peer_exchange_deadline =
+          g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+#endif
       break;
     }
     case BLE_CS_HCI_OP_PROCEDURE_ENABLE: {
@@ -4077,6 +4147,13 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         g_cs_local_chunk_start_step = 0U;
         g_cs_peer_chunk_start_step = 0U;
       }
+#if VPR_CS_DEDICATED_IMAGE
+      if (enable != 0U) {
+        g_cs_peer_exchange_stage = 1U;
+        g_cs_peer_exchange_deadline =
+            g_vpr_transport->heartbeat + (uint32_t)(g_cs_min_procedure_interval * 6U);
+      }
+#endif
       break;
     }
     case BLE_CS_HCI_OP_TEST: {
@@ -4116,7 +4193,7 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       len = append_h4_le_meta(
           (uint8_t *)g_vpr_transport->vprData + offset,
           NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
-          BLE_CS_HCI_EVT_TEST_END_COMPLETE, payload, 1U);
+          BLE_CS_HCI_EVT_TEST_END_COMPLETE, payload,1U);
       if (len == 0U) {
         return false;
       }
@@ -4482,12 +4559,28 @@ static void publish_response_for_opcode(uint16_t opcode) {
 }
 
 static bool publish_pending_cs_result_packet(void) {
-  uint8_t payload[40];
-  uint8_t packet[96];
+  /* payload and packet are used sequentially. union saves ~88 B stack. */
+  union {
+    uint8_t payload[40];
+    uint8_t packet[48];
+  } u;
   size_t len = 0U;
   uint16_t conn_handle = current_conn_handle();
   uint8_t steps_built = 0U;
   bool has_more = false;
+#if VPR_CS_DEDICATED_IMAGE
+  /* Disconnect guard: if session is closed, flush pending state. */
+  if (g_cs_session_open == 0U) {
+    g_pending_cs_result_stage = 0U;
+    g_cs_next_chunk_stage_heartbeat = 0U;
+    g_cs_next_peer_stage_heartbeat = 0U;
+    g_cs_next_subevent_heartbeat = 0U;
+    g_cs_next_procedure_heartbeat = 0U;
+    g_cs_last_peer_gap_ticks = 0U;
+    g_cs_last_interval_selector = 0U;
+    return false;
+  }
+#endif
   if (g_pending_cs_result_stage == 0U ||
       (g_vpr_transport->vprFlags & NRF54L15_VPR_TRANSPORT_FLAG_PENDING) != 0U ||
       host_request_pending()) {
@@ -4502,47 +4595,47 @@ static bool publish_pending_cs_result_packet(void) {
     return false;
   }
   if (g_pending_cs_result_stage == 1U) {
-    len = build_demo_subevent_payload(payload, sizeof(payload), conn_handle, false, false,
+    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, false, false,
                                       g_cs_local_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(packet, sizeof(packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT, payload, len);
+    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
   } else if (g_pending_cs_result_stage == 2U) {
-    len = build_demo_subevent_payload(payload, sizeof(payload), conn_handle, false, true,
+    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, false, true,
                                       g_cs_local_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(packet, sizeof(packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE,
-                            payload, len);
+    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE,
+                            u.payload, len);
   } else if (g_pending_cs_result_stage == 3U) {
 #if VPR_CS_DEDICATED_IMAGE
-    payload[0] = g_cs_config_id;
-    write_le16(&payload[1], g_cs_procedure_counter);
-    len = append_h4_vendor_event(packet, sizeof(packet),
-                                 VPR_VENDOR_EVENT_CS_PEER_RESULT_SOURCE, payload, 3U);
+    u.payload[0] = g_cs_config_id;
+    write_le16(&u.payload[1], g_cs_procedure_counter);
+    len = append_h4_vendor_event(u.packet, sizeof(u.packet),
+                                 VPR_VENDOR_EVENT_CS_PEER_RESULT_SOURCE, u.payload,3U);
 #else
-    payload[0] = 1U;
-    len = append_h4_vendor_event(packet, sizeof(packet),
-                                 VPR_VENDOR_EVENT_CS_PEER_RESULT_TRIGGER, payload, 1U);
+    u.payload[0] = 1U;
+    len = append_h4_vendor_event(u.packet, sizeof(u.packet),
+                                 VPR_VENDOR_EVENT_CS_PEER_RESULT_TRIGGER, u.payload,1U);
 #endif
 #if VPR_CS_DEDICATED_IMAGE
   } else if (g_pending_cs_result_stage == 4U) {
-    len = build_demo_subevent_payload(payload, sizeof(payload), conn_handle, true, false,
+    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, true, false,
                                       g_cs_peer_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(packet, sizeof(packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT, payload, len);
+    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
   } else if (g_pending_cs_result_stage == 5U) {
-    len = build_demo_subevent_payload(payload, sizeof(payload), conn_handle, true, true,
+    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, true, true,
                                       g_cs_peer_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(packet, sizeof(packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE,
-                            payload, len);
+    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE,
+                            u.payload, len);
 #endif
   } else {
     return false;
@@ -4551,7 +4644,7 @@ static bool publish_pending_cs_result_packet(void) {
     return false;
   }
   zero_vpr_data();
-  bytes_copy((void *)g_vpr_transport->vprData, packet, len);
+  bytes_copy((void *)g_vpr_transport->vprData, u.packet, len);
   g_vpr_transport->vprLen = (uint32_t)len;
   g_vpr_transport->vprSeq = g_vpr_transport->vprSeq + 1U;
   g_vpr_transport->vprFlags = NRF54L15_VPR_TRANSPORT_FLAG_PENDING;
@@ -4768,6 +4861,41 @@ static bool host_request_pending(void) {
          (g_host_transport->hostLen != 0U);
 }
 
+#if VPR_CS_DEDICATED_IMAGE
+/* Detect VPR session-closed (BLE disconnect) and set abort reasons.
+ * Called from the main loop before checking host requests. */
+static void detect_and_handle_disconnect(void) {
+  if (g_cs_session_open != 0U) { return; }
+  if (g_cs_procedure_enabled != 0U || g_pending_cs_result_stage != 0U) {
+    g_cs_procedure_abort_reason = 0x0BU;  /* Connection terminated by local host */
+    g_cs_subevent_abort_reason = 0x0BU;
+    g_cs_peer_exchange_stage = 0U;
+    g_cs_peer_exchange_deadline = 0U;
+    g_cs_procedure_enabled = 0U;
+    clear_active_runtime_state();
+    g_pending_cs_result_stage = 0U;
+    g_cs_config_created = 0U;
+    g_cs_security_enabled = 0U;
+    g_cs_procedure_params_applied = 0U;
+  }
+}
+
+/* Check if a peer-exchange operation has exceeded its deadline.
+ * Called from the main loop after disconnect detection. */
+static void check_peer_exchange_timeout(void) {
+  if (g_cs_peer_exchange_stage == 0U) { return; }
+  if (g_vpr_transport->heartbeat < g_cs_peer_exchange_deadline) { return; }
+  g_cs_procedure_abort_reason = 0x06U;  /* LL Procedure Timeout */
+  g_cs_peer_exchange_stage = 0U;
+  g_cs_peer_exchange_deadline = 0U;
+  if (g_pending_cs_result_stage != 0U) {
+    g_cs_procedure_enabled = 0U;
+    clear_active_runtime_state();
+    g_pending_cs_result_stage = 0U;
+  }
+}
+#endif  /* VPR_CS_DEDICATED_IMAGE */
+
 static bool consume_host_request(uint32_t host_seq) {
   if (!host_request_pending()) {
     return false;
@@ -4924,6 +5052,11 @@ __attribute__((noreturn, used, externally_visible)) void vpr_main(void) {
     g_vpr_transport->reservedConfig = current_link_state_config_packed();
 #endif
     fence_rw();
+
+#if VPR_CS_DEDICATED_IMAGE
+    detect_and_handle_disconnect();
+    check_peer_exchange_timeout();
+#endif
 
     if ((host_seq != last_seq) && host_request_pending()) {
       if (consume_host_request(host_seq)) {
