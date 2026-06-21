@@ -257,7 +257,6 @@ static uint8_t g_cs_test_active = 0U;
 static uint8_t g_pending_cs_test_result_stage = 0U;
 static uint16_t g_cs_test_procedure_counter = 0U;
 static uint32_t g_cs_test_next_stage_heartbeat = 0U;
-static uint8_t g_cs_test_chunk_start_step = 0U;
 #endif
 #if VPR_CS_DEDICATED_IMAGE
 static uint32_t g_cs_next_procedure_heartbeat = 0U;
@@ -623,11 +622,6 @@ static void reset_dedicated_cs_state(void) {
   g_cs_subevent_abort_reason = 0U;
   g_cs_peer_exchange_deadline = 0U;
   g_cs_peer_exchange_stage = 0U;
-  g_cs_test_active = 0U;
-  g_pending_cs_test_result_stage = 0U;
-  g_cs_test_procedure_counter = 0U;
-  g_cs_test_next_stage_heartbeat = 0U;
-  g_cs_test_chunk_start_step = 0U;
 }
 #endif
 
@@ -2388,11 +2382,6 @@ static void clear_active_runtime_state(void) {
   g_cs_subevent_abort_reason = 0U;
   g_cs_peer_exchange_deadline = 0U;
   g_cs_peer_exchange_stage = 0U;
-  g_cs_test_active = 0U;
-  g_pending_cs_test_result_stage = 0U;
-  g_cs_test_procedure_counter = 0U;
-  g_cs_test_next_stage_heartbeat = 0U;
-  g_cs_test_chunk_start_step = 0U;
 }
 
 static void clear_active_config_selection(void) {
@@ -3810,6 +3799,9 @@ static uint8_t validate_conn_scoped_command(size_t payload_len) {
 }
 
 static uint8_t validate_cs_test_command(void) {
+  if (g_cs_test_active != 0U) {
+    return BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
+  }
   if (g_host_transport->hostLen < 34U ||
       g_host_transport->hostData[0] != 0x01U ||
       g_host_transport->hostData[3] != (g_host_transport->hostLen - 4U) ||
@@ -4194,11 +4186,6 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       const uint8_t status = validate_cs_test_command();
       if (status == BLE_CS_HCI_STATUS_SUCCESS) {
         g_cs_test_active = 1U;
-#if VPR_CS_DEDICATED_IMAGE
-        g_cs_test_procedure_counter = 1U;
-        g_pending_cs_test_result_stage = 1U;
-        g_cs_test_next_stage_heartbeat = 0U;  /* fire immediately */
-#endif
       }
       size_t len = append_h4_command_complete(
           (uint8_t *)g_vpr_transport->vprData + offset,
@@ -4217,10 +4204,6 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         status = BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
       } else {
         g_cs_test_active = 0U;
-#if VPR_CS_DEDICATED_IMAGE
-        g_pending_cs_test_result_stage = 0U;
-        g_cs_test_next_stage_heartbeat = 0U;
-#endif
       }
       size_t len = append_h4_command_complete(
           (uint8_t *)g_vpr_transport->vprData + offset,
@@ -4803,81 +4786,6 @@ static bool publish_pending_cs_result_packet(void) {
   return true;
 }
 
-#if VPR_CS_DEDICATED_IMAGE
-/* Standalone CS Test result publisher (handle 0x0FFF).
- * Mirrors publish_pending_cs_result_packet() but uses the test-mode
- * staging variables and forces config_id / ACL counter / frequency
- * compensation / reference power to 0 per Zephyr host/cs.c test-mode
- * handling.  The test stream is mutually exclusive with connected-CS
- * results: the transport PENDING flag guards both paths. */
-static bool publish_pending_cs_test_result_packet(void) {
-  if (g_cs_test_active == 0U) { return false; }
-  if (g_pending_cs_test_result_stage == 0U) { return false; }
-  if ((g_vpr_transport->vprFlags & NRF54L15_VPR_TRANSPORT_FLAG_PENDING) != 0U) {
-    return false;
-  }
-  if (host_request_pending()) { return false; }
-
-  union {
-    uint8_t payload[40];
-    uint8_t packet[48];
-  } u;
-  size_t len = 0U;
-  uint8_t steps_built = 0U;
-  bool has_more = false;
-  const bool continuation = (g_pending_cs_test_result_stage == 2U);
-
-  if (!continuation && g_vpr_transport->heartbeat < g_cs_test_next_stage_heartbeat) {
-    return false;
-  }
-
-  len = build_demo_subevent_payload(u.payload, sizeof(u.payload),
-                                     BLE_CS_HCI_TEST_CONN_HANDLE,
-                                     false, /* peer_side */
-                                     continuation,
-                                     (continuation ? g_cs_test_chunk_start_step : 0U),
-                                     &steps_built, &has_more);
-  if (len == 0U) { return false; }
-
-  /* Force test-mode fields to 0 per Zephyr spec. */
-  if (!continuation) {
-    u.payload[2] = 0U;  /* config_id        */
-    /* payload[3:4] ACL event counter — zeroed by build_demo_subevent_payload
-     * (g_cs_config_id forced to 0 by demo function, ACL is synthetic anyway) */
-    write_le16(&u.payload[3], 0U); /* start_acl_conn_event = 0 */
-    write_le16(&u.payload[7], 0U); /* frequency_compensation = 0 */
-    u.payload[9] = 0U;             /* reference_power_level = 0   */
-  }
-
-  size_t offset = append_h4_le_meta(u.packet, sizeof(u.packet),
-                                     continuation
-                                         ? BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE
-                                         : BLE_CS_HCI_EVT_SUBEVENT_RESULT,
-                                     u.payload, len);
-  if (offset == 0U) { return false; }
-  zero_vpr_data();
-  bytes_copy((void *)g_vpr_transport->vprData, u.packet, offset);
-  g_vpr_transport->vprLen = offset;
-  g_vpr_transport->vprFlags = NRF54L15_VPR_TRANSPORT_FLAG_PENDING;
-
-  /* Stage transition. */
-  if (has_more) {
-    g_pending_cs_test_result_stage = 2U;
-    g_cs_test_chunk_start_step =
-        (uint8_t)((continuation ? g_cs_test_chunk_start_step : 0U) + steps_built);
-    g_cs_test_next_stage_heartbeat =
-        g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS;
-  } else {
-    g_cs_test_procedure_counter++;
-    g_pending_cs_test_result_stage = 1U;
-    g_cs_test_chunk_start_step = 0U;
-    g_cs_test_next_stage_heartbeat =
-        g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS;
-  }
-  return true;
-}
-#endif  /* VPR_CS_DEDICATED_IMAGE */
-
 #if !VPR_CS_DEDICATED_IMAGE
 static bool publish_pending_ticker_event(void) {
   uint8_t payload[20];
@@ -5291,11 +5199,6 @@ __attribute__((noreturn, used, externally_visible)) void vpr_main(void) {
         (void)schedule_next_cs_procedure();
       }
       (void)publish_pending_cs_result_packet();
-      /* Standalone CS Test result stream (handle 0x0FFF).
-       * Mutually exclusive with the connected path above via the
-       * transport PENDING flag — the test publisher returns false
-       * when g_cs_test_active == 0 or when the transport is busy. */
-      (void)publish_pending_cs_test_result_packet();
 #endif
     }
 
