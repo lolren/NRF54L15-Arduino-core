@@ -131,6 +131,6 @@ private:
 // Global SPI instance on the Arduino SPI pins, using a serial-fabric SPIM.
 extern SPIClass SPI;
 // Dedicated high-speed SPI instance on the P2.x HS-capable pin route.
-extern SPIClass SPI_HS;
+extern SPIClass& SPI_HS;
 
 #endif // SPI_h

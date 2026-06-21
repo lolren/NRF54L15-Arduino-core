@@ -18,6 +18,7 @@ static constexpr uint32_t SPIM_EVENTS_DMA_TX_BUSERROR = 0x170UL;
 
 static constexpr uint32_t SPIM_ENABLE           = 0x500UL;
 static constexpr uint32_t SPIM_PRESCALER        = 0x52CUL;
+static constexpr uint32_t SPIM_FREQUENCY       = 0x524UL;
 static constexpr uint32_t SPIM_CONFIG           = 0x554UL;
 static constexpr uint32_t SPIM_ORC              = 0x5C0UL;
 
@@ -68,7 +69,7 @@ static bool is_hs_spim(NRF_SPIM_Type* spim) {
 }
 
 static uint32_t spim_core_hz(NRF_SPIM_Type* spim) {
-    return is_hs_spim(spim) ? 128000000UL : 16000000UL;
+    return is_hs_spim(spim) ? F_CPU : 16000000UL;
 }
 
 static uint32_t spim_min_divisor(NRF_SPIM_Type* spim) {
@@ -416,7 +417,20 @@ void SPIClass::applySettings() {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
 
-    reg32(base + SPIM_PRESCALER) = compute_prescaler(_spim, _settings.clock());
+    if (is_hs_spim(_spim)) {
+        uint32_t freq_val = SPIM_FREQUENCY_M1;
+        uint32_t target = _settings.clock();
+        if (target >= 8000000UL)      freq_val = SPIM_FREQUENCY_M8;
+        else if (target >= 4000000UL) freq_val = SPIM_FREQUENCY_M4;
+        else if (target >= 2000000UL) freq_val = SPIM_FREQUENCY_M2;
+        else if (target >= 1000000UL) freq_val = SPIM_FREQUENCY_M1;
+        else if (target >= 500000UL)  freq_val = SPIM_FREQUENCY_K500;
+        else if (target >= 250000UL)  freq_val = SPIM_FREQUENCY_K250;
+        else                          freq_val = SPIM_FREQUENCY_K125;
+        reg32(base + SPIM_FREQUENCY) = freq_val;
+    } else {
+        reg32(base + SPIM_PRESCALER) = compute_prescaler(_spim, _settings.clock());
+    }
 
     uint32_t cfg = 0U;
     if (_settings.bitOrder() == LSBFIRST) {
