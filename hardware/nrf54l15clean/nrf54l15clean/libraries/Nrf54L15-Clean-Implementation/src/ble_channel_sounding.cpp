@@ -4563,10 +4563,17 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
    * The VPR may produce background events (e.g. demo-mode CS subevent
    * results) that set vprFlags=PENDING in shared memory, which causes
    * writeInternal to reject the write.  Draining those events into a
-   * scratch host ensures the transport is clear for the new command. */
+   * scratch host ensures the transport is clear for the new command.
+   *
+   * Critically: available() calls poll() which calls pullResponse() to
+   * clear vprFlags=PENDING in shared memory. The local rxBuffer drain
+   * alone is insufficient because writeInternal checks the SHARED
+   * vprFlags, not the local buffer. */
   {
     VprControllerServiceHost scratch(&transport_);
     (void)drainDirectControllerEvents(&scratch, nullptr, 0U);
+    /* Force poll()->pullResponse() to clear vprFlags=PENDING in shared memory. */
+    (void)transport_.available();
   }
 
   VprControllerServiceHost directHost(&transport_);

@@ -4584,6 +4584,67 @@ static void publish_response_for_opcode(uint16_t opcode) {
   }
 }
 
+#if VPR_CS_DEDICATED_IMAGE
+static bool publish_pending_cs_test_result_packet(void) {
+  union {
+    uint8_t payload[40];
+    uint8_t packet[48];
+  } u;
+  size_t len = 0U;
+  /* CS Test uses reserved handle 0x0FFF, config_id 0, ACL event counter 0. */
+  const uint16_t test_handle = BLE_CS_HCI_TEST_CONN_HANDLE;
+  uint8_t steps_built = 0U;
+  bool has_more = false;
+
+  if (g_cs_test_active == 0U || g_pending_cs_test_result_stage == 0U) {
+    return false;
+  }
+  if ((g_vpr_transport->vprFlags & NRF54L15_VPR_TRANSPORT_FLAG_PENDING) != 0U ||
+      host_request_pending()) {
+    return false;
+  }
+  if (g_vpr_transport->heartbeat < g_cs_test_next_stage_heartbeat) {
+    return false;
+  }
+
+  if (g_pending_cs_test_result_stage == 1U) {
+    /* Initial CS Subevent Result (0x31) — partial, mode 2, 4 steps. */
+    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), test_handle,
+                                      false, false, 0U, &steps_built, &has_more);
+    if (len == 0U) return false;
+    /* Override config_id to 0 for test mode. */
+    u.payload[0] = BLE_CS_HCI_TEST_CONFIG_ID;
+    len = append_h4_le_meta(u.packet, sizeof(u.packet),
+                            BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
+    if (len == 0U) return false;
+    g_pending_cs_test_result_stage = 2U;
+    g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS;
+  } else if (g_pending_cs_test_result_stage == 2U) {
+    /* Continuation CS Subevent Result Continue (0x32) — complete. */
+    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), test_handle,
+                                      false, true, 4U, &steps_built, &has_more);
+    if (len == 0U) return false;
+    u.payload[0] = BLE_CS_HCI_TEST_CONFIG_ID;
+    len = append_h4_le_meta(u.packet, sizeof(u.packet),
+                            BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE, u.payload, len);
+    if (len == 0U) return false;
+    /* Procedure complete — schedule next or stop. */
+    g_cs_test_procedure_counter = (uint16_t)(g_cs_test_procedure_counter + 1U);
+    g_pending_cs_test_result_stage = 0U;
+    g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS;
+  } else {
+    return false;
+  }
+  if (len == 0U) return false;
+  zero_vpr_data();
+  bytes_copy((void *)g_vpr_transport->vprData, u.packet, len);
+  g_vpr_transport->vprLen = (uint32_t)len;
+  g_vpr_transport->vprSeq = g_vpr_transport->vprSeq + 1U;
+  g_vpr_transport->vprFlags = NRF54L15_VPR_TRANSPORT_FLAG_PENDING;
+  return true;
+}
+#endif
+
 static bool publish_pending_cs_result_packet(void) {
   /* payload and packet are used sequentially. union saves ~88 B stack. */
   union {
@@ -5022,7 +5083,19 @@ static bool consume_host_request(uint32_t host_seq) {
   }
 
   const uint16_t opcode = read_opcode();
+  const uint8_t prev_test_active = g_cs_test_active;
   publish_response_for_opcode(opcode);
+#if VPR_CS_DEDICATED_IMAGE
+  /* After a successful LE CS Test command, initialize test staging OUTSIDE
+   * the switch statement to avoid the large-switch corruption bug.
+   * Detect success by checking that g_cs_test_active just flipped 0→1. */
+  if (opcode == BLE_CS_HCI_OP_TEST &&
+      prev_test_active == 0U && g_cs_test_active == 1U) {
+    g_cs_test_procedure_counter = 1U;
+    g_pending_cs_test_result_stage = 1U;
+    g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + 50U;
+  }
+#endif
   g_vpr_transport->vprSeq = host_seq;
   g_vpr_transport->vprFlags = NRF54L15_VPR_TRANSPORT_FLAG_PENDING;
   g_host_transport->hostFlags = 0U;
@@ -5195,6 +5268,8 @@ __attribute__((noreturn, used, externally_visible)) void vpr_main(void) {
         }
       }
 #else
+      /* CS Test stream has priority over connected-path results. */
+      (void)publish_pending_cs_test_result_packet();
       if (!schedule_next_cs_subevent()) {
         (void)schedule_next_cs_procedure();
       }
