@@ -3815,8 +3815,8 @@ static uint8_t validate_cs_test_command(void) {
 }
 
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
-  /* Keep this comfortably above the largest vendor command-complete payload. */
-  uint8_t payload[192];
+  /* Largest staging payload is the FAE table at 75 bytes; 80 leaves headroom. */
+  uint8_t payload[80];
   uint16_t conn_handle = current_conn_handle();
   size_t offset = 0U;
   zero_vpr_data();
