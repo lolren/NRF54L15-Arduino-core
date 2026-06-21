@@ -39,6 +39,7 @@ BleCsControllerVprHostConfig gConfig{};
 bool runTestResultStreamProbe() {
   gHost.reset();
   BleCsControllerVprHost::fillDemoConfig(&gConfig);
+  gConfig.session.workflow.procedureEnable.enable = 0U;
 
   uint8_t pumpCount = 0U;
   bool ok = gHost.beginFreshHost(kConnHandle, gConfig, 48U, &pumpCount);
