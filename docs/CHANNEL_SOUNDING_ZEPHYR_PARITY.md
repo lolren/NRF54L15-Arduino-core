@@ -294,15 +294,13 @@ BleChannelSoundingVprHciParity
 cs_vpr_hci_parity=PASS pumps=12 status=0/0/0/0/0/0/0 fae_valid=1 fae_handle=0x41 test_end=0
 ```
 
-**CsTestResults note:** `BleChannelSoundingVprCsTestResults` fails with
-`cs_vpr_test_results=FAIL procedures=0 handle=0x0 start=0x0 second_start=0x0 end=0xFF`.
-The `directStartTest()` now succeeds (status 0x00) after the pre-drain fix
-described below, but no standalone test results are consumed. Root cause: the VPR
-firmware blob sets `g_cs_test_active = 1` when it receives `LE CS Test`, but the
-standalone test result scheduling path (`g_pending_cs_test_result_stage`) is
-never activated — subevent results continue to be emitted on the connected-session
-handle instead of the reserved `0x0FFF` test handle. This is a VPR firmware-level
-gap, not a host code defect.
+**CsTestResults note:** The VPR firmware previously defined `g_pending_cs_test_result_stage`
+but never activated it — `g_cs_test_active` was set by `LE CS Test` but standalone test
+results on handle `0x0FFF` were never scheduled. This was fixed by adding
+`publish_pending_cs_test_result_packet()` (emits `0x31`/`0x32` on `0x0FFF` with
+`config_id=0` per Zephyr spec), wiring it into the main loop, and initializing test
+staging in the `LE CS Test` handler. The fix compiles and is pending hardware
+verification on the next upload cycle.
 
 **Pre-drain fix:** Any direct HCI command sent while the VPR has pending output
 (e.g. demo-mode subevent results after `beginFreshHost`) would be rejected by
