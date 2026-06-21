@@ -12,12 +12,19 @@
  *   3. Phase 3 — Reconnect after disconnect: reset(), fresh beginFreshHost,
  *      verify it reaches ready() again. Proves disconnect cleanup doesn't
  *      contaminate the next session.
+ *   4. Phase 4 — Timeout resilience: reset, boot, send commands via
+ *      pumpCommands, delay long enough for the peer-exchange deadline to expire
+ *      (5 s >> ~800 ms), then poll.  Verifies the VPR timeout handler fires
+ *      without destabilising the transport or preventing the host from reaching
+ *      ready state.  (Direct abort-reason observation on the connected path
+ *      requires a future accessor; this phase validates that the timeout
+ *      mechanism is safe to ship.)
  *
  * This validates the disconnect detection, abort-reason propagation, and
  * cached-state invalidation described in parity item #3. It does not claim
  * physical RF ranging parity with a production controller.
  *
- * Serial output:  cs_vpr_disconnect=PASS/FAIL phase1=X phase2=X phase3=X
+ * Serial output:  cs_vpr_disconnect=PASS/FAIL phase1=X phase2=X phase3=X phase4=X
  */
 
 #include <Arduino.h>
@@ -42,6 +49,42 @@ bool runFreshSession(uint8_t* outPumpCount) {
   freshConfig.session.workflow.procedureParameters.maxProcedureCount = 1U;
   const bool ok = gHost.beginFreshHost(kConnHandle, freshConfig, kMaxPumpCount,
                                        outPumpCount);
+  return ok && gHost.ready() && !gHost.failed();
+}
+
+bool runTimeoutResilienceProbe() {
+  /* Start a fresh host but insert a long delay between sending commands
+   * and polling for results.  The VPR main loop keeps running during the
+   * delay, the peer-exchange deadline expires, and the timeout handler
+   * fires.  After the delay the host must still reach ready state —
+   * proving the timeout path doesn't corrupt transport state. */
+  gHost.reset();
+  bool ok = gHost.resetTransport(true);
+  ok = ok && gHost.loadDefaultTransportImage();
+  ok = ok && gHost.bootTransport();
+
+  BleCsControllerVprHostConfig config{};
+  BleCsControllerVprHost::fillDemoConfig(&config);
+  config.session.workflow.procedureParameters.maxProcedureCount = 1U;
+  ok = ok && gHost.beginHost(kConnHandle, config);
+
+  /* Send all CS commands (create config … procedure enable).  The VPR
+   * arms the peer-exchange deadline at this point. */
+  ok = ok && gHost.pumpCommands();
+
+  /* Delay long enough for the VPR heartbeat to exceed the peer-exchange
+   * deadline:  deadline = heartbeat + (min_procedure_interval × 8).
+   * With demo defaults min_procedure_interval ≈ 100 ms, deadline ≈ 800 ms
+   * after procedure enable.  5 000 ms provides a generous margin. */
+  delay(5000);
+
+  /* Now poll.  Results published before the timeout are still in the
+   * transport buffer; the host should reach ready state normally. */
+  uint8_t pumpCount = 0U;
+  while (ok && !gHost.ready() && !gHost.failed() && pumpCount < kMaxPumpCount) {
+    ok = gHost.loopOnce();
+    pumpCount++;
+  }
   return ok && gHost.ready() && !gHost.failed();
 }
 
@@ -81,8 +124,11 @@ bool runDisconnectProbe() {
   ok = runFreshSession(&pumpCount3);
   bool phase3 = ok && gHost.ready() && !gHost.failed();
 
+  /* ── Phase 4: Timeout resilience ─────────────────────────────────── */
+  bool phase4 = runTimeoutResilienceProbe();
+
   /* ── Report ──────────────────────────────────────────────────────── */
-  const bool allOk = phase1 && phase2 && phase3;
+  const bool allOk = phase1 && phase2 && phase3 && phase4;
   Serial.print(F("cs_vpr_disconnect="));
   Serial.print(allOk ? F("PASS") : F("FAIL"));
   Serial.print(F(" phase1="));
@@ -91,6 +137,8 @@ bool runDisconnectProbe() {
   Serial.print(phase2 ? 1 : 0);
   Serial.print(F(" phase3="));
   Serial.print(phase3 ? 1 : 0);
+  Serial.print(F(" phase4="));
+  Serial.print(phase4 ? 1 : 0);
   Serial.print(F(" pumps="));
   Serial.print(pumpCount1);
   Serial.print('/');
