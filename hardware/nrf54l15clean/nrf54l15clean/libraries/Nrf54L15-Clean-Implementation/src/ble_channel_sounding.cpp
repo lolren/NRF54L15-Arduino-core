@@ -5495,6 +5495,21 @@ bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHos
    * produce background results (e.g. CS test stream). pullResponse() is
    * called by poll() which is called by available(). */
   (void)transport_.available();
+  /* Busy-wait for the VPR to produce background results. The VPR runs
+   * at ~1kHz heartbeat; poll every 2ms for up to 100ms to catch results. */
+  const uint32_t waitStart = millis();
+  while ((millis() - waitStart) < 100UL) {
+    (void)transport_.available();  /* poll -> pullResponse -> clear PENDING */
+    while (ok && transport_.available() > 0 && pollCount < 64U) {
+      packetLen = 0U;
+      ok = directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U) &&
+           (consumeDirectAuxiliaryEvent(packet, packetLen) ||
+            host_.consumeControllerPacket(packet, packetLen));
+      ++pollCount;
+    }
+    delay(2);
+  }
+  (void)transport_.available();
   return ok;
 }
 
