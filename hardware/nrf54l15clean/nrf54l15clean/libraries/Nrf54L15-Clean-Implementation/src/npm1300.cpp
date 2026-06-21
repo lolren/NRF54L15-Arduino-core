@@ -124,21 +124,21 @@ constexpr uint8_t kGpioCount = 5U;
 constexpr uint8_t kGpioOffsetMode = 0x00U;
 constexpr uint8_t kGpioOffsetStatus = 0x1EU;
 constexpr uint8_t kLedCount = 3U;
-constexpr uint8_t kLedModeHost = 3U;
+constexpr uint8_t kLedModeHost = 2U;
 constexpr uint8_t kLedOffsetMode = 0x00U;
 constexpr uint8_t kLedOffsetSet = 0x03U;
 constexpr uint8_t kLedOffsetClr = 0x04U;
-constexpr uint8_t kShipOffsetShip = 0x00U;
-constexpr uint8_t kShipOffsetHibernate = 0x01U;
+constexpr uint8_t kShipOffsetShip = 0x02U;
+constexpr uint8_t kShipOffsetHibernate = 0x00U;
 constexpr uint8_t kAdcMaxBatch = 6U;
 constexpr uint16_t kNpm1300LdoTableSize = 4U;
 static const uint16_t kLdoVoltages[] = {1100, 1800, 2500, 3300};
 static constexpr uint16_t NPM1300_LDO_VOLTAGE_3V3_RAW = 3300U;
 
-static constexpr uint8_t kChargerStatusChargingMask = 0x04U;
-static constexpr int32_t kDieTempOffsetMilliC = 109000;
-static constexpr int32_t kDieTempFactorMul = 3390;
-static constexpr int32_t kDieTempFactorDiv = 10;
+static constexpr uint8_t kChargerStatusChargingMask = 0x1CU;
+static constexpr int32_t kDieTempOffsetMilliC = 394670;
+static constexpr int32_t kDieTempFactorMul = 3963000;
+static constexpr int32_t kDieTempFactorDiv = 5000;
 
 struct AdcResults {
     uint8_t ibatStat, msbVbat, msbNtc, msbDie, msbVsys,
@@ -153,7 +153,7 @@ static AdcResults g_adcCache = {};
 static uint8_t g_chargerStatus = 0;
 static uint8_t g_chargerError = 0;
 static uint8_t g_vbusStatus = 0;
-static int32_t g_chargeCurrentUa = 0;
+static int32_t g_chargeCurrentUa = 32000;
 
 static inline uint16_t adc10(uint8_t msb, uint8_t lsb, uint8_t shift) {
     return (uint16_t)(((uint16_t)msb << 2U) | ((lsb >> shift) & 0x03U));
@@ -179,8 +179,8 @@ static int32_t ibat_to_ma(uint16_t code, uint8_t stat) {
             npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetDischargeLsb, &lsb)) {
             uint16_t fullScale = ((uint16_t)msb << 8U) | lsb;
             if (fullScale != 0) {
-                // I = code * full_scale * 0.836 / 1023
-                return ((int32_t)code * (int32_t)fullScale * 836) / 1023000;
+                // I = code * full_scale * 1.12 / 1023 (empirical correction)
+                return ((int32_t)code * (int32_t)fullScale * 1120) / 1023000;
             }
         }
         return ((int32_t)code * 200) / 1023;
@@ -438,11 +438,11 @@ int32_t npm1300_read_ibat_ma(void) {
 }
 int32_t npm1300_read_vsys_mv(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
-    return adc_to_mv(adc10(r.msbVsys, r.lsbA, kAdcLsbVsysShift), 3600);
+    return adc_to_mv(adc10(r.msbVsys, r.lsbA, kAdcLsbVsysShift), 6375);
 }
 int32_t npm1300_read_vbus_mv(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;
-    return adc_to_mv(adc10(r.msbVbus, r.lsbB, kAdcLsbVbusShift), 5000);
+    return adc_to_mv(adc10(r.msbVbus, r.lsbB, kAdcLsbVbusShift), 7500);
 }
 
 bool npm1300_enter_ship_mode(void) {
@@ -461,6 +461,16 @@ bool npm1300_led_set(uint8_t led, uint8_t brightness) {
 bool npm1300_gpio_set_mode(uint8_t pin, uint8_t mode) {
     if (pin >= kGpioCount || mode > 9) return false;
     return npm1300_write_reg(NPM1300_BASE_GPIO, kGpioOffsetMode + pin, mode);
+}
+
+bool npm1300_charger_set_discharge_current_ma(uint16_t ma) {
+    if (ma > 1000) ma = 1000;
+    if (ma < 20) ma = 20;
+    g_dischargeLimitUa = (int32_t)ma * 1000;
+    uint8_t msb = (uint8_t)((g_dischargeLimitUa >> 8) & 0xFFU);
+    uint8_t lsb = (uint8_t)(g_dischargeLimitUa & 0xFFU);
+    return npm1300_write_reg(NPM1300_BASE_CHARGER, 0x0AU, msb) &&
+           npm1300_write_reg(NPM1300_BASE_CHARGER, 0x0BU, lsb);
 }
 
 bool npm1300_is_crc_corrupt(void) {

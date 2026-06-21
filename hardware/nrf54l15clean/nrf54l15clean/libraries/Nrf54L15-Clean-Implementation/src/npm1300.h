@@ -161,3 +161,5 @@ bool npm1300_gpio_status(uint8_t *status);
 #endif
 
 #endif
+
+bool npm1300_charger_set_discharge_current_ma(uint16_t ma);
