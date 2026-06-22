@@ -78,10 +78,12 @@ constexpr uint8_t kChargerOffsetErrClr = 0x00U;
 constexpr uint8_t kChargerOffsetEnSet = 0x04U;
 constexpr uint8_t kChargerOffsetEnClr = 0x05U;
 constexpr uint8_t kChargerOffsetDisableSet = 0x06U;
+constexpr uint8_t kChargerOffsetDisableClr = 0x07U;
 constexpr uint8_t kChargerOffsetISet = 0x08U;
 constexpr uint8_t kChargerOffsetDischargeMsb = 0x0AU;
 constexpr uint8_t kChargerOffsetDischargeLsb = 0x0BU;
 constexpr uint8_t kChargerOffsetVTerm = 0x0CU;
+constexpr uint8_t kChargerOffsetVTermReduced = 0x0DU;
 constexpr uint8_t kChargerOffsetStatus = 0x34U;
 constexpr uint8_t kChargerOffsetError = 0x36U;
 constexpr uint8_t kAdcOffsetTaskVbat = 0x00U;
@@ -136,6 +138,24 @@ static const uint16_t kLdoVoltages[] = {1100, 1800, 2500, 3300};
 static constexpr uint16_t NPM1300_LDO_VOLTAGE_3V3_RAW = 3300U;
 
 static constexpr uint8_t kChargerStatusChargingMask = 0x1CU;
+static constexpr uint8_t kChargerEnableChargingMask = 0x01U;
+static constexpr uint8_t kIbatStatusModeShift = 2U;
+static constexpr uint8_t kIbatStatusModeMask = 0x03U;
+static constexpr uint8_t kIbatStatusInvalidMask = 0x10U;
+static constexpr uint8_t kIbatModeDischarge = 0x01U;
+static constexpr uint8_t kIbatModeCharge = 0x03U;
+static constexpr uint16_t kChargeCurrentMinMa = 32U;
+static constexpr uint16_t kChargeCurrentMaxMa = 800U;
+static constexpr uint16_t kChargeCurrentIndexMin = 16U;
+static constexpr uint16_t kChargeCurrentIndexMax = 400U;
+static constexpr uint16_t kDischargeLimitLowMa = 200U;
+static constexpr uint16_t kDischargeLimitHighMa = 1000U;
+static constexpr uint16_t kDischargeLimitLowCode = 84U;
+static constexpr uint16_t kDischargeLimitHighCode = 415U;
+static constexpr int32_t kIbatFullScaleChargeMul = 125;
+static constexpr int32_t kIbatFullScaleChargeDiv = 100;
+static constexpr int32_t kIbatFullScaleDischargeMul = 112;
+static constexpr int32_t kIbatFullScaleDischargeDiv = 100;
 static constexpr int32_t kDieTempOffsetMilliC = 394670;
 static constexpr int32_t kDieTempFactorMul = 3963000;
 static constexpr int32_t kDieTempFactorDiv = 5000;
@@ -161,49 +181,146 @@ static inline uint16_t adc10(uint8_t msb, uint8_t lsb, uint8_t shift) {
 }
 
 // ADC full-scale voltages per nPM1300 datasheet (10-bit, 0-1023):
-//   VBAT: VFSVBAT = 5.0 V (internal voltage divider for battery)
-//   VSYS: VFSVSYS = 3.6 V (system voltage)
-//   VBUS: VFSVBUS = 5.0 V (USB VBUS input)
+//   VBAT: VFSVBAT = 5.0 V
+//   VSYS: VFSVSYS = 6.375 V
+//   VBUS: VFSVBUS = 7.5 V
 static int32_t adc_to_mv(uint16_t code, int32_t vfs_mv) {
     return ((int32_t)code * vfs_mv) / 1023;
 }
 
-static int32_t ibat_to_ma(uint16_t code, uint8_t stat) {
-    // BCHARGER.MODE bits[7:6]: 00=idle/no-battery, 01=discharge, 11=charge
-    uint8_t mode = (stat >> 6) & 0x03U;
-    // VBAT will be ~0 if no battery present
-    if (mode == 0U) return 0;  // No battery / idle
-    if (mode == 1U) {
-        // Discharging: use BCHGISETDISCHARGEMSB/LSB for full scale
-        uint8_t msb = 0, lsb = 0;
-        if (npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetDischargeMsb, &msb) &&
-            npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetDischargeLsb, &lsb)) {
-            uint16_t fullScale = ((uint16_t)msb << 8U) | lsb;
-            if (fullScale != 0) {
-                // I = code * full_scale * 1.12 / 1023 (empirical correction)
-                return ((int32_t)code * (int32_t)fullScale * 1120) / 1023000;
-            }
-        }
-        return ((int32_t)code * 200) / 1023;
+static int32_t rounded_div_i64(int64_t num, int64_t den) {
+    if (den <= 0) return 0;
+    if (num >= 0) {
+        return (int32_t)((num + (den / 2)) / den);
     }
-    // Charging: center-zero bipolar measurement (512 = 0 mA)
-    const int32_t mul = (stat & 1U) ? 50 : 100;
-    return ((int32_t)code - 512) * mul;
+    return (int32_t)((num - (den / 2)) / den);
+}
+
+static bool read_charger_enabled(bool* enabled) {
+    if (enabled == nullptr) return false;
+    uint8_t value = 0;
+    if (!npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetEnSet, &value)) {
+        return false;
+    }
+    *enabled = (value & kChargerEnableChargingMask) != 0U;
+    return true;
+}
+
+static bool set_charger_enabled_task(bool enabled) {
+    return npm1300_write_reg(NPM1300_BASE_CHARGER,
+                             enabled ? kChargerOffsetEnSet : kChargerOffsetEnClr,
+                             kChargerEnableChargingMask);
+}
+
+static bool begin_charger_config(bool* wasEnabled) {
+    bool enabled = false;
+    if (!read_charger_enabled(&enabled)) {
+        enabled = false;
+    }
+    if (wasEnabled != nullptr) {
+        *wasEnabled = enabled;
+    }
+    if (enabled && !set_charger_enabled_task(false)) {
+        return false;
+    }
+    return true;
+}
+
+static bool end_charger_config(bool wasEnabled, bool ok) {
+    if (wasEnabled) {
+        ok = set_charger_enabled_task(true) && ok;
+    }
+    g_adcValid = false;
+    return ok;
+}
+
+static uint16_t clamp_charge_current_ma(uint16_t ma) {
+    if (ma < kChargeCurrentMinMa) return kChargeCurrentMinMa;
+    if (ma > kChargeCurrentMaxMa) return kChargeCurrentMaxMa;
+    return ma;
+}
+
+static uint16_t charge_current_index_to_ma(uint16_t idx) {
+    if (idx < kChargeCurrentIndexMin) idx = kChargeCurrentIndexMin;
+    if (idx > kChargeCurrentIndexMax) idx = kChargeCurrentIndexMax;
+    return (uint16_t)(kChargeCurrentMinMa + ((idx - kChargeCurrentIndexMin) * 2U));
+}
+
+static bool read_charge_current_limit_ua(int32_t* outUa) {
+    if (outUa == nullptr) return false;
+    uint8_t raw[2] = {0, 0};
+    if (!npm1300_read_burst(NPM1300_BASE_CHARGER, kChargerOffsetISet, raw, sizeof(raw))) {
+        return false;
+    }
+    const uint16_t idx = (uint16_t)((uint16_t)raw[0] * 2U + (raw[1] & 0x01U));
+    *outUa = (int32_t)charge_current_index_to_ma(idx) * 1000;
+    return true;
+}
+
+static uint16_t discharge_limit_code_from_ma(uint16_t ma) {
+    return (ma <= kDischargeLimitLowMa) ? kDischargeLimitLowCode : kDischargeLimitHighCode;
+}
+
+static int32_t discharge_limit_code_to_ua(uint16_t code) {
+    const uint16_t midpoint = (uint16_t)((kDischargeLimitLowCode + kDischargeLimitHighCode) / 2U);
+    return (code <= midpoint) ? ((int32_t)kDischargeLimitLowMa * 1000)
+                              : ((int32_t)kDischargeLimitHighMa * 1000);
+}
+
+static bool read_discharge_limit_ua(int32_t* outUa) {
+    if (outUa == nullptr) return false;
+    uint8_t raw[2] = {0, 0};
+    if (!npm1300_read_burst(NPM1300_BASE_CHARGER, kChargerOffsetDischargeMsb, raw, sizeof(raw))) {
+        return false;
+    }
+    const uint16_t code = (uint16_t)((uint16_t)raw[0] * 2U + (raw[1] & 0x01U));
+    *outUa = discharge_limit_code_to_ua(code);
+    return true;
+}
+
+static int32_t ibat_to_ma(uint16_t code, uint8_t stat) {
+    if ((stat & kIbatStatusInvalidMask) != 0U) {
+        return -1;
+    }
+
+    const uint8_t mode = (stat >> kIbatStatusModeShift) & kIbatStatusModeMask;
+    int32_t fullScaleUa = 0;
+    if (mode == kIbatModeDischarge) {
+        int32_t limitUa = g_dischargeLimitUa;
+        if (read_discharge_limit_ua(&limitUa)) {
+            g_dischargeLimitUa = limitUa;
+        }
+        fullScaleUa = (limitUa * kIbatFullScaleDischargeMul) /
+                      kIbatFullScaleDischargeDiv;
+    } else if (mode == kIbatModeCharge) {
+        int32_t limitUa = g_chargeCurrentUa;
+        if (read_charge_current_limit_ua(&limitUa)) {
+            g_chargeCurrentUa = limitUa;
+        }
+        fullScaleUa = (limitUa * kIbatFullScaleChargeMul) /
+                      kIbatFullScaleChargeDiv;
+    } else {
+        return 0;
+    }
+
+    return rounded_div_i64((int64_t)code * (int64_t)fullScaleUa, 1023LL * 1000LL);
 }
 
 static uint8_t clamp_channel(uint8_t ch) { return (ch > 1U) ? 0U : ch; }
 
 static uint16_t charger_current_index(uint16_t ma) {
-    if (ma > 2000) return 1008;
-    uint16_t idx = 16 + (ma - 32) / 2;
-    if (idx > 1008) idx = 1008;
+    ma = clamp_charge_current_ma(ma);
+    uint16_t idx = (uint16_t)(kChargeCurrentIndexMin + ((ma - kChargeCurrentMinMa) / 2U));
+    if (idx > kChargeCurrentIndexMax) idx = kChargeCurrentIndexMax;
     return idx;
 }
 
 static uint8_t charger_vterm_index(uint16_t mv) {
-    if (mv >= 4500) return 39;
-    if (mv <= 3650) return 0;
-    return (mv - 3650) / 25;
+    if (mv <= 3500U) return 0U;
+    if (mv <= 3650U) return (uint8_t)((mv - 3500U + 25U) / 50U);
+    if (mv < 4000U) return (mv < 3825U) ? 3U : 4U;
+    if (mv >= 4450U) return 13U;
+    return (uint8_t)(4U + ((mv - 4000U + 25U) / 50U));
 }
 
 static bool voltage_to_index(uint16_t mv, uint8_t* idx) {
@@ -397,8 +514,10 @@ bool npm1300_buck2_set_mode(uint8_t m) { return buck_set_mode(1, m); }
 bool npm1300_charger_enable(bool e) {
     if (e) {
         (void)npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetErrClr, 1U);
+        (void)npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetDisableClr, 1U);
     }
-    return npm1300_write_reg(NPM1300_BASE_CHARGER, e ? kChargerOffsetEnSet : kChargerOffsetEnClr, 1U);
+    g_adcValid = false;
+    return set_charger_enabled_task(e);
 }
 bool npm1300_charger_set_current(uint16_t ma) {
     const uint16_t idx = charger_current_index(ma);
@@ -406,15 +525,25 @@ bool npm1300_charger_set_current(uint16_t ma) {
         static_cast<uint8_t>(idx / 2U),
         static_cast<uint8_t>(idx & 1U)
     };
-    if (!npm1300_write_burst(NPM1300_BASE_CHARGER, kChargerOffsetISet, data, sizeof(data))) {
+
+    bool wasEnabled = false;
+    if (!begin_charger_config(&wasEnabled)) {
         return false;
     }
-    g_chargeCurrentUa = 32000 + (static_cast<int32_t>(idx) - 16) * 2000;
-    return true;
+    const bool ok = npm1300_write_burst(NPM1300_BASE_CHARGER, kChargerOffsetISet,
+                                        data, sizeof(data));
+    g_chargeCurrentUa = (int32_t)charge_current_index_to_ma(idx) * 1000;
+    return end_charger_config(wasEnabled, ok);
 }
 bool npm1300_charger_set_term_voltage(uint16_t mv) {
-    return npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetVTerm,
-                             charger_vterm_index(mv));
+    const uint8_t idx = charger_vterm_index(mv);
+    bool wasEnabled = false;
+    if (!begin_charger_config(&wasEnabled)) {
+        return false;
+    }
+    const bool ok = npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetVTerm, idx) &&
+                    npm1300_write_reg(NPM1300_BASE_CHARGER, kChargerOffsetVTermReduced, idx);
+    return end_charger_config(wasEnabled, ok);
 }
 bool npm1300_charger_is_charging(void) {
     uint8_t s; return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetStatus, &s) &&
@@ -463,15 +592,30 @@ bool npm1300_gpio_set_mode(uint8_t pin, uint8_t mode) {
     if (pin >= kGpioCount || mode > 9) return false;
     return npm1300_write_reg(NPM1300_BASE_GPIO, kGpioOffsetMode + pin, mode);
 }
+bool npm1300_gpio_write(uint8_t pin, bool high) {
+    return npm1300_gpio_set_mode(pin, high ? NPM1300_GPIO_GPOLOGIC1
+                                           : NPM1300_GPIO_GPOLOGIC0);
+}
+bool npm1300_gpio_status(uint8_t* status) {
+    return npm1300_read_reg(NPM1300_BASE_GPIO, kGpioOffsetStatus, status);
+}
 
 bool npm1300_charger_set_discharge_current_ma(uint16_t ma) {
-    if (ma > 1000) ma = 1000;
-    if (ma < 20) ma = 20;
-    g_dischargeLimitUa = (int32_t)ma * 1000;
-    uint8_t msb = (uint8_t)((g_dischargeLimitUa >> 8) & 0xFFU);
-    uint8_t lsb = (uint8_t)(g_dischargeLimitUa & 0xFFU);
-    return npm1300_write_reg(NPM1300_BASE_CHARGER, 0x0AU, msb) &&
-           npm1300_write_reg(NPM1300_BASE_CHARGER, 0x0BU, lsb);
+    const uint16_t code = discharge_limit_code_from_ma(ma);
+    const uint8_t data[] = {
+        static_cast<uint8_t>(code / 2U),
+        static_cast<uint8_t>(code & 1U)
+    };
+
+    bool wasEnabled = false;
+    if (!begin_charger_config(&wasEnabled)) {
+        return false;
+    }
+    const bool ok = npm1300_write_burst(NPM1300_BASE_CHARGER,
+                                        kChargerOffsetDischargeMsb,
+                                        data, sizeof(data));
+    g_dischargeLimitUa = discharge_limit_code_to_ua(code);
+    return end_charger_config(wasEnabled, ok);
 }
 
 bool npm1300_is_crc_corrupt(void) {

@@ -4589,11 +4589,11 @@ static size_t build_test_subevent_payload(uint8_t *payload, size_t max_len,
                                           uint16_t conn_handle, bool continuation,
                                           uint16_t procedure_counter) {
   /* Build a synthetic CS subevent result for test mode.
-   * Uses minimal header + 4 mode-2 step entries (RTT only, no phase).
+   * Uses spec-compliant header + 4 mode-2 step entries with proper
+   * 3-byte step headers and tone data.
    * Initial (0x31): 15-byte header + 4*8=32 bytes step data = 47 bytes.
-   * Continue (0x32): 8-byte header + 4*8=32 bytes step data = 40 bytes.
-   * Both fit in 40-byte payload buffer. */
-  if (payload == NULL || max_len < 40U) {
+   * Continue (0x32): 8-byte header + 4*8=32 bytes step data = 40 bytes. */
+  if (payload == NULL || max_len < 48U) {
     return 0U;
   }
 
@@ -4602,57 +4602,69 @@ static size_t build_test_subevent_payload(uint8_t *payload, size_t max_len,
   payload[2] = BLE_CS_HCI_TEST_CONFIG_ID;  /* config_id = 0 for test mode */
 
   if (!continuation) {
-    /* Initial subevent result (0x31) — 15-byte header. */
+    /* Initial subevent result (0x31) — 15-byte header.
+     * Layout per BT Core Spec Vol 4 Part E HCI LE CS Subevent Result.
+     * conn_handle[0-1], config_id[2], start_acl[3-4], procedure_counter[5-6],
+     * frequency_comp[7-8], ref_power_level[9], procedure_done_status[10],
+     * subevent_done_status[11], abort_reason_nibble[12], num_antenna_paths[13],
+     * num_steps[14], step_data[15+]. */
     write_le16(&payload[3], 0U);           /* start_acl_conn_event = 0 */
     write_le16(&payload[5], procedure_counter); /* procedure_counter */
     write_le16(&payload[7], 0U);           /* frequency_compensation = 0 */
     payload[9] = 0U;                       /* reference_power_level = 0 */
-    payload[10] = 0U;                      /* num_antenna_paths = 0 (RTT only) */
-    payload[11] = 2U;                      /* main_mode_type = 2 (RTT+PBR) */
-    payload[12] = 0U;                      /* sub_mode_type = 0 */
-    payload[13] = 0U;                      /* rtt_type = 0 */
-    payload[14] = 0U;                      /* procedure_abort_reason = 0 */
-    /* Step data starts at offset 15. */
+    payload[10] = 0x01U; /* procedure_done_status = partial */
+    payload[11] = 0x01U; /* subevent_done_status = partial */
+    payload[12] = 0x00U;                   /* abort_reason nibble (0 = no abort) */
+    payload[13] = 0U;                      /* num_antenna_paths = 0 (RTT only) */
+    payload[14] = 4U;                      /* num_steps_reported = 4 */
+    /* Step data starts at offset 15.
+     * Each step: [0]=mode, [1]=channel, [2]=dataLen, [3..dataLen-1]=data.
+     * Mode-2 data: [0]=antenna_permutation_index, [1..4]=tone[0] (4-byte tone info). */
     const size_t step_offset = 15U;
     for (uint8_t i = 0U; i < 4U; ++i) {
-      payload[step_offset + i * 8U + 0U] = (uint8_t)(0x01U + i); /* channel */
-      payload[step_offset + i * 8U + 1U] = 0x00U;                /* rtt_valid = 1 */
-      write_le16(&payload[step_offset + i * 8U + 2U], 1000U + i * 100U); /* rtt_sample */
-      payload[step_offset + i * 8U + 4U] = 0x00U;                /* phase_valid = 0 */
-      payload[step_offset + i * 8U + 5U] = 0x00U;                /* tone_quality = 0 */
-      payload[step_offset + i * 8U + 6U] = 0x00U;                /* antenna_path = 0 */
-      payload[step_offset + i * 8U + 7U] = 0x00U;                /* rssi = 0 */
+      const size_t off = step_offset + i * 8U;
+      payload[off + 0U] = 2U;              /* mode = kBleCsMainMode2 */
+      payload[off + 1U] = (uint8_t)(0x01U + i); /* channel */
+      payload[off + 2U] = 5U;              /* dataLen = 1 (ant_idx) + 4 (tone info) */
+      payload[off + 3U] = 0U;              /* antennaPermutationIndex = 0 */
+      /* Tone info: 3-byte PCT (I/Q) + 1-byte info. */
+      write_le24(&payload[off + 4U], 0x800000U + i * 0x001000U); /* PCT: I=0x800, Q=0x000+i */
+      payload[off + 7U] = 0x10U;           /* quality=0, extension=1 */
     }
-    payload[14] = 0x01U;  /* procedure_done_status = partial */
     return 15U + 4U * 8U;
   } else {
-    /* Continue subevent result (0x32) — 8-byte header. */
-    write_le16(&payload[0], conn_handle);   /* already written above, but repeat for clarity */
+    /* Continue subevent result (0x32) — 8-byte header.
+     * Layout per BT Core Spec Vol 4 Part E HCI LE CS Subevent Result Continue.
+     * conn_handle[0-1], config_id[2], procedure_done_status[3],
+     * subevent_done_status[4], abort_reason_nibble[5], num_antenna_paths[6],
+     * num_steps[7], step_data[8+]. */
     payload[2] = BLE_CS_HCI_TEST_CONFIG_ID;
-    write_le16(&payload[3], procedure_counter);
-    payload[5] = 0U;                        /* subevent_abort_reason = 0 */
-    payload[6] = 0x02U;                     /* procedure_done_status = complete */
-    payload[7] = 0x00U;                     /* subevent_done_status = complete */
-    /* Step data starts at offset 8. */
+    payload[3] = 0x00U; /* procedure_done_status = complete */
+    payload[4] = 0x00U; /* subevent_done_status = complete */
+    payload[5] = 0x00U; /* abort_reason nibble (0 = no abort) */
+    payload[6] = 0U;    /* num_antenna_paths = 0 (RTT only) */
+    payload[7] = 4U;    /* num_steps_reported = 4 */
+    /* Step data starts at offset 8 (same format as initial). */
     const size_t step_offset = 8U;
     for (uint8_t i = 0U; i < 4U; ++i) {
-      payload[step_offset + i * 8U + 0U] = (uint8_t)(0x04U + i); /* channel */
-      payload[step_offset + i * 8U + 1U] = 0x00U;                /* rtt_valid = 1 */
-      write_le16(&payload[step_offset + i * 8U + 2U], 2000U + i * 100U); /* rtt_sample */
-      payload[step_offset + i * 8U + 4U] = 0x00U;                /* phase_valid = 0 */
-      payload[step_offset + i * 8U + 5U] = 0x00U;                /* tone_quality = 0 */
-      payload[step_offset + i * 8U + 6U] = 0x00U;                /* antenna_path = 0 */
-      payload[step_offset + i * 8U + 7U] = 0x00U;                /* rssi = 0 */
+      const size_t off = step_offset + i * 8U;
+      payload[off + 0U] = 2U;              /* mode = kBleCsMainMode2 */
+      payload[off + 1U] = (uint8_t)(0x04U + i); /* channel */
+      payload[off + 2U] = 5U;              /* dataLen = 1 (ant_idx) + 4 (tone info) */
+      payload[off + 3U] = 0U;              /* antennaPermutationIndex = 0 */
+      write_le24(&payload[off + 4U], 0x900000U + i * 0x001000U); /* PCT: I=0x900, Q=0x000+i */
+      payload[off + 7U] = 0x10U;           /* quality=0, extension=1 */
     }
     return 8U + 4U * 8U;
   }
 }
 
 static bool publish_pending_cs_test_result_packet(void) {
-  union {
-    uint8_t payload[40];
-    uint8_t packet[48];
-  } u;
+  /* Build subevent payload at offset 4 of the packet buffer, then prepend
+   * the 4-byte H4 header at offset 0. Avoids the self-overlap bug (union
+   * payload/packet overlap caused a forward-copy cascade in bytes_copy,
+   * filling the entire packet with the H4 header pattern). */
+  uint8_t packet[64];
   size_t len = 0U;
   /* CS Test uses reserved handle 0x0FFF, config_id 0, ACL event counter 0. */
   const uint16_t test_handle = BLE_CS_HCI_TEST_CONN_HANDLE;
@@ -4672,32 +4684,36 @@ static bool publish_pending_cs_test_result_packet(void) {
 
   if (g_pending_cs_test_result_stage == 1U) {
     /* Initial CS Subevent Result (0x31) — partial, mode 2, 4 steps. */
-    len = build_test_subevent_payload(u.payload, sizeof(u.payload), test_handle,
+    len = build_test_subevent_payload(&packet[4], sizeof(packet) - 4, test_handle,
                                       false, g_cs_test_procedure_counter);
     if (len == 0U) return false;
-    len = append_h4_le_meta(u.packet, sizeof(u.packet),
-                            BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
-    if (len == 0U) return false;
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_LE_META;
+    packet[2] = (uint8_t)(1U + len);
+    packet[3] = BLE_CS_HCI_EVT_SUBEVENT_RESULT;
+    len += 4U;
     g_pending_cs_test_result_stage = 2U;
     g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS;
   } else if (g_pending_cs_test_result_stage == 2U) {
     /* Continuation CS Subevent Result Continue (0x32) — complete. */
-    len = build_test_subevent_payload(u.payload, sizeof(u.payload), test_handle,
+    len = build_test_subevent_payload(&packet[4], sizeof(packet) - 4, test_handle,
                                       true, g_cs_test_procedure_counter);
     if (len == 0U) return false;
-    len = append_h4_le_meta(u.packet, sizeof(u.packet),
-                            BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE, u.payload, len);
-    if (len == 0U) return false;
-    /* Procedure complete — schedule next or stop. */
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_LE_META;
+    packet[2] = (uint8_t)(1U + len);
+    packet[3] = BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE;
+    len += 4U;
+    /* Procedure complete — re-arm for next procedure. */
     g_cs_test_procedure_counter = (uint16_t)(g_cs_test_procedure_counter + 1U);
-    g_pending_cs_test_result_stage = 0U;
+    g_pending_cs_test_result_stage = 1U;
     g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS;
   } else {
     return false;
   }
   if (len == 0U) return false;
   zero_vpr_data();
-  bytes_copy((void *)g_vpr_transport->vprData, u.packet, len);
+  bytes_copy((void *)g_vpr_transport->vprData, packet, len);
   g_vpr_transport->vprLen = (uint32_t)len;
   g_vpr_transport->vprSeq = g_vpr_transport->vprSeq + 1U;
   g_vpr_transport->vprFlags = NRF54L15_VPR_TRANSPORT_FLAG_PENDING;
@@ -4706,11 +4722,13 @@ static bool publish_pending_cs_test_result_packet(void) {
 #endif
 
 static bool publish_pending_cs_result_packet(void) {
-  /* payload and packet are used sequentially. union saves ~88 B stack. */
-  union {
-    uint8_t payload[40];
-    uint8_t packet[48];
-  } u;
+  /* Build subevent payload at offset 4 of the packet buffer, then prepend
+   * the 4-byte H4 header at offset 0. This avoids the self-overlap bug
+   * that would occur if an HCI-packet wrapper function read from the same
+   * buffer it wrote to (union-based payload/packet overlap triggered a
+   * forward-copy cascade in bytes_copy, filling the entire payload with
+   * the H4 header pattern). */
+  uint8_t packet[52];
   size_t len = 0U;
   uint16_t conn_handle = current_conn_handle();
   uint8_t steps_built = 0U;
@@ -4742,47 +4760,68 @@ static bool publish_pending_cs_result_packet(void) {
     return false;
   }
   if (g_pending_cs_result_stage == 1U) {
-    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, false, false,
+    /* Build subevent payload at offset 4, then prepend H4 LE Meta header. */
+    len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, false, false,
                                       g_cs_local_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_LE_META;
+    packet[2] = (uint8_t)(1U + len);
+    packet[3] = BLE_CS_HCI_EVT_SUBEVENT_RESULT;
+    len += 4U;
   } else if (g_pending_cs_result_stage == 2U) {
-    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, false, true,
+    len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, false, true,
                                       g_cs_local_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE,
-                            u.payload, len);
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_LE_META;
+    packet[2] = (uint8_t)(1U + len);
+    packet[3] = BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE;
+    len += 4U;
   } else if (g_pending_cs_result_stage == 3U) {
 #if VPR_CS_DEDICATED_IMAGE
-    u.payload[0] = g_cs_config_id;
-    write_le16(&u.payload[1], g_cs_procedure_counter);
-    len = append_h4_vendor_event(u.packet, sizeof(u.packet),
-                                 VPR_VENDOR_EVENT_CS_PEER_RESULT_SOURCE, u.payload,3U);
+    packet[4] = g_cs_config_id;
+    write_le16(&packet[5], g_cs_procedure_counter);
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_VENDOR;
+    packet[2] = 4U;  /* 1 + 3 bytes payload */
+    packet[3] = VPR_VENDOR_EVENT_CS_PEER_RESULT_SOURCE;
+    len = 7U;
 #else
-    u.payload[0] = 1U;
-    len = append_h4_vendor_event(u.packet, sizeof(u.packet),
-                                 VPR_VENDOR_EVENT_CS_PEER_RESULT_TRIGGER, u.payload,1U);
+    packet[4] = 1U;
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_VENDOR;
+    packet[2] = 2U;  /* 1 + 1 byte payload */
+    packet[3] = VPR_VENDOR_EVENT_CS_PEER_RESULT_TRIGGER;
+    len = 5U;
 #endif
 #if VPR_CS_DEDICATED_IMAGE
   } else if (g_pending_cs_result_stage == 4U) {
-    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, true, false,
+    len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, true, false,
                                       g_cs_peer_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT, u.payload, len);
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_LE_META;
+    packet[2] = (uint8_t)(1U + len);
+    packet[3] = BLE_CS_HCI_EVT_SUBEVENT_RESULT;
+    len += 4U;
   } else if (g_pending_cs_result_stage == 5U) {
-    len = build_demo_subevent_payload(u.payload, sizeof(u.payload), conn_handle, true, true,
+    len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, true, true,
                                       g_cs_peer_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
       return false;
     }
-    len = append_h4_le_meta(u.packet, sizeof(u.packet), BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE,
-                            u.payload, len);
+    packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
+    packet[1] = BLE_HCI_EVT_LE_META;
+    packet[2] = (uint8_t)(1U + len);
+    packet[3] = BLE_CS_HCI_EVT_SUBEVENT_RESULT_CONTINUE;
+    len += 4U;
 #endif
   } else {
     return false;
@@ -4791,7 +4830,7 @@ static bool publish_pending_cs_result_packet(void) {
     return false;
   }
   zero_vpr_data();
-  bytes_copy((void *)g_vpr_transport->vprData, u.packet, len);
+  bytes_copy((void *)g_vpr_transport->vprData, packet, len);
   g_vpr_transport->vprLen = (uint32_t)len;
   g_vpr_transport->vprSeq = g_vpr_transport->vprSeq + 1U;
   g_vpr_transport->vprFlags = NRF54L15_VPR_TRANSPORT_FLAG_PENDING;

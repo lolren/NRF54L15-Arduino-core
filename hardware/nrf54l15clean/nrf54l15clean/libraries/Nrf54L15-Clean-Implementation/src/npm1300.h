@@ -133,6 +133,7 @@ bool npm1300_buck2_set_mode(uint8_t mode);
 /* Battery charger and status. */
 bool npm1300_charger_enable(bool enable);
 bool npm1300_charger_set_current(uint16_t ma);
+bool npm1300_charger_set_discharge_current_ma(uint16_t ma);
 bool npm1300_charger_set_term_voltage(uint16_t mv);
 bool npm1300_charger_is_charging(void);
 bool npm1300_charger_status(uint8_t *status);
@@ -161,5 +162,3 @@ bool npm1300_gpio_status(uint8_t *status);
 #endif
 
 #endif
-
-bool npm1300_charger_set_discharge_current_ma(uint16_t ma);
