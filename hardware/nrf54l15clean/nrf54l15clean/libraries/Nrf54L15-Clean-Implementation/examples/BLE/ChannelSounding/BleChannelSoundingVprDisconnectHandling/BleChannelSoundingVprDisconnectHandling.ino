@@ -16,9 +16,8 @@
  *      pumpCommands, delay long enough for the peer-exchange deadline to expire
  *      (5 s >> ~800 ms), then poll.  Verifies the VPR timeout handler fires
  *      without destabilising the transport or preventing the host from reaching
- *      ready state.  (Direct abort-reason observation on the connected path
- *      requires a future accessor; this phase validates that the timeout
- *      mechanism is safe to ship.)
+ *      ready state.  This phase validates that timeout handling is safe to
+ *      ship; focused abort-reason packet injection is tracked separately.
  *
  * This validates the disconnect detection, abort-reason propagation, and
  * cached-state invalidation described in parity item #3. It does not claim

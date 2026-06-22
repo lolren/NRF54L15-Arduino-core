@@ -412,6 +412,13 @@ Current invalid-parameter coverage exists in
 cs_vpr_invalid_params=PASS pumps=12 statuses=12/12/12/12/C/0/0
 ```
 
+Retained config removal/promotion coverage exists in
+`BleChannelSoundingVprConfigRemoveActive` and is hardware-verified:
+
+```text
+cs_vpr_config_remove=PASS pumps=12 statuses=0/0/0/0/0/0/12
+```
+
 Required work:
 
 - Disconnect during capability exchange, configuration, security, and active

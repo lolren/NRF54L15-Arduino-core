@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-███████████████████████████░░░░░░░░░░░░░░░░░░░  56%
+█████████████████████████████░░░░░░░░░░░░░░░░░  60%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -21,7 +21,8 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | CS Test result stream (handle 0x0FFF, synthetic) | ✅ Hardware-verified |
 | ██ | CS Test End (`end=0xFF` fix) | ✅ Hardware-verified |
 | ██ | Error-path testing (invalid direct-HCI example) | ✅ Hardware-verified |
-| ░░ | Host abort reason reaction | 📋 Planned below |
+| ▓▓ | Host abort reason reaction | ✅ Code complete |
+| ██ | Config removal / retained promotion example | ✅ Hardware-verified |
 | ░░ | Multi-config slot testing | 📋 Planned below |
 | ░░ | LL Control PDU over-the-air exchange | 🔒 Second board |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
@@ -121,49 +122,19 @@ Host maintains per-connection cached remote capabilities (v1, 30 bytes; v2, 33 b
 ### 3e — Host Abort Reason Reaction
 
 ```
-░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+████████████████ 100% Code complete
 ```
 
-**The gap:** The host parses `procedureAbortReason` and `subeventAbortReason` from HCI subevent result packets (lines 1536-1538, 1571-1573 of `ble_channel_sounding.cpp`). The values are stored in `BleCsSubeventResultHeader` (lines 231-232 of the header). However, `accumulateProcedureResult()` (line 3437) never checks them — an aborted subevent is accumulated just like a successful one. `updateEstimateIfComplete()` (line 3585) checks `procedureDoneStatus != kBleCsProcedureDoneComplete` and returns early, but never cleans up the accumulated buffers.
+The host now rejects aborted subevent results before they can be accumulated into
+a distance estimate. `accumulateProcedureResult()` records the latest procedure
+and subevent abort reasons, clears estimate validity, and refuses aborted data.
+`updateEstimateIfComplete()` also clears accumulated buffers if either side has
+an aborted done status or non-zero abort reason.
 
-**What to do (~30 lines):**
-
-**Step 1** — `accumulateProcedureResult()` (line 3437 of `ble_channel_sounding.cpp`):
-After the existing guard at line 3439, add:
-```cpp
-/* Reject aborted results. The VPR tags subevent results with a non-zero
- * abort reason (e.g. 0x06 = LL Procedure Timeout, 0x0B = Connection
- * Terminated). Accumulating aborted data would produce invalid distance
- * estimates. */
-if (result.header.procedureAbortReason != 0U ||
-    result.header.subeventAbortReason != 0U) {
-  return false;
-}
-```
-
-**Step 2** — `updateEstimateIfComplete()` (line 3585 of `ble_channel_sounding.cpp`):
-In the existing early-return block for non-Complete done status, add cleanup:
-```cpp
-if (accumulatedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
-    accumulatedPeerResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete) {
-  /* If either result indicates abort, clean up so stale data doesn't
-   * contaminate the next procedure. */
-  if (accumulatedLocalResult_.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
-      accumulatedPeerResult_.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
-      accumulatedLocalResult_.header.procedureAbortReason != 0U ||
-      accumulatedPeerResult_.header.procedureAbortReason != 0U) {
-    resetAccumulatedProcedureResults();
-  }
-  return;
-}
-```
-
-**Step 3** — Verify:
-- Compile all CS examples (no regression)
-- Upload `BleChannelSoundingVprDisconnectHandling` — Phase 2 resetTransport should trigger abort → the host should clean up gracefully
-- Can be tested by injecting a synthetic aborted subevent via `consumeDirectAuxiliaryEvent`
-
-**Files:** `src/ble_channel_sounding.cpp` only.
+**Remaining verification gap:** add a focused synthetic host-only test that
+injects local/peer aborted result packets and asserts stale buffers are cleared.
+The runtime disconnect/timeout example already verifies that these paths do not
+destabilise the VPR transport.
 
 ---
 
@@ -234,7 +205,7 @@ while preserving real `readNextH4Event()` failures. Verified by
 # Item 5 — Error-Path Testing
 
 ```
-██████░░░░░░░░░░ 35%
+██████████░░░░░░ 60%
 ```
 
 Write example sketches that exercise error paths. **Pure software, testable on existing board.**
@@ -265,16 +236,20 @@ Remaining negative coverage:
 - Invalid CS Test override mask bits
 - Security enable malformed inputs
 
-### 5b — Config Removal While Active
+### 5b — Config Removal / Promotion
 
-**Example:** `BleChannelSoundingVprConfigRemoveActive`
+**Example:** `BleChannelSoundingVprConfigRemoveActive` — implemented and
+hardware-verified.
 
-1. `beginFreshHost` — creates config, enables procedure
-2. `directRemoveConfig(configId=1)` while procedure is active
-3. Verify VPR returns `COMMAND_DISALLOWED (0x0C)` or succeeds with proper cleanup
-4. Verify host state machine transitions correctly
+- Create and arm an alternate config
+- Re-select the original config
+- Remove the selected/original config
+- Verify the alternate config is promoted and runnable
+- Verify enabling the removed config returns Invalid Parameters (`0x12`)
 
-**Test coverage:** ~40 lines.
+```text
+cs_vpr_config_remove=PASS pumps=12 statuses=0/0/0/0/0/0/12
+```
 
 ### 5c — Contradictory Commands
 
@@ -300,10 +275,13 @@ Send N commands in rapid succession without draining responses; verify the VPR t
 # Item 6 — Multi-Config Slot Operations
 
 ```
-░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+████░░░░░░░░░░░░ 25%
 ```
 
-The VPR supports up to 8 config slots via `g_cs_slots[]`. No example exercises multiple configs.
+The VPR supports up to 8 config slots via `g_cs_slots[]`.
+`BleChannelSoundingVprConfigRemoveActive` now covers two retained configs,
+selection, removal, promotion, and rejection of a removed config. Broader
+multi-slot/eviction coverage remains.
 
 ### 6a — Multiple Config Create/Select/Evict
 
@@ -319,6 +297,10 @@ The VPR supports up to 8 config slots via `g_cs_slots[]`. No example exercises m
 **Files:** `src/ble_channel_sounding.cpp` — may need `directSelectConfig()` or verify existing API covers this.
 
 **Test coverage:** ~80 lines.
+
+Partial coverage is already in `BleChannelSoundingVprConfigRemoveActive`
+for two configs. A dedicated multi-config example should still cover three or
+more slots and explicit slot reuse/eviction.
 
 ### 6b — Retained Config State After Reset
 
@@ -454,9 +436,8 @@ Replace synthetic mode-2 step data with real RF measurements. Requires:
 ```
 Phase A — Quick wins (software only, 1 day)
 ─────────────────────────────────────────
-Item 3e   Host abort reason reaction       ~30 lines
-Item 5b   Config remove example            ~40 lines
 Item 5c   More direct-HCI edge cases        ~80 lines
+Abort-injection host-only unit example     ~60 lines
 
 Phase B — Multi-config (software only, 1 day)
 ─────────────────────────────────────────
@@ -486,6 +467,7 @@ Item 11   Two-board interoperability
 # Current Commit History
 
 ```
+20bf8b64 test: add CS direct HCI invalid parameter probe
 83db24aa fix: drain direct CS HCI events without false failure
 b5d8cc13 fix: disable connected procedure in CsTestResults example (enable=0)
 6bf86d7d perf: shrink publish_builtin_response_for_opcode payload buffer 192->80 B

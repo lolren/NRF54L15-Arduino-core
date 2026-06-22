@@ -149,13 +149,14 @@ cs_vpr_disconnect=PASS phase1=1 phase2=1 phase3=1 pumps=12/12/12 disconnected=1 
 
 ### 2.5 Examples
 
-11 CS examples exist under `examples/BLE/ChannelSounding/`:
+12 CS examples exist under `examples/BLE/ChannelSounding/`:
 
 | Example | Purpose | Verified |
 |---------|---------|----------|
 | `BleChannelSoundingHciParity` | Host-side HCI command packing | Compiles |
 | `BleChannelSoundingVprHciParity` | VPR round-trip: all 14 HCI commands | PASS |
 | `BleChannelSoundingVprCsTestResults` | Standalone CS Test result stream | PASS |
+| `BleChannelSoundingVprConfigRemoveActive` | Retained config removal/promotion | PASS |
 | `BleChannelSoundingVprInvalidParams` | Direct-HCI invalid parameter paths | PASS |
 | `BleChannelSoundingVprCachedCapabilities` | Capability/FAE caching lifecycle | Compiles |
 | `BleChannelSoundingVprDisconnectHandling` | Disconnect/timeout framework | PASS |
@@ -410,7 +411,8 @@ Before declaring any CS change done:
 4. Upload `BleChannelSoundingVprDisconnectHandling` → `PASS`
 5. Upload `BleChannelSoundingVprCsTestResults` → `PASS`
 6. Upload `BleChannelSoundingVprInvalidParams` → `PASS`
-7. Spot-check at least one connected example compiles and produces output
+7. Upload `BleChannelSoundingVprConfigRemoveActive` → `PASS`
+8. Spot-check at least one connected example compiles and produces output
 
 ---
 
