@@ -4577,7 +4577,7 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
    * between our drain and the write, re-arming vprFlags=PENDING. */
   for (uint8_t retry = 0U; retry < 4U; ++retry) {
     VprControllerServiceHost scratch(&transport_);
-    (void)drainDirectControllerEvents(&scratch, nullptr, 0U);
+    (void)drainDirectControllerEvents(&scratch, nullptr, 0U, true);
     /* Force poll()->pullResponse() to clear vprFlags=PENDING in shared
      * memory, then consume anything that arrived so rxIndex catches up. */
     (void)transport_.available();
@@ -4588,7 +4588,8 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       directHost.sendHciCommand(opcode, params, paramsLen, response, responseSize, responseLen);
   const bool drained =
       ok && drainDirectControllerEvents(&directHost, response,
-                                        (responseLen != nullptr) ? *responseLen : 0U);
+                                        (responseLen != nullptr) ? *responseLen : 0U,
+                                        opcode != kBleCsHciOpProcedureEnable);
   if (ok && drained && resetRunStateAfter) {
     host_.resetProcedureRunState();
   }
@@ -5235,7 +5236,7 @@ bool BleCsControllerVprHost::drainPendingControllerEvents() {
     return false;
   }
   VprControllerServiceHost directHost(&transport_);
-  return drainDirectControllerEvents(&directHost, nullptr, 0U);
+  return drainDirectControllerEvents(&directHost, nullptr, 0U, true);
 }
 
 bool BleCsControllerVprHost::ready() const { return host_.ready(); }
@@ -5472,7 +5473,8 @@ bool BleCsControllerVprHost::consumeTestResultEvent(uint8_t subeventCode,
 
 bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                                          const uint8_t* response,
-                                                         size_t responseLen) {
+                                                         size_t responseLen,
+                                                         bool waitForBackgroundResults) {
   if (directHost == nullptr || !host_.hostState().began) {
     return true;
   }
@@ -5505,6 +5507,9 @@ bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHos
    * produce background results (e.g. CS test stream). pullResponse() is
    * called by poll() which is called by available(). */
   (void)transport_.available();
+  if (!waitForBackgroundResults) {
+    return true;
+  }
   /* Busy-wait for the VPR to produce background results. The VPR runs
    * at ~1kHz heartbeat; poll every 2ms for up to 100ms to catch results. */
   const uint32_t waitStart = millis();

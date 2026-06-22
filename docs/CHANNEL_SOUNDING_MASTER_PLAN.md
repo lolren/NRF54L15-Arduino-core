@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-██████████████████████████████░░░░░░░░░░░░░░░░  62%
+████████████████████████████████░░░░░░░░░░░░░░  67%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -23,7 +23,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Error-path testing (invalid direct-HCI example) | ✅ Hardware-verified |
 | ██ | Host abort reason reaction | ✅ Hardware-verified |
 | ██ | Config removal / retained promotion example | ✅ Hardware-verified |
-| ░░ | Multi-config slot testing | 📋 Planned below |
+| ██ | Multi-config slot testing | ✅ Hardware-verified |
 | ░░ | LL Control PDU over-the-air exchange | 🔒 Second board |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
@@ -281,32 +281,33 @@ Send N commands in rapid succession without draining responses; verify the VPR t
 # Item 6 — Multi-Config Slot Operations
 
 ```
-████░░░░░░░░░░░░ 25%
+████████████░░░░ 75%
 ```
 
-The VPR supports up to 8 config slots via `g_cs_slots[]`.
-`BleChannelSoundingVprConfigRemoveActive` now covers two retained configs,
-selection, removal, promotion, and rejection of a removed config. Broader
-multi-slot/eviction coverage remains.
+The VPR retained config table now supports 8 primary slots via `g_cs_slots[]`.
+`BleChannelSoundingVprConfigRemoveActive` covers selected/active removal and
+promotion, and `BleChannelSoundingVprMultiConfig` covers five retained configs,
+slot removal, slot reuse, selecting an older config after later configs were
+created, and rejection of a removed config.
 
 ### 6a — Multiple Config Create/Select/Evict
 
 **Example:** `BleChannelSoundingVprMultiConfig`
 
-1. Create config 1 → verify config complete
-2. Create config 2 → verify config complete
-3. Create config 3 → verify config complete
-4. Remove config 1 → verify eviction tracking
-5. Switch active config from 2 to 3
-6. Create config 4 → verify slot reuse
+1. Create configs 2–5 in addition to the boot config
+2. Verify retained config count reaches 5
+3. Re-select and run the base config after later configs were created
+4. Remove config 3 and verify count drops to 4
+5. Create config 6 and verify the freed slot is reused
+6. Verify the removed config rejects procedure parameters with `0x12`
 
-**Files:** `src/ble_channel_sounding.cpp` — may need `directSelectConfig()` or verify existing API covers this.
+**Files:** `examples/BLE/ChannelSounding/BleChannelSoundingVprMultiConfig`
 
-**Test coverage:** ~80 lines.
+**Status:** Hardware-verified on XIAO nRF54L15:
 
-Partial coverage is already in `BleChannelSoundingVprConfigRemoveActive`
-for two configs. A dedicated multi-config example should still cover three or
-more slots and explicit slot reuse/eviction.
+```text
+cs_vpr_multi_config=PASS count=5>4>5 ... removed_select=12
+```
 
 ### 6b — Retained Config State After Reset
 
@@ -447,7 +448,7 @@ Abort-injection host-only unit example     DONE
 
 Phase B — Multi-config (software only, 1 day)
 ─────────────────────────────────────────
-Item 6a   Multi-config example             ~80 lines
+Item 6a   Multi-config example             DONE
 Item 6b   Retained config test             ~50 lines
 
 Phase C — Stress & soak (software only, 1 day)

@@ -1610,7 +1610,8 @@ class BleCsControllerVprHost {
                               const uint8_t* payload, size_t payloadLen);
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
-                                   size_t responseLen);
+                                   size_t responseLen,
+                                   bool waitForBackgroundResults);
   void syncVprState();
 
   BleCsControllerVprHostConfig config_;

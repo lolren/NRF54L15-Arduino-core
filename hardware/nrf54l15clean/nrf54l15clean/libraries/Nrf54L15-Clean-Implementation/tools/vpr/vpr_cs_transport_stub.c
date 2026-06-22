@@ -38,6 +38,8 @@
 #define BLE_CS_TEST_SUPPORTED_OVERRIDE_MASK 0x05FDU
 #define BLE_CS_FAE_TABLE_LEN 72U
 #define BLE_CS_CHANNEL_CLASSIFICATION_LEN 10U
+#define BLE_CS_MAX_CONFIG_SLOTS 8U
+#define BLE_CS_MAX_TRACKED_CONFIG_IDS (BLE_CS_MAX_CONFIG_SLOTS + 1U)
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -375,7 +377,7 @@ static vpr_cs_dedicated_state_t g_cs_state = {
     .procedureEnabled = 0U,
     .sessionOpen = 0U,
 };
-static vpr_cs_config_slot_t g_cs_slots[2];
+static vpr_cs_config_slot_t g_cs_slots[BLE_CS_MAX_CONFIG_SLOTS];
 static vpr_cs_config_slot_t g_cs_previous_slot;
 
 #define g_cs_config_id g_cs_state.configId
@@ -487,6 +489,9 @@ enum {
   VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE,
 };
 static uint8_t g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
+#if VPR_CS_DEDICATED_IMAGE
+static uint8_t g_cs_builtin_peer_demo_enabled = 0U;
+#endif
 
 /* Forward declarations for functions defined later in the dedicated-image
  * section.  They are called from arm sites inside publish_builtin_response_
@@ -622,6 +627,7 @@ static void reset_dedicated_cs_state(void) {
   g_cs_subevent_abort_reason = 0U;
   g_cs_peer_exchange_deadline = 0U;
   g_cs_peer_exchange_stage = 0U;
+  g_cs_builtin_peer_demo_enabled = 0U;
 }
 #endif
 
@@ -1109,6 +1115,14 @@ static void clear_ble_connection_handoff(void) {
 }
 
 #if VPR_CS_DEDICATED_IMAGE
+static bool cs_builtin_peer_demo_active(void) {
+  const uint32_t host_reserved = g_host_transport->reserved;
+  if (host_reserved != 0U && host_reserved != NRF54L15_VPR_BLE_CONN_HANDOFF_COOKIE) {
+    g_cs_builtin_peer_demo_enabled = 1U;
+  }
+  return g_cs_builtin_peer_demo_enabled != 0U;
+}
+
 static void consume_ble_connection_handoff(void) {
   if (g_host_transport->reserved != NRF54L15_VPR_BLE_CONN_HANDOFF_COOKIE) {
     return;
@@ -1165,7 +1179,7 @@ static bool append_unique_config_id(uint8_t config_id, uint8_t *ids, uint8_t *co
       return false;
     }
   }
-  if (*count >= 4U) {
+  if (*count >= BLE_CS_MAX_TRACKED_CONFIG_IDS) {
     return false;
   }
   ids[*count] = config_id;
@@ -1174,7 +1188,7 @@ static bool append_unique_config_id(uint8_t config_id, uint8_t *ids, uint8_t *co
 }
 
 static uint8_t current_unique_cs_config_count(void) {
-  uint8_t ids[4] = {0U, 0U, 0U, 0U};
+  uint8_t ids[BLE_CS_MAX_TRACKED_CONFIG_IDS] = {0U};
   uint8_t count = 0U;
   if (g_cs_config_created != 0U && g_cs_config_id != 0U) {
     (void)append_unique_config_id(g_cs_config_id, ids, &count);
@@ -1191,16 +1205,15 @@ static uint8_t current_unique_cs_config_count(void) {
 }
 
 static void current_authority_config_ids(uint8_t *out0, uint8_t *out1, uint8_t *out2) {
-  uint8_t ids[4] = {0U, 0U, 0U, 0U};
+  uint8_t ids[BLE_CS_MAX_TRACKED_CONFIG_IDS] = {0U};
   uint8_t count = 0U;
   if (g_cs_config_created != 0U && g_cs_config_id != 0U) {
     (void)append_unique_config_id(g_cs_config_id, ids, &count);
   }
-  if (g_cs_slots[0].inUse != 0U) {
-    (void)append_unique_config_id(g_cs_slots[0].configId, ids, &count);
-  }
-  if (g_cs_slots[1].inUse != 0U) {
-    (void)append_unique_config_id(g_cs_slots[1].configId, ids, &count);
+  for (uint8_t i = 0U; i < (uint8_t)(sizeof(g_cs_slots) / sizeof(g_cs_slots[0])); ++i) {
+    if (g_cs_slots[i].inUse != 0U) {
+      (void)append_unique_config_id(g_cs_slots[i].configId, ids, &count);
+    }
   }
   if (g_cs_previous_slot.inUse != 0U) {
     (void)append_unique_config_id(g_cs_previous_slot.configId, ids, &count);
@@ -2230,6 +2243,7 @@ static void update_demo_channels_from_create_config(void) {
     const uint32_t packed = pack_demo_channels_from_map(channel_map);
     if (packed != 0U) {
       g_cs_demo_channels_packed = packed;
+      g_cs_builtin_peer_demo_enabled = 1U;
     }
   }
 }
@@ -4130,6 +4144,8 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         } else if (status == 0U) {
           g_cs_procedure_enabled = 1U;
           g_cs_procedure_counter = 1U;
+          g_cs_procedure_abort_reason = 0U;
+          g_cs_subevent_abort_reason = 0U;
           g_cs_active_subevent_index = 0U;
           g_pending_cs_result_stage = 1U;
           g_cs_next_procedure_heartbeat = 0U;
@@ -4175,9 +4191,14 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       }
 #if VPR_CS_DEDICATED_IMAGE
       if (enable != 0U) {
-        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
-        g_cs_peer_exchange_deadline =
-            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        if (cs_builtin_peer_demo_active()) {
+          g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE;
+          g_cs_peer_exchange_deadline = 0U;
+        } else {
+          g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
+          g_cs_peer_exchange_deadline =
+              peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        }
       }
 #endif
       break;
@@ -5104,9 +5125,11 @@ static void check_peer_exchange_timeout(void) {
   if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_IDLE) { return; }
   if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) { return; }
   if (g_vpr_transport->heartbeat < g_cs_peer_exchange_deadline) { return; }
-  g_cs_procedure_abort_reason =
-      abort_reason_for_peer_stage(g_cs_peer_exchange_stage);
-  g_cs_subevent_abort_reason = g_cs_procedure_abort_reason;
+  if (g_cs_procedure_enabled != 0U || g_pending_cs_result_stage != 0U) {
+    g_cs_procedure_abort_reason =
+        abort_reason_for_peer_stage(g_cs_peer_exchange_stage);
+    g_cs_subevent_abort_reason = g_cs_procedure_abort_reason;
+  }
   g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
   g_cs_peer_exchange_deadline = 0U;
   if (g_pending_cs_result_stage != 0U) {

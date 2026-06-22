@@ -149,7 +149,7 @@ cs_vpr_disconnect=PASS phase1=1 phase2=1 phase3=1 pumps=12/12/12 disconnected=1 
 
 ### 2.5 Examples
 
-13 CS examples exist under `examples/BLE/ChannelSounding/`:
+14 CS examples exist under `examples/BLE/ChannelSounding/`:
 
 | Example | Purpose | Verified |
 |---------|---------|----------|
@@ -158,6 +158,7 @@ cs_vpr_disconnect=PASS phase1=1 phase2=1 phase3=1 pumps=12/12/12 disconnected=1 
 | `BleChannelSoundingVprHciParity` | VPR round-trip: all 14 HCI commands | PASS |
 | `BleChannelSoundingVprCsTestResults` | Standalone CS Test result stream | PASS |
 | `BleChannelSoundingVprConfigRemoveActive` | Retained config removal/promotion | PASS |
+| `BleChannelSoundingVprMultiConfig` | Five retained configs, slot reuse, removed-config rejection | PASS |
 | `BleChannelSoundingVprInvalidParams` | Direct-HCI invalid parameter paths | PASS |
 | `BleChannelSoundingVprCachedCapabilities` | Capability/FAE caching lifecycle | Compiles |
 | `BleChannelSoundingVprDisconnectHandling` | Disconnect/timeout framework | PASS |
@@ -357,7 +358,7 @@ python3 tools/generate_vpr_cs_transport_stub.py
 ```
 
 Both must fit within `0x2003C900`—`0x2003FE00` (13568 B window).
-Current sizes: controller ~13096 B, transport ~9936 B.
+Current sizes: controller ~13420 B, transport ~10336 B.
 
 ### 4.3 Compiling an Example
 
@@ -414,7 +415,8 @@ Before declaring any CS change done:
 6. Upload `BleChannelSoundingVprInvalidParams` → `PASS`
 7. Upload `BleChannelSoundingVprConfigRemoveActive` → `PASS`
 8. Upload `BleChannelSoundingHostAbortCleanup` → `PASS`
-9. Spot-check at least one connected example compiles and produces output
+9. Upload `BleChannelSoundingVprMultiConfig` → `PASS`
+10. Spot-check at least one connected example compiles and produces output
 
 ---
 
@@ -457,7 +459,7 @@ Events on the wrong handle are silently ignored by the respective path.
 | Controller image | `0x2003C900` | 13568 B | VPR firmware blob |
 | Context save | `0x2003FE80` | 384 B | VPR state save/restore |
 
-Controller blob headroom: ~472 B (13096/13568 used). Stack reservation: 256 B.
+Controller blob headroom: ~148 B (13420/13568 used). Stack reservation: 256 B.
 
 ### 5.5 Cache Coherency Fix Pattern
 

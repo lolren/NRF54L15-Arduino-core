@@ -241,7 +241,6 @@ unconditional.
 Out of scope for this pass (remain as future work):
 - Real LL Control PDU construction and RADIO transmission (items #4, #5, #6).
 - CS security material derivation / DRBG (item #5).
-- Multi-config slot negotiation for stored configs.
 - Two-board interoperability verification.
 
 ## Hardware Verification
@@ -267,7 +266,14 @@ BleChannelSoundingReflector
 BleChannelSoundingVprCsTestResults
 BleChannelSoundingVprCachedCapabilities
 BleChannelSoundingVprDisconnectHandling
+BleChannelSoundingVprMultiConfig
 ```
+
+`BleChannelSoundingVprMultiConfig` was compiled, uploaded, and verified on a
+XIAO nRF54L15 after expanding the dedicated VPR retained config table to 8
+primary slots. It creates five retained configs, selects/runs the base config
+after later configs were created, removes a middle config, reuses the freed slot,
+and verifies the removed config rejects procedure parameters with `0x12`.
 
 `BleChannelSoundingVprDisconnectHandling` was compiled, uploaded, and verified on a XIAO
 nRF54L15 with probe UID `E91217E8`. Observed output:
@@ -433,8 +439,7 @@ Required work:
 - Disconnect during capability exchange, configuration, security, and active
   procedure.
 - Procedure disable and re-enable.
-- Config removal while selected, active, or retained.
-- Multiple stored configurations and eviction.
+- Full reset-state coverage after retained config creation.
 - Multiple connections, or explicit rejection if the implementation remains
   single-link.
 - HCI queue saturation and fragmented/concatenated event streams.
