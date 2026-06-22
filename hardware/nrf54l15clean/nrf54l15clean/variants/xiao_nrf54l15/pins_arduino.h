@@ -114,7 +114,7 @@ enum {
 #define PIN_HSPI_MOSI (PIN_D10)       // P2.02
 #define PIN_HSPI_MISO (PIN_D9)        // P2.04
 #define PIN_HSPI_SCK  (PIN_D8)        // P2.01
-#define PIN_HSPI_SS   (PIN_RF_SW_CTL) // P2.05, shared with RF path select
+#define PIN_HSPI_SS   (PIN_SPI_SS)    // D2; P2.05 is reserved for the RF switch
 
 // Compatibility helpers used by libraries like Adafruit_BusIO on ARM cores.
 typedef volatile uint32_t PortReg;

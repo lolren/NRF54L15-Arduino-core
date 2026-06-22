@@ -19,6 +19,7 @@ static constexpr uint32_t SPIM_EVENTS_DMA_TX_BUSERROR = 0x170UL;
 static constexpr uint32_t SPIM_ENABLE           = 0x500UL;
 static constexpr uint32_t SPIM_PRESCALER        = 0x52CUL;
 static constexpr uint32_t SPIM_CONFIG           = 0x554UL;
+static constexpr uint32_t SPIM_IFTIMING_CSNDUR  = 0x5B0UL;
 static constexpr uint32_t SPIM_ORC              = 0x5C0UL;
 
 static constexpr uint32_t SPIM_PSEL_SCK         = 0x600UL;
@@ -39,7 +40,14 @@ static constexpr uint32_t SPIM_CONFIG_CPHA_TRAILING   = 1UL << 1;
 static constexpr uint32_t SPIM_CONFIG_CPOL_ACTIVE_LOW = 1UL << 2;
 
 static constexpr uint32_t PSEL_DISCONNECTED = 0xFFFFFFFFUL;
-static constexpr size_t SPI_DMA_CHUNK_BYTES = 64U;
+static constexpr size_t SPI_DMA_CHUNK_BYTES = 512U;
+static constexpr uint32_t SPIM_DEFAULT_CSNDUR = 2UL;
+static constexpr uint32_t SPIM_ERRATA8_CONTROL = 0xC84UL;
+static constexpr uint32_t SPIM_ERRATA8_ENABLE = 0x82UL;
+static constexpr uintptr_t GPIOHSPADCTRL_BASE = 0x50050400UL;
+static constexpr uint32_t GPIOHSPADCTRL_BIAS = 0x30UL;
+static constexpr uint32_t GPIOHSPADCTRL_HSBIAS_MASK = 0x3UL;
+static constexpr uint32_t GPIOHSPADCTRL_HSBIAS_FASTEST = 0x3UL;
 
 static inline volatile uint32_t& reg32(uintptr_t addr) {
     return *reinterpret_cast<volatile uint32_t*>(addr);
@@ -68,7 +76,10 @@ static bool is_hs_spim(NRF_SPIM_Type* spim) {
 }
 
 static uint32_t spim_core_hz(NRF_SPIM_Type* spim) {
-    return is_hs_spim(spim) ? 128000000UL : 16000000UL;
+    if (is_hs_spim(spim)) {
+        return nrf54l15_core_get_cpu_frequency_hz();
+    }
+    return 16000000UL;
 }
 
 static uint32_t spim_min_divisor(NRF_SPIM_Type* spim) {
@@ -84,7 +95,8 @@ static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
     }
 }
 
-static void set_extra_high_drive_if_hs(NRF_SPIM_Type* spim, uint8_t pin) {
+static void set_hs_output_drive(NRF_SPIM_Type* spim, uint8_t pin,
+                                bool extraHigh) {
     if (!is_hs_spim(spim)) {
         return;
     }
@@ -102,9 +114,20 @@ static void set_extra_high_drive_if_hs(NRF_SPIM_Type* spim, uint8_t pin) {
 
     uint32_t cnf = gpio->PIN_CNF[p];
     cnf &= ~(GPIO_PIN_CNF_DRIVE0_Msk | GPIO_PIN_CNF_DRIVE1_Msk);
-    cnf |= (GPIO_PIN_CNF_DRIVE0_E0 << GPIO_PIN_CNF_DRIVE0_Pos);
-    cnf |= (GPIO_PIN_CNF_DRIVE1_E1 << GPIO_PIN_CNF_DRIVE1_Pos);
+    const uint32_t drive0 =
+        extraHigh ? GPIO_PIN_CNF_DRIVE0_E0 : GPIO_PIN_CNF_DRIVE0_S0;
+    const uint32_t drive1 =
+        extraHigh ? GPIO_PIN_CNF_DRIVE1_E1 : GPIO_PIN_CNF_DRIVE1_S1;
+    cnf |= (drive0 << GPIO_PIN_CNF_DRIVE0_Pos);
+    cnf |= (drive1 << GPIO_PIN_CNF_DRIVE1_Pos);
     gpio->PIN_CNF[p] = cnf;
+}
+
+static void set_hs_pad_slew_fastest() {
+    uint32_t bias = reg32(GPIOHSPADCTRL_BASE + GPIOHSPADCTRL_BIAS);
+    bias &= ~GPIOHSPADCTRL_HSBIAS_MASK;
+    bias |= GPIOHSPADCTRL_HSBIAS_FASTEST;
+    reg32(GPIOHSPADCTRL_BASE + GPIOHSPADCTRL_BIAS) = bias;
 }
 
 static uint32_t compute_prescaler(NRF_SPIM_Type* spim, uint32_t target_hz) {
@@ -132,39 +155,25 @@ static uint32_t compute_prescaler(NRF_SPIM_Type* spim, uint32_t target_hz) {
 
 }  // namespace
 
-SPIClass SPI(NRF_SPIM00, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
-SPIClass& SPI_HS = SPI;
+SPIClass* SPIClass::_activeSpim00Owner = nullptr;
 
-SPIClass::SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck, uint8_t cs)
+SPIClass SPI(NRF_SPIM00, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS, false);
+SPIClass SPI_HS(NRF_SPIM00, PIN_HSPI_MOSI, PIN_HSPI_MISO, PIN_HSPI_SCK, PIN_HSPI_SS, true);
+
+SPIClass::SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck,
+                   uint8_t cs, bool allowCpuBoost)
     : _spim(spim), _mosi(mosi), _miso(miso), _sck(sck), _cs(cs), _settings(),
-      _initialized(false), _inTransaction(false), _lastActivityUs(0U) {}
+      _initialized(false), _inTransaction(false), _allowCpuBoost(allowCpuBoost),
+      _errata8Active(false), _restoreCpuHz(0U), _lastActivityUs(0U) {}
 
 void SPIClass::begin() {
     if (_spim == nullptr) {
         return;
     }
 
-    configurePins();
-
-    uint8_t sckPort = 0, sckPin = 0, mosiPort = 0, mosiPin = 0, misoPort = 0, misoPin = 0;
-    if (!decode_pin(_sck, &sckPort, &sckPin) ||
-        !decode_pin(_mosi, &mosiPort, &mosiPin) ||
-        !decode_pin(_miso, &misoPort, &misoPin)) {
+    if (!claimHardware()) {
         return;
     }
-
-    const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
-
-    reg32(base + SPIM_ENABLE) = SPIM_ENABLE_DISABLED;
-    reg32(base + SPIM_PSEL_SCK) = make_psel(sckPort, sckPin);
-    reg32(base + SPIM_PSEL_MOSI) = make_psel(mosiPort, mosiPin);
-    reg32(base + SPIM_PSEL_MISO) = make_psel(misoPort, misoPin);
-    reg32(base + SPIM_PSEL_CSN) = PSEL_DISCONNECTED;
-    reg32(base + SPIM_ORC) = 0xFFU;
-
-    applySettings();
-
-    reg32(base + SPIM_ENABLE) = SPIM_ENABLE_ENABLED;
 
     _initialized = true;
     _inTransaction = false;
@@ -221,12 +230,24 @@ void SPIClass::end() {
         return;
     }
 
-    const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
-    reg32(base + SPIM_ENABLE) = SPIM_ENABLE_DISABLED;
-    reg32(base + SPIM_PSEL_SCK) = PSEL_DISCONNECTED;
-    reg32(base + SPIM_PSEL_MOSI) = PSEL_DISCONNECTED;
-    reg32(base + SPIM_PSEL_MISO) = PSEL_DISCONNECTED;
-    reg32(base + SPIM_PSEL_CSN) = PSEL_DISCONNECTED;
+    if (_inTransaction) {
+        endTransaction();
+    } else {
+        restoreTransactionClock();
+    }
+
+    if (ownsHardware()) {
+        const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
+        reg32(base + SPIM_ERRATA8_CONTROL) = 0U;
+        reg32(base + SPIM_ENABLE) = SPIM_ENABLE_DISABLED;
+        reg32(base + SPIM_PSEL_SCK) = PSEL_DISCONNECTED;
+        reg32(base + SPIM_PSEL_MOSI) = PSEL_DISCONNECTED;
+        reg32(base + SPIM_PSEL_MISO) = PSEL_DISCONNECTED;
+        reg32(base + SPIM_PSEL_CSN) = PSEL_DISCONNECTED;
+        if (is_hs_spim(_spim)) {
+            _activeSpim00Owner = nullptr;
+        }
+    }
 
     _inTransaction = false;
     _initialized = false;
@@ -234,17 +255,25 @@ void SPIClass::end() {
 }
 
 void SPIClass::beginTransaction(SPISettings settings) {
-    if (!_initialized) {
-        begin();
+    if (_inTransaction) {
+        endTransaction();
     }
+
     _settings = settings;
-    applySettings();
+    _inTransaction = false;
+    prepareTransactionClock();
+    if (!claimHardware()) {
+        restoreTransactionClock();
+        return;
+    }
+    _initialized = true;
     _inTransaction = true;
     _lastActivityUs = micros();
 }
 
 void SPIClass::endTransaction(void) {
     _inTransaction = false;
+    restoreTransactionClock();
     _lastActivityUs = micros();
 }
 
@@ -286,6 +315,11 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
     const bool autoTransaction = !_inTransaction;
     if (autoTransaction) {
         beginTransaction(_settings);
+        if (!_inTransaction || !ownsHardware()) {
+            return;
+        }
+    } else if (!ownsHardware()) {
+        return;
     }
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
@@ -311,6 +345,7 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
         }
 
         reg32(base + SPIM_EVENTS_END) = 0U;
+        reg32(base + SPIM_EVENTS_STARTED) = 0U;
         reg32(base + SPIM_EVENTS_STOPPED) = 0U;
         reg32(base + SPIM_EVENTS_DMA_RX_BUSERROR) = 0U;
         reg32(base + SPIM_EVENTS_DMA_TX_BUSERROR) = 0U;
@@ -320,12 +355,22 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
         reg32(base + SPIM_DMA_RX_PTR) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rxScratch));
         reg32(base + SPIM_DMA_RX_MAXCNT) = hasRx ? chunk : 0U;
 
+        if (_errata8Active) {
+            reg32(base + SPIM_ERRATA8_CONTROL) = SPIM_ERRATA8_ENABLE;
+        }
         reg32(base + SPIM_TASKS_START) = 1U;
-        const bool endOk = wait_event(base, SPIM_EVENTS_END, 2000000UL);
+        bool startedOk = true;
+        if (_errata8Active) {
+            startedOk = wait_event(base, SPIM_EVENTS_STARTED, 2000000UL);
+            reg32(base + SPIM_ERRATA8_CONTROL) = 0U;
+        }
+        const bool endOk =
+            startedOk && wait_event(base, SPIM_EVENTS_END, 2000000UL);
 
         const bool rxBusError = (reg32(base + SPIM_EVENTS_DMA_RX_BUSERROR) != 0U);
         const bool txBusError = (reg32(base + SPIM_EVENTS_DMA_TX_BUSERROR) != 0U);
-        if (!endOk || rxBusError || txBusError) {
+        if (!startedOk || !endOk || rxBusError || txBusError) {
+            reg32(base + SPIM_ERRATA8_CONTROL) = 0U;
             reg32(base + SPIM_TASKS_STOP) = 1U;
             (void)wait_event(base, SPIM_EVENTS_STOPPED, 2000000UL);
             break;
@@ -346,14 +391,14 @@ void SPIClass::transfer(const void* tx_buf, void* rx_buf, size_t count) {
 
 void SPIClass::setBitOrder(uint8_t order) {
     _settings = SPISettings(_settings.clock(), order, _settings.dataMode());
-    if (_initialized) {
+    if (_initialized && ownsHardware()) {
         applySettings();
     }
 }
 
 void SPIClass::setDataMode(uint8_t mode) {
     _settings = SPISettings(_settings.clock(), _settings.bitOrder(), mode);
-    if (_initialized) {
+    if (_initialized && ownsHardware()) {
         applySettings();
     }
 }
@@ -369,7 +414,7 @@ void SPIClass::setClockDivider(uint32_t div) {
     }
 
     _settings = SPISettings(clock, _settings.bitOrder(), _settings.dataMode());
-    if (_initialized) {
+    if (_initialized && ownsHardware()) {
         applySettings();
     }
 }
@@ -403,9 +448,72 @@ void SPIClass::configurePins() {
     pinMode(_sck, OUTPUT);
     pinMode(_mosi, OUTPUT);
     pinMode(_miso, INPUT);
-    set_extra_high_drive_if_hs(_spim, _sck);
-    set_extra_high_drive_if_hs(_spim, _mosi);
-    set_extra_high_drive_if_hs(_spim, _miso);
+}
+
+bool SPIClass::claimHardware() {
+    if (_spim == nullptr) {
+        return false;
+    }
+
+    uint8_t sckPort = 0;
+    uint8_t sckPin = 0;
+    uint8_t mosiPort = 0;
+    uint8_t mosiPin = 0;
+    uint8_t misoPort = 0;
+    uint8_t misoPin = 0;
+    if (!decode_pin(_sck, &sckPort, &sckPin) ||
+        !decode_pin(_mosi, &mosiPort, &mosiPin) ||
+        !decode_pin(_miso, &misoPort, &misoPin)) {
+        return false;
+    }
+
+    if (is_hs_spim(_spim) && _activeSpim00Owner != nullptr &&
+        _activeSpim00Owner != this && _activeSpim00Owner->_inTransaction) {
+        return false;
+    }
+
+    configurePins();
+
+    const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
+    reg32(base + SPIM_ERRATA8_CONTROL) = 0U;
+    reg32(base + SPIM_ENABLE) = SPIM_ENABLE_DISABLED;
+    reg32(base + SPIM_PSEL_SCK) = make_psel(sckPort, sckPin);
+    reg32(base + SPIM_PSEL_MOSI) = make_psel(mosiPort, mosiPin);
+    reg32(base + SPIM_PSEL_MISO) = make_psel(misoPort, misoPin);
+    reg32(base + SPIM_PSEL_CSN) = PSEL_DISCONNECTED;
+    reg32(base + SPIM_ORC) = 0xFFU;
+    applySettings();
+    reg32(base + SPIM_ENABLE) = SPIM_ENABLE_ENABLED;
+
+    if (is_hs_spim(_spim)) {
+        _activeSpim00Owner = this;
+    }
+    return true;
+}
+
+bool SPIClass::ownsHardware() const {
+    return !is_hs_spim(_spim) || _activeSpim00Owner == this;
+}
+
+void SPIClass::prepareTransactionClock() {
+    _restoreCpuHz = 0U;
+    if (!_allowCpuBoost || !is_hs_spim(_spim)) {
+        return;
+    }
+
+    const uint32_t currentCpuHz = nrf54l15_core_get_cpu_frequency_hz();
+    const uint32_t maximumSckHz = currentCpuHz / spim_min_divisor(_spim);
+    if (_settings.clock() > maximumSckHz && currentCpuHz < 128000000UL &&
+        nrf54l15_core_set_cpu_frequency_hz(128000000UL)) {
+        _restoreCpuHz = currentCpuHz;
+    }
+}
+
+void SPIClass::restoreTransactionClock() {
+    if (_restoreCpuHz != 0U) {
+        (void)nrf54l15_core_set_cpu_frequency_hz(_restoreCpuHz);
+        _restoreCpuHz = 0U;
+    }
 }
 
 void SPIClass::applySettings() {
@@ -415,7 +523,17 @@ void SPIClass::applySettings() {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
 
-    reg32(base + SPIM_PRESCALER) = compute_prescaler(_spim, _settings.clock());
+    const uint32_t prescaler = compute_prescaler(_spim, _settings.clock());
+    reg32(base + SPIM_PRESCALER) = prescaler;
+    if (is_hs_spim(_spim)) {
+        const uint32_t actualClockHz = spim_core_hz(_spim) / prescaler;
+        const bool extraHighDrive = actualClockHz > SPI_CLOCK_8M;
+        set_hs_output_drive(_spim, _sck, extraHighDrive);
+        set_hs_output_drive(_spim, _mosi, extraHighDrive);
+        if (extraHighDrive) {
+            set_hs_pad_slew_fastest();
+        }
+    }
 
     uint32_t cfg = 0U;
     if (_settings.bitOrder() == LSBFIRST) {
@@ -431,6 +549,15 @@ void SPIClass::applySettings() {
     }
 
     reg32(base + SPIM_CONFIG) = cfg;
+
+    // nRF54L anomaly 8: mode 0/2 with a prescaler greater than two requires
+    // a longer interface duration and a temporary control bit around STARTED.
+    _errata8Active =
+        is_hs_spim(_spim) && prescaler > 2U &&
+        (mode == SPI_MODE0 || mode == SPI_MODE2);
+    const uint32_t minimumCsnDuration =
+        _errata8Active ? ((prescaler / 2U) + 1U) : SPIM_DEFAULT_CSNDUR;
+    reg32(base + SPIM_IFTIMING_CSNDUR) = minimumCsnDuration;
 }
 
 uint32_t SPIClass::getFrequencyValue(uint32_t clockHz) {

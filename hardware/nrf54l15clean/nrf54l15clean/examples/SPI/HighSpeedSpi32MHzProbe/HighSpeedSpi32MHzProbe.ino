@@ -4,10 +4,11 @@
   Shows the dedicated HS-SPI path.
 
   nRF54L15 boards:
-    SPI uses the normal Arduino SPI pins on a serial-fabric SPIM, 8 MHz max.
-    SPI_HS uses SPIM00 on the P2 high-speed route and can request 32 MHz.
-    On XIAO nRF54L15, D8/D9/D10 are the same P2 SCK/MISO/MOSI pins and
-    HS_SS is P2.05, shared with RF_SW_CTL.
+    SPI and SPI_HS use the same P2 SPIM00 SCK/MISO/MOSI route.
+    They are separate logical objects and must be used sequentially.
+    SPI_HS temporarily selects the 128 MHz CPU clock for a 32 MHz request,
+    then restores the previous CPU clock at endTransaction().
+    On XIAO nRF54L15, both use D8/D9/D10 and default to D2 for software CS.
 
   XIAO nRF54LM20A:
     SPI uses the XIAO header pins on a serial-fabric SPIM and is limited to 8 MHz.
@@ -31,8 +32,9 @@ void setup() {
   Serial.println("SPI_HS: onboard QSPI/HS pads on SPIM00, 32 MHz capable.");
 #elif defined(ARDUINO_NRF54L15)
   Serial.println("Board: nRF54L15");
-  Serial.println("Default SPI: Arduino SPI pins on serial-fabric SPIM, 8 MHz max.");
-  Serial.println("SPI_HS: P2.x HS pins on SPIM00, 32 MHz capable.");
+  Serial.println("SPI and SPI_HS share the exposed P2 SPIM00 pins.");
+  Serial.println("SPI_HS: 32 MHz with temporary 128 MHz CPU clock.");
+  Serial.println("Use SPI and SPI_HS sequentially, not simultaneously.");
 #else
   Serial.println("Board: unknown nRF54 clean-core target.");
 #endif

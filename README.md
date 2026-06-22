@@ -144,18 +144,20 @@ Normal uploads use the bundled native [**nRF OCD**](https://github.com/lolren/op
 
 | Board family | External Arduino `SPI` pins | Implemented max on exposed pins | `SPI_HS` / 32 MHz status |
 |---|---|---|---|
-| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on normal `SPI`; use `SPI_HS` for 32 MHz | `SPI_HS` is a real second object on `SPIM00` using P2.01/P2.04/P2.02 and P2.05 (`HS_SCK/HS_MISO/HS_MOSI/HS_SS`) |
-| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` SPI route on a serial-fabric SPIM | 8 MHz on normal `SPI`; use `SPI_HS` for 32 MHz where board wiring and the attached device allow it | `SPI_HS` is a real second object on `SPIM00` using the exposed P2.01/P2.04/P2.02/P2.05 route |
+| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the dedicated P2 `SPIM00` route | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical pins and automatically selects 128 MHz only while a 32 MHz transaction is active |
+| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` route on dedicated P2 `SPIM00` | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical P2.01/P2.04/P2.02 route and automatically enables 32 MHz transactions |
 | **XIAO nRF54LM20A / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
 
 Notes:
 
-- The **64 MHz / 128 MHz CPU menu does not set the SPI SCK ceiling**. SPI speed comes from the selected SPIM peripheral clock and its prescaler.
+- On **nRF54L15**, the exposed Arduino SPI pins can only use `SPIM00`. `SPI` and `SPI_HS` are separate logical objects that retain separate settings, but share that one physical controller and must be used sequentially.
+- On **nRF54L15**, `SPI_HS` temporarily raises the CPU/peripheral clock to 128 MHz for a 32 MHz request and restores the previous CPU clock at `endTransaction()`. Normal `SPI` never changes the CPU profile.
 - On **LM20A**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
 - On **L15**, `SPI_HS` is plain 1-bit SPI on the P2 high-speed route, not Quad SPI.
-- On **XIAO L15**, `HS_SS` is P2.05 and is shared with the RF switch select line, so avoid using `SPI_HS` while BLE/RF path switching is active.
+- On **XIAO L15**, `SPI_HS` defaults to `D2` for software-controlled chip select. P2.05 remains reserved for the RF switch.
 - On **LM20A**, the 32 MHz `SPI_HS` path is useful for the onboard QSPI flash and deliberate advanced probing of the flash pads. The schematic does not expose that HS bus on the normal XIAO header.
-- Examples: `File > Examples > Peripherals > HighSpeedSpi32MHzProbe`, `File > Examples > XiaoLM20A > QspiFlashInfo`, and `File > Examples > Adafruit SPIFlash > FlashInfo`.
+- The L15 implementation follows the documented P2 high-speed pad requirements, including E0/E1 output drive, maximum `HSBIAS` slew above 8 MHz, and the nRF54L SPIM anomaly 8 workaround.
+- Examples: `File > Examples > SPI > HighSpeedSpi32MHzProbe`, `File > Examples > XiaoLM20A > QspiFlashInfo`, and `File > Examples > Adafruit SPIFlash > FlashInfo`.
 
 ## LM20A Onboard QSPI Flash
 

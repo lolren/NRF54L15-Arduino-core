@@ -20,8 +20,8 @@
 #define SPI_MODE2 0x02  // CPOL=1, CPHA=0
 #define SPI_MODE3 0x03  // CPOL=1, CPHA=1
 
-// Clock settings. Default SPI uses a serial-fabric SPIM and is capped at
-// 8 MHz. SPI_HS uses SPIM00 on the P2 high-speed pins and can reach 32 MHz.
+// Clock settings. The exposed L15 SPI pins use SPIM00. SPI_HS keeps separate
+// bus state and may temporarily select the 128 MHz CPU clock for 32 MHz SCK.
 #define SPI_CLOCK_32M    32000000UL
 #define SPI_CLOCK_16M    16000000UL
 #define SPI_CLOCK_8M      8000000UL
@@ -62,7 +62,8 @@ private:
 
 class SPIClass {
 public:
-    SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck, uint8_t cs);
+    SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck,
+             uint8_t cs, bool allowCpuBoost = false);
 
     // Initialize the SPI bus
     void begin();
@@ -116,10 +117,23 @@ private:
     SPISettings _settings;
     bool _initialized;
     bool _inTransaction;
+    bool _allowCpuBoost;
+    bool _errata8Active;
+    uint32_t _restoreCpuHz;
     uint32_t _lastActivityUs;
+
+    static SPIClass* _activeSpim00Owner;
 
     // Configure SPI pins
     void configurePins();
+
+    // Claim and configure a shared SPIM instance for this logical bus.
+    bool claimHardware();
+    bool ownsHardware() const;
+
+    // Raise and restore the L15 PLL only when 32 MHz SPIM00 needs it.
+    void prepareTransactionClock();
+    void restoreTransactionClock();
 
     // Apply SPI settings to hardware
     void applySettings();
@@ -128,9 +142,9 @@ private:
     uint32_t getFrequencyValue(uint32_t clockHz);
 };
 
-// Global SPI instance on the Arduino SPI pins, using a serial-fabric SPIM.
+// Both logical buses use the dedicated P2 SPIM00 route on nRF54L15. They may
+// be used sequentially and retain independent settings, but not simultaneously.
 extern SPIClass SPI;
-// Dedicated high-speed SPI instance on the P2.x HS-capable pin route.
-extern SPIClass& SPI_HS;
+extern SPIClass SPI_HS;
 
 #endif // SPI_h

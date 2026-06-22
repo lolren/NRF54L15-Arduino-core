@@ -40,7 +40,7 @@ Load this at session start after context compaction.
 - STOP doesn't fire END reliably — use DISABLE instead
 
 ## SPI Frequencies
-- L15: SPIM00 at F_CPU (64/128 MHz). Default 4 MHz. Max 32 MHz at 128 MHz.
+- L15: exposed `SPI` and `SPI_HS` share SPIM00 on P2. Default `SPI` reaches 16 MHz at the 64 MHz CPU profile; `SPI_HS` temporarily selects 128 MHz for a 32 MHz transaction and restores the previous CPU clock afterward.
 - LM20B: SPIM22 at 16 MHz serial fabric. Default 4 MHz. Max 8 MHz.
 - LM20B HS-SPI: SPIM00 on QSPI pads, 32 MHz at 128 MHz CPU.
 
