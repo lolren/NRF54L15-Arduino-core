@@ -5469,25 +5469,28 @@ bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHos
     return true;
   }
 
-  bool ok = true;
   if (response != nullptr && responseLen > 0U) {
-    ok = consumeDirectAuxiliaryEvent(response, responseLen) ||
-         host_.consumeControllerPacket(response, responseLen);
+    // Direct VPR HCI may return command-complete or CS test packets that are
+    // valid for the direct caller but intentionally invisible to the public host.
+    (void)(consumeDirectAuxiliaryEvent(response, responseLen) ||
+           host_.consumeControllerPacket(response, responseLen));
   }
 
   uint8_t packet[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t packetLen = 0U;
-  while (ok && directHost->popPendingH4Event(packet, sizeof(packet), &packetLen)) {
-    ok = consumeDirectAuxiliaryEvent(packet, packetLen) ||
-         host_.consumeControllerPacket(packet, packetLen);
+  while (directHost->popPendingH4Event(packet, sizeof(packet), &packetLen)) {
+    (void)(consumeDirectAuxiliaryEvent(packet, packetLen) ||
+           host_.consumeControllerPacket(packet, packetLen));
   }
 
   uint8_t pollCount = 0U;
-  while (ok && transport_.available() > 0 && pollCount < 8U) {
+  while (transport_.available() > 0 && pollCount < 8U) {
     packetLen = 0U;
-    ok = directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U) &&
-         (consumeDirectAuxiliaryEvent(packet, packetLen) ||
-          host_.consumeControllerPacket(packet, packetLen));
+    if (!directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U)) {
+      return false;
+    }
+    (void)(consumeDirectAuxiliaryEvent(packet, packetLen) ||
+           host_.consumeControllerPacket(packet, packetLen));
     ++pollCount;
   }
   /* Clear vprFlags=PENDING in shared memory so the VPR main loop can
@@ -5499,17 +5502,19 @@ bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHos
   const uint32_t waitStart = millis();
   while ((millis() - waitStart) < 100UL) {
     (void)transport_.available();  /* poll -> pullResponse -> clear PENDING */
-    while (ok && transport_.available() > 0 && pollCount < 64U) {
+    while (transport_.available() > 0 && pollCount < 64U) {
       packetLen = 0U;
-      ok = directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U) &&
-           (consumeDirectAuxiliaryEvent(packet, packetLen) ||
-            host_.consumeControllerPacket(packet, packetLen));
+      if (!directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U)) {
+        return false;
+      }
+      (void)(consumeDirectAuxiliaryEvent(packet, packetLen) ||
+             host_.consumeControllerPacket(packet, packetLen));
       ++pollCount;
     }
     delay(2);
   }
   (void)transport_.available();
-  return ok;
+  return true;
 }
 
 void BleCsControllerVprHost::syncVprState() {
