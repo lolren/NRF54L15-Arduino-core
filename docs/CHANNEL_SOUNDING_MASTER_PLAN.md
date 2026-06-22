@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-████████████████████████████████░░░░░░░░░░░░░░  67%
+██████████████████████████████████░░░░░░░░░░░░  70%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -281,14 +281,16 @@ Send N commands in rapid succession without draining responses; verify the VPR t
 # Item 6 — Multi-Config Slot Operations
 
 ```
-████████████░░░░ 75%
+████████████████ 100%
 ```
 
 The VPR retained config table now supports 8 primary slots via `g_cs_slots[]`.
 `BleChannelSoundingVprConfigRemoveActive` covers selected/active removal and
 promotion, and `BleChannelSoundingVprMultiConfig` covers five retained configs,
 slot removal, slot reuse, selecting an older config after later configs were
-created, and rejection of a removed config.
+created, and rejection of a removed config. `BleChannelSoundingVprResetClearsConfigs`
+verifies retained config state is cleared by `resetTransport()` and that a fresh
+session starts from a single boot config again.
 
 ### 6a — Multiple Config Create/Select/Evict
 
@@ -315,7 +317,13 @@ cs_vpr_multi_config=PASS count=5>4>5 ... removed_select=12
 2. `resetTransport()` — verify VPR clears all slots
 3. Re-create configs — verify IDs and slot state
 
-**Test coverage:** ~50 lines.
+**Example:** `BleChannelSoundingVprResetClearsConfigs`
+
+**Status:** Hardware-verified on XIAO nRF54L15:
+
+```text
+cs_vpr_reset_clears_configs=PASS before=4 reset=0 fresh=1
+```
 
 ---
 
@@ -449,7 +457,7 @@ Abort-injection host-only unit example     DONE
 Phase B — Multi-config (software only, 1 day)
 ─────────────────────────────────────────
 Item 6a   Multi-config example             DONE
-Item 6b   Retained config test             ~50 lines
+Item 6b   Retained config test             DONE
 
 Phase C — Stress & soak (software only, 1 day)
 ─────────────────────────────────────────

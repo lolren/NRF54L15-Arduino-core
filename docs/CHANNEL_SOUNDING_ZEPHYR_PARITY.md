@@ -267,6 +267,7 @@ BleChannelSoundingVprCsTestResults
 BleChannelSoundingVprCachedCapabilities
 BleChannelSoundingVprDisconnectHandling
 BleChannelSoundingVprMultiConfig
+BleChannelSoundingVprResetClearsConfigs
 ```
 
 `BleChannelSoundingVprMultiConfig` was compiled, uploaded, and verified on a
@@ -274,6 +275,11 @@ XIAO nRF54L15 after expanding the dedicated VPR retained config table to 8
 primary slots. It creates five retained configs, selects/runs the base config
 after later configs were created, removes a middle config, reuses the freed slot,
 and verifies the removed config rejects procedure parameters with `0x12`.
+
+`BleChannelSoundingVprResetClearsConfigs` was compiled, uploaded, and verified
+on a XIAO nRF54L15. It creates four retained configs, calls `resetTransport()`,
+verifies the cached VPR state reports zero retained configs, then starts a fresh
+session and verifies only the boot config exists.
 
 `BleChannelSoundingVprDisconnectHandling` was compiled, uploaded, and verified on a XIAO
 nRF54L15 with probe UID `E91217E8`. Observed output:
@@ -439,7 +445,6 @@ Required work:
 - Disconnect during capability exchange, configuration, security, and active
   procedure.
 - Procedure disable and re-enable.
-- Full reset-state coverage after retained config creation.
 - Multiple connections, or explicit rejection if the implementation remains
   single-link.
 - HCI queue saturation and fragmented/concatenated event streams.

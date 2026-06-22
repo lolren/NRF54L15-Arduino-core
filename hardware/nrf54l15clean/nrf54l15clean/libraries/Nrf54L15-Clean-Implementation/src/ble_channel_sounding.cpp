@@ -4240,7 +4240,7 @@ bool BleCsControllerVprHost::resetTransport(bool clearScripts) {
   testReassembler_.reset();
   lastTestResultValid_ = false;
   testResultCount_ = 0U;
-  vprState_.linkSessionOpen = false;
+  vprState_ = BleCsControllerVprHostState{};
   return ok;
 }
 
