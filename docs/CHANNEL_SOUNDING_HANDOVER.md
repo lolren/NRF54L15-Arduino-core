@@ -104,9 +104,10 @@ All 14 HCI opcodes and 9 LE Meta subevents match Zephyr definitions.
 
 - VPR emits `0x31`/`0x32` subevent results on handle `0x0FFF` while test mode active
 - `LE CS Test End` stops the stream; second `LE CS Test` is rejected with `0x0C`
-- **Known gap:** VPR firmware doesn't schedule standalone test results
-  (`g_pending_cs_test_result_stage` defined but never activated). Results only flow
-  on the connected path. `BleChannelSoundingVprCsTestResults` fails for this reason.
+- Hardware-verified with `BleChannelSoundingVprCsTestResults`:
+  `cs_vpr_test_results=PASS procedures=29 handle=0xFFF start=0x0 second_start=0xC end=0x0`
+- Still synthetic: the payload is deterministic mode-2 test data, not physical RF
+  ranging data.
 
 ### 2.3 Per-Connection Cached State (Parity Item #2 — DONE)
 
@@ -148,13 +149,14 @@ cs_vpr_disconnect=PASS phase1=1 phase2=1 phase3=1 pumps=12/12/12 disconnected=1 
 
 ### 2.5 Examples
 
-10 CS examples exist under `examples/BLE/ChannelSounding/`:
+11 CS examples exist under `examples/BLE/ChannelSounding/`:
 
 | Example | Purpose | Verified |
 |---------|---------|----------|
 | `BleChannelSoundingHciParity` | Host-side HCI command packing | Compiles |
 | `BleChannelSoundingVprHciParity` | VPR round-trip: all 14 HCI commands | PASS |
-| `BleChannelSoundingVprCsTestResults` | Standalone CS Test result stream | FAIL (firmware gap) |
+| `BleChannelSoundingVprCsTestResults` | Standalone CS Test result stream | PASS |
+| `BleChannelSoundingVprInvalidParams` | Direct-HCI invalid parameter paths | PASS |
 | `BleChannelSoundingVprCachedCapabilities` | Capability/FAE caching lifecycle | Compiles |
 | `BleChannelSoundingVprDisconnectHandling` | Disconnect/timeout framework | PASS |
 | `BleChannelSoundingVprLinkedInitiator` | VPR connected initiator workflow | Compiles |
@@ -403,11 +405,12 @@ cp $SRC/src/nrf54l15_vpr.h $DST/src/
 Before declaring any CS change done:
 
 1. Regenerate VPR blobs; verify size within window
-2. Compile all 10 CS examples — zero regressions
+2. Compile all CS examples — zero regressions
 3. Upload `BleChannelSoundingVprHciParity` → `PASS`
 4. Upload `BleChannelSoundingVprDisconnectHandling` → `PASS`
-5. Upload `BleChannelSoundingVprCsTestResults` → known FAIL (documented firmware gap)
-6. Spot-check at least one connected example compiles and produces output
+5. Upload `BleChannelSoundingVprCsTestResults` → `PASS`
+6. Upload `BleChannelSoundingVprInvalidParams` → `PASS`
+7. Spot-check at least one connected example compiles and produces output
 
 ---
 
@@ -434,9 +437,9 @@ Events on the wrong handle are silently ignored by the respective path.
 
 ### 5.3 VPR Firmware Limitations
 
-- **No standalone CS Test result scheduling:** `g_pending_cs_test_result_stage`
-  (line 257) is defined but never referenced. The `g_cs_test_active` flag is set
-  by `LE CS Test` but no code reads it to generate results on `0x0FFF`.
+- **Standalone CS Test result scheduling is synthetic:** test mode emits
+  deterministic `0x31` / `0x32` packets on handle `0x0FFF`, but those packets are
+  not yet backed by real RADIO CS measurements.
 - **Synthetic results only:** All subevent data is from `build_demo_subevent_payload()`
   using deterministic mode-2 step values.
 - **Single connection only:** The `g_cs_session_*` globals assume one ACL link.

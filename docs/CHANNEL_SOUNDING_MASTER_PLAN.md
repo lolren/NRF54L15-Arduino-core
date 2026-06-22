@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░  42%
+███████████████████████████░░░░░░░░░░░░░░░░░░░  56%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -17,11 +17,11 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | LL Control PDU definitions | ✅ Code complete |
 | ██ | VPR peer-exchange state machine | ✅ Code complete |
 | ██ | `directStartTest` transport fix | ✅ Hardware-verified |
-| ▓▓ | Duplicate CS Test rejection | ⚠️ Code complete, unreachable |
+| ██ | Duplicate CS Test rejection | ✅ Hardware-verified |
+| ██ | CS Test result stream (handle 0x0FFF, synthetic) | ✅ Hardware-verified |
+| ██ | CS Test End (`end=0xFF` fix) | ✅ Hardware-verified |
+| ██ | Error-path testing (invalid direct-HCI example) | ✅ Hardware-verified |
 | ░░ | Host abort reason reaction | 📋 Planned below |
-| ░░ | CS Test result stream (handle 0x0FFF) | 🔒 VPR memory window |
-| ░░ | CS Test End (`end=0xFF` fix) | 📋 Needs investigation |
-| ░░ | Error-path testing (examples) | 📋 Planned below |
 | ░░ | Multi-config slot testing | 📋 Planned below |
 | ░░ | LL Control PDU over-the-air exchange | 🔒 Second board |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
@@ -170,7 +170,7 @@ if (accumulatedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneCom
 # Item 4 — CS Test Result Stream
 
 ```
-███░░░░░░░░░░░░░ 25%
+████████████████ 100% Synthetic HCI parity verified
 ```
 
 ### 4a — `directStartTest` Transport Fix
@@ -188,8 +188,7 @@ if (accumulatedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneCom
 ### 4b — Duplicate CS Test Rejection
 
 ```
-████████████████ 100% Code complete
-⚠️ Not yet exercised by any example
+████████████████ 100% Hardware-verified
 ```
 
 `validate_cs_test_command()` in `vpr_cs_transport_stub.c` now checks `g_cs_test_active != 0U` and returns `BLE_CS_HCI_STATUS_COMMAND_DISALLOWED (0x0C)`. The CsTestResults example tests this at lines 77–79:
@@ -198,59 +197,44 @@ uint8_t secondStartStatus = 0x00U;
 ok = ok && gHost.directStartTest(testParams, &secondStartStatus) &&
      secondStartStatus == kBleCsHciStatusCommandDisallowed;
 ```
-This code is unreachable until the test stream produces results (Item 4c).
+This executes in `BleChannelSoundingVprCsTestResults` and returns
+`second_start=0xC` on hardware.
 
 ### 4c — CS Test Result Stream (handle 0x0FFF)
 
 ```
-░░░░░░░░░░░░░░░░ 0% 🔒 VPR memory-constrained
+████████████████ 100% Hardware-verified, synthetic
 ```
 
-**The gap:** `g_pending_cs_test_result_stage` is defined but never activated. The VPR `LE CS Test` handler sets `g_cs_test_active = 1` but no code schedules results on handle `0x0FFF`. The connected path continues to emit results on the session handle.
+The VPR image now stages standalone test procedures after `LE CS Test`, emits
+`0x31` / `0x32` result events on reserved handle `0x0FFF`, and stops
+deterministically on `LE CS Test End`. Verified by:
 
-**What's needed:**
+```text
+cs_vpr_test_results=PASS procedures=29 handle=0xFFF start=0x0 second_start=0xC end=0x0
+```
 
-1. **Test staging initialization** — in the `LE CS Test` handler (`case BLE_CS_HCI_OP_TEST`):
-   ```c
-   g_cs_test_procedure_counter = 1U;
-   g_pending_cs_test_result_stage = 1U;
-   g_cs_test_next_stage_heartbeat = g_vpr_transport->heartbeat + 50U;
-   ```
-
-2. **Test result publisher** — emits `0x31`/`0x32` subevent results on `0x0FFF` with `config_id=0`, `acl_event_counter=0`, `frequency_compensation=0`, `reference_power_level=0` per Zephyr test-mode spec. Emits initial + continuation pairs and re-schedules procedures at `BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS (200)`.
-
-3. **Main loop wiring** — test publisher must have priority over the connected-path scheduler to avoid starvation.
-
-4. **Cleanup** — in `LE CS Test End` handler and `reset_dedicated_cs_state()`.
-
-**The blocker:** The VPR firmware window is 13568 bytes. Current firmware is 12816 bytes with the payload optimization. Adding the test stream code (~340 bytes for the publisher function) causes `directStartTest` to fail even when the code is gated to be no-op. This appears to be a code-size / memory-layout sensitivity — the additional code shifts sections in a way that affects the `publish_builtin_response_for_opcode` call path for CS Test.
-
-**Investigation needed:**
-- Check if the `publish_builtin_response_for_opcode` stack frame is overflowing (payload buffer is now 80 bytes, was 192)
-- Profile VPR memory with the RISC-V toolchain: `riscv64-unknown-elf-size` on the ELF to see exact section sizes
-- Experiment with compiler flags (`-Os` vs `-Oz`, different inlining settings)
-- Consider moving the test publisher to a separate compilation unit to isolate section shifts
-
-**Estimated effort:** 1–2 days of VPR memory debugging.
+This remains a synthetic controller-parity stream. The result payload is still
+deterministic mode-2 test data, not real RF ranging data.
 
 ### 4d — CS Test End (`end=0xFF`)
 
 ```
-░░░░░░░░░░░░░░░░ 0% 📋 Needs investigation
+████████████████ 100% Hardware-verified
 ```
 
-`directStopTest` returns `end=0xFF` because `sendDirectHciCommand` fails. This is a pre-existing issue (present before any changes). The symptom is the same as the `directStartTest` transport contention — likely the same root cause (connected procedure saturating the transport). When the test stream is implemented (4c), `procedures` will be satisfied, `ok` will be true, and `directStopTest` will be reachable.
-
-**Investigation plan:**
-- After Item 4c is done, test with `enable=0` — if `end=0xFF` persists, the issue is in `sendDirectHciCommand` for the Test End opcode specifically
-- Check if `BLE_CS_HCI_OP_TEST_END` response is properly handled by `drainDirectControllerEvents`
+The false `end=0xFF` path was caused by direct-HCI drain treating valid
+command-complete / test result packets as a transport failure. The direct drain
+now ignores direct-only packets that are not meant for the public connected host,
+while preserving real `readNextH4Event()` failures. Verified by
+`BleChannelSoundingVprCsTestResults` and `BleChannelSoundingVprHciParity`.
 
 ---
 
 # Item 5 — Error-Path Testing
 
 ```
-░░░░░░░░░░░░░░░░ 0% Planned — needs implementation
+██████░░░░░░░░░░ 35%
 ```
 
 Write example sketches that exercise error paths. **Pure software, testable on existing board.**
@@ -261,12 +245,25 @@ Write example sketches that exercise error paths. **Pure software, testable on e
 
 Send malformed HCI commands through `directCreateConfig()`, `directProcedureEnable()`, `directSetProcedureParameters()`, `directSecurityEnable()`, `directStartTest()`, `directStopTest()`, etc. and verify the VPR returns `BLE_CS_HCI_STATUS_INVALID_PARAMS (0x12)`.
 
-**Test coverage:** ~50 lines.
-- Wrong configId
+**Implemented / verified:** `BleChannelSoundingVprInvalidParams`
+
+```text
+cs_vpr_invalid_params=PASS pumps=12 statuses=12/12/12/12/C/0/0
+```
+
+Coverage currently includes:
+- Create config with invalid `configId=0`
+- Set procedure parameters for missing config `99`
+- Procedure enable with invalid enable value `2`
+- Remove missing config `99`
+- Stop test while no CS Test is active
+- Valid CS Test start and stop after the negative probes
+
+Remaining negative coverage:
 - Bad mainModeType / subModeType values
-- Invalid channel map lengths
+- Invalid channel map contents
 - Invalid CS Test override mask bits
-- Malformed procedure enable
+- Security enable malformed inputs
 
 ### 5b — Config Removal While Active
 
@@ -458,8 +455,8 @@ Replace synthetic mode-2 step data with real RF measurements. Requires:
 Phase A — Quick wins (software only, 1 day)
 ─────────────────────────────────────────
 Item 3e   Host abort reason reaction       ~30 lines
-Item 5a   Invalid param example            ~50 lines
 Item 5b   Config remove example            ~40 lines
+Item 5c   More direct-HCI edge cases        ~80 lines
 
 Phase B — Multi-config (software only, 1 day)
 ─────────────────────────────────────────
@@ -470,12 +467,11 @@ Phase C — Stress & soak (software only, 1 day)
 ─────────────────────────────────────────
 Item 7a   Soak test example                ~100 lines
 Item 7b   Reset mid-procedure test         ~40 lines
-Item 5c   Edge cases example               ~80 lines
+Item 5d   HCI queue saturation              ~60 lines
 
-Phase D — CS Test stream (VPR memory work, 1–2 days)
+Phase D — RF-backed CS Test parameters (VPR + RADIO work)
 ─────────────────────────────────────────
-Item 4c   Test stream implementation       ~100 lines VPR
-Item 4d   CS Test End fix                  ~20 lines
+Use real test parameters and hardware measurements instead of synthetic mode-2 data
 
 Phase E — Hardware (2nd board, 1–2 weeks)
 ─────────────────────────────────────────
@@ -490,6 +486,7 @@ Item 11   Two-board interoperability
 # Current Commit History
 
 ```
+83db24aa fix: drain direct CS HCI events without false failure
 b5d8cc13 fix: disable connected procedure in CsTestResults example (enable=0)
 6bf86d7d perf: shrink publish_builtin_response_for_opcode payload buffer 192->80 B
 477c3da5 fix: add duplicate LE CS Test rejection in validate_cs_test_command

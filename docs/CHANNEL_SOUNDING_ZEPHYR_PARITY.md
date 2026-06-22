@@ -282,9 +282,9 @@ This confirms: normal flow (Phase 1), disconnect mid-procedure via resetTranspor
 cache coherency workaround in `resetTransport()` — see the nRF54L15 write-back
 cache note below.
 
-Phase 4 (timeout resilience) has been added to the example and compiles; it
-verifies that the VPR peer-exchange timeout handler fires without destabilising
-the transport. Hardware verification of Phase 4 is pending the next upload cycle.
+Phase 4 (timeout resilience) has been added to the example and verified on
+hardware; it confirms that the VPR peer-exchange timeout handler fires without
+destabilising the transport.
 
 `BleChannelSoundingVprHciParity` was previously verified on the same hardware
 with probe UID `E91217E8`:
@@ -299,14 +299,19 @@ but never activated it — `g_cs_test_active` was set by `LE CS Test` but standa
 results on handle `0x0FFF` were never scheduled. This was fixed by adding
 `publish_pending_cs_test_result_packet()` (emits `0x31`/`0x32` on `0x0FFF` with
 `config_id=0` per Zephyr spec), wiring it into the main loop, and initializing test
-staging in the `LE CS Test` handler. The fix compiles and is pending hardware
-verification on the next upload cycle.
+staging in the `LE CS Test` handler. The fix is hardware-verified:
 
-**Pre-drain fix:** Any direct HCI command sent while the VPR has pending output
+```text
+cs_vpr_test_results=PASS procedures=29 handle=0xFFF start=0x0 second_start=0xC end=0x0
+```
+
+**Direct-drain fix:** Any direct HCI command sent while the VPR has pending output
 (e.g. demo-mode subevent results after `beginFreshHost`) would be rejected by
-`writeInternal()` because the `vprFlags=PENDING` gate blocked new writes. The fix
-adds a pre-drain step in `sendDirectHciCommand()` that consumes pending VPR events
-into a scratch host before sending the command, so the transport is always clear.
+`writeInternal()` because the `vprFlags=PENDING` gate blocked new writes. The
+direct path now drains valid command-complete / CS Test packets without treating
+direct-only events as a public-host failure, so `LE CS Test End` no longer returns
+the old synthetic `0xFF` failure. Verified by `BleChannelSoundingVprHciParity` and
+`BleChannelSoundingVprCsTestResults`.
 
 ## Current Limitations
 
@@ -400,6 +405,13 @@ Required work:
 
 ### 7. Error and Concurrency Coverage Is Incomplete
 
+Current invalid-parameter coverage exists in
+`BleChannelSoundingVprInvalidParams` and is hardware-verified:
+
+```text
+cs_vpr_invalid_params=PASS pumps=12 statuses=12/12/12/12/C/0/0
+```
+
 Required work:
 
 - Disconnect during capability exchange, configuration, security, and active
@@ -411,8 +423,8 @@ Required work:
   single-link.
 - HCI queue saturation and fragmented/concatenated event streams.
 - Controller reset while VPR is active.
-- Invalid channel maps, timing combinations, roles, PHYs, antenna selections,
-  and override lengths.
+- More invalid channel maps, timing combinations, roles, PHYs, antenna
+  selections, security-enable inputs, and override lengths.
 
 ## Recommended Implementation Order
 
@@ -420,8 +432,10 @@ Required work:
    - Emits `0x31/0x32` result events using handle `0x0FFF`.
    - Host-side test-result collector independent of the connected workflow state
      (`drainPendingControllerEvents()` + `testResultCount()`).
-   - Still to validate against Zephyr command/event byte captures on hardware
-     and to drive results from real CS Test parameters (not synthetic).
+   - Verified on hardware for start, duplicate rejection, result streaming, and
+     Test End.
+   - Still to drive results from real CS Test parameters and RF measurements
+     instead of synthetic payloads.
 
 2. **Per-connection cached state** — DONE
    - Store capabilities and FAE tables.
