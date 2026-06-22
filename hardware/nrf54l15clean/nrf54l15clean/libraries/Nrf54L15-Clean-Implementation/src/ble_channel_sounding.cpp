@@ -3426,19 +3426,27 @@ void BleCsControllerSession::resetAccumulatedProcedureResult(
 
 bool BleCsControllerSession::accumulateProcedureResult(BleCsControllerResultSource source,
                                                        const BleCsSubeventResult& result) {
-  if (!result.isComplete || result.stepData == nullptr || result.stepDataLen == 0U) {
+  if (!result.isComplete) {
     return false;
   }
 
   /* Reject aborted results.  The VPR may tag subevent results with a non-zero
    * abort reason (e.g. 0x06 = LL Procedure Timeout, 0x0B = Connection Terminated
    * by Local Host).  Accumulating aborted data would produce invalid distance
-   * estimates later, so treat them as rejected. */
+   * estimates later, so treat them as rejected and clear both sides of the
+   * current procedure. */
   if (result.header.procedureAbortReason != 0U ||
-      result.header.subeventAbortReason != 0U) {
+      result.header.subeventAbortReason != 0U ||
+      result.header.procedureDoneStatus == kBleCsProcedureDoneAborted ||
+      result.header.subeventDoneStatus == kBleCsSubeventDoneAborted) {
     lastProcedureAbortReason_ = result.header.procedureAbortReason;
     lastSubeventAbortReason_ = result.header.subeventAbortReason;
     state_.estimateValid = false;
+    resetAccumulatedProcedureResults();
+    return false;
+  }
+
+  if (result.stepData == nullptr || result.stepDataLen == 0U) {
     return false;
   }
 

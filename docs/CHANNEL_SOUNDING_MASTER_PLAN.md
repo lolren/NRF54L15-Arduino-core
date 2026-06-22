@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-█████████████████████████████░░░░░░░░░░░░░░░░░  60%
+██████████████████████████████░░░░░░░░░░░░░░░░  62%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -21,7 +21,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | CS Test result stream (handle 0x0FFF, synthetic) | ✅ Hardware-verified |
 | ██ | CS Test End (`end=0xFF` fix) | ✅ Hardware-verified |
 | ██ | Error-path testing (invalid direct-HCI example) | ✅ Hardware-verified |
-| ▓▓ | Host abort reason reaction | ✅ Code complete |
+| ██ | Host abort reason reaction | ✅ Hardware-verified |
 | ██ | Config removal / retained promotion example | ✅ Hardware-verified |
 | ░░ | Multi-config slot testing | 📋 Planned below |
 | ░░ | LL Control PDU over-the-air exchange | 🔒 Second board |
@@ -131,10 +131,16 @@ and subevent abort reasons, clears estimate validity, and refuses aborted data.
 `updateEstimateIfComplete()` also clears accumulated buffers if either side has
 an aborted done status or non-zero abort reason.
 
-**Remaining verification gap:** add a focused synthetic host-only test that
-injects local/peer aborted result packets and asserts stale buffers are cleared.
-The runtime disconnect/timeout example already verifies that these paths do not
-destabilise the VPR transport.
+**Implemented / verified:** `BleChannelSoundingHostAbortCleanup`.
+
+```text
+cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 abort=0xB/0x0
+```
+
+The probe injects a valid local result, then an aborted peer result with abort
+reason `0x0B`, then another valid peer result for the same procedure. The host
+must not complete the procedure against stale pre-abort local data. It then runs
+a fresh valid local/peer procedure to prove recovery still works.
 
 ---
 
@@ -205,7 +211,7 @@ while preserving real `readNextH4Event()` failures. Verified by
 # Item 5 — Error-Path Testing
 
 ```
-██████████░░░░░░ 60%
+███████████░░░░░ 65%
 ```
 
 Write example sketches that exercise error paths. **Pure software, testable on existing board.**
@@ -437,7 +443,7 @@ Replace synthetic mode-2 step data with real RF measurements. Requires:
 Phase A — Quick wins (software only, 1 day)
 ─────────────────────────────────────────
 Item 5c   More direct-HCI edge cases        ~80 lines
-Abort-injection host-only unit example     ~60 lines
+Abort-injection host-only unit example     DONE
 
 Phase B — Multi-config (software only, 1 day)
 ─────────────────────────────────────────

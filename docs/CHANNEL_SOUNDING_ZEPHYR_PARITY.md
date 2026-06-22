@@ -313,6 +313,15 @@ direct-only events as a public-host failure, so `LE CS Test End` no longer retur
 the old synthetic `0xFF` failure. Verified by `BleChannelSoundingVprHciParity` and
 `BleChannelSoundingVprCsTestResults`.
 
+**Host abort cleanup fix:** Aborted CS subevent results now clear both
+accumulated local and peer procedure buffers immediately. Before this, a valid
+result received after an abort could complete a procedure against stale
+pre-abort data from the other side. Verified on hardware:
+
+```text
+cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 abort=0xB/0x0
+```
+
 ## Current Limitations
 
 ### 1. CS Test Results — Stream Implemented (Synthetic), RF Capture Open
@@ -453,6 +462,8 @@ Required work:
    - Disconnect detection, timeout tracking, and abort reason propagation
      implemented (see "Completed in This Pass — Disconnect/Timeout/Abort
      Framework" above).
+   - Host-side abort cleanup/stale-result rejection is hardware-verified with
+     `BleChannelSoundingHostAbortCleanup`.
    - Real LL Control PDU construction and RADIO transmission remain.
 
 4. **Hardware event scheduler**
