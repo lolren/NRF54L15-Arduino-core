@@ -268,6 +268,11 @@ BleChannelSoundingVprCachedCapabilities
 BleChannelSoundingVprDisconnectHandling
 BleChannelSoundingVprMultiConfig
 BleChannelSoundingVprResetClearsConfigs
+BleChannelSoundingVprEdgeCases
+BleChannelSoundingVprHciBurst
+BleChannelSoundingVprMaxPayload
+BleChannelSoundingVprResetMidProcedure
+BleChannelSoundingVprSoakTest
 ```
 
 `BleChannelSoundingVprMultiConfig` was compiled, uploaded, and verified on a
@@ -333,6 +338,34 @@ pre-abort data from the other side. Verified on hardware:
 ```text
 cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 abort=0xB/0x0
 ```
+
+**Software/VPR diagnostics pass:** The remaining public-API stress and edge-case
+diagnostics were added under
+`File > Examples > Nrf54L15 Clean Implementation > BLE > ChannelSounding` and
+hardware-verified on XIAO nRF54L15 probe `E91217E8`.
+
+```text
+BleChannelSoundingVprEdgeCases
+cs_vpr_edge_cases=PASS e1=1 e2=1 e3=1 e4=1 e5=1
+
+BleChannelSoundingVprHciBurst
+cs_vpr_hci_burst=PASS sent=10 success=8 rejected=2 polls=16 failed=0
+
+BleChannelSoundingVprMaxPayload
+cs_vpr_max_payload=PASS procedures=111 steps=8 bytes=64 start=0x0 end=0x0 failed=0
+
+BleChannelSoundingVprResetMidProcedure
+cs_vpr_reset_mid=PASS phase1=1 phase2=1 phase3=1 procedures=1
+
+BleChannelSoundingVprSoakTest
+cs_vpr_soak=PASS procedures=100 disconnects=10 configs=10 final=1
+```
+
+`BleChannelSoundingVprHciBurst` is deliberately a public direct-HCI burst test:
+the public helpers drain the VPR output slot before each command, so this checks
+that repeated command/status/error cycles do not deadlock or corrupt state. A
+true raw queue-saturation test would require a lower-level non-draining debug
+hook and is separate from the supported Arduino API.
 
 ## Current Limitations
 
@@ -424,7 +457,7 @@ Required work:
 - Characterize at multiple known distances; the earlier approximate
   `0.7-1.0 m` setup must not be treated as a precise calibration reference.
 
-### 7. Error and Concurrency Coverage Is Incomplete
+### 7. Error and Concurrency Coverage Is Partly Synthetic
 
 Current invalid-parameter coverage exists in
 `BleChannelSoundingVprInvalidParams` and is hardware-verified:
@@ -440,6 +473,16 @@ Retained config removal/promotion coverage exists in
 cs_vpr_config_remove=PASS pumps=12 statuses=0/0/0/0/0/0/12
 ```
 
+Additional public API diagnostics are now hardware-verified:
+
+```text
+cs_vpr_edge_cases=PASS e1=1 e2=1 e3=1 e4=1 e5=1
+cs_vpr_hci_burst=PASS sent=10 success=8 rejected=2 polls=16 failed=0
+cs_vpr_reset_mid=PASS phase1=1 phase2=1 phase3=1 procedures=1
+cs_vpr_max_payload=PASS procedures=111 steps=8 bytes=64 start=0x0 end=0x0 failed=0
+cs_vpr_soak=PASS procedures=100 disconnects=10 configs=10 final=1
+```
+
 Required work:
 
 - Disconnect during capability exchange, configuration, security, and active
@@ -447,8 +490,8 @@ Required work:
 - Procedure disable and re-enable.
 - Multiple connections, or explicit rejection if the implementation remains
   single-link.
-- HCI queue saturation and fragmented/concatenated event streams.
-- Controller reset while VPR is active.
+- Raw non-draining HCI queue saturation and malformed fragmented/concatenated
+  event streams.
 - More invalid channel maps, timing combinations, roles, PHYs, antenna
   selections, security-enable inputs, and override lengths.
 
@@ -492,6 +535,8 @@ Required work:
 7. **Power and soak validation**
    - Connected idle, active procedures, disable, disconnect, and reconnect.
    - Long result streams and all payload/continuation sizes.
+   - Public software/VPR diagnostics are hardware-verified; real RF power and
+     two-board soak remain open.
 
 ## Required Test Matrix
 
