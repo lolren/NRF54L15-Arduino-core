@@ -48,6 +48,8 @@ constexpr uint16_t kBleCsHciOpProcedureEnable = 0x2094U;
 constexpr uint16_t kBleCsHciOpTest = 0x2095U;
 constexpr uint16_t kBleCsHciOpTestEnd = 0x2096U;
 constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2 = 0x20A6U;
+constexpr uint16_t kBleCsVprHciOpPeerPduInject = 0xFCE8U;
+constexpr uint16_t kBleCsVprHciOpPeerStageRead = 0xFCE9U;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
@@ -89,6 +91,14 @@ constexpr uint16_t kBleCsTestSupportedOverrideMask =
     kBleCsTestOverrideMarkerValue |
     kBleCsTestOverridePayload |
     kBleCsTestOverrideStablePhase;
+
+constexpr uint8_t kBleCsVprPeerStageIdle = 0U;
+constexpr uint8_t kBleCsVprPeerStageAwaitingCsRsp = 1U;
+constexpr uint8_t kBleCsVprPeerStageAwaitingCsCfg = 2U;
+constexpr uint8_t kBleCsVprPeerStageAwaitingProcRsp = 3U;
+constexpr uint8_t kBleCsVprPeerStageAwaitingSecRsp = 4U;
+constexpr uint8_t kBleCsVprPeerStageAwaitingStart = 5U;
+constexpr uint8_t kBleCsVprPeerStageProcedureActive = 6U;
 
 struct BleCsToneSample {
   bool valid = false;
@@ -267,6 +277,16 @@ struct BleCsHciLeMetaEvent {
   uint8_t subeventCode = 0U;
   const uint8_t* payload = nullptr;
   uint8_t payloadLen = 0U;
+};
+
+struct BleCsVprPeerExchangeState {
+  bool valid = false;
+  uint8_t status = 0xFFU;
+  uint8_t previousStage = kBleCsVprPeerStageIdle;
+  uint8_t currentStage = kBleCsVprPeerStageIdle;
+  uint32_t deadlineHeartbeat = 0U;
+  uint8_t procedureAbortReason = 0U;
+  uint8_t subeventAbortReason = 0U;
 };
 
 enum class BleCsControllerResultSource : uint8_t {
@@ -1475,6 +1495,10 @@ class BleCsControllerVprHost {
   bool directProcedureEnable(const BleCsProcedureEnable& params, uint8_t* outStatus);
   bool directProcedureEnable(uint8_t configId, bool enable, uint8_t* outStatus);
   bool directCurrentProcedureEnable(bool enable, uint8_t* outStatus);
+  bool directInjectPeerPduForTest(const uint8_t* pdu,
+                                  size_t pduLen,
+                                  BleCsVprPeerExchangeState* outState);
+  bool directReadPeerExchangeStateForTest(BleCsVprPeerExchangeState* outState);
   bool pollUntilRunningWithProcedureCount(uint16_t targetProcedureCount,
                                           uint8_t maxPolls,
                                           uint8_t* outPolls);

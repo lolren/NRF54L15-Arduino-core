@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-██████████████████████████████████████░░░░░░░░  78%
+███████████████████████████████████████░░░░░░░  80%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -15,7 +15,8 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Disconnect framework (Phases 1–3) | ✅ Hardware-verified |
 | ██ | Timeout resilience (Phase 4) | ✅ Hardware-verified |
 | ██ | LL Control PDU definitions | ✅ Code complete |
-| ██ | VPR peer-exchange state machine | ✅ Code complete |
+| ██ | VPR peer-exchange state machine | ✅ Hardware-verified |
+| ██ | Test-only peer LL PDU injection/readback | ✅ Hardware-verified |
 | ██ | `directStartTest` transport fix | ✅ Hardware-verified |
 | ██ | Duplicate CS Test rejection | ✅ Hardware-verified |
 | ██ | CS Test result stream (handle 0x0FFF, synthetic) | ✅ Hardware-verified |
@@ -99,25 +100,37 @@ Host maintains per-connection cached remote capabilities (v1, 30 bytes; v2, 33 b
 ### 3c — Peer-Exchange State Machine (Part 3b)
 
 ```
-████████████████ 100% Code complete
+████████████████ 100% Hardware-verified
 ```
 
 - **7-stage enum** replaces 0/1 flag:
-  `IDLE → AWAITING_CS_RSP → AWAITING_CS_CFG → AWAITING_PROC_RSP → AWAITING_SEC_RSP → AWAITING_START → PROCEDURE_ACTIVE`
-- **`peer_deadline_for_stage()`** — per-stage timeout calculation (500 ticks for caps/CFG, 300 for procedure/security, `min_procedure_interval × 8` for START)
+  `IDLE → AWAITING_CS_RSP → AWAITING_CS_CFG → AWAITING_SEC_RSP → AWAITING_PROC_RSP → AWAITING_START → PROCEDURE_ACTIVE`
+- The effective host-driven flow is:
+  `Create Config → CS_RSP → CS_CFG → Security Enable → CS_SEC_RSP → Set Procedure Parameters → CS_PROC_RSP → Procedure Enable → CS_START`.
+- **`peer_deadline_for_stage()`** — per-stage timeout calculation in VPR heartbeat ticks (`50000` for caps/CFG, `30000` for procedure/security, `min_procedure_interval × 800` for START)
 - **`abort_reason_for_peer_stage()`** — stage-specific abort mapping (0x06=procedure, 0x07=config, 0x09=security)
 - **`handle_peer_cs_pdu()`** — callback framework wired, advances stage on expected PDU arrival
 - All arm sites updated to use stage-specific enum values
 
-### 3d — LL Control PDU Definitions
+### 3d — LL Control PDU Definitions & Test Injection
 
 ```
-████████████████ 100% Code complete
+████████████████ 100% Hardware-verified
 ```
 
 - `vpr_cs_ll_control.h` — CS LL Control PDU opcodes `0x2C`–`0x35` with packed structs
-- Serialization helpers: `vpr_cs_ll_encode_pdu()`, `vpr_cs_ll_decode_header()`
-- Framework-ready; no over-the-air exchange without second board
+- Serialization helpers: `vpr_cs_ll_encode_pdu()`, `vpr_cs_ll_decode_header()`, using raw LL Control PDU payloads (`opcode,len,payload...`) for test injection
+- Test-only VPR vendor commands:
+  - `0xFCE8` injects one raw peer CS LL Control PDU and returns previous/current peer stage plus abort state.
+  - `0xFCE9` reads the current peer-exchange stage without changing it.
+- **Hardware-verified diagnostic:** `BleChannelSoundingVprPeerPduInjection`
+
+```text
+cs_vpr_peer_pdu_injection=PASS progress=0x3FFFF final_stage=0 prev_stage=6 state_status=0x0 hci_status=0x0 valid=1 abort=0x42 invalid_status=0x12
+```
+
+- This proves the VPR state machine, timeout windows, abort bookkeeping, host-side debug APIs, and malformed-PDU rejection on real hardware.
+- This is still not over-air LL Control PDU exchange; the diagnostic injects peer PDUs through a test-only HCI path.
 
 ### 3e — Host Abort Reason Reaction
 
@@ -395,13 +408,13 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-░░░░░░░░░░░░░░░░ 0% 🔒 Second board required
+██░░░░░░░░░░░░░░ 12% Framework hardware-verified; over-air path open
 ```
 
 ### Requires:
 1. **Second nRF54L15 board** (or Zephyr board) to act as peer
 2. **RADIO access from VPR** — VPR currently has no RADIO peripheral access
-3. **LL Control PDU transmission** — build actual LL data-channel PDUs with CID `0x0025` (CS)
+3. **LL Control PDU transmission** — build actual LL data-channel PDUs with LLID/control framing and the CS control payloads
 4. **Connection-event-relative timing** — schedule CS exchanges in µs windows between BLE events
 
 ### Implementation steps (after hardware access):
@@ -413,11 +426,12 @@ surface now intentionally avoids that failure mode by draining responses.
 
 **Step 2** — LL Control PDU construction:
 - Use `vpr_cs_ll_control.h` structs to build real CS PDUs
-- Inject into the BLE data channel (LLID = data, CID = `0x0025`)
+- Inject into the BLE data/control path at the right connection-event phase
+- Reuse the test-only `0xFCE8` path as the deterministic validation harness while replacing its source with real received peer PDUs
 
 **Step 3** — Peer negotiation state machine:
 - Wire `handle_peer_cs_pdu()` into the BLE connection event dequeue
-- Verify state transitions through the 7-stage peer-exchange enum
+- Verify state transitions through the 7-stage peer-exchange enum; the injected-PDU hardware diagnostic already proves the local state machine.
 
 **Step 4** — Procedure execution:
 - Schedule CS subevents at connection-event-anchor-relative times

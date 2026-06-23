@@ -7,8 +7,8 @@
  * These are NOT currently exchanged over-the-air (no second board,
  * no RADIO access from the VPR).  The header exists so the VPR
  * peer-exchange state machine can reference real PDU types rather
- * than magic numbers, and so serialisation helpers are ready when
- * the link-layer transport is implemented.
+ * than magic numbers, and so raw-control-PDU serialisation helpers
+ * are ready when the link-layer transport is implemented.
  */
 #ifndef VPR_CS_LL_CONTROL_H_
 #define VPR_CS_LL_CONTROL_H_
@@ -129,38 +129,36 @@ typedef struct __attribute__((__packed__)) {
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 
-/* Encode a CS LL PDU into the link-layer data-channel format.
- * 'pdu' points to one of the packed structs above.
- * 'out_buf' must be at least pdu_len + 2 bytes.
- * On success the CID (0x0025 = CS), opcode, len, and payload are
- * written to out_buf and *out_len is the total encoded length. */
+/* Encode a CS LL Control PDU payload.
+ * 'pdu' points to one of the packed structs above, beginning with
+ * opcode and len. This is not an L2CAP frame and must not be CID-wrapped:
+ * LL control PDUs are carried by the controller's LL control channel.
+ * 'out_buf' must be at least pdu_len bytes. */
 static inline bool vpr_cs_ll_encode_pdu(const void *pdu, size_t pdu_len,
                                          uint8_t *out_buf, size_t *out_len) {
   if (pdu == NULL || out_buf == NULL || out_len == NULL || pdu_len < 2U) {
     return false;
   }
-  out_buf[0] = 0x25U;  /* CID low byte (CS) */
-  out_buf[1] = 0x00U;  /* CID high byte       */
   for (size_t i = 0U; i < pdu_len; ++i) {
-    out_buf[2U + i] = ((const uint8_t *)pdu)[i];
+    out_buf[i] = ((const uint8_t *)pdu)[i];
   }
-  *out_len = 2U + pdu_len;
+  *out_len = pdu_len;
   return true;
 }
 
-/* Decode the opcode and length from a raw CS LL PDU buffer.
- * Returns false if the buffer is too short or the CID doesn't match. */
+/* Decode the opcode and length from a raw CS LL Control PDU buffer.
+ * Returns false if the buffer is too short or the embedded payload length
+ * does not fit inside the provided buffer. */
 static inline bool vpr_cs_ll_decode_header(const uint8_t *buf, size_t buf_len,
                                             vpr_cs_ll_pdu_header_t *out_hdr) {
-  if (buf == NULL || buf_len < 4U || out_hdr == NULL) {
+  if (buf == NULL || buf_len < 2U || out_hdr == NULL) {
     return false;
   }
-  /* Verify CS CID (0x0025) */
-  if (buf[0] != 0x25U || buf[1] != 0x00U) {
+  out_hdr->opcode = buf[0];
+  out_hdr->len = buf[1];
+  if ((size_t)out_hdr->len + 2U > buf_len) {
     return false;
   }
-  out_hdr->opcode = buf[2];
-  out_hdr->len    = buf[3];
   return true;
 }
 

@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "nrf54l15_vpr_transport_shared.h"
+#include "vpr_cs_ll_control.h"
 
 #ifndef VPR_CS_DEDICATED_IMAGE
 #define VPR_CS_DEDICATED_IMAGE 0
@@ -40,6 +41,8 @@
 #define BLE_CS_CHANNEL_CLASSIFICATION_LEN 10U
 #define BLE_CS_MAX_CONFIG_SLOTS 8U
 #define BLE_CS_MAX_TRACKED_CONFIG_IDS (BLE_CS_MAX_CONFIG_SLOTS + 1U)
+#define VPR_HCI_OP_VENDOR_BLE_CS_PEER_PDU_INJECT 0xFCE8U
+#define VPR_HCI_OP_VENDOR_BLE_CS_PEER_STAGE_READ 0xFCE9U
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -119,7 +122,11 @@
 #define BLE_CS_HCI_TEST_CONFIG_ID 0x00U
 #define BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS 200U
 #define BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS 8U
+#define BLE_CS_PEER_CONFIG_TIMEOUT_TICKS 50000U
+#define BLE_CS_PEER_PROC_TIMEOUT_TICKS 30000U
+#define BLE_CS_PEER_START_TIMEOUT_SCALE 800U
 
+#define BLE_HCI_PACKET_TYPE_COMMAND 0x01U
 #define BLE_HCI_PACKET_TYPE_EVENT 0x04U
 #define BLE_HCI_EVT_COMMAND_COMPLETE 0x0EU
 #define BLE_HCI_EVT_COMMAND_STATUS 0x0FU
@@ -498,6 +505,9 @@ static uint8_t g_cs_builtin_peer_demo_enabled = 0U;
  * for_opcode which precedes their definitions. */
 static uint32_t peer_deadline_for_stage(uint8_t stage);
 static uint8_t abort_reason_for_peer_stage(uint8_t stage);
+#if VPR_CS_DEDICATED_IMAGE
+static void handle_peer_cs_pdu(const uint8_t *pdu, size_t pdu_len);
+#endif
 
 static bool host_request_pending(void);
 
@@ -2235,15 +2245,24 @@ static uint8_t fill_demo_channels_for_procedure(uint8_t *out_channels, uint8_t c
 
 static void update_demo_channels_from_create_config(void) {
   uint8_t channel_map[10];
+  const uint32_t host_reserved = g_host_transport->reserved;
+  const bool demo_requested =
+      (host_reserved != 0U && host_reserved != NRF54L15_VPR_BLE_CONN_HANDOFF_COOKIE);
   if (g_host_transport->hostLen < 32U || g_host_transport->hostData[0] != 0x01U) {
     return;
   }
+  if (demo_requested) {
+    g_cs_demo_channels_packed = host_reserved;
+    g_cs_builtin_peer_demo_enabled = 1U;
+    return;
+  }
+
+  g_cs_builtin_peer_demo_enabled = 0U;
   bytes_copy(channel_map, (const void *)&g_host_transport->hostData[17], sizeof(channel_map));
   {
     const uint32_t packed = pack_demo_channels_from_map(channel_map);
     if (packed != 0U) {
       g_cs_demo_channels_packed = packed;
-      g_cs_builtin_peer_demo_enabled = 1U;
     }
   }
 }
@@ -3828,6 +3847,67 @@ static uint8_t validate_cs_test_command(void) {
              : BLE_CS_HCI_STATUS_INVALID_PARAMS;
 }
 
+#if VPR_CS_DEDICATED_IMAGE
+static size_t build_vendor_ble_cs_peer_exchange_payload(uint8_t *payload,
+                                                        size_t max_len,
+                                                        uint8_t status,
+                                                        uint8_t previous_stage) {
+  if (payload == NULL || max_len < 9U) {
+    return 0U;
+  }
+  payload[0] = status;
+  payload[1] = previous_stage;
+  payload[2] = g_cs_peer_exchange_stage;
+  write_le32(&payload[3], g_cs_peer_exchange_deadline);
+  payload[7] = g_cs_procedure_abort_reason;
+  payload[8] = g_cs_subevent_abort_reason;
+  return 9U;
+}
+
+static uint8_t validate_peer_pdu_inject_command(size_t *out_pdu_len) {
+  if (out_pdu_len == NULL) {
+    return BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  }
+  *out_pdu_len = 0U;
+  if (g_host_transport->hostLen < 6U ||
+      g_host_transport->hostData[0] != BLE_HCI_PACKET_TYPE_COMMAND ||
+      g_host_transport->hostData[3] != (g_host_transport->hostLen - 4U)) {
+    return BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  }
+
+  const size_t pdu_len = g_host_transport->hostLen - 4U;
+  vpr_cs_ll_pdu_header_t header;
+  if (!vpr_cs_ll_decode_header((const uint8_t *)&g_host_transport->hostData[4],
+                                pdu_len, &header) ||
+      pdu_len != ((size_t)header.len + 2U)) {
+    return BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  }
+
+  *out_pdu_len = pdu_len;
+  return BLE_CS_HCI_STATUS_SUCCESS;
+}
+
+static size_t build_vendor_ble_cs_peer_pdu_inject_complete_payload(uint8_t *payload,
+                                                                   size_t max_len) {
+  const uint8_t previous_stage = g_cs_peer_exchange_stage;
+  size_t pdu_len = 0U;
+  uint8_t status = validate_peer_pdu_inject_command(&pdu_len);
+  if (status == BLE_CS_HCI_STATUS_SUCCESS) {
+    handle_peer_cs_pdu((const uint8_t *)&g_host_transport->hostData[4], pdu_len);
+  }
+  return build_vendor_ble_cs_peer_exchange_payload(payload, max_len, status, previous_stage);
+}
+
+static size_t build_vendor_ble_cs_peer_stage_read_complete_payload(uint8_t *payload,
+                                                                  size_t max_len) {
+  const uint8_t previous_stage = g_cs_peer_exchange_stage;
+  const uint8_t status = command_layout_is_exact(0U)
+                             ? BLE_CS_HCI_STATUS_SUCCESS
+                             : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  return build_vendor_ble_cs_peer_exchange_payload(payload, max_len, status, previous_stage);
+}
+#endif
+
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
   /* Largest staging payload is the FAE table at 75 bytes; 80 leaves headroom. */
   uint8_t payload[80];
@@ -4247,6 +4327,38 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       offset += len;
       break;
     }
+#if VPR_CS_DEDICATED_IMAGE
+    case VPR_HCI_OP_VENDOR_BLE_CS_PEER_PDU_INJECT: {
+      size_t len =
+          build_vendor_ble_cs_peer_pdu_inject_complete_payload(payload, sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_PEER_STAGE_READ: {
+      size_t len =
+          build_vendor_ble_cs_peer_stage_read_complete_payload(payload, sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+#endif
 #if !VPR_CS_DEDICATED_IMAGE
     case VPR_HCI_OP_VENDOR_PING: {
       size_t len = build_vendor_ping_complete_payload(payload, sizeof(payload));
@@ -5092,15 +5204,16 @@ static uint32_t peer_deadline_for_stage(uint8_t stage) {
   switch (stage) {
     case VPR_CS_PEER_STAGE_AWAITING_CS_RSP:
     case VPR_CS_PEER_STAGE_AWAITING_CS_CFG:
-      return g_vpr_transport->heartbeat + 500U;   /* ~5 connection events */
+      return g_vpr_transport->heartbeat + BLE_CS_PEER_CONFIG_TIMEOUT_TICKS;
     case VPR_CS_PEER_STAGE_AWAITING_PROC_RSP:
     case VPR_CS_PEER_STAGE_AWAITING_SEC_RSP:
-      return g_vpr_transport->heartbeat + 300U;   /* ~3 connection events */
+      return g_vpr_transport->heartbeat + BLE_CS_PEER_PROC_TIMEOUT_TICKS;
     case VPR_CS_PEER_STAGE_AWAITING_START:
       return g_vpr_transport->heartbeat +
-             ((uint32_t)g_cs_min_procedure_interval * 8U);
+             ((uint32_t)g_cs_min_procedure_interval *
+              BLE_CS_PEER_START_TIMEOUT_SCALE);
     default:
-      return g_vpr_transport->heartbeat + 5000U;  /* generous fallback */
+      return g_vpr_transport->heartbeat + BLE_CS_PEER_CONFIG_TIMEOUT_TICKS;
   }
 }
 
@@ -5158,23 +5271,33 @@ static void handle_peer_cs_pdu(const uint8_t *pdu, size_t pdu_len) {
       break;
     case VPR_CS_PEER_STAGE_AWAITING_CS_CFG:
       if (opcode == VPR_CS_LL_CS_CFG) {
-        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_PROC_RSP;
-        g_cs_peer_exchange_deadline =
-            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
+        g_cs_peer_exchange_deadline = 0U;
       }
       break;
     case VPR_CS_PEER_STAGE_AWAITING_PROC_RSP:
       if (opcode == VPR_CS_LL_CS_PROC_RSP) {
-        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_SEC_RSP;
-        g_cs_peer_exchange_deadline =
-            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        if (g_cs_security_enabled != 0U) {
+          g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
+          g_cs_peer_exchange_deadline =
+              peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        } else {
+          g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_SEC_RSP;
+          g_cs_peer_exchange_deadline =
+              peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        }
       }
       break;
     case VPR_CS_PEER_STAGE_AWAITING_SEC_RSP:
       if (opcode == VPR_CS_LL_CS_SEC_RSP) {
-        g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
-        g_cs_peer_exchange_deadline =
-            peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        if (g_cs_procedure_params_applied != 0U) {
+          g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_AWAITING_START;
+          g_cs_peer_exchange_deadline =
+              peer_deadline_for_stage(g_cs_peer_exchange_stage);
+        } else {
+          g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
+          g_cs_peer_exchange_deadline = 0U;
+        }
       }
       break;
     case VPR_CS_PEER_STAGE_AWAITING_START:

@@ -243,6 +243,57 @@ Out of scope for this pass (remain as future work):
 - CS security material derivation / DRBG (item #5).
 - Two-board interoperability verification.
 
+## Completed in This Pass — Test-Only Peer LL Control PDU Injection
+
+The VPR CS controller image now has a deterministic peer-PDU injection path for
+the CS control-procedure state machine. This is a debug/test hook, not a
+production over-air transport.
+
+- Added raw CS LL Control PDU helpers in `vpr_cs_ll_control.h`. The helpers now
+  encode/decode the actual raw peer control payload (`opcode`, `len`, payload)
+  instead of wrapping it in an L2CAP-style CS CID. That matches the data consumed
+  by the VPR peer state machine.
+- Added test-only VPR vendor commands:
+  - `0xFCE8` — inject one raw peer CS LL Control PDU.
+  - `0xFCE9` — read the current peer-exchange state.
+- Added public test APIs on `BleCsControllerVprHost`:
+  - `directInjectPeerPduForTest(...)`
+  - `directReadPeerExchangeStateForTest(...)`
+- Added `BleCsVprPeerExchangeState`, returning command status, previous/current
+  stage, peer deadline heartbeat, procedure abort reason, and subevent abort
+  reason.
+- Fixed peer-exchange deadlines to use VPR heartbeat-loop scale rather than the
+  older tiny 300/500 tick constants. Direct debug commands also bypass the
+  normal direct-command drain so the act of reading/injecting does not consume
+  the entire peer timeout window.
+- Fixed the built-in peer demo gate: creating a CS config no longer implicitly
+  enables the synthetic peer demo just because the channel map is non-empty.
+  The host-side `builtInPeerDemo.enabled` flag now controls whether procedure
+  enable auto-enters synthetic `PROCEDURE_ACTIVE` or waits for a real/test peer
+  `CS_START`.
+- Updated the state sequence to match the host validation path:
+  `Create Config -> CS_RSP -> CS_CFG -> Security Enable -> CS_SEC_RSP -> Set Procedure Parameters -> CS_PROC_RSP -> Procedure Enable -> CS_START`.
+
+Hardware-verified on XIAO nRF54L15 probe `E91217E8`:
+
+```text
+BleChannelSoundingVprPeerPduInjection
+cs_vpr_peer_pdu_injection=PASS progress=0x3FFFF final_stage=0 prev_stage=6 state_status=0x0 hci_status=0x0 valid=1 abort=0x42 invalid_status=0x12
+```
+
+This confirms:
+- Valid injected peer PDUs advance the VPR state machine through config,
+  security, procedure-parameter, start, active, and abort states.
+- The procedure and subevent abort reasons survive back to the host.
+- Malformed raw PDU length is rejected with `0x12` (`Invalid HCI Command Parameters`).
+
+Remaining before physical parity:
+- Replace the test-only injection source with real BLE link-layer received CS
+  control PDUs.
+- Transmit local CS control PDUs at the correct connection-event phase.
+- Keep the injected-PDU example as the deterministic regression test for the
+  state machine after real over-air transport is wired.
+
 ## Hardware Verification
 
 `BleChannelSoundingVprHciParity` was compiled, uploaded, and run on a XIAO
@@ -517,7 +568,9 @@ Required work:
      Framework" above).
    - Host-side abort cleanup/stale-result rejection is hardware-verified with
      `BleChannelSoundingHostAbortCleanup`.
-   - Real LL Control PDU construction and RADIO transmission remain.
+   - Test-only peer LL PDU injection/readback is hardware-verified with
+     `BleChannelSoundingVprPeerPduInjection`.
+   - Real LL Control PDU reception/transmission over the BLE data path remains.
 
 4. **Hardware event scheduler**
    - Port the timing model from Zephyr/Nordic open code where licensing permits.

@@ -90,6 +90,13 @@ inline uint16_t readLe16(const uint8_t* data) {
          (static_cast<uint16_t>(data[1]) << 8U);
 }
 
+inline uint32_t readLe32(const uint8_t* data) {
+  return static_cast<uint32_t>(data[0]) |
+         (static_cast<uint32_t>(data[1]) << 8U) |
+         (static_cast<uint32_t>(data[2]) << 16U) |
+         (static_cast<uint32_t>(data[3]) << 24U);
+}
+
 inline void writeLe16(uint8_t* data, uint16_t value) {
   data[0] = static_cast<uint8_t>(value & 0xFFU);
   data[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
@@ -3292,6 +3299,35 @@ bool parseDirectStatusResponse(const uint8_t* packet,
   return false;
 }
 
+bool parseVprPeerExchangeResponse(const uint8_t* packet,
+                                  size_t packetLen,
+                                  uint16_t expectedOpcode,
+                                  BleCsVprPeerExchangeState* outState) {
+  if (outState == nullptr) {
+    return false;
+  }
+  *outState = BleCsVprPeerExchangeState{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 9U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outState->valid = true;
+  outState->status = params[0];
+  outState->previousStage = params[1];
+  outState->currentStage = params[2];
+  outState->deadlineHeartbeat = readLe32(params + 3U);
+  outState->procedureAbortReason = params[7];
+  outState->subeventAbortReason = params[8];
+  return true;
+}
+
 bool BleCsControllerSession::begin(uint16_t connHandle,
                                    const BleCsControllerSessionConfig& config) {
   reset();
@@ -4551,6 +4587,9 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
                                                   size_t* responseLen) {
   bool resetRunStateBefore = false;
   bool resetRunStateAfter = false;
+  const bool peerExchangeDebugCommand =
+      opcode == kBleCsVprHciOpPeerPduInject ||
+      opcode == kBleCsVprHciOpPeerStageRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
     case kBleCsHciOpSetProcedureParameters:
@@ -4575,21 +4614,24 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
    *
    * Retry up to 4 times: the VPR main loop can publish a new event
    * between our drain and the write, re-arming vprFlags=PENDING. */
-  for (uint8_t retry = 0U; retry < 4U; ++retry) {
-    VprControllerServiceHost scratch(&transport_);
-    (void)drainDirectControllerEvents(&scratch, nullptr, 0U, true);
-    /* Force poll()->pullResponse() to clear vprFlags=PENDING in shared
-     * memory, then consume anything that arrived so rxIndex catches up. */
-    (void)transport_.available();
+  if (!peerExchangeDebugCommand) {
+    for (uint8_t retry = 0U; retry < 4U; ++retry) {
+      VprControllerServiceHost scratch(&transport_);
+      (void)drainDirectControllerEvents(&scratch, nullptr, 0U, true);
+      /* Force poll()->pullResponse() to clear vprFlags=PENDING in shared
+       * memory, then consume anything that arrived so rxIndex catches up. */
+      (void)transport_.available();
+    }
   }
 
   VprControllerServiceHost directHost(&transport_);
   const bool ok =
       directHost.sendHciCommand(opcode, params, paramsLen, response, responseSize, responseLen);
   const bool drained =
-      ok && drainDirectControllerEvents(&directHost, response,
-                                        (responseLen != nullptr) ? *responseLen : 0U,
-                                        opcode != kBleCsHciOpProcedureEnable);
+      ok && (peerExchangeDebugCommand ||
+             drainDirectControllerEvents(&directHost, response,
+                                         (responseLen != nullptr) ? *responseLen : 0U,
+                                         opcode != kBleCsHciOpProcedureEnable));
   if (ok && drained && resetRunStateAfter) {
     host_.resetProcedureRunState();
   }
@@ -4623,6 +4665,39 @@ bool BleCsControllerVprHost::sendDirectBuiltCommand(const BleCsHciCommand& comma
     return false;
   }
   return parseDirectStatusResponse(response, responseLen, command.opcode, outStatus);
+}
+
+bool BleCsControllerVprHost::directInjectPeerPduForTest(
+    const uint8_t* pdu, size_t pduLen, BleCsVprPeerExchangeState* outState) {
+  if (pdu == nullptr || outState == nullptr || pduLen < 2U ||
+      pduLen > kBleCsMaxHciCommandPayloadBytes) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpPeerPduInject, pdu, pduLen,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  return parseVprPeerExchangeResponse(response, responseLen,
+                                      kBleCsVprHciOpPeerPduInject, outState);
+}
+
+bool BleCsControllerVprHost::directReadPeerExchangeStateForTest(
+    BleCsVprPeerExchangeState* outState) {
+  if (outState == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpPeerStageRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  return parseVprPeerExchangeResponse(response, responseLen,
+                                      kBleCsVprHciOpPeerStageRead, outState);
 }
 
 bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outStatus) {
