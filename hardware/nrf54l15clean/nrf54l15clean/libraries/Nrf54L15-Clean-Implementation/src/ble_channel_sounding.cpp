@@ -2972,6 +2972,18 @@ void BleCsControllerWorkflow::reconcileReadyShadowState(uint8_t selectedConfigId
   }
 
   if (!sessionOpen) {
+    const bool workflowHadControllerState =
+        ready() ||
+        state_.configCreated ||
+        state_.securityEnabled ||
+        state_.procedureParametersApplied ||
+        state_.procedureEnabled ||
+        state_.configComplete.configId != 0U ||
+        state_.procedureEnableComplete.configId != 0U;
+    if (!workflowHadControllerState) {
+      return;
+    }
+
     state_.remoteCapabilities = BleCsControllerCapabilities{};
     state_.remoteCapabilitiesValid = false;
     state_.defaultSettingsApplied = false;
@@ -5707,12 +5719,19 @@ bool BleCsControllerVprHost::loopOnceWithInitiatorLlControlBridge(
     BleRadio& radio,
     BleCsLlControlBridgePollResult* outResult,
     uint32_t spinLimit) {
-  const bool ok = initiatorLlBridgeOwnsCurrentWorkflowPhase() ? poll() : loopOnce();
+  const bool bridgeOwnedBeforePump = initiatorLlBridgeOwnsCurrentWorkflowPhase();
+  const bool ok = bridgeOwnedBeforePump ? poll() : loopOnce();
   if (!ok) {
     if (outResult != nullptr) {
       *outResult = BleCsLlControlBridgePollResult{};
     }
     return false;
+  }
+  if (!initiatorLlBridgeOwnsCurrentWorkflowPhase() && !ready()) {
+    if (outResult != nullptr) {
+      *outResult = BleCsLlControlBridgePollResult{};
+    }
+    return true;
   }
   return pollInitiatorLlControlBridge(radio, outResult, spinLimit);
 }
