@@ -97,6 +97,12 @@ if ! grep -q "std_est=1" "${initiator_log}"; then
   exit 1
 fi
 
+if ! grep -q "host_est=1" "${initiator_log}"; then
+  echo "Raw CS measurements did not reach the controller host result ingress path" >&2
+  sed -n '1,220p' "${initiator_log}" >&2
+  exit 1
+fi
+
 last_replies="$(
   awk '
     {
@@ -118,7 +124,8 @@ if [[ "${last_replies}" -lt "${min_reflector_replies}" ]]; then
 fi
 
 last_initiator="$(
-  grep "std_est=1" "${initiator_log}" | tail -n 1 || \
+  grep "host_est=1" "${initiator_log}" | tail -n 1 || \
+    grep "std_est=1" "${initiator_log}" | tail -n 1 || \
     grep "valid_channels=" "${initiator_log}" | tail -n 1 || true
 )"
 last_reflector="$(

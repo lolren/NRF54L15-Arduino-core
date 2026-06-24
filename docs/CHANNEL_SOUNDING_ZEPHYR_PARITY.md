@@ -435,9 +435,11 @@ The harness captures serial after a synchronized reset and fails unless:
 Hardware result from the local XIAO nRF54L15 pair:
 
 ```text
-reflector replies in 20s: 840
-initiator: raw_cs_ready=1, valid_channels up to 19, dfe_bytes=336, dfe_zero=0
-standard result path: std_est=1, std_steps up to 19/19, std_m populated
+reflector replies in 20s: 843
+initiator: raw_cs_ready=1, valid_channels=15 in the final PASS line,
+           dfe_bytes=336, dfe_zero=0
+standard result path: std_est=1, std_steps=15/15, std_m populated
+controller host ingress path: host_est=1, host_steps=15/15, host_m populated
 ```
 
 This is an important physical-RF smoke baseline, but it is still not
@@ -445,7 +447,12 @@ Zephyr-parity connected Channel Sounding. It runs the clean-core standalone
 phase-sounding frame format and proves RADIO tone extension / CSTONES / DFE
 capture can move real RF data between two boards. It also proves those real
 measurements can be encoded as standard Mode 2 CS subevent result step data and
-fed through the existing controller-style parser/estimator path. The
+fed through the existing controller-style parser/estimator path. The raw
+initiator now also feeds those real measurements into
+`BleCsControllerHost::consumeMode2ResultsFromMeasurements()` and requires
+`host_est=1` in `scripts/test_cs_raw_radio_pair.sh`, proving the same physical
+data can enter the connected-controller host accumulation path without an HCI
+event wrapper. The
 remaining work is to move that physical execution under the connected CS
 controller workflow and produce those real subevent results from the
 controller/VPR scheduler rather than from the standalone sketch loop.

@@ -60,11 +60,14 @@ static constexpr uint8_t kSweepChannelCount = 37U;
 static constexpr uint8_t kMedianWindow = 5U;
 // Reserved HCI test connection handle used for standalone CS result records.
 static constexpr uint16_t kRawCsSubeventConnHandle = 0x0FFFU;
+// Synthetic connected-handle used only to regression-test host result ingestion.
+static constexpr uint16_t kRawCsHostConnHandle = 0x0042U;
 // Default calibration profile: identity scale/offset with no anchored reference.
 static constexpr BleCsCalibrationProfile kCalibrationProfileDefault{
     1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U, 0U};
 
 static BleChannelSoundingRadio gCs;
+static BleCsControllerHost gRawMeasurementHost;
 static BleCsChannelMeasurement gMeasurements[kSweepChannelCount];
 static BleCsEstimate gLastEstimate{};
 static bool gLastEstimateValid = false;
@@ -74,6 +77,10 @@ static BleCsEstimate gLastEncodedEstimate{};
 static bool gLastEncodedEstimateValid = false;
 static uint16_t gLastEncodedLocalSteps = 0U;
 static uint16_t gLastEncodedPeerSteps = 0U;
+static BleCsEstimate gLastHostIngressEstimate{};
+static bool gLastHostIngressEstimateValid = false;
+static uint16_t gLastHostIngressLocalSteps = 0U;
+static uint16_t gLastHostIngressPeerSteps = 0U;
 static bool gCsReady = false;
 static float gRecentDistances[kMedianWindow] = {0.0f};
 static uint8_t gRecentCount = 0U;
@@ -8161,11 +8168,30 @@ const BleCsChannelMeasurement* firstValidMeasurement() {
   return nullptr;
 }
 
+bool rawMeasurementHostSendPacket(const uint8_t*, size_t, void*) {
+  return true;
+}
+
+bool beginRawMeasurementHost(uint16_t connHandle) {
+  BleCsControllerVprHostConfig vprConfig{};
+  BleCsControllerVprHost::fillDemoConfig(&vprConfig);
+
+  BleCsControllerHostConfig hostConfig{};
+  hostConfig.session = vprConfig.session;
+  hostConfig.sendPacket = rawMeasurementHostSendPacket;
+  hostConfig.userData = nullptr;
+  return gRawMeasurementHost.begin(connHandle, hostConfig);
+}
+
 bool updateEncodedSubeventEstimate() {
   gLastEncodedEstimate = BleCsEstimate{};
   gLastEncodedEstimateValid = false;
   gLastEncodedLocalSteps = 0U;
   gLastEncodedPeerSteps = 0U;
+  gLastHostIngressEstimate = BleCsEstimate{};
+  gLastHostIngressEstimateValid = false;
+  gLastHostIngressLocalSteps = 0U;
+  gLastHostIngressPeerSteps = 0U;
 
   BleCsSubeventResultHeader header{};
   header.connHandle = kRawCsSubeventConnHandle;
@@ -8197,6 +8223,21 @@ bool updateEncodedSubeventEstimate() {
 
   gLastEncodedEstimate = estimate;
   gLastEncodedEstimateValid = true;
+
+  BleCsSubeventResultHeader hostHeader = header;
+  hostHeader.connHandle = kRawCsHostConnHandle;
+  if (beginRawMeasurementHost(kRawCsHostConnHandle) &&
+      gRawMeasurementHost.consumeMode2ResultsFromMeasurements(
+          gMeasurements, kSweepChannelCount, hostHeader, gLocalStepData,
+          sizeof(gLocalStepData), gPeerStepData, sizeof(gPeerStepData)) &&
+      gRawMeasurementHost.estimateValid()) {
+    gLastHostIngressEstimate = gRawMeasurementHost.sessionState().estimate;
+    gLastHostIngressEstimateValid = true;
+    gLastHostIngressLocalSteps =
+        gRawMeasurementHost.completedLocalResult().header.numStepsReported;
+    gLastHostIngressPeerSteps =
+        gRawMeasurementHost.completedPeerResult().header.numStepsReported;
+  }
   return true;
 }
 
@@ -8323,6 +8364,10 @@ void loop() {
     gLastEncodedEstimateValid = false;
     gLastEncodedLocalSteps = 0U;
     gLastEncodedPeerSteps = 0U;
+    gLastHostIngressEstimate = BleCsEstimate{};
+    gLastHostIngressEstimateValid = false;
+    gLastHostIngressLocalSteps = 0U;
+    gLastHostIngressPeerSteps = 0U;
     gLastValidChannels = 0U;
     gLastDfeInfo = BleCsDfeCaptureInfo{};
   }
@@ -8408,6 +8453,22 @@ void loop() {
       } else {
         printDistanceField(F(" std_m="), NAN);
         printDistanceField(F(" std_delta_m="), NAN);
+      }
+      Serial.print(F(" host_est="));
+      Serial.print(gLastHostIngressEstimateValid ? 1 : 0);
+      Serial.print(F(" host_steps="));
+      Serial.print(gLastHostIngressLocalSteps);
+      Serial.print('/');
+      Serial.print(gLastHostIngressPeerSteps);
+      if (gLastHostIngressEstimateValid) {
+        printDistanceField(F(" host_m="),
+                           gLastHostIngressEstimate.phaseSlopeDistanceMeters);
+        printDistanceField(F(" host_delta_m="),
+                           gLastHostIngressEstimate.phaseSlopeDistanceMeters -
+                               gLastEstimate.phaseSlopeDistanceMeters);
+      } else {
+        printDistanceField(F(" host_m="), NAN);
+        printDistanceField(F(" host_delta_m="), NAN);
       }
       Serial.print(F(" display_ok="));
       Serial.print(displayAccepted ? 1 : 0);

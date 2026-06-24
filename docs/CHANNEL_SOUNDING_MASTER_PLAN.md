@@ -556,7 +556,9 @@ VPR/controller workflow:
 - Use `scripts/test_cs_raw_radio_pair.sh` as the current hardware baseline for
   standalone RADIO tone/DFE behavior and real-measurement Mode 2 subevent
   result encoding while moving execution under the connected controller
-  workflow.
+  workflow. The script requires both `std_est=1` and `host_est=1`, so the same
+  over-air measurements must pass through the standalone estimator and the
+  controller-host measurement ingress path.
 - Feed completed local/peer result objects into the host through
   `consumeCompletedResult()` instead of wrapping physical result data as
   synthetic HCI event bytes.
