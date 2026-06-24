@@ -408,6 +408,42 @@ Status:
 - This is still not physical CS ranging. The examples do not yet run the RF tone
   exchange, hardware scheduler, timestamp/IQ capture, or real result reporting.
 
+## Completed in This Pass — Raw RADIO RF Smoke Harness
+
+The standalone two-board raw RADIO path now has a repeatable regression command:
+
+```bash
+scripts/test_cs_raw_radio_pair.sh
+```
+
+This flashes:
+
+```text
+BleChannelSoundingReflector -> default /dev/ttyACM2, UID E91217E8
+BleChannelSoundingInitiator -> default /dev/ttyACM1, UID 761FDE87
+```
+
+The harness captures serial after a synchronized reset and fails unless:
+
+- The initiator prints `raw_cs_init=ok`.
+- At least one initiator sweep reports nonzero `valid_channels`.
+- The initiator captures nonzero DFE data (`dfe_zero=0`).
+- The reflector completes at least `CS_MIN_REFLECTOR_REPLIES` replies.
+
+Hardware result from the local XIAO nRF54L15 pair:
+
+```text
+reflector replies in 20s: 852
+initiator: raw_cs_ready=1, valid_channels up to 19, dfe_bytes=336, dfe_zero=0
+```
+
+This is an important physical-RF smoke baseline, but it is still not
+Zephyr-parity connected Channel Sounding. It runs the clean-core standalone
+phase-sounding frame format and proves RADIO tone extension / CSTONES / DFE
+capture can move real RF data between two boards. The remaining work is to move
+that physical execution under the connected CS controller workflow and emit
+standard CS subevent results from real measurements.
+
 Next required slice:
 
 - Move CS LL-control PDU emission/consumption from the CPUAPP sketch loop into

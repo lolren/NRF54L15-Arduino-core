@@ -30,6 +30,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Host-owned initiator LL bridge service | ✅ Two-board hardware-verified |
 | ██ | Host-owned initiator LL bridge poll helper | ✅ Two-board hardware-verified |
 | ██ | VPR-owned initiator LL PDU source | ✅ Two-board hardware-verified |
+| ██ | Standalone raw RF tone/DFE smoke harness | ✅ Two-board hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
 | ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
@@ -550,6 +551,9 @@ VPR/controller workflow:
 - Configure `NRF_RADIO` for CS tone exchange
 - Set up PPI channels for event chaining
 - Configure `TIMER` instances for µs-precision scheduling
+- Use `scripts/test_cs_raw_radio_pair.sh` as the current hardware baseline for
+  standalone RADIO tone/DFE behavior while moving execution under the connected
+  controller workflow.
 
 **Step 3** — LL Control PDU construction:
 - Use the public `bleCsBuildLlControl*()` helpers for CPUAPP-side packet

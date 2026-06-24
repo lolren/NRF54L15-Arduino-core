@@ -200,7 +200,7 @@ Examples:
 | **Zigbee** | ~40K | ⚠️ Good | Partial — HA/Zigbee2MQTT device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
 | **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
-| **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2, VPR-owned local LL PDU selection, and LL-control workflow bridge work on 2 boards; physical RF scheduler still staged |
+| **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2, VPR-owned local LL PDU selection, LL-control workflow bridge, and raw RF tone/DFE smoke work on 2 boards; connected Zephyr-parity RF scheduler still staged |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes — all nPM1300 features, GPIO bit‑bang I²C |
 
 ---
@@ -212,7 +212,7 @@ Examples:
 - **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
-- **Channel Sounding physical ranging is staged.** The HCI/VPR workflow and real over-air LL-control bridge are hardware-tested, but the final Zephyr-parity RF scheduler still needs VPR/RADIO-owned subevent timing.
+- **Channel Sounding connected-CS parity is staged.** The HCI/VPR workflow, real over-air LL-control bridge, and raw two-board RF tone/DFE smoke path are hardware-tested, but the final Zephyr-parity connected scheduler still needs VPR/RADIO-owned subevent timing and real connected result generation.
 
 ---
 

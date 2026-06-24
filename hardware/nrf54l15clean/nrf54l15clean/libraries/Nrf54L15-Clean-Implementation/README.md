@@ -968,6 +968,9 @@ BLE examples:
 - `examples/BLE/ChannelSounding/BleChannelSoundingInitiator/BleChannelSoundingInitiator.ino`
   - Sweeps BLE data channels with tone-extended probes and combines both endpoints' IQ terms.
   - Reports `dist_m`, rolling `median_m`, `valid_channels`, and fit `residual` from the phase-slope estimator.
+- `scripts/test_cs_raw_radio_pair.sh`
+  - Local two-board regression harness for the raw RADIO phase-sounding path.
+  - Compiles/uploads `BleChannelSoundingReflector` and `BleChannelSoundingInitiator`, resets both probes, captures serial, and fails unless the initiator reports `raw_cs_init=ok`, nonzero `valid_channels`, nonzero DFE capture, and enough reflector replies.
 - `examples/BLE/ChannelSounding/BleChannelSoundingVprLinkedInitiator/BleChannelSoundingVprLinkedInitiator.ino`
   - Uses the generic VPR BLE link snapshot as the source for the dedicated CS image.
   - Runs one imported-link CS workflow without the SWD-summary probe harness and prints the nominal regression estimate over `Serial`.
