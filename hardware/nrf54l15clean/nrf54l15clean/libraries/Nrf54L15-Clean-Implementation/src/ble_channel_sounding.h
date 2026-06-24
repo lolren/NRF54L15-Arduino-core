@@ -543,6 +543,21 @@ struct BleCsLlControlBridgeServiceResult {
   BleCsVprPeerExchangeState state{};
 };
 
+struct BleCsLlControlBridgePollResult {
+  bool pollRan = false;
+  bool eventStarted = false;
+  bool csLlControlReceived = false;
+  bool serviceCalled = false;
+  bool preServiceCalled = false;
+  bool eventServiceCalled = false;
+  uint16_t eventCounter = 0U;
+  uint8_t rxOpcode = 0U;
+  uint8_t rxPayloadLength = 0U;
+  BleCsLlControlBridgeServiceResult service{};
+  BleCsLlControlBridgeServiceResult preService{};
+  BleCsLlControlBridgeServiceResult eventService{};
+};
+
 enum class BleCsControllerResultSource : uint8_t {
   kLocal = 0U,
   kPeer,
@@ -1769,6 +1784,10 @@ class BleCsControllerVprHost {
       BleRadio& radio,
       const BleConnectionEvent* event,
       BleCsLlControlBridgeServiceResult* outResult = nullptr);
+  bool pollInitiatorLlControlBridge(
+      BleRadio& radio,
+      BleCsLlControlBridgePollResult* outResult = nullptr,
+      uint32_t spinLimit = 400000UL);
   bool pollUntilRunningWithProcedureCount(uint16_t targetProcedureCount,
                                           uint8_t maxPolls,
                                           uint8_t* outPolls);
@@ -1902,6 +1921,10 @@ class BleCsControllerVprHost {
   bool consumeDirectAuxiliaryEvent(const uint8_t* packet, size_t packetLen);
   bool consumeTestResultEvent(uint8_t subeventCode,
                               const uint8_t* payload, size_t payloadLen);
+  bool queuePendingInitiatorLlControlPduIfNeeded(
+      BleRadio& radio,
+      BleCsLlControlBridgeServiceResult* result);
+  void resetLlControlBridgeQueueState();
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
                                    size_t responseLen,
@@ -1925,6 +1948,8 @@ class BleCsControllerVprHost {
   BleCsSubeventResult lastTestResult_;
   bool lastTestResultValid_;
   uint16_t testResultCount_;
+  bool llControlBridgeQueuedStageValid_;
+  uint8_t llControlBridgeQueuedStage_;
 };
 
 }  // namespace xiao_nrf54l15

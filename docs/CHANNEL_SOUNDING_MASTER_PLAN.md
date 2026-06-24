@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-████████████████████████████████████████░░░░░░  84%
+█████████████████████████████████████████░░░░░  85%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -28,6 +28,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | CS LL-control over-the-air bridge | ✅ Two-board hardware-verified |
 | ██ | Host-owned initiator LL PDU queue seam | ✅ Two-board hardware-verified |
 | ██ | Host-owned initiator LL bridge service | ✅ Two-board hardware-verified |
+| ██ | Host-owned initiator LL bridge poll helper | ✅ Two-board hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
 | ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
@@ -410,7 +411,7 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-███████░░░░░░░░░ 45% Raw CS LL-control bridge + host-stage PDU seam hardware-verified
+████████░░░░░░░░ 50% Raw CS LL-control bridge + host poll seam hardware-verified
 ```
 
 ### Completed in this slice
@@ -445,17 +446,22 @@ surface now intentionally avoids that failure mode by draining responses.
   (`Security Enable`, `Set Procedure Parameters`, `Procedure Enable`), and
   queueing of the next initiator PDU. The central diagnostic now calls this
   host service instead of owning the CS LL-control phase sequence itself.
+- Added `BleCsControllerVprHost::pollInitiatorLlControlBridge()`, which owns
+  the current CPUAPP bridge loop: duplicate-safe pending initiator PDU queueing,
+  one BLE connection-event poll, peer CS LL-control event consumption, and the
+  direct-HCI transition service. The central diagnostic now calls this single
+  helper instead of deciding when to poll BLE events and when to run the bridge.
 
 Two-board hardware result:
 
 ```text
 Peripheral /dev/ttyACM1:
-link ev=15 queued=6
-debug rx=3 txq=6 txsent=6 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
+link ev=3 queued=6
+debug rx=3 txq=6 txsent=3 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
 
 Central /dev/ttyACM2:
 cs_ll_vpr_bridge=PASS progress=0x1FFF injected=6
-debug phase=complete ev=17 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
+debug phase=complete ev=6 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
 ```
 
 This proves the current CPUAPP BLE LL-control transport can move CS control
@@ -468,10 +474,10 @@ the received peer PDUs.
    subevent procedure. The current bridge receives PDUs on CPUAPP and injects
    them into VPR.
 2. **Automatic controller-owned scheduling** — packet construction, host-owned
-   initiator queueing, peer-event consumption, and the current direct-HCI
-   bridge service are now shared, but production CS still needs the normal
-   VPR/controller workflow to call that service from the connected-CS scheduler
-   instead of having the diagnostic sketch decide when to poll BLE events.
+   initiator queueing, peer-event consumption, direct-HCI bridge service, and
+   one-event polling are now shared, but production CS still needs the normal
+   VPR/controller workflow to call this from a controller/VPR-owned connected-CS
+   scheduler instead of the diagnostic sketch's `loop()`.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling.
 4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps
@@ -488,10 +494,9 @@ the received peer PDUs.
   the CS host API.
 - Use `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()` for received
   CS_RSP/CFG/SEC_RSP/PROC_RSP/START/ABORT events.
-- Use `BleCsControllerVprHost::serviceInitiatorLlControlBridge()` as the
-  current CPUAPP bridge seam. Move this service call out of the diagnostic loop
-  and into the normal connected-CS workflow once the production scheduling seam
-  is ready.
+- Use `BleCsControllerVprHost::pollInitiatorLlControlBridge()` as the current
+  CPUAPP bridge seam. Move this call out of the diagnostic loop and into the
+  normal connected-CS workflow once the production scheduling seam is ready.
 - Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression
   harness.
 

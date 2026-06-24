@@ -4227,7 +4227,9 @@ BleCsControllerVprHost::BleCsControllerVprHost()
       cachedRemoteCapabilitiesV2Valid_(false),
       lastTestResult_{},
       lastTestResultValid_(false),
-      testResultCount_(0U) {}
+      testResultCount_(0U),
+      llControlBridgeQueuedStageValid_(false),
+      llControlBridgeQueuedStage_(kBleCsVprPeerStageIdle) {}
 
 void BleCsControllerVprHost::reset() {
   config_ = BleCsControllerVprHostConfig{};
@@ -4244,6 +4246,7 @@ void BleCsControllerVprHost::reset() {
   lastTestResult_ = BleCsSubeventResult{};
   lastTestResultValid_ = false;
   testResultCount_ = 0U;
+  resetLlControlBridgeQueueState();
 }
 
 bool BleCsControllerVprHost::resetTransport(bool clearScripts) {
@@ -4276,6 +4279,7 @@ bool BleCsControllerVprHost::resetTransport(bool clearScripts) {
   testReassembler_.reset();
   lastTestResultValid_ = false;
   testResultCount_ = 0U;
+  resetLlControlBridgeQueueState();
   vprState_ = BleCsControllerVprHostState{};
   return ok;
 }
@@ -4325,12 +4329,14 @@ bool BleCsControllerVprHost::handleDisconnect() {
   cachedRemoteCapabilitiesV2_ = BleCsControllerCapabilities{};
   cachedRemoteCapabilitiesV1Valid_ = false;
   cachedRemoteCapabilitiesV2Valid_ = false;
+  resetLlControlBridgeQueueState();
   return true;
 }
 
 bool BleCsControllerVprHost::beginHost(uint16_t connHandle,
                                        const BleCsControllerVprHostConfig& config) {
   config_ = config;
+  resetLlControlBridgeQueueState();
 
   volatile Nrf54l15VprTransportHostShared* sharedHost =
       nrf54l15_vpr_transport_host_shared();
@@ -4796,12 +4802,16 @@ static bool bleCsVprStageNeedsInitiatorLlControlPdu(uint8_t stage) {
          stage == kBleCsVprPeerStageAwaitingProcRsp;
 }
 
-static bool bleCsVprBridgeQueueIfPending(
-    BleCsControllerVprHost& host,
+void BleCsControllerVprHost::resetLlControlBridgeQueueState() {
+  llControlBridgeQueuedStageValid_ = false;
+  llControlBridgeQueuedStage_ = kBleCsVprPeerStageIdle;
+}
+
+bool BleCsControllerVprHost::queuePendingInitiatorLlControlPduIfNeeded(
     BleRadio& radio,
     BleCsLlControlBridgeServiceResult* result) {
   BleCsVprPeerExchangeState state{};
-  if (!host.directReadPeerExchangeStateForTest(&state)) {
+  if (!directReadPeerExchangeStateForTest(&state)) {
     if (result != nullptr) {
       result->state = state;
     }
@@ -4815,20 +4825,36 @@ static bool bleCsVprBridgeQueueIfPending(
     return false;
   }
   if (!bleCsVprStageNeedsInitiatorLlControlPdu(state.currentStage)) {
+    resetLlControlBridgeQueueState();
+    if (result != nullptr) {
+      result->peerState = state;
+    }
+    return true;
+  }
+
+  if (llControlBridgeQueuedStageValid_ &&
+      llControlBridgeQueuedStage_ == state.currentStage) {
+    if (result != nullptr) {
+      result->peerState = state;
+    }
     return true;
   }
 
   BleCsLlControlPdu pdu{};
-  if (!host.queuePendingInitiatorLlControlPdu(radio, &state, &pdu)) {
+  if (!queuePendingInitiatorLlControlPdu(radio, &state, &pdu)) {
     if (result != nullptr) {
       result->state = state;
     }
     return false;
   }
 
+  llControlBridgeQueuedStageValid_ = true;
+  llControlBridgeQueuedStage_ = state.currentStage;
+
   if (result != nullptr) {
     result->initiatorPduQueued = true;
     result->state = state;
+    result->peerState = state;
     result->txOpcode = pdu.length > 0U ? pdu.bytes[0] : 0U;
   }
   return true;
@@ -4875,6 +4901,7 @@ bool BleCsControllerVprHost::serviceInitiatorLlControlBridge(
     }
     result.peerPduConsumed = true;
     result.peerState = result.state;
+    resetLlControlBridgeQueueState();
 
     if (event->llControlOpcode == kBleCsLlCtrlCfg &&
         result.state.currentStage == kBleCsVprPeerStageIdle) {
@@ -4889,7 +4916,7 @@ bool BleCsControllerVprHost::serviceInitiatorLlControlBridge(
       }
       result.directStatus = status;
       const bool queued =
-          bleCsVprBridgeQueueIfPending(*this, radio, &result);
+          queuePendingInitiatorLlControlPduIfNeeded(radio, &result);
       if (outResult != nullptr) {
         *outResult = result;
       }
@@ -4911,7 +4938,7 @@ bool BleCsControllerVprHost::serviceInitiatorLlControlBridge(
       }
       result.directStatus = status;
       const bool queued =
-          bleCsVprBridgeQueueIfPending(*this, radio, &result);
+          queuePendingInitiatorLlControlPduIfNeeded(radio, &result);
       if (outResult != nullptr) {
         *outResult = result;
       }
@@ -4945,11 +4972,75 @@ bool BleCsControllerVprHost::serviceInitiatorLlControlBridge(
     return true;
   }
 
-  const bool queued = bleCsVprBridgeQueueIfPending(*this, radio, &result);
+  const bool queued = queuePendingInitiatorLlControlPduIfNeeded(radio, &result);
   if (outResult != nullptr) {
     *outResult = result;
   }
   return queued;
+}
+
+bool BleCsControllerVprHost::pollInitiatorLlControlBridge(
+    BleRadio& radio,
+    BleCsLlControlBridgePollResult* outResult,
+    uint32_t spinLimit) {
+  BleCsLlControlBridgePollResult result{};
+
+  BleCsLlControlBridgeServiceResult preService{};
+  if (!serviceInitiatorLlControlBridge(radio, nullptr, &preService)) {
+    result.service = preService;
+    if (outResult != nullptr) {
+      *outResult = result;
+    }
+    return false;
+  }
+  if (preService.peerPduConsumed || preService.initiatorPduQueued ||
+      preService.directCommandSent || preService.exchangeComplete) {
+    result.serviceCalled = true;
+    result.preServiceCalled = true;
+    result.preService = preService;
+    result.service = preService;
+  }
+
+  BleConnectionEvent event{};
+  const bool ran = radio.pollConnectionEvent(&event, spinLimit);
+  result.pollRan = ran;
+  if (!ran) {
+    if (outResult != nullptr) {
+      *outResult = result;
+    }
+    return true;
+  }
+
+  result.eventStarted = event.eventStarted;
+  result.eventCounter = event.eventCounter;
+  if (event.eventStarted && event.packetReceived && event.crcOk &&
+      event.packetIsNew && event.channelSoundingLlControlPacket &&
+      event.payload != nullptr && event.payloadLength >= 2U) {
+    result.csLlControlReceived = true;
+    result.rxOpcode = event.llControlOpcode;
+    result.rxPayloadLength = event.payloadLength;
+
+    BleCsLlControlBridgeServiceResult service{};
+    if (!serviceInitiatorLlControlBridge(radio, &event, &service)) {
+      result.serviceCalled = true;
+      result.eventServiceCalled = true;
+      result.eventService = service;
+      result.service = service;
+      if (outResult != nullptr) {
+        *outResult = result;
+      }
+      return false;
+    }
+    result.serviceCalled = true;
+    result.eventServiceCalled = true;
+    result.eventService = service;
+    result.service = service;
+  }
+
+  if (outResult != nullptr) {
+    *outResult = result;
+  }
+  return true;
 }
 
 bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outStatus) {

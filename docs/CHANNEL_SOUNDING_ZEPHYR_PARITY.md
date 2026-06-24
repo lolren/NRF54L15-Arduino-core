@@ -336,6 +336,10 @@ What the pair verifies:
   `BleCsControllerVprHost::serviceInitiatorLlControlBridge()`, which consumes
   peer CS LL-control events, performs the required direct-HCI transition, and
   queues the next initiator PDU through the host API.
+- The central now uses `BleCsControllerVprHost::pollInitiatorLlControlBridge()`
+  for the whole current CPUAPP bridge loop: duplicate-safe pending initiator PDU
+  queueing, one BLE connection-event poll, received peer CS LL-control service,
+  and direct-HCI follow-up transitions.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted
   by `BleChannelSoundingLlControlDebug`.
 - The central injects the received peer PDUs into `BleCsControllerVprHost` and
@@ -352,12 +356,12 @@ Observed output:
 
 ```text
 Peripheral:
-link ev=15 queued=6
-debug rx=3 txq=6 txsent=6 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
+link ev=3 queued=6
+debug rx=3 txq=6 txsent=3 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
 
 Central:
 cs_ll_vpr_bridge=PASS progress=0x1FFF injected=6
-debug phase=complete ev=17 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
+debug phase=complete ev=6 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
 ```
 
 Status:
@@ -370,9 +374,10 @@ Status:
 Next required slice:
 
 - Move CS LL-control PDU emission/consumption fully into the normal
-  VPR/controller workflow. The packet builders, host-owned bridge service, and
-  peer-event consumer now exist; the production workflow still needs to call
-  them automatically from the connected-CS scheduling path.
+  VPR/controller workflow. The packet builders, host-owned bridge service,
+  peer-event consumer, and one-event poll helper now exist; the production
+  workflow still needs to call them automatically from the connected-CS
+  scheduling path rather than from the diagnostic sketch loop.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.

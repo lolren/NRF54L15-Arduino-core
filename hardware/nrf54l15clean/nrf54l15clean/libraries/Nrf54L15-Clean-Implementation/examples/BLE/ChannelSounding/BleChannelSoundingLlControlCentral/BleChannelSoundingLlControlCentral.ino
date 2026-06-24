@@ -281,25 +281,18 @@ static void handleBridgeServiceResult(
   }
 }
 
-static bool serviceBridge(const BleConnectionEvent* evt) {
-  BleCsLlControlBridgeServiceResult result{};
-  if (!g_csHost.serviceInitiatorLlControlBridge(g_ble, evt, &result)) {
-    g_lastVprStage = result.state.currentStage;
-    g_lastVprStatus = result.directCommandSent ? result.directStatus
-                                               : result.state.status;
-    g_phase = BridgePhase::kFailed;
-    Serial.print("bridge service failed rx=");
-    printOpcode(result.rxOpcode);
-    Serial.print(" stage=");
-    Serial.print(result.state.currentStage);
-    Serial.print(" status=0x");
-    Serial.print(g_lastVprStatus, HEX);
-    Serial.print("\r\n");
-    return false;
-  }
-
-  handleBridgeServiceResult(result);
-  return true;
+static void failBridgePoll(const BleCsLlControlBridgePollResult& result) {
+  g_lastVprStage = result.service.state.currentStage;
+  g_lastVprStatus = result.service.directCommandSent ? result.service.directStatus
+                                                     : result.service.state.status;
+  g_phase = BridgePhase::kFailed;
+  Serial.print("bridge poll failed rx=");
+  printOpcode(result.rxOpcode != 0U ? result.rxOpcode : result.service.rxOpcode);
+  Serial.print(" stage=");
+  Serial.print(result.service.state.currentStage);
+  Serial.print(" status=0x");
+  Serial.print(g_lastVprStatus, HEX);
+  Serial.print("\r\n");
 }
 
 static void resetBridgeState() {
@@ -375,28 +368,35 @@ void loop() {
     resetBridgeState();
   }
 
-  if (g_phase == BridgePhase::kSendCsReq) {
-    (void)serviceBridge(nullptr);
-  }
-
-  BleConnectionEvent evt{};
-  const bool ran = g_ble.pollConnectionEvent(&evt, 450000UL);
-  if (ran && evt.eventStarted) {
-    ++g_linkEvents;
-    if (evt.packetReceived && evt.crcOk && evt.packetIsNew &&
-        evt.channelSoundingLlControlPacket && evt.payload != nullptr &&
-        evt.payloadLength >= 2U) {
-      Serial.print("CS LL RX ce=");
-      Serial.print(evt.eventCounter);
-      Serial.print(" op=");
-      printOpcode(evt.llControlOpcode);
-      Serial.print(" len=");
-      Serial.print(evt.payloadLength);
-      Serial.print("\r\n");
-      (void)serviceBridge(&evt);
-    }
+  BleCsLlControlBridgePollResult poll{};
+  if (!g_csHost.pollInitiatorLlControlBridge(g_ble, &poll, 450000UL)) {
+    failBridgePoll(poll);
   } else {
-    delay(1);
+    if (poll.eventStarted) {
+      ++g_linkEvents;
+      if (poll.csLlControlReceived) {
+        Serial.print("CS LL RX ce=");
+        Serial.print(poll.eventCounter);
+        Serial.print(" op=");
+        printOpcode(poll.rxOpcode);
+        Serial.print(" len=");
+        Serial.print(poll.rxPayloadLength);
+        Serial.print("\r\n");
+      }
+    }
+
+    if (poll.preServiceCalled) {
+      handleBridgeServiceResult(poll.preService);
+    }
+    if (poll.eventServiceCalled) {
+      handleBridgeServiceResult(poll.eventService);
+    } else if (poll.serviceCalled && !poll.preServiceCalled) {
+      handleBridgeServiceResult(poll.service);
+    }
+
+    if (!poll.eventStarted) {
+      delay(1);
+    }
   }
 
   const uint32_t now = millis();

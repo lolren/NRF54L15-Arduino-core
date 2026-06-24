@@ -990,6 +990,7 @@ BLE examples:
   - The pair uses the public `bleCsBuildLlControl*()` helpers from `ble_channel_sounding.h` for raw CS LL-control packet construction.
   - The central uses `BleCsControllerVprHost::queuePendingInitiatorLlControlPdu()` so local CS_REQ/CS_SEC_REQ/CS_PROC_REQ selection and queueing follows the VPR peer-exchange stage through the CS host API.
   - The central uses `BleCsControllerVprHost::serviceInitiatorLlControlBridge()` so peer PDU consumption, direct-HCI transitions, and next-PDU queueing live behind the CS host API.
+  - The central uses `BleCsControllerVprHost::pollInitiatorLlControlBridge()` so duplicate-safe initiator queueing, one BLE connection-event poll, and peer-PDU service are owned by the CS host API instead of the sketch loop.
   - Received peer PDUs are consumed through `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`.
 
 Latency characterization note:
