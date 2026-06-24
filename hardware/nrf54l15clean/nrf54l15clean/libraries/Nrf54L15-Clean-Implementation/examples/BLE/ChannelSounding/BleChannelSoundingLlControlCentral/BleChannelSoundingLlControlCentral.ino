@@ -118,30 +118,6 @@ static void printDebug(const char* prefix) {
   Serial.print("\r\n");
 }
 
-static bool queuePdu(const uint8_t* payload, uint8_t length, const char* label) {
-  if (!bleCsLlControlPduIsValid(payload, length)) {
-    Serial.print("invalid ");
-    Serial.print(label);
-    Serial.print("\r\n");
-    g_phase = BridgePhase::kFailed;
-    return false;
-  }
-
-  if (g_ble.queueChannelSoundingLlControlPdu(payload, length)) {
-    ++g_txQueued;
-    Serial.print("queued ");
-    Serial.print(label);
-    Serial.print("\r\n");
-    return true;
-  }
-
-  Serial.print("queue failed ");
-  Serial.print(label);
-  Serial.print("\r\n");
-  g_phase = BridgePhase::kFailed;
-  return false;
-}
-
 static const char* localPduLabelForStage(uint8_t stage) {
   switch (stage) {
     case kBleCsVprPeerStageAwaitingCsRsp:
@@ -158,8 +134,8 @@ static const char* localPduLabelForStage(uint8_t stage) {
 static bool queuePendingInitiatorPdu() {
   BleCsLlControlPdu pdu{};
   BleCsVprPeerExchangeState state{};
-  if (!g_csHost.buildPendingInitiatorLlControlPdu(&pdu, &state)) {
-    Serial.print("no local CS LL PDU for stage=");
+  if (!g_csHost.queuePendingInitiatorLlControlPdu(g_ble, &state, &pdu)) {
+    Serial.print("queue failed stage=");
     Serial.print(state.currentStage);
     Serial.print(" status=0x");
     Serial.print(state.status, HEX);
@@ -168,8 +144,11 @@ static bool queuePendingInitiatorPdu() {
     return false;
   }
 
-  return queuePdu(pdu.data(), pdu.length,
-                  localPduLabelForStage(state.currentStage));
+  ++g_txQueued;
+  Serial.print("queued ");
+  Serial.print(localPduLabelForStage(state.currentStage));
+  Serial.print("\r\n");
+  return true;
 }
 
 static bool bootVprPeerBridge() {

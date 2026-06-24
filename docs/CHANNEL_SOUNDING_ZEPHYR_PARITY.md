@@ -323,10 +323,11 @@ What the pair verifies:
 - The examples now use the public `bleCsBuildLlControl*()` helper API in
   `ble_channel_sounding.h`, so local CS LL-control PDU construction is no
   longer duplicated as ad-hoc byte arrays in sketches.
-- The central now asks `BleCsControllerVprHost::buildPendingInitiatorLlControlPdu()`
-  for the local initiator PDU implied by the current VPR peer-exchange stage,
-  rather than selecting `CS_REQ`, `CS_SEC_REQ`, or `CS_PROC_REQ` entirely in
-  the sketch.
+- The central now asks `BleCsControllerVprHost::queuePendingInitiatorLlControlPdu()`
+  to build and queue the local initiator PDU implied by the current VPR
+  peer-exchange stage. This keeps CS_REQ, CS_SEC_REQ, and CS_PROC_REQ source
+  selection behind the CS host API instead of making the sketch own the
+  VPR-stage-to-radio-queue seam.
 - Peer CS LL-control events are consumed through
   `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`, keeping the
   VPR peer-stage injection behind the CS host API instead of exposing the raw
@@ -365,9 +366,9 @@ Status:
 Next required slice:
 
 - Move CS LL-control PDU emission/consumption fully into the normal
-  VPR/controller workflow. The packet builders, stage-to-PDU host helper, and
-  peer-event consumer now exist; the production workflow still needs to call
-  them automatically from the connected-CS scheduling path.
+  VPR/controller workflow. The packet builders, host-owned stage-to-queued-PDU
+  helper, and peer-event consumer now exist; the production workflow still
+  needs to call them automatically from the connected-CS scheduling path.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.

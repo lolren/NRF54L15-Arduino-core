@@ -1744,6 +1744,10 @@ class BleCsControllerVprHost {
   bool buildPendingInitiatorLlControlPdu(
       BleCsLlControlPdu* outPdu,
       BleCsVprPeerExchangeState* outState = nullptr);
+  bool queuePendingInitiatorLlControlPdu(
+      BleRadio& radio,
+      BleCsVprPeerExchangeState* outState = nullptr,
+      BleCsLlControlPdu* outPdu = nullptr);
   bool consumePeerLlControlPdu(const uint8_t* payload,
                                uint8_t length,
                                BleCsVprPeerExchangeState* outState);

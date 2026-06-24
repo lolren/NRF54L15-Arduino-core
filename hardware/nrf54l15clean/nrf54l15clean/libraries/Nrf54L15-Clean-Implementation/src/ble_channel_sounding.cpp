@@ -4765,6 +4765,31 @@ bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
   }
 }
 
+bool BleCsControllerVprHost::queuePendingInitiatorLlControlPdu(
+    BleRadio& radio,
+    BleCsVprPeerExchangeState* outState,
+    BleCsLlControlPdu* outPdu) {
+  BleCsLlControlPdu pdu{};
+  BleCsVprPeerExchangeState state{};
+  if (!buildPendingInitiatorLlControlPdu(&pdu, &state)) {
+    if (outState != nullptr) {
+      *outState = state;
+    }
+    if (outPdu != nullptr) {
+      *outPdu = pdu;
+    }
+    return false;
+  }
+
+  if (outState != nullptr) {
+    *outState = state;
+  }
+  if (outPdu != nullptr) {
+    *outPdu = pdu;
+  }
+  return radio.queueChannelSoundingLlControlPdu(pdu.data(), pdu.length);
+}
+
 bool BleCsControllerVprHost::consumePeerLlControlPdu(
     const uint8_t* payload,
     uint8_t length,
