@@ -451,6 +451,11 @@ surface now intentionally avoids that failure mode by draining responses.
   one BLE connection-event poll, peer CS LL-control event consumption, and the
   direct-HCI transition service. The central diagnostic now calls this single
   helper instead of deciding when to poll BLE events and when to run the bridge.
+- Added `BleCsControllerVprHost::pollWithInitiatorLlControlBridge()` and
+  `loopOnceWithInitiatorLlControlBridge()` as production-facing wrappers for
+  callers that already use the normal CS host stream workflow. These pump/poll
+  the existing host/VPR stream path first, then service one real BLE LL-control
+  bridge event through the same helper.
 
 Two-board hardware result:
 
@@ -494,9 +499,10 @@ the received peer PDUs.
   the CS host API.
 - Use `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()` for received
   CS_RSP/CFG/SEC_RSP/PROC_RSP/START/ABORT events.
-- Use `BleCsControllerVprHost::pollInitiatorLlControlBridge()` as the current
-  CPUAPP bridge seam. Move this call out of the diagnostic loop and into the
-  normal connected-CS workflow once the production scheduling seam is ready.
+- Use `BleCsControllerVprHost::pollInitiatorLlControlBridge()` for direct-HCI
+  bridge diagnostics and `loopOnceWithInitiatorLlControlBridge()` for
+  production-style stream workflow callers. Move the latter into the normal
+  connected-CS workflow once the production scheduling seam is ready.
 - Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression
   harness.
 

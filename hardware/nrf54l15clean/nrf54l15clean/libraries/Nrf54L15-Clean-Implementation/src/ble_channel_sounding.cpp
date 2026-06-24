@@ -5649,6 +5649,32 @@ bool BleCsControllerVprHost::loopOnce() {
   return ok;
 }
 
+bool BleCsControllerVprHost::pollWithInitiatorLlControlBridge(
+    BleRadio& radio,
+    BleCsLlControlBridgePollResult* outResult,
+    uint32_t spinLimit) {
+  if (!poll()) {
+    if (outResult != nullptr) {
+      *outResult = BleCsLlControlBridgePollResult{};
+    }
+    return false;
+  }
+  return pollInitiatorLlControlBridge(radio, outResult, spinLimit);
+}
+
+bool BleCsControllerVprHost::loopOnceWithInitiatorLlControlBridge(
+    BleRadio& radio,
+    BleCsLlControlBridgePollResult* outResult,
+    uint32_t spinLimit) {
+  if (!loopOnce()) {
+    if (outResult != nullptr) {
+      *outResult = BleCsLlControlBridgePollResult{};
+    }
+    return false;
+  }
+  return pollInitiatorLlControlBridge(radio, outResult, spinLimit);
+}
+
 bool BleCsControllerVprHost::drainPendingControllerEvents() {
   if (!host_.hostState().began) {
     return false;

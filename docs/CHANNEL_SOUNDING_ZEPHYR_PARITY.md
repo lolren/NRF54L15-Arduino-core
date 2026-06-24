@@ -340,6 +340,11 @@ What the pair verifies:
   for the whole current CPUAPP bridge loop: duplicate-safe pending initiator PDU
   queueing, one BLE connection-event poll, received peer CS LL-control service,
   and direct-HCI follow-up transitions.
+- Stream-workflow callers can use
+  `BleCsControllerVprHost::pollWithInitiatorLlControlBridge()` or
+  `loopOnceWithInitiatorLlControlBridge()` to pump the existing CS host/VPR
+  stream path and then service one real BLE LL-control bridge event through the
+  same helper.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted
   by `BleChannelSoundingLlControlDebug`.
 - The central injects the received peer PDUs into `BleCsControllerVprHost` and
@@ -375,9 +380,9 @@ Next required slice:
 
 - Move CS LL-control PDU emission/consumption fully into the normal
   VPR/controller workflow. The packet builders, host-owned bridge service,
-  peer-event consumer, and one-event poll helper now exist; the production
-  workflow still needs to call them automatically from the connected-CS
-  scheduling path rather than from the diagnostic sketch loop.
+  peer-event consumer, one-event poll helper, and stream-workflow wrappers now
+  exist; the production workflow still needs to call them automatically from the
+  connected-CS scheduling path rather than from the diagnostic sketch loop.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.

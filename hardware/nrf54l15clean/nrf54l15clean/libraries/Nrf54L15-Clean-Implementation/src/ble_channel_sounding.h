@@ -1873,6 +1873,14 @@ class BleCsControllerVprHost {
   bool pumpCommands();
   bool poll();
   bool loopOnce();
+  bool pollWithInitiatorLlControlBridge(
+      BleRadio& radio,
+      BleCsLlControlBridgePollResult* outResult = nullptr,
+      uint32_t spinLimit = 400000UL);
+  bool loopOnceWithInitiatorLlControlBridge(
+      BleRadio& radio,
+      BleCsLlControlBridgePollResult* outResult = nullptr,
+      uint32_t spinLimit = 400000UL);
   /* Drains pending asynchronous controller events (e.g. the standalone CS Test
    * result stream) via the direct controller-service path. Use this, not
    * poll()/loopOnce(), to collect test results on handle 0x0FFF, because the
