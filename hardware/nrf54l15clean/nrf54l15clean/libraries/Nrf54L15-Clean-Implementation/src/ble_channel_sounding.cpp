@@ -2967,7 +2967,7 @@ void BleCsControllerWorkflow::reconcileReadyShadowState(uint8_t selectedConfigId
                                                         bool securityEnabled,
                                                         bool procedureParametersApplied,
                                                         bool procedureEnabled) {
-  if (!ready()) {
+  if (failed()) {
     return;
   }
 
@@ -2986,19 +2986,46 @@ void BleCsControllerWorkflow::reconcileReadyShadowState(uint8_t selectedConfigId
     return;
   }
 
-  const bool recoveredSelectedConfig = !state_.configCreated && configCreated;
-  if (recoveredSelectedConfig) {
+  if (!state_.configCreated && configCreated && selectedConfigId != 0U) {
     state_.remoteCapabilitiesValid = true;
     state_.defaultSettingsApplied = true;
     state_.configCreated = true;
     state_.securityEnabled = securityEnabled;
     state_.procedureParametersApplied = procedureParametersApplied;
+    state_.configComplete.connHandle = state_.connHandle;
+    state_.configComplete.status = 0U;
+    state_.configComplete.action = 1U;
+    state_.configComplete.configId = selectedConfigId;
+  }
+
+  if ((state_.phase == BleCsControllerWorkflowPhase::kNeedSecurityEnable ||
+       state_.phase == BleCsControllerWorkflowPhase::kWaitingSecurityEnableComplete) &&
+      securityEnabled) {
+    state_.lastStatus = 0U;
+    state_.securityEnabled = true;
+    state_.phase = BleCsControllerWorkflowPhase::kNeedSetProcedureParameters;
+  }
+
+  if ((state_.phase == BleCsControllerWorkflowPhase::kNeedSetProcedureParameters ||
+       state_.phase == BleCsControllerWorkflowPhase::kWaitingSetProcedureParameters) &&
+      procedureParametersApplied) {
+    state_.lastStatus = 0U;
+    state_.procedureParametersApplied = true;
+    state_.phase = BleCsControllerWorkflowPhase::kNeedProcedureEnable;
+  }
+
+  if ((state_.phase == BleCsControllerWorkflowPhase::kNeedProcedureEnable ||
+       state_.phase == BleCsControllerWorkflowPhase::kWaitingProcedureEnableComplete) &&
+      procedureEnabled) {
+    state_.lastStatus = 0U;
+    state_.procedureEnabled = true;
     if (selectedConfigId != 0U) {
-      state_.configComplete.connHandle = state_.connHandle;
-      state_.configComplete.status = 0U;
-      state_.configComplete.action = 1U;
-      state_.configComplete.configId = selectedConfigId;
+      state_.procedureEnableComplete.connHandle = state_.connHandle;
+      state_.procedureEnableComplete.status = 0U;
+      state_.procedureEnableComplete.configId = selectedConfigId;
+      state_.procedureEnableComplete.state = 1U;
     }
+    state_.phase = BleCsControllerWorkflowPhase::kReady;
   }
 
   if (state_.configCreated && configCreated && selectedConfigId != 0U &&
@@ -5662,11 +5689,26 @@ bool BleCsControllerVprHost::pollWithInitiatorLlControlBridge(
   return pollInitiatorLlControlBridge(radio, outResult, spinLimit);
 }
 
+bool BleCsControllerVprHost::initiatorLlBridgeOwnsCurrentWorkflowPhase() const {
+  switch (workflowState().phase) {
+    case BleCsControllerWorkflowPhase::kNeedSecurityEnable:
+    case BleCsControllerWorkflowPhase::kWaitingSecurityEnableComplete:
+    case BleCsControllerWorkflowPhase::kNeedSetProcedureParameters:
+    case BleCsControllerWorkflowPhase::kWaitingSetProcedureParameters:
+    case BleCsControllerWorkflowPhase::kNeedProcedureEnable:
+    case BleCsControllerWorkflowPhase::kWaitingProcedureEnableComplete:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool BleCsControllerVprHost::loopOnceWithInitiatorLlControlBridge(
     BleRadio& radio,
     BleCsLlControlBridgePollResult* outResult,
     uint32_t spinLimit) {
-  if (!loopOnce()) {
+  const bool ok = initiatorLlBridgeOwnsCurrentWorkflowPhase() ? poll() : loopOnce();
+  if (!ok) {
     if (outResult != nullptr) {
       *outResult = BleCsLlControlBridgePollResult{};
     }

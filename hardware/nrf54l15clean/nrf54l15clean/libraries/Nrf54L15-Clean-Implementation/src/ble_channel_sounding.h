@@ -1932,6 +1932,7 @@ class BleCsControllerVprHost {
   bool queuePendingInitiatorLlControlPduIfNeeded(
       BleRadio& radio,
       BleCsLlControlBridgeServiceResult* result);
+  bool initiatorLlBridgeOwnsCurrentWorkflowPhase() const;
   void resetLlControlBridgeQueueState();
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
