@@ -4700,6 +4700,71 @@ bool BleCsControllerVprHost::directReadPeerExchangeStateForTest(
                                       kBleCsVprHciOpPeerStageRead, outState);
 }
 
+bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
+    BleCsLlControlPdu* outPdu,
+    BleCsVprPeerExchangeState* outState) {
+  if (outPdu == nullptr) {
+    return false;
+  }
+
+  BleCsVprPeerExchangeState state{};
+  if (!directReadPeerExchangeStateForTest(&state) || !state.valid ||
+      state.status != 0U) {
+    if (outState != nullptr) {
+      *outState = state;
+    }
+    return false;
+  }
+
+  if (outState != nullptr) {
+    *outState = state;
+  }
+
+  const BleCsControllerWorkflowConfig& workflow = config_.session.workflow;
+  uint8_t configId = workflow.createConfig.configId;
+  if (configId == 0U) {
+    configId = workflow.procedureParameters.configId;
+  }
+  if (configId == 0U) {
+    configId = workflow.procedureEnable.configId;
+  }
+  if (configId == 0U) {
+    configId = vprState_.linkConfigId;
+  }
+  if (configId == 0U) {
+    configId = 1U;
+  }
+
+  switch (state.currentStage) {
+    case kBleCsVprPeerStageAwaitingCsRsp:
+      return bleCsBuildLlControlReq(configId, true, outPdu);
+
+    case kBleCsVprPeerStageAwaitingSecRsp:
+      return bleCsBuildLlControlSecurityReq(configId, outPdu);
+
+    case kBleCsVprPeerStageAwaitingProcRsp: {
+      BleCsLlControlProcedureParams params{};
+      params.configId = workflow.procedureParameters.configId != 0U
+                            ? workflow.procedureParameters.configId
+                            : configId;
+      params.maxProcedureLen = workflow.procedureParameters.maxProcedureLen;
+      params.minProcedureInterval =
+          workflow.procedureParameters.minProcedureInterval;
+      params.maxProcedureInterval =
+          workflow.procedureParameters.maxProcedureInterval;
+      params.maxProcedureCount = workflow.procedureParameters.maxProcedureCount;
+      params.minSubeventLen = workflow.procedureParameters.minSubeventLen;
+      params.maxSubeventLen = workflow.procedureParameters.maxSubeventLen;
+      params.phy = workflow.procedureParameters.phy;
+      params.txPowerDelta = workflow.procedureParameters.txPowerDelta;
+      return bleCsBuildLlControlProcedureReq(params, outPdu);
+    }
+
+    default:
+      return false;
+  }
+}
+
 bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outStatus) {
   uint16_t connHandle = 0U;
   BleCsHciCommand command{};

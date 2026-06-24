@@ -1741,6 +1741,9 @@ class BleCsControllerVprHost {
                                   size_t pduLen,
                                   BleCsVprPeerExchangeState* outState);
   bool directReadPeerExchangeStateForTest(BleCsVprPeerExchangeState* outState);
+  bool buildPendingInitiatorLlControlPdu(
+      BleCsLlControlPdu* outPdu,
+      BleCsVprPeerExchangeState* outState = nullptr);
   bool pollUntilRunningWithProcedureCount(uint16_t targetProcedureCount,
                                           uint8_t maxPolls,
                                           uint8_t* outPolls);

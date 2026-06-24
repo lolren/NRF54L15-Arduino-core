@@ -988,6 +988,7 @@ BLE examples:
   - Two-board diagnostic central for raw Channel Sounding LL-control transport.
   - Injects received peer CS LL-control PDUs into the VPR peer-exchange state machine and reports the bridge pass/fail status.
   - The pair uses the public `bleCsBuildLlControl*()` helpers from `ble_channel_sounding.h` for raw CS LL-control packet construction.
+  - The central uses `BleCsControllerVprHost::buildPendingInitiatorLlControlPdu()` so local CS_REQ/CS_SEC_REQ/CS_PROC_REQ selection follows the VPR peer-exchange stage.
 
 Latency characterization note:
 

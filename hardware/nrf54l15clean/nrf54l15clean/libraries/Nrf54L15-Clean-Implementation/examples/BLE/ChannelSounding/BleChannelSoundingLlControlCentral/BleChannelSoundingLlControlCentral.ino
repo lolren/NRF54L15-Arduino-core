@@ -142,33 +142,34 @@ static bool queuePdu(const uint8_t* payload, uint8_t length, const char* label) 
   return false;
 }
 
-static bool queueCsReq() {
-  BleCsLlControlPdu pdu{};
-  if (!bleCsBuildLlControlReq(kConfigId, true, &pdu)) {
-    g_phase = BridgePhase::kFailed;
-    return false;
+static const char* localPduLabelForStage(uint8_t stage) {
+  switch (stage) {
+    case kBleCsVprPeerStageAwaitingCsRsp:
+      return "CS_REQ";
+    case kBleCsVprPeerStageAwaitingSecRsp:
+      return "CS_SEC_REQ";
+    case kBleCsVprPeerStageAwaitingProcRsp:
+      return "CS_PROC_REQ";
+    default:
+      return "CS_UNKNOWN";
   }
-  return queuePdu(pdu.data(), pdu.length, "CS_REQ");
 }
 
-static bool queueCsSecReq() {
+static bool queuePendingInitiatorPdu() {
   BleCsLlControlPdu pdu{};
-  if (!bleCsBuildLlControlSecurityReq(kConfigId, &pdu)) {
+  BleCsVprPeerExchangeState state{};
+  if (!g_csHost.buildPendingInitiatorLlControlPdu(&pdu, &state)) {
+    Serial.print("no local CS LL PDU for stage=");
+    Serial.print(state.currentStage);
+    Serial.print(" status=0x");
+    Serial.print(state.status, HEX);
+    Serial.print("\r\n");
     g_phase = BridgePhase::kFailed;
     return false;
   }
-  return queuePdu(pdu.data(), pdu.length, "CS_SEC_REQ");
-}
 
-static bool queueCsProcReq() {
-  BleCsLlControlProcedureParams params{};
-  params.configId = kConfigId;
-  BleCsLlControlPdu pdu{};
-  if (!bleCsBuildLlControlProcedureReq(params, &pdu)) {
-    g_phase = BridgePhase::kFailed;
-    return false;
-  }
-  return queuePdu(pdu.data(), pdu.length, "CS_PROC_REQ");
+  return queuePdu(pdu.data(), pdu.length,
+                  localPduLabelForStage(state.currentStage));
 }
 
 static bool bootVprPeerBridge() {
@@ -374,14 +375,14 @@ void loop() {
   }
 
   if (g_phase == BridgePhase::kSendCsReq) {
-    if (queueCsReq()) {
+    if (queuePendingInitiatorPdu()) {
       markProgress(4U);
       g_phase = BridgePhase::kWaitConfig;
     }
   } else if (g_phase == BridgePhase::kSendSecurityReq) {
     uint8_t status = 0xFFU;
     if (g_csHost.directSecurityEnable(&status) && status == 0U &&
-        queueCsSecReq()) {
+        queuePendingInitiatorPdu()) {
       g_lastVprStatus = status;
       markProgress(7U);
       g_phase = BridgePhase::kWaitSecurity;
@@ -393,7 +394,7 @@ void loop() {
     uint8_t status = 0xFFU;
     if (g_csHost.directSetProcedureParameters(
             g_csConfig.session.workflow.procedureParameters, &status) &&
-        status == 0U && queueCsProcReq()) {
+        status == 0U && queuePendingInitiatorPdu()) {
       g_lastVprStatus = status;
       markProgress(9U);
       g_phase = BridgePhase::kWaitProcedure;
