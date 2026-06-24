@@ -4765,6 +4765,28 @@ bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
   }
 }
 
+bool BleCsControllerVprHost::consumePeerLlControlPdu(
+    const uint8_t* payload,
+    uint8_t length,
+    BleCsVprPeerExchangeState* outState) {
+  if (!bleCsLlControlPduIsValid(payload, length) || outState == nullptr) {
+    return false;
+  }
+
+  return directInjectPeerPduForTest(payload, length, outState);
+}
+
+bool BleCsControllerVprHost::consumePeerLlControlPduFromEvent(
+    const BleConnectionEvent& event,
+    BleCsVprPeerExchangeState* outState) {
+  if (!event.packetReceived || !event.crcOk || !event.packetIsNew ||
+      !event.channelSoundingLlControlPacket || event.payload == nullptr) {
+    return false;
+  }
+
+  return consumePeerLlControlPdu(event.payload, event.payloadLength, outState);
+}
+
 bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outStatus) {
   uint16_t connHandle = 0U;
   BleCsHciCommand command{};

@@ -1744,6 +1744,11 @@ class BleCsControllerVprHost {
   bool buildPendingInitiatorLlControlPdu(
       BleCsLlControlPdu* outPdu,
       BleCsVprPeerExchangeState* outState = nullptr);
+  bool consumePeerLlControlPdu(const uint8_t* payload,
+                               uint8_t length,
+                               BleCsVprPeerExchangeState* outState);
+  bool consumePeerLlControlPduFromEvent(const BleConnectionEvent& event,
+                                        BleCsVprPeerExchangeState* outState);
   bool pollUntilRunningWithProcedureCount(uint16_t targetProcedureCount,
                                           uint8_t maxPolls,
                                           uint8_t* outPolls);

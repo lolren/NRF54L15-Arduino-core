@@ -408,7 +408,7 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-███████░░░░░░░░░ 43% Raw CS LL-control bridge + host-stage PDU selection hardware-verified
+███████░░░░░░░░░ 45% Raw CS LL-control bridge + host-stage PDU seam hardware-verified
 ```
 
 ### Completed in this slice
@@ -431,6 +431,9 @@ surface now intentionally avoids that failure mode by draining responses.
 - Added `BleCsControllerVprHost::buildPendingInitiatorLlControlPdu()`, which
   reads the VPR peer-exchange stage and builds the corresponding local
   initiator-side PDU from the active workflow configuration.
+- Added `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`, which
+  validates a received CS LL-control connection event and advances the VPR
+  peer-exchange state behind the CS host API.
 
 Two-board hardware result:
 
@@ -453,10 +456,11 @@ the received peer PDUs.
 1. **VPR/RADIO ownership** — the VPR still does not own the actual RADIO
    subevent procedure. The current bridge receives PDUs on CPUAPP and injects
    them into VPR.
-2. **Automatic controller-owned local PDU emission** — packet construction and
-   stage-to-PDU selection are now shared, but production CS still needs the
-   normal VPR/controller workflow to queue those PDUs automatically instead of
-   having the diagnostic sketch call the helper.
+2. **Automatic controller-owned PDU emission/consumption** — packet
+   construction, stage-to-PDU selection, and peer-event consumption are now
+   shared, but production CS still needs the normal VPR/controller workflow to
+   queue/consume those PDUs automatically instead of having the diagnostic
+   sketch call the helpers.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling.
 4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps
@@ -470,6 +474,8 @@ the received peer PDUs.
   sketch-local byte arrays.
 - Use `BleCsControllerVprHost::buildPendingInitiatorLlControlPdu()` to emit
   CS_REQ/SEC_REQ/PROC_REQ packets from the current peer-exchange stage.
+- Use `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()` for received
+  CS_RSP/CFG/SEC_RSP/PROC_RSP/START/ABORT events.
 - Move the helper call out of the diagnostic loop and into the normal
   connected-CS workflow once the production scheduling seam is ready.
 - Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression

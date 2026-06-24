@@ -213,10 +213,10 @@ static bool bootVprPeerBridge() {
   return ok;
 }
 
-static bool injectPeerPdu(const uint8_t* payload, uint8_t length) {
+static bool injectPeerPdu(const BleConnectionEvent& evt) {
   BleCsVprPeerExchangeState state{};
-  if (!g_csHost.directInjectPeerPduForTest(payload, length, &state) ||
-      !state.valid || state.status != 0U) {
+  if (!g_csHost.consumePeerLlControlPduFromEvent(evt, &state) || !state.valid ||
+      state.status != 0U) {
     g_lastVprStatus = state.status;
     g_lastVprStage = state.currentStage;
     g_phase = BridgePhase::kFailed;
@@ -232,7 +232,7 @@ static bool injectPeerPdu(const uint8_t* payload, uint8_t length) {
   g_lastVprStage = state.currentStage;
   g_lastVprStatus = state.status;
   Serial.print("VPR inject op=");
-  printOpcode(payload[0]);
+  printOpcode(evt.payload[0]);
   Serial.print(" prev=");
   Serial.print(state.previousStage);
   Serial.print(" stage=");
@@ -418,7 +418,7 @@ void loop() {
       Serial.print(" len=");
       Serial.print(evt.payloadLength);
       Serial.print("\r\n");
-      if (injectPeerPdu(evt.payload, evt.payloadLength)) {
+      if (injectPeerPdu(evt)) {
         advanceAfterPeerPdu(evt.llControlOpcode);
       }
     }
