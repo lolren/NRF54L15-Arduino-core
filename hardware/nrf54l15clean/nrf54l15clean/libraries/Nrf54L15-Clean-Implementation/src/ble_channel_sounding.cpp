@@ -4268,7 +4268,10 @@ BleCsControllerVprHost::BleCsControllerVprHost()
       lastTestResultValid_(false),
       testResultCount_(0U),
       llControlBridgeQueuedStageValid_(false),
-      llControlBridgeQueuedStage_(kBleCsVprPeerStageIdle) {}
+      llControlBridgeQueuedStage_(kBleCsVprPeerStageIdle),
+      llControlBridgeNoTxStageValid_(false),
+      llControlBridgeNoTxStage_(kBleCsVprPeerStageIdle),
+      llControlBridgeNoTxPollSkips_(0U) {}
 
 void BleCsControllerVprHost::reset() {
   config_ = BleCsControllerVprHostConfig{};
@@ -4844,11 +4847,39 @@ static bool bleCsVprStageNeedsInitiatorLlControlPdu(uint8_t stage) {
 void BleCsControllerVprHost::resetLlControlBridgeQueueState() {
   llControlBridgeQueuedStageValid_ = false;
   llControlBridgeQueuedStage_ = kBleCsVprPeerStageIdle;
+  llControlBridgeNoTxStageValid_ = false;
+  llControlBridgeNoTxStage_ = kBleCsVprPeerStageIdle;
+  llControlBridgeNoTxPollSkips_ = 0U;
+}
+
+bool BleCsControllerVprHost::llControlBridgeCachedNoTxStage(
+    BleCsLlControlBridgeServiceResult* result) {
+  static constexpr uint8_t kNoTxStageReadIntervalPolls = 96U;
+  if (!llControlBridgeNoTxStageValid_) {
+    return false;
+  }
+  if (llControlBridgeNoTxPollSkips_ >= kNoTxStageReadIntervalPolls) {
+    llControlBridgeNoTxPollSkips_ = 0U;
+    return false;
+  }
+
+  ++llControlBridgeNoTxPollSkips_;
+  if (result != nullptr) {
+    result->state.valid = true;
+    result->state.status = 0U;
+    result->state.currentStage = llControlBridgeNoTxStage_;
+    result->peerState = result->state;
+  }
+  return true;
 }
 
 bool BleCsControllerVprHost::queuePendingInitiatorLlControlPduIfNeeded(
     BleRadio& radio,
     BleCsLlControlBridgeServiceResult* result) {
+  if (llControlBridgeCachedNoTxStage(result)) {
+    return true;
+  }
+
   BleCsVprPeerExchangeState state{};
   if (!directReadPeerExchangeStateForTest(&state)) {
     if (result != nullptr) {
@@ -4864,7 +4895,13 @@ bool BleCsControllerVprHost::queuePendingInitiatorLlControlPduIfNeeded(
     return false;
   }
   if (!bleCsVprStageNeedsInitiatorLlControlPdu(state.currentStage)) {
-    resetLlControlBridgeQueueState();
+    llControlBridgeQueuedStageValid_ = false;
+    llControlBridgeQueuedStage_ = kBleCsVprPeerStageIdle;
+    llControlBridgeNoTxStageValid_ =
+        state.currentStage == kBleCsVprPeerStageAwaitingStart ||
+        state.currentStage == kBleCsVprPeerStageProcedureActive;
+    llControlBridgeNoTxStage_ = state.currentStage;
+    llControlBridgeNoTxPollSkips_ = 0U;
     if (result != nullptr) {
       result->peerState = state;
     }
@@ -4889,6 +4926,9 @@ bool BleCsControllerVprHost::queuePendingInitiatorLlControlPduIfNeeded(
 
   llControlBridgeQueuedStageValid_ = true;
   llControlBridgeQueuedStage_ = state.currentStage;
+  llControlBridgeNoTxStageValid_ = false;
+  llControlBridgeNoTxStage_ = kBleCsVprPeerStageIdle;
+  llControlBridgeNoTxPollSkips_ = 0U;
 
   if (result != nullptr) {
     result->initiatorPduQueued = true;
@@ -4998,6 +5038,11 @@ bool BleCsControllerVprHost::serviceInitiatorLlControlBridge(
         return false;
       }
       result.directStatus = status;
+    }
+
+    if (event->llControlOpcode == kBleCsLlCtrlStart &&
+        result.state.currentStage == kBleCsVprPeerStageProcedureActive) {
+      (void)drainPendingControllerEvents();
     }
 
     if (event->llControlOpcode == kBleCsLlCtrlAbort &&

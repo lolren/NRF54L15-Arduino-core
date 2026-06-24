@@ -1933,6 +1933,7 @@ class BleCsControllerVprHost {
       BleRadio& radio,
       BleCsLlControlBridgeServiceResult* result);
   bool initiatorLlBridgeOwnsCurrentWorkflowPhase() const;
+  bool llControlBridgeCachedNoTxStage(BleCsLlControlBridgeServiceResult* result);
   void resetLlControlBridgeQueueState();
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
@@ -1959,6 +1960,9 @@ class BleCsControllerVprHost {
   uint16_t testResultCount_;
   bool llControlBridgeQueuedStageValid_;
   uint8_t llControlBridgeQueuedStage_;
+  bool llControlBridgeNoTxStageValid_;
+  uint8_t llControlBridgeNoTxStage_;
+  uint8_t llControlBridgeNoTxPollSkips_;
 };
 
 }  // namespace xiao_nrf54l15

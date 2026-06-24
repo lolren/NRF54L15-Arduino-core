@@ -122,9 +122,9 @@
 #define BLE_CS_HCI_TEST_CONFIG_ID 0x00U
 #define BLE_CS_HCI_TEST_PROCEDURE_INTERVAL_TICKS 200U
 #define BLE_CS_HCI_TEST_CHUNK_DELAY_TICKS 8U
-#define BLE_CS_PEER_CONFIG_TIMEOUT_TICKS 50000U
-#define BLE_CS_PEER_PROC_TIMEOUT_TICKS 30000U
-#define BLE_CS_PEER_START_TIMEOUT_SCALE 800U
+#define BLE_CS_PEER_CONFIG_TIMEOUT_TICKS 500000U
+#define BLE_CS_PEER_PROC_TIMEOUT_TICKS 500000U
+#define BLE_CS_PEER_START_TIMEOUT_SCALE 8000U
 
 #define BLE_HCI_PACKET_TYPE_COMMAND 0x01U
 #define BLE_HCI_PACKET_TYPE_EVENT 0x04U
@@ -4884,6 +4884,12 @@ static bool publish_pending_cs_result_packet(void) {
       host_request_pending()) {
     return false;
   }
+#if VPR_CS_DEDICATED_IMAGE
+  if (g_cs_builtin_peer_demo_enabled == 0U &&
+      g_cs_peer_exchange_stage != VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+    return false;
+  }
+#endif
   if ((g_pending_cs_result_stage == 2U || g_pending_cs_result_stage == 5U) &&
       g_vpr_transport->heartbeat < g_cs_next_chunk_stage_heartbeat) {
     return false;
@@ -5311,6 +5317,17 @@ static void handle_peer_cs_pdu(const uint8_t *pdu, size_t pdu_len) {
         if (pdu_len >= 3U) {
           g_cs_procedure_abort_reason = pdu[2];
           g_cs_subevent_abort_reason = pdu[2];
+        }
+        if (g_pending_cs_result_stage != 0U) {
+          g_cs_procedure_enabled = 0U;
+          clear_active_runtime_state();
+          g_pending_cs_result_stage = 0U;
+          g_cs_next_chunk_stage_heartbeat = 0U;
+          g_cs_next_peer_stage_heartbeat = 0U;
+          g_cs_next_subevent_heartbeat = 0U;
+          g_cs_next_procedure_heartbeat = 0U;
+          g_cs_last_peer_gap_ticks = 0U;
+          g_cs_last_interval_selector = 0U;
         }
         g_cs_peer_exchange_stage = VPR_CS_PEER_STAGE_IDLE;
         g_cs_peer_exchange_deadline = 0U;

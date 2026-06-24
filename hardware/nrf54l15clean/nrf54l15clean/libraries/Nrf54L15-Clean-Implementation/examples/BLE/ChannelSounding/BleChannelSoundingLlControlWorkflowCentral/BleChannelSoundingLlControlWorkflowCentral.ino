@@ -230,6 +230,9 @@ static void markRxOpcode(uint8_t opcode) {
 static bool beginWorkflowBridge() {
   BleCsControllerVprHost::fillDemoConfig(&g_csConfig);
   g_csConfig.builtInPeerDemo.enabled = false;
+  g_csConfig.session.workflow.createConfig.minMainModeSteps = 3U;
+  g_csConfig.session.workflow.createConfig.maxMainModeSteps = 3U;
+  g_csConfig.session.workflow.createConfig.rttType = 0U;
   g_csConfig.session.workflow.procedureParameters.maxProcedureCount = 1U;
   g_csConfig.session.workflow.procedureEnable.enable = 1U;
 
