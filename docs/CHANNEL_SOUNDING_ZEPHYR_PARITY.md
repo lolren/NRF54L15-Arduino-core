@@ -350,9 +350,10 @@ What the pair verifies:
   stream path and then service one real BLE LL-control bridge event through the
   same helper.
 - The workflow central diagnostic now uses
-  `loopOnceWithInitiatorLlControlBridge()` and verifies that the normal host
-  workflow reaches ready state and publishes local/peer procedure results after
-  over-air `CS_START`.
+  `pumpInitiatorLlControlWorkflowBridge()` and
+  `BleCsLlControlBridgeWorkflowTracker` to verify that the normal host workflow
+  reaches ready state and publishes local/peer procedure results after over-air
+  `CS_START`.
 - The VPR now gates connected-procedure result publication so local/peer results
   are not emitted before peer exchange reaches `PROCEDURE_ACTIVE`.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted

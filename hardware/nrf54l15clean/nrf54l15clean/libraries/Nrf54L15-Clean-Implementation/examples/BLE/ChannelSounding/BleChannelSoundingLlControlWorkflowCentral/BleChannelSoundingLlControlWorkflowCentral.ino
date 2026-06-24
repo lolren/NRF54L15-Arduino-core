@@ -28,6 +28,7 @@ static BleRadio g_ble;
 static PowerManager g_power;
 static BleCsControllerVprHost g_csHost;
 static BleCsControllerVprHostConfig g_csConfig{};
+static BleCsLlControlBridgeWorkflowTracker g_bridgeTracker{};
 
 static constexpr int8_t kTxPowerDbm = 0;
 static constexpr uint16_t kCsConnHandle = 0x0041U;
@@ -302,6 +303,7 @@ static void resetBridgeState() {
   g_rxMask = 0U;
   g_lastVprStage = 0xFFU;
   g_lastVprStatus = 0xFFU;
+  g_bridgeTracker.reset();
   g_passPrinted = false;
   g_failed = false;
   g_bridgeStarted = beginWorkflowBridge();
@@ -376,7 +378,8 @@ void loop() {
   }
 
   BleCsLlControlBridgePollResult poll{};
-  if (!g_csHost.loopOnceWithInitiatorLlControlBridge(g_ble, &poll, 450000UL)) {
+  if (!g_csHost.pumpInitiatorLlControlWorkflowBridge(
+          g_ble, &g_bridgeTracker, &poll, 1U, 450000UL)) {
     failBridge("poll", &poll);
   } else {
     updateWorkflowMask();
@@ -403,26 +406,26 @@ void loop() {
     }
     updateWorkflowMask();
 
-    if (!g_passPrinted && bridgeComplete() && resultPathComplete()) {
+    if (!g_passPrinted && g_bridgeTracker.complete()) {
       g_passPrinted = true;
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
-      Serial.print(g_workflowMask, HEX);
+      Serial.print(g_bridgeTracker.workflowMask, HEX);
       Serial.print(" tx=0x");
-      Serial.print(g_txMask, HEX);
+      Serial.print(g_bridgeTracker.txMask, HEX);
       Serial.print(" rx=0x");
-      Serial.print(g_rxMask, HEX);
+      Serial.print(g_bridgeTracker.rxMask, HEX);
       Serial.print(" injected=");
-      Serial.print(g_peerPdusInjected);
+      Serial.print(g_bridgeTracker.peerPdusConsumed);
       Serial.print(" direct=");
-      Serial.print(g_directCommands);
+      Serial.print(g_bridgeTracker.directCommands);
       Serial.print(" local=");
-      Serial.print(g_csHost.hostState().localSubeventResults);
+      Serial.print(g_bridgeTracker.localSubeventResults);
       Serial.print(" peer=");
-      Serial.print(g_csHost.hostState().peerSubeventResults);
+      Serial.print(g_bridgeTracker.peerSubeventResults);
       Serial.print(" proc=");
-      Serial.print(g_csHost.sessionState().completedProcedureCounter);
+      Serial.print(g_bridgeTracker.completedProcedureCounter);
       Serial.print(" est=");
-      Serial.print(g_csHost.estimateValid() ? 1 : 0);
+      Serial.print(g_bridgeTracker.estimateValid ? 1 : 0);
       Serial.print("\r\n");
     }
 

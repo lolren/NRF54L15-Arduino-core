@@ -5127,6 +5127,228 @@ bool BleCsControllerVprHost::pollInitiatorLlControlBridge(
   return true;
 }
 
+static void bleCsBridgeTrackerMarkBit(uint32_t* mask, uint8_t bit) {
+  if (mask != nullptr && bit < 32U) {
+    *mask |= (1UL << bit);
+  }
+}
+
+static void bleCsBridgeTrackerMarkTx(BleCsLlControlBridgeWorkflowTracker* tracker,
+                                     uint8_t opcode) {
+  if (tracker == nullptr) {
+    return;
+  }
+  switch (opcode) {
+    case kBleCsLlCtrlReq:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->txMask,
+          BleCsLlControlBridgeWorkflowTracker::kTxCsReq);
+      break;
+    case kBleCsLlCtrlSecReq:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->txMask,
+          BleCsLlControlBridgeWorkflowTracker::kTxSecReq);
+      break;
+    case kBleCsLlCtrlProcReq:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->txMask,
+          BleCsLlControlBridgeWorkflowTracker::kTxProcReq);
+      break;
+    default:
+      break;
+  }
+}
+
+static void bleCsBridgeTrackerMarkRx(BleCsLlControlBridgeWorkflowTracker* tracker,
+                                     uint8_t opcode) {
+  if (tracker == nullptr) {
+    return;
+  }
+  switch (opcode) {
+    case kBleCsLlCtrlRsp:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->rxMask,
+          BleCsLlControlBridgeWorkflowTracker::kRxCsRsp);
+      break;
+    case kBleCsLlCtrlCfg:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->rxMask,
+          BleCsLlControlBridgeWorkflowTracker::kRxCsCfg);
+      break;
+    case kBleCsLlCtrlSecRsp:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->rxMask,
+          BleCsLlControlBridgeWorkflowTracker::kRxSecRsp);
+      break;
+    case kBleCsLlCtrlProcRsp:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->rxMask,
+          BleCsLlControlBridgeWorkflowTracker::kRxProcRsp);
+      break;
+    case kBleCsLlCtrlStart:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->rxMask,
+          BleCsLlControlBridgeWorkflowTracker::kRxStart);
+      break;
+    case kBleCsLlCtrlAbort:
+      bleCsBridgeTrackerMarkBit(
+          &tracker->rxMask,
+          BleCsLlControlBridgeWorkflowTracker::kRxAbort);
+      break;
+    default:
+      break;
+  }
+}
+
+static void bleCsBridgeTrackerUpdateWorkflow(
+    BleCsLlControlBridgeWorkflowTracker* tracker,
+    const BleCsControllerVprHost& host) {
+  if (tracker == nullptr) {
+    return;
+  }
+  const BleCsControllerWorkflowState& workflow = host.workflowState();
+  if (workflow.remoteCapabilitiesValid) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowRemoteCapabilities);
+  }
+  if (workflow.defaultSettingsApplied) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowDefaults);
+  }
+  if (workflow.configCreated) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowConfig);
+  }
+  if (workflow.securityEnabled) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowSecurity);
+  }
+  if (workflow.procedureParametersApplied) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowProcedureParams);
+  }
+  if (workflow.procedureEnabled) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowProcedureEnabled);
+  }
+  tracker->ready = host.ready();
+  if (tracker->ready) {
+    bleCsBridgeTrackerMarkBit(
+        &tracker->workflowMask,
+        BleCsLlControlBridgeWorkflowTracker::kWorkflowReady);
+  }
+
+  tracker->localSubeventResults = host.hostState().localSubeventResults;
+  tracker->peerSubeventResults = host.hostState().peerSubeventResults;
+  tracker->completedProcedureCounter =
+      host.sessionState().completedProcedureCounter;
+  tracker->estimateValid = host.estimateValid();
+  tracker->resultPathComplete =
+      tracker->localSubeventResults > 0U &&
+      tracker->peerSubeventResults > 0U &&
+      tracker->completedProcedureCounter > 0U &&
+      tracker->estimateValid;
+}
+
+static void bleCsBridgeTrackerUpdateService(
+    BleCsLlControlBridgeWorkflowTracker* tracker,
+    const BleCsLlControlBridgeServiceResult& service) {
+  if (tracker == nullptr) {
+    return;
+  }
+
+  if (service.state.valid) {
+    tracker->lastVprStage = service.state.currentStage;
+    tracker->lastVprStatus = service.state.status;
+  }
+
+  if (service.peerPduConsumed) {
+    ++tracker->peerPdusConsumed;
+    tracker->lastRxOpcode = service.rxOpcode;
+    bleCsBridgeTrackerMarkRx(tracker, service.rxOpcode);
+  }
+  if (service.initiatorPduQueued) {
+    ++tracker->txQueued;
+    tracker->lastTxOpcode = service.txOpcode;
+    bleCsBridgeTrackerMarkTx(tracker, service.txOpcode);
+  }
+  if (service.directCommandSent) {
+    ++tracker->directCommands;
+    tracker->lastDirectStatus = service.directStatus;
+  }
+  if (service.exchangeComplete) {
+    tracker->exchangeComplete = true;
+  }
+}
+
+void BleCsLlControlBridgeWorkflowTracker::reset() {
+  *this = BleCsLlControlBridgeWorkflowTracker{};
+}
+
+void BleCsLlControlBridgeWorkflowTracker::update(
+    const BleCsControllerVprHost& host,
+    const BleCsLlControlBridgePollResult& poll) {
+  if (polls < 0xFFFFU) {
+    ++polls;
+  }
+  if (poll.eventStarted) {
+    ++linkEvents;
+  }
+
+  bleCsBridgeTrackerUpdateWorkflow(this, host);
+  if (poll.preServiceCalled) {
+    bleCsBridgeTrackerUpdateService(this, poll.preService);
+  }
+  if (poll.eventServiceCalled) {
+    bleCsBridgeTrackerUpdateService(this, poll.eventService);
+  } else if (poll.serviceCalled && !poll.preServiceCalled) {
+    bleCsBridgeTrackerUpdateService(this, poll.service);
+  }
+  bleCsBridgeTrackerUpdateWorkflow(this, host);
+}
+
+bool BleCsLlControlBridgeWorkflowTracker::workflowComplete() const {
+  static constexpr uint32_t kExpected =
+      (1UL << kWorkflowRemoteCapabilities) |
+      (1UL << kWorkflowDefaults) |
+      (1UL << kWorkflowConfig) |
+      (1UL << kWorkflowSecurity) |
+      (1UL << kWorkflowProcedureParams) |
+      (1UL << kWorkflowProcedureEnabled) |
+      (1UL << kWorkflowReady);
+  return (workflowMask & kExpected) == kExpected;
+}
+
+bool BleCsLlControlBridgeWorkflowTracker::txComplete() const {
+  static constexpr uint32_t kExpected =
+      (1UL << kTxCsReq) |
+      (1UL << kTxSecReq) |
+      (1UL << kTxProcReq);
+  return (txMask & kExpected) == kExpected;
+}
+
+bool BleCsLlControlBridgeWorkflowTracker::rxComplete() const {
+  static constexpr uint32_t kExpected =
+      (1UL << kRxCsRsp) |
+      (1UL << kRxCsCfg) |
+      (1UL << kRxSecRsp) |
+      (1UL << kRxProcRsp) |
+      (1UL << kRxStart) |
+      (1UL << kRxAbort);
+  return (rxMask & kExpected) == kExpected;
+}
+
+bool BleCsLlControlBridgeWorkflowTracker::complete() const {
+  return workflowComplete() && txComplete() && rxComplete() &&
+         resultPathComplete;
+}
+
 bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outStatus) {
   uint16_t connHandle = 0U;
   BleCsHciCommand command{};
@@ -5779,6 +6001,37 @@ bool BleCsControllerVprHost::loopOnceWithInitiatorLlControlBridge(
     return true;
   }
   return pollInitiatorLlControlBridge(radio, outResult, spinLimit);
+}
+
+bool BleCsControllerVprHost::pumpInitiatorLlControlWorkflowBridge(
+    BleRadio& radio,
+    BleCsLlControlBridgeWorkflowTracker* tracker,
+    BleCsLlControlBridgePollResult* outLastPoll,
+    uint16_t maxPolls,
+    uint32_t spinLimit) {
+  if (maxPolls == 0U) {
+    maxPolls = 1U;
+  }
+
+  for (uint16_t i = 0U; i < maxPolls; ++i) {
+    BleCsLlControlBridgePollResult poll{};
+    if (!loopOnceWithInitiatorLlControlBridge(radio, &poll, spinLimit)) {
+      if (outLastPoll != nullptr) {
+        *outLastPoll = poll;
+      }
+      return false;
+    }
+    if (tracker != nullptr) {
+      tracker->update(*this, poll);
+    }
+    if (outLastPoll != nullptr) {
+      *outLastPoll = poll;
+    }
+    if (tracker != nullptr && tracker->complete()) {
+      break;
+    }
+  }
+  return true;
 }
 
 bool BleCsControllerVprHost::drainPendingControllerEvents() {

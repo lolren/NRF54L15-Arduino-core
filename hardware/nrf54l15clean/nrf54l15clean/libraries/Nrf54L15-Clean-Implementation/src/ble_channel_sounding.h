@@ -531,6 +531,8 @@ struct BleCsVprPeerExchangeState {
   uint8_t subeventAbortReason = 0U;
 };
 
+class BleCsControllerVprHost;
+
 struct BleCsLlControlBridgeServiceResult {
   bool peerPduConsumed = false;
   bool initiatorPduQueued = false;
@@ -556,6 +558,62 @@ struct BleCsLlControlBridgePollResult {
   BleCsLlControlBridgeServiceResult service{};
   BleCsLlControlBridgeServiceResult preService{};
   BleCsLlControlBridgeServiceResult eventService{};
+};
+
+struct BleCsLlControlBridgeWorkflowTracker {
+  enum WorkflowBit : uint8_t {
+    kWorkflowRemoteCapabilities = 0U,
+    kWorkflowDefaults,
+    kWorkflowConfig,
+    kWorkflowSecurity,
+    kWorkflowProcedureParams,
+    kWorkflowProcedureEnabled,
+    kWorkflowReady,
+  };
+
+  enum TxBit : uint8_t {
+    kTxCsReq = 0U,
+    kTxSecReq,
+    kTxProcReq,
+  };
+
+  enum RxBit : uint8_t {
+    kRxCsRsp = 0U,
+    kRxCsCfg,
+    kRxSecRsp,
+    kRxProcRsp,
+    kRxStart,
+    kRxAbort,
+  };
+
+  uint32_t workflowMask = 0U;
+  uint32_t txMask = 0U;
+  uint32_t rxMask = 0U;
+  uint32_t linkEvents = 0U;
+  uint32_t txQueued = 0U;
+  uint32_t peerPdusConsumed = 0U;
+  uint32_t directCommands = 0U;
+  uint16_t polls = 0U;
+  uint16_t completedProcedureCounter = 0U;
+  uint32_t localSubeventResults = 0U;
+  uint32_t peerSubeventResults = 0U;
+  bool resultPathComplete = false;
+  bool exchangeComplete = false;
+  bool ready = false;
+  bool estimateValid = false;
+  uint8_t lastRxOpcode = 0U;
+  uint8_t lastTxOpcode = 0U;
+  uint8_t lastDirectStatus = 0xFFU;
+  uint8_t lastVprStage = 0xFFU;
+  uint8_t lastVprStatus = 0xFFU;
+
+  void reset();
+  void update(const BleCsControllerVprHost& host,
+              const BleCsLlControlBridgePollResult& poll);
+  bool workflowComplete() const;
+  bool txComplete() const;
+  bool rxComplete() const;
+  bool complete() const;
 };
 
 enum class BleCsControllerResultSource : uint8_t {
@@ -1880,6 +1938,12 @@ class BleCsControllerVprHost {
   bool loopOnceWithInitiatorLlControlBridge(
       BleRadio& radio,
       BleCsLlControlBridgePollResult* outResult = nullptr,
+      uint32_t spinLimit = 400000UL);
+  bool pumpInitiatorLlControlWorkflowBridge(
+      BleRadio& radio,
+      BleCsLlControlBridgeWorkflowTracker* tracker = nullptr,
+      BleCsLlControlBridgePollResult* outLastPoll = nullptr,
+      uint16_t maxPolls = 1U,
       uint32_t spinLimit = 400000UL);
   /* Drains pending asynchronous controller events (e.g. the standalone CS Test
    * result stream) via the direct controller-service path. Use this, not

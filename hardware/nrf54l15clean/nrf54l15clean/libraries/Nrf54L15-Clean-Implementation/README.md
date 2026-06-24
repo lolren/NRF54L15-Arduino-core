@@ -995,7 +995,7 @@ BLE examples:
   - Received peer PDUs are consumed through `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`.
 - `examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral/BleChannelSoundingLlControlWorkflowCentral.ino`
   - Two-board workflow central for raw Channel Sounding LL-control transport.
-  - Uses `BleCsControllerVprHost::loopOnceWithInitiatorLlControlBridge()` so the normal CS host workflow reaches ready state through real over-air CS LL-control PDUs.
+  - Uses `BleCsControllerVprHost::pumpInitiatorLlControlWorkflowBridge()` and `BleCsLlControlBridgeWorkflowTracker` so normal CS host workflow progress, over-air CS LL-control TX/RX, and completed local/peer result publication are tracked by the CS library instead of open-coded pass/fail masks in the sketch.
   - Expected PASS line: `cs_ll_workflow_bridge=PASS ... rx=0x3F ... local=1 peer=1 proc=1 est=1`.
 - `scripts/test_cs_ll_workflow_bridge.sh`
   - Local regression harness for the XIAO pair.

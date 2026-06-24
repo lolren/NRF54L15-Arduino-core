@@ -457,8 +457,13 @@ surface now intentionally avoids that failure mode by draining responses.
   the existing host/VPR stream path first, then service one real BLE LL-control
   bridge event through the same helper.
 - Added `BleChannelSoundingLlControlWorkflowCentral`, a two-board workflow
-  diagnostic that uses `loopOnceWithInitiatorLlControlBridge()` instead of
-  manually driving direct HCI transitions from the sketch.
+  diagnostic that uses `pumpInitiatorLlControlWorkflowBridge()` and
+  `BleCsLlControlBridgeWorkflowTracker` instead of manually owning all
+  workflow/tx/rx/result pass criteria in the sketch.
+- Added `BleCsLlControlBridgeWorkflowTracker` so the shared CS library now owns
+  the verified workflow mask (`0x7F`), initiator TX mask (`0x7`), peer RX mask
+  (`0x3F`), and local/peer/procedure/estimate completion criteria used by the
+  two-board bridge regression.
 - Tightened the VPR peer-exchange timing so connected-procedure result packets
   are published only after over-air `CS_START` moves the peer exchange to
   `PROCEDURE_ACTIVE`.
