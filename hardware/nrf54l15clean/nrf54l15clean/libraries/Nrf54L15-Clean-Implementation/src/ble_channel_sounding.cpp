@@ -217,6 +217,41 @@ bool appendMode2DemoStep(uint8_t* buffer,
   return true;
 }
 
+inline bool validDataChannel(uint8_t channelIndex);
+
+uint8_t qualityFromRawTone(const BleCsToneSample& tone) {
+  if (!tone.valid) {
+    return kBleCsToneQualityUnavailable;
+  }
+  return kBleCsToneQualityHigh;
+}
+
+bool appendMode2ToneStep(uint8_t* buffer,
+                         size_t maxLen,
+                         size_t* offset,
+                         uint8_t channel,
+                         uint8_t antennaPermutationIndex,
+                         const BleCsToneSample& tone) {
+  if (buffer == nullptr || offset == nullptr || *offset > maxLen ||
+      (maxLen - *offset) < 8U) {
+    return false;
+  }
+  if (!validDataChannel(channel) || !tone.valid) {
+    return false;
+  }
+
+  buffer[*offset + 0U] = kBleCsMainMode2;
+  buffer[*offset + 1U] = channel;
+  buffer[*offset + 2U] = 5U;
+  buffer[*offset + 3U] = antennaPermutationIndex;
+  encodePctSampleBytes(tone.i, tone.q, &buffer[*offset + 4U]);
+  buffer[*offset + 7U] =
+      static_cast<uint8_t>(qualityFromRawTone(tone) |
+                           (kBleCsToneExtensionNone << 4U));
+  *offset += 8U;
+  return true;
+}
+
 bool buildHciInitialEvent(uint8_t* out,
                           size_t maxLen,
                           uint16_t connHandle,
@@ -1522,6 +1557,85 @@ void BleChannelSoundingRadio::parseSubeventStepData(const uint8_t* stepData,
     }
     offset += step.dataLen;
   }
+}
+
+bool BleChannelSoundingRadio::encodeMode2StepDataFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    bool peerSide,
+    uint8_t* outStepData,
+    size_t maxStepDataLen,
+    size_t* outStepDataLen,
+    uint16_t* outStepsEncoded) {
+  if (measurements == nullptr || outStepData == nullptr || outStepDataLen == nullptr ||
+      outStepsEncoded == nullptr) {
+    return false;
+  }
+
+  *outStepDataLen = 0U;
+  *outStepsEncoded = 0U;
+
+  size_t offset = 0U;
+  for (size_t i = 0U; i < count; ++i) {
+    const BleCsChannelMeasurement& measurement = measurements[i];
+    if (!measurement.valid || !validDataChannel(measurement.channelIndex)) {
+      continue;
+    }
+
+    const BleCsToneSample& tone =
+        peerSide ? measurement.peerTone : measurement.localTone;
+    if (!tone.valid) {
+      continue;
+    }
+
+    if (!appendMode2ToneStep(outStepData, maxStepDataLen, &offset,
+                             measurement.channelIndex, 0U, tone)) {
+      return false;
+    }
+    ++(*outStepsEncoded);
+  }
+
+  *outStepDataLen = offset;
+  return (*outStepsEncoded > 0U);
+}
+
+bool BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    bool peerSide,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* outStepData,
+    size_t maxStepDataLen,
+    BleCsSubeventResult* outResult) {
+  if (outResult == nullptr) {
+    return false;
+  }
+
+  size_t stepDataLen = 0U;
+  uint16_t stepsEncoded = 0U;
+  if (!encodeMode2StepDataFromMeasurements(measurements, count, peerSide,
+                                           outStepData, maxStepDataLen,
+                                           &stepDataLen, &stepsEncoded)) {
+    *outResult = BleCsSubeventResult{};
+    return false;
+  }
+
+  BleCsSubeventResult result{};
+  result.header = headerTemplate;
+  result.header.procedureDoneStatus = kBleCsProcedureDoneComplete;
+  result.header.subeventDoneStatus = kBleCsSubeventDoneComplete;
+  result.header.procedureAbortReason = 0U;
+  result.header.subeventAbortReason = 0U;
+  result.header.numAntennaPaths =
+      (result.header.numAntennaPaths != 0U) ? result.header.numAntennaPaths : 1U;
+  result.header.numStepsReported = stepsEncoded;
+  result.stepData = outStepData;
+  result.stepDataLen = static_cast<uint16_t>(stepDataLen);
+  result.isPartial = false;
+  result.isComplete = true;
+  result.isContinuation = false;
+  *outResult = result;
+  return true;
 }
 
 bool BleChannelSoundingRadio::parseHciSubeventResultEvent(

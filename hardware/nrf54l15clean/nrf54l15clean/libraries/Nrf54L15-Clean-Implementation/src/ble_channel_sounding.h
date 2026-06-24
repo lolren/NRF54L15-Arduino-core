@@ -961,6 +961,22 @@ class BleChannelSoundingRadio {
                                     bool (*callback)(const BleCsSubeventStep* step,
                                                      void* userData),
                                     void* userData);
+  static bool encodeMode2StepDataFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      bool peerSide,
+      uint8_t* outStepData,
+      size_t maxStepDataLen,
+      size_t* outStepDataLen,
+      uint16_t* outStepsEncoded);
+  static bool buildMode2SubeventResultFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      bool peerSide,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* outStepData,
+      size_t maxStepDataLen,
+      BleCsSubeventResult* outResult);
   static bool estimateDistanceFromStepBuffers(const uint8_t* localStepData,
                                               size_t localStepDataLen,
                                               const uint8_t* peerStepData,

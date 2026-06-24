@@ -58,6 +58,8 @@ static constexpr BoardAntennaPath kAntennaPath = BoardAntennaPath::kCeramic;
 static constexpr uint8_t kSweepChannelCount = 37U;
 // Number of recent distance estimates kept in the sliding median filter.
 static constexpr uint8_t kMedianWindow = 5U;
+// Reserved HCI test connection handle used for standalone CS result records.
+static constexpr uint16_t kRawCsSubeventConnHandle = 0x0FFFU;
 // Default calibration profile: identity scale/offset with no anchored reference.
 static constexpr BleCsCalibrationProfile kCalibrationProfileDefault{
     1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0U, 0U};
@@ -66,6 +68,12 @@ static BleChannelSoundingRadio gCs;
 static BleCsChannelMeasurement gMeasurements[kSweepChannelCount];
 static BleCsEstimate gLastEstimate{};
 static bool gLastEstimateValid = false;
+static uint8_t gLocalStepData[kBleCsMaxControllerStepDataBytes];
+static uint8_t gPeerStepData[kBleCsMaxControllerStepDataBytes];
+static BleCsEstimate gLastEncodedEstimate{};
+static bool gLastEncodedEstimateValid = false;
+static uint16_t gLastEncodedLocalSteps = 0U;
+static uint16_t gLastEncodedPeerSteps = 0U;
 static bool gCsReady = false;
 static float gRecentDistances[kMedianWindow] = {0.0f};
 static uint8_t gRecentCount = 0U;
@@ -8153,6 +8161,45 @@ const BleCsChannelMeasurement* firstValidMeasurement() {
   return nullptr;
 }
 
+bool updateEncodedSubeventEstimate() {
+  gLastEncodedEstimate = BleCsEstimate{};
+  gLastEncodedEstimateValid = false;
+  gLastEncodedLocalSteps = 0U;
+  gLastEncodedPeerSteps = 0U;
+
+  BleCsSubeventResultHeader header{};
+  header.connHandle = kRawCsSubeventConnHandle;
+  header.configId = 1U;
+  header.procedureCounter = static_cast<uint16_t>(gSweepCount & 0xFFFFU);
+  header.numAntennaPaths = 1U;
+
+  BleCsSubeventResult localResult{};
+  BleCsSubeventResult peerResult{};
+  const bool localOk =
+      BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          gMeasurements, kSweepChannelCount, false, header, gLocalStepData,
+          sizeof(gLocalStepData), &localResult);
+  const bool peerOk =
+      BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          gMeasurements, kSweepChannelCount, true, header, gPeerStepData,
+          sizeof(gPeerStepData), &peerResult);
+  gLastEncodedLocalSteps = localOk ? localResult.header.numStepsReported : 0U;
+  gLastEncodedPeerSteps = peerOk ? peerResult.header.numStepsReported : 0U;
+  if (!localOk || !peerOk) {
+    return false;
+  }
+
+  BleCsEstimate estimate{};
+  if (!BleChannelSoundingRadio::estimateDistanceFromSubeventResults(
+          localResult, peerResult, true, &estimate)) {
+    return false;
+  }
+
+  gLastEncodedEstimate = estimate;
+  gLastEncodedEstimateValid = true;
+  return true;
+}
+
 uint8_t sweepChannelAt(uint8_t order) {
   const uint8_t center = kSweepChannelCount / 2U;
   if (order == 0U) {
@@ -8260,6 +8307,7 @@ void loop() {
         BleChannelSoundingRadio::estimateDistancePhaseSlope(gMeasurements,
                                                             kSweepChannelCount,
                                                             &estimate);
+    (void)updateEncodedSubeventEstimate();
     if (gLastEstimateValid) {
       gLastEstimate = estimate;
       ++gValidSweepCount;
@@ -8271,6 +8319,10 @@ void loop() {
     }
   } else {
     gLastEstimateValid = false;
+    gLastEncodedEstimate = BleCsEstimate{};
+    gLastEncodedEstimateValid = false;
+    gLastEncodedLocalSteps = 0U;
+    gLastEncodedPeerSteps = 0U;
     gLastValidChannels = 0U;
     gLastDfeInfo = BleCsDfeCaptureInfo{};
   }
@@ -8341,6 +8393,22 @@ void loop() {
       Serial.print(gLastEstimate.rejectedResidualChannels);
       Serial.print(F(" fit_delta_m="));
       Serial.print(gLastEstimate.fitDeltaMeters, 4);
+      Serial.print(F(" std_est="));
+      Serial.print(gLastEncodedEstimateValid ? 1 : 0);
+      Serial.print(F(" std_steps="));
+      Serial.print(gLastEncodedLocalSteps);
+      Serial.print('/');
+      Serial.print(gLastEncodedPeerSteps);
+      if (gLastEncodedEstimateValid) {
+        printDistanceField(F(" std_m="),
+                           gLastEncodedEstimate.phaseSlopeDistanceMeters);
+        printDistanceField(F(" std_delta_m="),
+                           gLastEncodedEstimate.phaseSlopeDistanceMeters -
+                               gLastEstimate.phaseSlopeDistanceMeters);
+      } else {
+        printDistanceField(F(" std_m="), NAN);
+        printDistanceField(F(" std_delta_m="), NAN);
+      }
       Serial.print(F(" display_ok="));
       Serial.print(displayAccepted ? 1 : 0);
       Serial.print(F(" phys_ok="));
