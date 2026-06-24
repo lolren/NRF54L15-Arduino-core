@@ -988,6 +988,7 @@ BLE examples:
 - `examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral/BleChannelSoundingLlControlPeripheral.ino`
   - Two-board diagnostic peripheral for raw Channel Sounding LL-control transport.
   - Answers CS_REQ, CS_SEC_REQ, and CS_PROC_REQ with real-shaped CS LL-control peer PDUs.
+  - After the LL-control exchange completes and the central disconnects, switches into raw RADIO reflector mode for the workflow central's physical follow-up sweep.
 - `examples/BLE/ChannelSounding/BleChannelSoundingLlControlCentral/BleChannelSoundingLlControlCentral.ino`
   - Two-board diagnostic central for raw Channel Sounding LL-control transport.
   - Injects received peer CS LL-control PDUs into the VPR peer-exchange state machine and reports the bridge pass/fail status.
@@ -1002,9 +1003,11 @@ BLE examples:
   - Two-board workflow central for raw Channel Sounding LL-control transport.
   - Uses `BleCsControllerVprHost::pumpInitiatorLlControlWorkflowBridge()` and `BleCsLlControlBridgeWorkflowTracker` so normal CS host workflow progress, over-air CS LL-control TX/RX, and completed local/peer result publication are tracked by the CS library instead of open-coded pass/fail masks in the sketch.
   - Expected PASS line: `cs_ll_workflow_bridge=PASS ... rx=0x3F vpr_pdu=3 ... local=1 peer=1 proc=1 est=1`.
+  - Then intentionally disconnects the BLE link, runs a raw 37-channel physical CS sweep against the same peer, and feeds the real `BleCsChannelMeasurement[]` into `BleCsControllerVprHost::consumeMode2ResultsFromMeasurements()`.
+  - Expected follow-up PASS line: `cs_ll_physical_followup=PASS ... raw_est=1 host_est=1 host_steps=N/N`.
 - `scripts/test_cs_ll_workflow_bridge.sh`
   - Local regression harness for the XIAO pair.
-  - Compiles/uploads the LL-control peripheral and workflow central, resets both probes, captures serial, and fails unless the full workflow PASS line is observed.
+  - Compiles/uploads the LL-control peripheral and workflow central, resets both probes, captures serial, and fails unless both the full LL-control workflow PASS and physical follow-up PASS lines are observed.
 
 Latency characterization note:
 

@@ -10,7 +10,7 @@ central_port="${CS_CENTRAL_PORT:-/dev/ttyACM1}"
 peripheral_port="${CS_PERIPHERAL_PORT:-/dev/ttyACM2}"
 central_uid="${CS_CENTRAL_UID:-761FDE87}"
 peripheral_uid="${CS_PERIPHERAL_UID:-E91217E8}"
-capture_seconds="${CS_CAPTURE_SECONDS:-25}"
+capture_seconds="${CS_CAPTURE_SECONDS:-40}"
 sync_installed="${CS_SYNC_INSTALLED:-1}"
 
 installed_base="${CS_INSTALLED_BASE:-${HOME}/.arduino15/packages/nrf54l15clean/hardware/nrf54l15clean}"
@@ -83,6 +83,15 @@ if ! grep -q "cs_ll_workflow_bridge=PASS" "${central_log}"; then
   exit 1
 fi
 
+if ! grep -q "cs_ll_physical_followup=PASS" "${central_log}"; then
+  echo "CS LL physical follow-up did not report PASS" >&2
+  echo "central log:" >&2
+  sed -n '1,260p' "${central_log}" >&2
+  echo "peripheral log:" >&2
+  sed -n '1,220p' "${peripheral_log}" >&2
+  exit 1
+fi
+
 if ! grep -q "rx=0x3F" "${central_log}" ||
    ! grep -q "vpr_pdu=3" "${central_log}" ||
    ! grep -q "local=1 peer=1 proc=1 est=1" "${central_log}"; then
@@ -92,4 +101,6 @@ if ! grep -q "rx=0x3F" "${central_log}" ||
 fi
 
 grep "cs_ll_workflow_bridge=PASS" "${central_log}" | tail -n 1
+grep "cs_ll_physical_followup=PASS" "${central_log}" | tail -n 1
 grep "queued CS_PROC_RSP\\|queued CS_START\\|queued CS_ABORT" "${peripheral_log}" || true
+grep "physical reflector replies=" "${peripheral_log}" | tail -n 1 || true

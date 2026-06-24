@@ -20,16 +20,22 @@ namespace {
 
 static BleRadio g_ble;
 static PowerManager g_power;
+static BleChannelSoundingRadio g_physicalCs;
 
 static constexpr int8_t kTxPowerDbm = 0;
 static constexpr uint32_t kAdvIntervalMs = 80UL;
 static constexpr char kAddressText[] = "C0:DE:54:15:C5:11";
 static constexpr char kName[] = "XIAO54-CSLL";
+static constexpr BoardAntennaPath kPhysicalAntennaPath = BoardAntennaPath::kCeramic;
 
 static bool g_wasConnected = false;
+static bool g_physicalPending = false;
+static bool g_physicalMode = false;
+static bool g_physicalReady = false;
 static uint32_t g_advEvents = 0;
 static uint32_t g_linkEvents = 0;
 static uint32_t g_rspQueued = 0;
+static uint32_t g_physicalReplies = 0;
 static uint32_t g_lastStatusMs = 0;
 
 static void printOpcode(uint8_t opcode) {
@@ -165,11 +171,61 @@ static void respondToCsControl(const BleConnectionEvent& evt) {
       if (evt.payloadLength >= 21U && evt.payload[1] == 19U) {
         (void)queueCsProcedureResponse(configId);
         (void)queueCsStart(configId);
-        (void)queueCsAbort();
+        if (queueCsAbort()) {
+          g_physicalPending = true;
+        }
       }
       break;
     default:
       break;
+  }
+}
+
+static bool beginPhysicalReflector() {
+  g_physicalMode = true;
+  g_physicalReady = false;
+  g_physicalReplies = 0U;
+
+  g_ble.end();
+  delay(250);
+
+  BleCsConfig config;
+  config.txPowerDbm = -8;
+  config.controlChannel = 37U;
+  config.probeToReportDelayUs = 1200U;
+  config.controlListenWindowUs = 20000U;
+  config.probeListenWindowUs = 8000U;
+  config.maxPayloadLength = 32U;
+  config.minToneMagnitude = 16U;
+  config.enableRtt = false;
+  config.enableRawDfeCapture = true;
+
+  const bool rfOk = BoardControl::enableRfPath(kPhysicalAntennaPath);
+  g_physicalReady = rfOk && g_physicalCs.begin(config);
+  Serial.print("physical reflector init: rf=");
+  Serial.print(rfOk ? 1 : 0);
+  Serial.print(" raw=");
+  Serial.print(g_physicalReady ? 1 : 0);
+  Serial.print("\r\n");
+  return g_physicalReady;
+}
+
+static void runPhysicalReflector() {
+  if (!g_physicalReady) {
+    delay(100);
+    return;
+  }
+
+  if (g_physicalCs.listenAndReflectOnce()) {
+    ++g_physicalReplies;
+  }
+
+  const uint32_t now = millis();
+  if ((now - g_lastStatusMs) >= 1000UL) {
+    g_lastStatusMs = now;
+    Serial.print("physical reflector replies=");
+    Serial.print(g_physicalReplies);
+    Serial.print("\r\n");
   }
 }
 
@@ -204,12 +260,22 @@ void setup() {
 }
 
 void loop() {
+  if (g_physicalMode) {
+    runPhysicalReflector();
+    return;
+  }
+
   if (!g_ble.isConnected()) {
     if (g_wasConnected) {
       g_wasConnected = false;
       Serial.print("disconnected\r\n");
       printDebug("final");
       Gpio::write(kPinUserLed, true);
+      if (g_physicalPending) {
+        Serial.print("physical reflector pending\r\n");
+        (void)beginPhysicalReflector();
+        return;
+      }
     }
 
     BleAdvInteraction adv{};

@@ -29,6 +29,7 @@ static PowerManager g_power;
 static BleCsControllerVprHost g_csHost;
 static BleCsControllerVprHostConfig g_csConfig{};
 static BleCsLlControlBridgeWorkflowTracker g_bridgeTracker{};
+static BleChannelSoundingRadio g_physicalCs;
 
 static constexpr int8_t kTxPowerDbm = 0;
 static constexpr uint16_t kCsConnHandle = 0x0041U;
@@ -36,11 +37,19 @@ static constexpr uint8_t kPeripheralAddress[6] = {
     0x11U, 0xC5U, 0x15U, 0x54U, 0xDEU, 0xC0U,
 };
 static constexpr uint32_t kStatusIntervalMs = 1000UL;
+static constexpr BoardAntennaPath kPhysicalAntennaPath = BoardAntennaPath::kCeramic;
+static constexpr uint8_t kPhysicalChannelCount = 37U;
+static constexpr uint8_t kPhysicalMinValidChannels = 8U;
+static constexpr uint8_t kPhysicalMaxSweeps = 3U;
 
 static bool g_wasConnected = false;
 static bool g_bridgeStarted = false;
 static bool g_passPrinted = false;
 static bool g_failed = false;
+static bool g_physicalStarted = false;
+static bool g_physicalReady = false;
+static bool g_physicalDone = false;
+static bool g_physicalFailed = false;
 static uint32_t g_connectAttempts = 0U;
 static uint32_t g_linkEvents = 0U;
 static uint32_t g_txQueued = 0U;
@@ -53,6 +62,12 @@ static uint32_t g_txMask = 0U;
 static uint32_t g_rxMask = 0U;
 static uint8_t g_lastVprStage = 0xFFU;
 static uint8_t g_lastVprStatus = 0xFFU;
+static uint8_t g_physicalSequence = 0U;
+static uint8_t g_physicalSweepCount = 0U;
+static uint8_t g_physicalValidChannels = 0U;
+static BleCsChannelMeasurement g_physicalMeasurements[kPhysicalChannelCount];
+static uint8_t g_physicalLocalStepData[kBleCsMaxControllerStepDataBytes];
+static uint8_t g_physicalPeerStepData[kBleCsMaxControllerStepDataBytes];
 
 enum WorkflowBits : uint8_t {
   kBitRemoteCaps = 0U,
@@ -101,8 +116,30 @@ static void printOpcode(uint8_t opcode) {
   Serial.print(opcode, HEX);
 }
 
+static void printDistanceField(const char* label, float value) {
+  Serial.print(label);
+  if (isfinite(value)) {
+    Serial.print(value, 4);
+  } else {
+    Serial.print("nan");
+  }
+}
+
 static const char* phaseName(BleCsControllerWorkflowPhase phase) {
   return BleCsControllerWorkflow::phaseName(phase);
+}
+
+static uint8_t physicalSweepChannelAt(uint8_t order) {
+  const uint8_t center = 18U;
+  if (order == 0U) {
+    return center;
+  }
+
+  const uint8_t step = static_cast<uint8_t>((order + 1U) / 2U);
+  if ((order & 0x1U) != 0U) {
+    return static_cast<uint8_t>(center - step);
+  }
+  return static_cast<uint8_t>(center + step);
 }
 
 static void updateWorkflowMask() {
@@ -324,6 +361,148 @@ static void resetBridgeState() {
   Serial.print("\r\n");
 }
 
+static bool beginPhysicalFollowup() {
+  g_physicalStarted = true;
+  g_physicalReady = false;
+  g_physicalDone = false;
+  g_physicalFailed = false;
+  g_physicalSequence = 0U;
+  g_physicalSweepCount = 0U;
+  g_physicalValidChannels = 0U;
+  memset(g_physicalMeasurements, 0, sizeof(g_physicalMeasurements));
+
+  Serial.print("physical follow-up: disconnecting BLE link\r\n");
+  const bool disconnected = g_ble.disconnect(900000UL);
+  g_ble.end();
+  delay(1200);
+
+  BleCsConfig config;
+  config.txPowerDbm = -8;
+  config.controlChannel = 37U;
+  config.controlToProbeDelayUs = 2400U;
+  config.probeToReportDelayUs = 1200U;
+  config.probeRetries = 4U;
+  config.probeListenWindowUs = 8000U;
+  config.responseListenWindowUs = 12000U;
+  config.maxPayloadLength = 32U;
+  config.minToneMagnitude = 16U;
+  config.enableRtt = false;
+  config.enableRawDfeCapture = true;
+
+  const bool rfOk = BoardControl::enableRfPath(kPhysicalAntennaPath);
+  g_physicalReady = rfOk && g_physicalCs.begin(config);
+  Serial.print("physical follow-up init: disconnect=");
+  Serial.print(disconnected ? 1 : 0);
+  Serial.print(" rf=");
+  Serial.print(rfOk ? 1 : 0);
+  Serial.print(" raw=");
+  Serial.print(g_physicalReady ? 1 : 0);
+  Serial.print("\r\n");
+  if (!g_physicalReady) {
+    g_physicalFailed = true;
+  }
+  return g_physicalReady;
+}
+
+static void runPhysicalFollowup() {
+  if (g_physicalDone || g_physicalFailed) {
+    delay(100);
+    return;
+  }
+  if (!g_physicalReady) {
+    if (!beginPhysicalFollowup()) {
+      Serial.print("cs_ll_physical_followup=FAIL reason=init\r\n");
+    }
+    return;
+  }
+
+  uint8_t validChannels = 0U;
+  for (uint8_t order = 0U; order < kPhysicalChannelCount; ++order) {
+    const uint8_t channel = physicalSweepChannelAt(order);
+    BleCsChannelMeasurement measurement{};
+    const bool ok = g_physicalCs.measureChannel(channel, g_physicalSequence++,
+                                                &measurement);
+    g_physicalMeasurements[order] = measurement;
+    if (ok && measurement.valid) {
+      ++validChannels;
+    }
+    delayMicroseconds(120U);
+  }
+
+  ++g_physicalSweepCount;
+  g_physicalValidChannels = validChannels;
+
+  BleCsEstimate rawEstimate{};
+  const bool rawEstimateValid =
+      BleChannelSoundingRadio::estimateDistancePhaseSlope(
+          g_physicalMeasurements, kPhysicalChannelCount, &rawEstimate);
+
+  BleCsSubeventResultHeader header{};
+  header.connHandle = kCsConnHandle;
+  header.configId = 1U;
+  header.procedureCounter =
+      static_cast<uint16_t>(g_csHost.sessionState().completedProcedureCounter + 1U);
+  if (header.procedureCounter == 0U) {
+    header.procedureCounter = 1U;
+  }
+  header.numAntennaPaths = 1U;
+
+  const bool hostOk =
+      g_csHost.consumeMode2ResultsFromMeasurements(
+          g_physicalMeasurements, kPhysicalChannelCount, header,
+          g_physicalLocalStepData, sizeof(g_physicalLocalStepData),
+          g_physicalPeerStepData, sizeof(g_physicalPeerStepData)) &&
+      g_csHost.estimateValid();
+  const uint16_t localSteps =
+      hostOk ? g_csHost.completedLocalResult().header.numStepsReported : 0U;
+  const uint16_t peerSteps =
+      hostOk ? g_csHost.completedPeerResult().header.numStepsReported : 0U;
+
+  if (validChannels >= kPhysicalMinValidChannels && rawEstimateValid && hostOk) {
+    g_physicalDone = true;
+    Serial.print("cs_ll_physical_followup=PASS sweeps=");
+    Serial.print(g_physicalSweepCount);
+    Serial.print(" valid_channels=");
+    Serial.print(validChannels);
+    Serial.print(" raw_est=");
+    Serial.print(rawEstimateValid ? 1 : 0);
+    printDistanceField(" raw_m=", rawEstimate.phaseSlopeDistanceMeters);
+    Serial.print(" host_est=");
+    Serial.print(g_csHost.estimateValid() ? 1 : 0);
+    Serial.print(" host_steps=");
+    Serial.print(localSteps);
+    Serial.print('/');
+    Serial.print(peerSteps);
+    printDistanceField(" host_m=",
+                       g_csHost.sessionState().estimate.phaseSlopeDistanceMeters);
+    Serial.print(" proc=");
+    Serial.print(g_csHost.sessionState().completedProcedureCounter);
+    Serial.print("\r\n");
+    return;
+  }
+
+  Serial.print("physical debug sweeps=");
+  Serial.print(g_physicalSweepCount);
+  Serial.print(" valid_channels=");
+  Serial.print(validChannels);
+  Serial.print(" raw_est=");
+  Serial.print(rawEstimateValid ? 1 : 0);
+  Serial.print(" host_est=");
+  Serial.print(hostOk ? 1 : 0);
+  Serial.print("\r\n");
+
+  if (g_physicalSweepCount >= kPhysicalMaxSweeps) {
+    g_physicalFailed = true;
+    Serial.print("cs_ll_physical_followup=FAIL reason=sweep valid_channels=");
+    Serial.print(validChannels);
+    Serial.print(" raw_est=");
+    Serial.print(rawEstimateValid ? 1 : 0);
+    Serial.print(" host_est=");
+    Serial.print(hostOk ? 1 : 0);
+    Serial.print("\r\n");
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -345,6 +524,11 @@ void setup() {
 }
 
 void loop() {
+  if (g_physicalStarted) {
+    runPhysicalFollowup();
+    return;
+  }
+
   if (!g_ble.isConnected()) {
     if (g_wasConnected) {
       g_wasConnected = false;
@@ -438,6 +622,7 @@ void loop() {
       Serial.print(" est=");
       Serial.print(g_bridgeTracker.estimateValid ? 1 : 0);
       Serial.print("\r\n");
+      (void)beginPhysicalFollowup();
     }
 
     if (!poll.eventStarted) {

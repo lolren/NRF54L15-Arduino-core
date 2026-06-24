@@ -498,12 +498,17 @@ VPR inject op=0x30 prev=3 stage=5
 VPR inject op=0x33 prev=5 stage=6
 VPR inject op=0x35 prev=6 stage=0
 cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
+cs_ll_physical_followup=PASS sweeps=3 valid_channels=18 raw_est=1 raw_m=0.4320 host_est=1 host_steps=18/18 host_m=0.4108 proc=4
 ```
 
 This proves the current CPUAPP BLE LL-control transport can move CS control
 payloads over a real connection, that the VPR peer state machine can consume
 the received peer PDUs, and that the normal host workflow can reach ready state
 and publish local/peer procedure results after the over-air `CS_START`.
+The follow-up line proves the same two-board run can then switch to physical
+raw RADIO CS and feed real measurement data through the controller-host Mode 2
+result ingestion path. That is still a staged handoff after disconnect, not a
+true in-connection CS subevent scheduler.
 
 Regression command:
 
@@ -529,8 +534,11 @@ central `/dev/ttyACM1` / UID `761FDE87`, peripheral `/dev/ttyACM2` / UID
    sketch loop calling the helper.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling.
-4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps
-   and IQ, then feed real result data into the existing host reassembler.
+4. **Physical CS subevents inside the connected procedure** — the raw RADIO
+   tone exchange and real result ingestion are now hardware-tested as a
+   post-LL-control follow-up, but production parity still requires moving that
+   physical sweep into the negotiated connected procedure instead of
+   disconnecting first.
 
 ### Implementation steps (after hardware access):
 
@@ -559,6 +567,10 @@ VPR/controller workflow:
   workflow. The script requires both `std_est=1` and `host_est=1`, so the same
   over-air measurements must pass through the standalone estimator and the
   controller-host measurement ingress path.
+- Use `scripts/test_cs_ll_workflow_bridge.sh` as the connected-workflow handoff
+  baseline. It now requires `cs_ll_workflow_bridge=PASS` and
+  `cs_ll_physical_followup=PASS`, proving LL-control negotiation and real
+  physical measurement host-ingress in one two-board run.
 - Feed completed local/peer result objects into the host through
   `consumeCompletedResult()` instead of wrapping physical result data as
   synthetic HCI event bytes.
