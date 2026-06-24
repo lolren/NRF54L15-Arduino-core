@@ -7502,6 +7502,62 @@ bool BleChannelSoundingRadio::measureChannel(uint8_t channelIndex,
   return false;
 }
 
+uint8_t BleChannelSoundingRadio::centeredDataChannelAt(uint8_t order,
+                                                       uint8_t channelCount) {
+  if (channelCount == 0U || channelCount > kMaxCsChannels || order >= channelCount) {
+    return 0xFFU;
+  }
+
+  const uint8_t center = 18U;
+  if (order == 0U) {
+    return center;
+  }
+
+  const uint8_t step = static_cast<uint8_t>((order + 1U) / 2U);
+  const uint8_t channel = ((order & 0x1U) != 0U)
+                              ? static_cast<uint8_t>(center - step)
+                              : static_cast<uint8_t>(center + step);
+  return validDataChannel(channel) ? channel : 0xFFU;
+}
+
+bool BleChannelSoundingRadio::measureMode2Sweep(
+    uint8_t channelCount,
+    uint8_t* inOutSequence,
+    BleCsChannelMeasurement* outMeasurements,
+    uint8_t* outValidChannels,
+    uint16_t interChannelGuardUs) {
+  if (!initialized_ || inOutSequence == nullptr || outMeasurements == nullptr ||
+      channelCount == 0U || channelCount > kMaxCsChannels) {
+    if (outValidChannels != nullptr) {
+      *outValidChannels = 0U;
+    }
+    return false;
+  }
+
+  uint8_t validChannels = 0U;
+  for (uint8_t order = 0U; order < channelCount; ++order) {
+    const uint8_t channel = centeredDataChannelAt(order, channelCount);
+    BleCsChannelMeasurement measurement{};
+    bool ok = false;
+    if (validDataChannel(channel)) {
+      ok = measureChannel(channel, *inOutSequence, &measurement);
+      *inOutSequence = static_cast<uint8_t>(*inOutSequence + 1U);
+    }
+    outMeasurements[order] = measurement;
+    if (ok && measurement.valid) {
+      ++validChannels;
+    }
+    if (interChannelGuardUs > 0U) {
+      delayMicroseconds(interChannelGuardUs);
+    }
+  }
+
+  if (outValidChannels != nullptr) {
+    *outValidChannels = validChannels;
+  }
+  return validChannels > 0U;
+}
+
 bool BleChannelSoundingRadio::listenAndReflectOnce(uint32_t controlListenWindowUs) {
   if (!initialized_) {
     return false;

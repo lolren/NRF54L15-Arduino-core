@@ -920,8 +920,15 @@ class BleChannelSoundingRadio {
 
   bool measureChannel(uint8_t channelIndex, uint8_t sequence,
                       BleCsChannelMeasurement* outMeasurement);
+  bool measureMode2Sweep(uint8_t channelCount,
+                         uint8_t* inOutSequence,
+                         BleCsChannelMeasurement* outMeasurements,
+                         uint8_t* outValidChannels = nullptr,
+                         uint16_t interChannelGuardUs = 120U);
   bool listenAndReflectOnce(uint32_t controlListenWindowUs = 0U);
 
+  static uint8_t centeredDataChannelAt(uint8_t order,
+                                       uint8_t channelCount = 37U);
   static float combinedPhaseRad(const BleCsChannelMeasurement& measurement);
   static bool rttDistanceMeters(const BleCsChannelMeasurement& measurement,
                                 float* outDistanceMeters);

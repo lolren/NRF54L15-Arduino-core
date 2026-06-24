@@ -571,6 +571,10 @@ VPR/controller workflow:
   baseline. It now requires `cs_ll_workflow_bridge=PASS` and
   `cs_ll_physical_followup=PASS`, proving LL-control negotiation and real
   physical measurement host-ingress in one two-board run.
+- `BleChannelSoundingRadio::measureMode2Sweep()` is the shared raw RADIO
+  centre-out sweep primitive used by the workflow follow-up; future connected
+  scheduler work should call through this primitive or move its internals into
+  the controller/VPR timing path rather than open-coding another sweep loop.
 - Feed completed local/peer result objects into the host through
   `consumeCompletedResult()` instead of wrapping physical result data as
   synthetic HCI event bytes.

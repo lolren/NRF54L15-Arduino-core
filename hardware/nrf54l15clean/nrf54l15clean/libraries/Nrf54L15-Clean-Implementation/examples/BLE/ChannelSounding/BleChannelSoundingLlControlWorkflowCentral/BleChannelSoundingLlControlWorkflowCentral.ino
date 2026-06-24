@@ -129,19 +129,6 @@ static const char* phaseName(BleCsControllerWorkflowPhase phase) {
   return BleCsControllerWorkflow::phaseName(phase);
 }
 
-static uint8_t physicalSweepChannelAt(uint8_t order) {
-  const uint8_t center = 18U;
-  if (order == 0U) {
-    return center;
-  }
-
-  const uint8_t step = static_cast<uint8_t>((order + 1U) / 2U);
-  if ((order & 0x1U) != 0U) {
-    return static_cast<uint8_t>(center - step);
-  }
-  return static_cast<uint8_t>(center + step);
-}
-
 static void updateWorkflowMask() {
   const BleCsControllerWorkflowState& wf = g_csHost.workflowState();
   if (wf.remoteCapabilitiesValid) markBit(&g_workflowMask, kBitRemoteCaps);
@@ -417,17 +404,10 @@ static void runPhysicalFollowup() {
   }
 
   uint8_t validChannels = 0U;
-  for (uint8_t order = 0U; order < kPhysicalChannelCount; ++order) {
-    const uint8_t channel = physicalSweepChannelAt(order);
-    BleCsChannelMeasurement measurement{};
-    const bool ok = g_physicalCs.measureChannel(channel, g_physicalSequence++,
-                                                &measurement);
-    g_physicalMeasurements[order] = measurement;
-    if (ok && measurement.valid) {
-      ++validChannels;
-    }
-    delayMicroseconds(120U);
-  }
+  (void)g_physicalCs.measureMode2Sweep(kPhysicalChannelCount,
+                                       &g_physicalSequence,
+                                       g_physicalMeasurements,
+                                       &validChannels);
 
   ++g_physicalSweepCount;
   g_physicalValidChannels = validChannels;
