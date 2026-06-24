@@ -44,6 +44,7 @@ static bool g_failed = false;
 static uint32_t g_connectAttempts = 0U;
 static uint32_t g_linkEvents = 0U;
 static uint32_t g_txQueued = 0U;
+static uint32_t g_vprPduQueued = 0U;
 static uint32_t g_peerPdusInjected = 0U;
 static uint32_t g_directCommands = 0U;
 static uint32_t g_lastStatusMs = 0U;
@@ -154,6 +155,8 @@ static void printStatus(const char* prefix) {
   Serial.print(g_linkEvents);
   Serial.print(" txq=");
   Serial.print(g_txQueued);
+  Serial.print(" vpr_pdu=");
+  Serial.print(g_vprPduQueued);
   Serial.print(" inj=");
   Serial.print(g_peerPdusInjected);
   Serial.print(" direct=");
@@ -268,9 +271,14 @@ static void handleBridgeServiceResult(
 
   if (result.initiatorPduQueued) {
     ++g_txQueued;
+    if (result.initiatorPduSourceVpr) {
+      ++g_vprPduQueued;
+    }
     markTxOpcode(result.txOpcode);
     Serial.print("queued op=");
     printOpcode(result.txOpcode);
+    Serial.print(" src=");
+    Serial.print(result.initiatorPduSourceVpr ? "vpr" : "host");
     Serial.print("\r\n");
   }
 }
@@ -296,6 +304,7 @@ static void resetBridgeState() {
   g_csHost.reset();
   g_linkEvents = 0U;
   g_txQueued = 0U;
+  g_vprPduQueued = 0U;
   g_peerPdusInjected = 0U;
   g_directCommands = 0U;
   g_workflowMask = 0U;
@@ -414,6 +423,8 @@ void loop() {
       Serial.print(g_bridgeTracker.txMask, HEX);
       Serial.print(" rx=0x");
       Serial.print(g_bridgeTracker.rxMask, HEX);
+      Serial.print(" vpr_pdu=");
+      Serial.print(g_bridgeTracker.vprPduQueued);
       Serial.print(" injected=");
       Serial.print(g_bridgeTracker.peerPdusConsumed);
       Serial.print(" direct=");

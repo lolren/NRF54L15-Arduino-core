@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-█████████████████████████████████████████░░░░░  85%
+██████████████████████████████████████████░░░░  87%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -29,6 +29,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Host-owned initiator LL PDU queue seam | ✅ Two-board hardware-verified |
 | ██ | Host-owned initiator LL bridge service | ✅ Two-board hardware-verified |
 | ██ | Host-owned initiator LL bridge poll helper | ✅ Two-board hardware-verified |
+| ██ | VPR-owned initiator LL PDU source | ✅ Two-board hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
 | ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
@@ -411,7 +412,7 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-████████████░░░░ 75% Raw CS LL-control workflow bridge hardware-verified
+█████████████░░░ 80% Raw CS LL-control workflow bridge hardware-verified
 ```
 
 ### Completed in this slice
@@ -464,6 +465,13 @@ surface now intentionally avoids that failure mode by draining responses.
   the verified workflow mask (`0x7F`), initiator TX mask (`0x7`), peer RX mask
   (`0x3F`), and local/peer/procedure/estimate completion criteria used by the
   two-board bridge regression.
+- Added VPR vendor command `0xFCEA`, which reads the pending local initiator
+  CS LL-control PDU directly from the VPR/controller peer-exchange state.
+  `BleCsControllerVprHost::buildPendingInitiatorLlControlPdu()` now prefers
+  this VPR-provided PDU and falls back to the older CPUAPP stage-based builder
+  if the command is unavailable. This moves CS_REQ, CS_SEC_REQ, and CS_PROC_REQ
+  source ownership out of sketch/CPUAPP inference and into the controller-side
+  workflow while preserving the existing BLE queue transport seam.
 - Tightened the VPR peer-exchange timing so connected-procedure result packets
   are published only after over-air `CS_START` moves the peer exchange to
   `PROCEDURE_ACTIVE`.
@@ -486,7 +494,7 @@ Workflow central /dev/ttyACM1:
 VPR inject op=0x30 prev=3 stage=5
 VPR inject op=0x33 prev=5 stage=6
 VPR inject op=0x35 prev=6 stage=0
-cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F injected=6 direct=3 local=1 peer=1 proc=1 est=1
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
 ```
 
 This proves the current CPUAPP BLE LL-control transport can move CS control
@@ -508,8 +516,9 @@ central `/dev/ttyACM1` / UID `761FDE87`, peripheral `/dev/ttyACM2` / UID
 ### Still required
 
 1. **VPR/RADIO ownership** — the VPR still does not own the actual RADIO
-   subevent procedure. The current bridge receives PDUs on CPUAPP and injects
-   them into VPR.
+   subevent procedure. Local initiator LL-control PDU selection is now
+   VPR-owned, but the current bridge still queues packets through CPUAPP BLE
+   transport and receives peer PDUs on CPUAPP before injecting them into VPR.
 2. **Automatic controller-owned scheduling** — packet construction, host-owned
    initiator queueing, peer-event consumption, direct-HCI bridge service, and
    one-event polling are now shared and workflow-tested, but production CS still
@@ -522,21 +531,20 @@ central `/dev/ttyACM1` / UID `761FDE87`, peripheral `/dev/ttyACM2` / UID
 
 ### Implementation steps (after hardware access):
 
-**Step 1** — Move local CS LL-control PDU source into the VPR/controller workflow:
-- Keep the existing CPUAPP queue as the transport sink.
-- Reuse the new `bleCsBuildLlControl*()` builders instead of reintroducing
-  sketch-local byte arrays.
-- Use `BleCsControllerVprHost::queuePendingInitiatorLlControlPdu()` to emit
-  CS_REQ/SEC_REQ/PROC_REQ packets from the current peer-exchange stage through
-  the CS host API.
-- Use `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()` for received
-  CS_RSP/CFG/SEC_RSP/PROC_RSP/START/ABORT events.
-- Use `BleCsControllerVprHost::pollInitiatorLlControlBridge()` for direct-HCI
-  bridge diagnostics and `loopOnceWithInitiatorLlControlBridge()` for
-  production-style stream workflow callers. Move the latter into the normal
-  connected-CS workflow once the production scheduling seam is ready.
-- Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression
-  harness.
+**Step 1 — Complete** — Move local CS LL-control PDU source into the
+VPR/controller workflow:
+- `0xFCEA` returns the VPR/controller-selected pending local PDU.
+- `queuePendingInitiatorLlControlPdu()` keeps the existing CPUAPP queue as the
+  transport sink, but the PDU source is now VPR-owned when the bundled image
+  supports the command.
+- `scripts/test_cs_ll_workflow_bridge.sh` now requires `vpr_pdu=3`, proving
+  the workflow used the VPR readback path for CS_REQ, CS_SEC_REQ, and
+  CS_PROC_REQ rather than silently passing through the fallback builder.
+- `consumePeerLlControlPduFromEvent()`, `pollInitiatorLlControlBridge()`, and
+  `loopOnceWithInitiatorLlControlBridge()` remain the current CPUAPP bridge
+  service seams.
+- `BleChannelSoundingLlControlCentral/Peripheral` and
+  `BleChannelSoundingLlControlWorkflowCentral` remain the regression harness.
 
 **Step 2** — VPR RADIO initialization:
 - Configure `NRF_RADIO` for CS tone exchange

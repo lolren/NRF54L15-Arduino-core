@@ -3367,6 +3367,49 @@ bool parseVprPeerExchangeResponse(const uint8_t* packet,
   return true;
 }
 
+bool parseVprPendingLocalLlControlPduResponse(
+    const uint8_t* packet,
+    size_t packetLen,
+    uint16_t expectedOpcode,
+    BleCsLlControlPdu* outPdu,
+    BleCsVprPeerExchangeState* outState) {
+  if (outPdu == nullptr || outState == nullptr) {
+    return false;
+  }
+  *outPdu = BleCsLlControlPdu{};
+  *outState = BleCsVprPeerExchangeState{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 10U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outState->valid = true;
+  outState->status = params[0];
+  outState->previousStage = params[1];
+  outState->currentStage = params[2];
+  outState->deadlineHeartbeat = readLe32(params + 3U);
+  outState->procedureAbortReason = params[7];
+  outState->subeventAbortReason = params[8];
+
+  const uint8_t pduLen = params[9];
+  if (outState->status != 0U || pduLen == 0U ||
+      static_cast<size_t>(10U + pduLen) > completeEvent.returnParamsLen ||
+      pduLen > sizeof(outPdu->bytes) ||
+      !bleCsLlControlPduIsValid(params + 10U, pduLen)) {
+    return false;
+  }
+
+  memcpy(outPdu->bytes, params + 10U, pduLen);
+  outPdu->length = pduLen;
+  return true;
+}
+
 bool BleCsControllerSession::begin(uint16_t connHandle,
                                    const BleCsControllerSessionConfig& config) {
   reset();
@@ -4637,7 +4680,8 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
   bool resetRunStateAfter = false;
   const bool peerExchangeDebugCommand =
       opcode == kBleCsVprHciOpPeerPduInject ||
-      opcode == kBleCsVprHciOpPeerStageRead;
+      opcode == kBleCsVprHciOpPeerStageRead ||
+      opcode == kBleCsVprHciOpPendingLocalPduRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
     case kBleCsHciOpSetProcedureParameters:
@@ -4748,11 +4792,44 @@ bool BleCsControllerVprHost::directReadPeerExchangeStateForTest(
                                       kBleCsVprHciOpPeerStageRead, outState);
 }
 
-bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
+bool BleCsControllerVprHost::directReadPendingLocalLlControlPduForTest(
     BleCsLlControlPdu* outPdu,
     BleCsVprPeerExchangeState* outState) {
+  if (outPdu == nullptr || outState == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpPendingLocalPduRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  return parseVprPendingLocalLlControlPduResponse(
+      response, responseLen, kBleCsVprHciOpPendingLocalPduRead, outPdu,
+      outState);
+}
+
+bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
+    BleCsLlControlPdu* outPdu,
+    BleCsVprPeerExchangeState* outState,
+    bool* outVprOwned) {
   if (outPdu == nullptr) {
     return false;
+  }
+  if (outVprOwned != nullptr) {
+    *outVprOwned = false;
+  }
+
+  BleCsVprPeerExchangeState vprOwnedState{};
+  if (directReadPendingLocalLlControlPduForTest(outPdu, &vprOwnedState)) {
+    if (outState != nullptr) {
+      *outState = vprOwnedState;
+    }
+    if (outVprOwned != nullptr) {
+      *outVprOwned = true;
+    }
+    return true;
   }
 
   BleCsVprPeerExchangeState state{};
@@ -4816,15 +4893,20 @@ bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
 bool BleCsControllerVprHost::queuePendingInitiatorLlControlPdu(
     BleRadio& radio,
     BleCsVprPeerExchangeState* outState,
-    BleCsLlControlPdu* outPdu) {
+    BleCsLlControlPdu* outPdu,
+    bool* outVprOwned) {
   BleCsLlControlPdu pdu{};
   BleCsVprPeerExchangeState state{};
-  if (!buildPendingInitiatorLlControlPdu(&pdu, &state)) {
+  bool vprOwned = false;
+  if (!buildPendingInitiatorLlControlPdu(&pdu, &state, &vprOwned)) {
     if (outState != nullptr) {
       *outState = state;
     }
     if (outPdu != nullptr) {
       *outPdu = pdu;
+    }
+    if (outVprOwned != nullptr) {
+      *outVprOwned = false;
     }
     return false;
   }
@@ -4834,6 +4916,9 @@ bool BleCsControllerVprHost::queuePendingInitiatorLlControlPdu(
   }
   if (outPdu != nullptr) {
     *outPdu = pdu;
+  }
+  if (outVprOwned != nullptr) {
+    *outVprOwned = vprOwned;
   }
   return radio.queueChannelSoundingLlControlPdu(pdu.data(), pdu.length);
 }
@@ -4917,7 +5002,8 @@ bool BleCsControllerVprHost::queuePendingInitiatorLlControlPduIfNeeded(
   }
 
   BleCsLlControlPdu pdu{};
-  if (!queuePendingInitiatorLlControlPdu(radio, &state, &pdu)) {
+  bool vprOwned = false;
+  if (!queuePendingInitiatorLlControlPdu(radio, &state, &pdu, &vprOwned)) {
     if (result != nullptr) {
       result->state = state;
     }
@@ -4932,6 +5018,7 @@ bool BleCsControllerVprHost::queuePendingInitiatorLlControlPduIfNeeded(
 
   if (result != nullptr) {
     result->initiatorPduQueued = true;
+    result->initiatorPduSourceVpr = vprOwned;
     result->state = state;
     result->peerState = state;
     result->txOpcode = pdu.length > 0U ? pdu.bytes[0] : 0U;
@@ -5275,6 +5362,9 @@ static void bleCsBridgeTrackerUpdateService(
   }
   if (service.initiatorPduQueued) {
     ++tracker->txQueued;
+    if (service.initiatorPduSourceVpr) {
+      ++tracker->vprPduQueued;
+    }
     tracker->lastTxOpcode = service.txOpcode;
     bleCsBridgeTrackerMarkTx(tracker, service.txOpcode);
   }

@@ -989,6 +989,7 @@ BLE examples:
   - Injects received peer CS LL-control PDUs into the VPR peer-exchange state machine and reports the bridge pass/fail status.
   - The pair uses the public `bleCsBuildLlControl*()` helpers from `ble_channel_sounding.h` for raw CS LL-control packet construction.
   - The central uses `BleCsControllerVprHost::queuePendingInitiatorLlControlPdu()` so local CS_REQ/CS_SEC_REQ/CS_PROC_REQ selection and queueing follows the VPR peer-exchange stage through the CS host API.
+  - With the bundled VPR image, that helper reads the pending local initiator PDU through vendor command `0xFCEA`, so the VPR/controller side now owns local PDU selection while CPUAPP remains the temporary BLE queue sink.
   - The central uses `BleCsControllerVprHost::serviceInitiatorLlControlBridge()` so peer PDU consumption, direct-HCI transitions, and next-PDU queueing live behind the CS host API.
   - The central uses `BleCsControllerVprHost::pollInitiatorLlControlBridge()` so duplicate-safe initiator queueing, one BLE connection-event poll, and peer-PDU service are owned by the CS host API instead of the sketch loop.
   - Production-style stream workflow callers can use `pollWithInitiatorLlControlBridge()` or `loopOnceWithInitiatorLlControlBridge()` to combine normal host/VPR stream polling with one real BLE LL-control bridge poll.
@@ -996,7 +997,7 @@ BLE examples:
 - `examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral/BleChannelSoundingLlControlWorkflowCentral.ino`
   - Two-board workflow central for raw Channel Sounding LL-control transport.
   - Uses `BleCsControllerVprHost::pumpInitiatorLlControlWorkflowBridge()` and `BleCsLlControlBridgeWorkflowTracker` so normal CS host workflow progress, over-air CS LL-control TX/RX, and completed local/peer result publication are tracked by the CS library instead of open-coded pass/fail masks in the sketch.
-  - Expected PASS line: `cs_ll_workflow_bridge=PASS ... rx=0x3F ... local=1 peer=1 proc=1 est=1`.
+  - Expected PASS line: `cs_ll_workflow_bridge=PASS ... rx=0x3F vpr_pdu=3 ... local=1 peer=1 proc=1 est=1`.
 - `scripts/test_cs_ll_workflow_bridge.sh`
   - Local regression harness for the XIAO pair.
   - Compiles/uploads the LL-control peripheral and workflow central, resets both probes, captures serial, and fails unless the full workflow PASS line is observed.

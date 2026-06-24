@@ -354,6 +354,15 @@ What the pair verifies:
   `BleCsLlControlBridgeWorkflowTracker` to verify that the normal host workflow
   reaches ready state and publishes local/peer procedure results after over-air
   `CS_START`.
+- The VPR/controller image now exposes vendor command `0xFCEA` to return the
+  pending local initiator CS LL-control PDU selected from its peer-exchange
+  state. `BleCsControllerVprHost::buildPendingInitiatorLlControlPdu()` prefers
+  that VPR-provided PDU and only falls back to CPUAPP stage-based construction
+  for older images or invalid responses. This removes the local CS_REQ,
+  CS_SEC_REQ, and CS_PROC_REQ selection decision from sketch logic while
+  retaining the existing CPUAPP BLE queue as the temporary transport sink.
+- The two-board regression now requires `vpr_pdu=3`, confirming all three local
+  initiator PDUs in the workflow came from the VPR readback path.
 - The VPR now gates connected-procedure result publication so local/peer results
   are not emitted before peer exchange reaches `PROCEDURE_ACTIVE`.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted

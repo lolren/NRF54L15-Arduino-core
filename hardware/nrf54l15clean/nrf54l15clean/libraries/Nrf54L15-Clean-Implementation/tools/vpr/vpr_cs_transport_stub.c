@@ -43,6 +43,7 @@
 #define BLE_CS_MAX_TRACKED_CONFIG_IDS (BLE_CS_MAX_CONFIG_SLOTS + 1U)
 #define VPR_HCI_OP_VENDOR_BLE_CS_PEER_PDU_INJECT 0xFCE8U
 #define VPR_HCI_OP_VENDOR_BLE_CS_PEER_STAGE_READ 0xFCE9U
+#define VPR_HCI_OP_VENDOR_BLE_CS_PENDING_LOCAL_PDU_READ 0xFCEAU
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -3864,6 +3865,96 @@ static size_t build_vendor_ble_cs_peer_exchange_payload(uint8_t *payload,
   return 9U;
 }
 
+static size_t build_local_initiator_ll_control_pdu(uint8_t *payload,
+                                                   size_t max_len) {
+  if (payload == NULL) {
+    return 0U;
+  }
+
+  switch (g_cs_peer_exchange_stage) {
+    case VPR_CS_PEER_STAGE_AWAITING_CS_RSP: {
+      if (max_len < VPR_CS_LL_REQ_RSP_PDU_LEN) {
+        return 0U;
+      }
+      vpr_cs_ll_pdu_req_rsp_t pdu = {
+          VPR_CS_LL_CS_REQ,
+          VPR_CS_LL_REQ_RSP_PAYLOAD_LEN,
+          1U,
+          g_cs_config_id,
+      };
+      size_t out_len = 0U;
+      return vpr_cs_ll_encode_pdu(&pdu, sizeof(pdu), payload, &out_len) ? out_len : 0U;
+    }
+
+    case VPR_CS_PEER_STAGE_AWAITING_SEC_RSP: {
+      if (max_len < VPR_CS_LL_SEC_PDU_LEN) {
+        return 0U;
+      }
+      vpr_cs_ll_pdu_sec_req_rsp_t pdu = {
+          VPR_CS_LL_CS_SEC_REQ,
+          VPR_CS_LL_SEC_PAYLOAD_LEN,
+          g_cs_config_id,
+      };
+      size_t out_len = 0U;
+      return vpr_cs_ll_encode_pdu(&pdu, sizeof(pdu), payload, &out_len) ? out_len : 0U;
+    }
+
+    case VPR_CS_PEER_STAGE_AWAITING_PROC_RSP: {
+      if (max_len < VPR_CS_LL_PROC_PDU_LEN) {
+        return 0U;
+      }
+      vpr_cs_ll_pdu_proc_req_rsp_t pdu = {
+          VPR_CS_LL_CS_PROC_REQ,
+          VPR_CS_LL_PROC_PAYLOAD_LEN,
+          g_cs_config_id,
+          {0},
+      };
+      write_le16(&pdu.params[0], g_cs_max_procedure_len);
+      write_le16(&pdu.params[2], g_cs_min_procedure_interval);
+      write_le16(&pdu.params[4], g_cs_max_procedure_interval);
+      write_le16(&pdu.params[6], g_cs_max_procedure_count);
+      write_le24(&pdu.params[8], g_cs_min_subevent_len);
+      pdu.params[11] = (uint8_t)((g_cs_min_subevent_len >> 24U) & 0xFFU);
+      write_le24(&pdu.params[12], g_cs_max_subevent_len);
+      pdu.params[15] = (uint8_t)((g_cs_max_subevent_len >> 24U) & 0xFFU);
+      pdu.params[16] = g_cs_phy;
+      pdu.params[17] = (uint8_t)g_cs_tx_power_delta;
+      size_t out_len = 0U;
+      return vpr_cs_ll_encode_pdu(&pdu, sizeof(pdu), payload, &out_len) ? out_len : 0U;
+    }
+
+    default:
+      return 0U;
+  }
+}
+
+static size_t build_vendor_ble_cs_pending_local_pdu_complete_payload(uint8_t *payload,
+                                                                    size_t max_len) {
+  const uint8_t previous_stage = g_cs_peer_exchange_stage;
+  uint8_t status = command_layout_is_exact(0U)
+                       ? BLE_CS_HCI_STATUS_SUCCESS
+                       : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  size_t header_len = build_vendor_ble_cs_peer_exchange_payload(
+      payload, max_len, status, previous_stage);
+  if (header_len == 0U || max_len < (header_len + 1U)) {
+    return 0U;
+  }
+
+  payload[header_len] = 0U;
+  if (status != BLE_CS_HCI_STATUS_SUCCESS) {
+    return header_len + 1U;
+  }
+
+  size_t pdu_len = build_local_initiator_ll_control_pdu(
+      &payload[header_len + 1U], max_len - header_len - 1U);
+  if (pdu_len == 0U) {
+    return header_len + 1U;
+  }
+
+  payload[header_len] = (uint8_t)pdu_len;
+  return header_len + 1U + pdu_len;
+}
+
 static uint8_t validate_peer_pdu_inject_command(size_t *out_pdu_len) {
   if (out_pdu_len == NULL) {
     return BLE_CS_HCI_STATUS_INVALID_PARAMS;
@@ -4346,6 +4437,21 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
     case VPR_HCI_OP_VENDOR_BLE_CS_PEER_STAGE_READ: {
       size_t len =
           build_vendor_ble_cs_peer_stage_read_complete_payload(payload, sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_PENDING_LOCAL_PDU_READ: {
+      size_t len =
+          build_vendor_ble_cs_pending_local_pdu_complete_payload(payload, sizeof(payload));
       if (len == 0U) {
         return false;
       }

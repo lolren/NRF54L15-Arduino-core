@@ -200,7 +200,7 @@ Examples:
 | **Zigbee** | ~40K | ⚠️ Good | Partial — HA/Zigbee2MQTT device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
 | **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
-| **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2 and LL-control workflow bridge work on 2 boards; physical RF scheduler still staged |
+| **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2, VPR-owned local LL PDU selection, and LL-control workflow bridge work on 2 boards; physical RF scheduler still staged |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes — all nPM1300 features, GPIO bit‑bang I²C |
 
 ---

@@ -51,6 +51,7 @@ constexpr uint16_t kBleCsHciOpTestEnd = 0x2096U;
 constexpr uint16_t kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2 = 0x20A6U;
 constexpr uint16_t kBleCsVprHciOpPeerPduInject = 0xFCE8U;
 constexpr uint16_t kBleCsVprHciOpPeerStageRead = 0xFCE9U;
+constexpr uint16_t kBleCsVprHciOpPendingLocalPduRead = 0xFCEAU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
@@ -536,6 +537,7 @@ class BleCsControllerVprHost;
 struct BleCsLlControlBridgeServiceResult {
   bool peerPduConsumed = false;
   bool initiatorPduQueued = false;
+  bool initiatorPduSourceVpr = false;
   bool directCommandSent = false;
   bool exchangeComplete = false;
   uint8_t rxOpcode = 0U;
@@ -591,6 +593,7 @@ struct BleCsLlControlBridgeWorkflowTracker {
   uint32_t rxMask = 0U;
   uint32_t linkEvents = 0U;
   uint32_t txQueued = 0U;
+  uint32_t vprPduQueued = 0U;
   uint32_t peerPdusConsumed = 0U;
   uint32_t directCommands = 0U;
   uint16_t polls = 0U;
@@ -1826,13 +1829,18 @@ class BleCsControllerVprHost {
                                   size_t pduLen,
                                   BleCsVprPeerExchangeState* outState);
   bool directReadPeerExchangeStateForTest(BleCsVprPeerExchangeState* outState);
+  bool directReadPendingLocalLlControlPduForTest(
+      BleCsLlControlPdu* outPdu,
+      BleCsVprPeerExchangeState* outState);
   bool buildPendingInitiatorLlControlPdu(
       BleCsLlControlPdu* outPdu,
-      BleCsVprPeerExchangeState* outState = nullptr);
+      BleCsVprPeerExchangeState* outState = nullptr,
+      bool* outVprOwned = nullptr);
   bool queuePendingInitiatorLlControlPdu(
       BleRadio& radio,
       BleCsVprPeerExchangeState* outState = nullptr,
-      BleCsLlControlPdu* outPdu = nullptr);
+      BleCsLlControlPdu* outPdu = nullptr,
+      bool* outVprOwned = nullptr);
   bool consumePeerLlControlPdu(const uint8_t* payload,
                                uint8_t length,
                                BleCsVprPeerExchangeState* outState);

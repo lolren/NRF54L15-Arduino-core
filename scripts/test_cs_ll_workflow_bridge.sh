@@ -84,6 +84,7 @@ if ! grep -q "cs_ll_workflow_bridge=PASS" "${central_log}"; then
 fi
 
 if ! grep -q "rx=0x3F" "${central_log}" ||
+   ! grep -q "vpr_pdu=3" "${central_log}" ||
    ! grep -q "local=1 peer=1 proc=1 est=1" "${central_log}"; then
   echo "CS LL workflow bridge PASS was incomplete" >&2
   sed -n '1,220p' "${central_log}" >&2
