@@ -119,6 +119,14 @@ static void printDebug(const char* prefix) {
 }
 
 static bool queuePdu(const uint8_t* payload, uint8_t length, const char* label) {
+  if (!bleCsLlControlPduIsValid(payload, length)) {
+    Serial.print("invalid ");
+    Serial.print(label);
+    Serial.print("\r\n");
+    g_phase = BridgePhase::kFailed;
+    return false;
+  }
+
   if (g_ble.queueChannelSoundingLlControlPdu(payload, length)) {
     ++g_txQueued;
     Serial.print("queued ");
@@ -135,45 +143,32 @@ static bool queuePdu(const uint8_t* payload, uint8_t length, const char* label) 
 }
 
 static bool queueCsReq() {
-  const uint8_t payload[] = {
-      kBleCsLlCtrlReq,
-      0x02U,
-      0x01U,
-      kConfigId,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_REQ");
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlReq(kConfigId, true, &pdu)) {
+    g_phase = BridgePhase::kFailed;
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_REQ");
 }
 
 static bool queueCsSecReq() {
-  const uint8_t payload[] = {
-      kBleCsLlCtrlSecReq,
-      0x01U,
-      kConfigId,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_SEC_REQ");
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlSecurityReq(kConfigId, &pdu)) {
+    g_phase = BridgePhase::kFailed;
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_SEC_REQ");
 }
 
 static bool queueCsProcReq() {
-  uint8_t payload[21] = {
-      kBleCsLlCtrlProcReq,
-      19U,
-      kConfigId,
-  };
-  payload[3] = 0x80U;  // max procedure length, little-endian low byte
-  payload[4] = 0x0CU;
-  payload[5] = 0x18U;  // min interval = 30 ms
-  payload[6] = 0x00U;
-  payload[7] = 0x18U;  // max interval = 30 ms
-  payload[8] = 0x00U;
-  payload[9] = 0x01U;  // max procedure count
-  payload[10] = 0x00U;
-  payload[11] = 0x80U; // min subevent length
-  payload[12] = 0x0CU;
-  payload[15] = 0x80U; // max subevent length
-  payload[16] = 0x0CU;
-  payload[19] = 0x01U; // LE 1M PHY
-  payload[20] = 0x00U; // TX power delta
-  return queuePdu(payload, sizeof(payload), "CS_PROC_REQ");
+  BleCsLlControlProcedureParams params{};
+  params.configId = kConfigId;
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlProcedureReq(params, &pdu)) {
+    g_phase = BridgePhase::kFailed;
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_PROC_REQ");
 }
 
 static bool bootVprPeerBridge() {

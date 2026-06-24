@@ -408,7 +408,7 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-██████░░░░░░░░░░ 38% Raw CS LL-control bridge hardware-verified
+██████░░░░░░░░░░ 40% Raw CS LL-control bridge + reusable PDU builders hardware-verified
 ```
 
 ### Completed in this slice
@@ -424,6 +424,10 @@ surface now intentionally avoids that failure mode by draining responses.
   `CS_RSP`, `CS_CFG`, `CS_SEC_RSP`, `CS_PROC_RSP`, `CS_START`, and `CS_ABORT`.
 - The central now injects those real over-air peer PDUs into the VPR
   peer-exchange state machine through the existing direct peer-PDU test seam.
+- Added public `bleCsBuildLlControl*()` helpers in `ble_channel_sounding.h` for
+  `CS_REQ`, `CS_RSP`, `CS_CFG`, `CS_SEC_REQ/RSP`, `CS_PROC_REQ/RSP`,
+  `CS_START`, `CS_TERMINATE`, and `CS_ABORT`. The two-board diagnostics now use
+  those builders instead of local byte-array copies.
 
 Two-board hardware result:
 
@@ -446,9 +450,9 @@ the received peer PDUs.
 1. **VPR/RADIO ownership** — the VPR still does not own the actual RADIO
    subevent procedure. The current bridge receives PDUs on CPUAPP and injects
    them into VPR.
-2. **Controller-owned local PDU generation** — the central example builds local
-   CS_REQ / CS_SEC_REQ / CS_PROC_REQ in sketch code. Production CS needs the
-   VPR/controller workflow to emit those local LL-control PDUs.
+2. **Controller-owned local PDU emission** — packet construction is now shared,
+   but production CS still needs the VPR/controller workflow to decide which
+   local LL-control PDU to emit for each peer-exchange stage.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling.
 4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps
@@ -458,8 +462,9 @@ the received peer PDUs.
 
 **Step 1** — Move local CS LL-control PDU source into the VPR/controller workflow:
 - Keep the existing CPUAPP queue as the transport sink.
-- Replace sketch-built CS_REQ/SEC_REQ/PROC_REQ packets with VPR-generated
-  packets from the current peer-exchange stage.
+- Reuse the new `bleCsBuildLlControl*()` builders instead of reintroducing
+  sketch-local byte arrays.
+- Emit CS_REQ/SEC_REQ/PROC_REQ packets from the current peer-exchange stage.
 - Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression
   harness.
 
@@ -469,7 +474,8 @@ the received peer PDUs.
 - Configure `TIMER` instances for µs-precision scheduling
 
 **Step 3** — LL Control PDU construction:
-- Use `vpr_cs_ll_control.h` structs to build real CS PDUs
+- Use the public `bleCsBuildLlControl*()` helpers for CPUAPP-side packet
+  construction and keep `vpr_cs_ll_control.h` aligned for VPR-side C code
 - Inject into the BLE data/control path at the right connection-event phase
 - Reuse the test-only `0xFCE8` path as the deterministic validation harness while replacing its source with real received peer PDUs
 

@@ -320,6 +320,9 @@ What the pair verifies:
   `CS_RSP`, `CS_CFG`, `CS_SEC_RSP`, `CS_PROC_RSP`, `CS_START`, and `CS_ABORT`.
 - Both sides use the raw LL-control payload shape:
   `opcode`, `payload_length`, payload bytes.
+- The examples now use the public `bleCsBuildLlControl*()` helper API in
+  `ble_channel_sounding.h`, so local CS LL-control PDU construction is no
+  longer duplicated as ad-hoc byte arrays in sketches.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted
   by `BleChannelSoundingLlControlDebug`.
 - The central injects the received peer PDUs into `BleCsControllerVprHost` and
@@ -353,8 +356,9 @@ Status:
 
 Next required slice:
 
-- Move local CS LL-control PDU generation out of sketch code and into the
-  VPR/controller workflow.
+- Move local CS LL-control PDU emission into the VPR/controller workflow. The
+  packet builders now exist; the workflow still needs to decide when to emit
+  them and hand them to the CPUAPP BLE transport seam.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.

@@ -987,6 +987,7 @@ BLE examples:
 - `examples/BLE/ChannelSounding/BleChannelSoundingLlControlCentral/BleChannelSoundingLlControlCentral.ino`
   - Two-board diagnostic central for raw Channel Sounding LL-control transport.
   - Injects received peer CS LL-control PDUs into the VPR peer-exchange state machine and reports the bridge pass/fail status.
+  - The pair uses the public `bleCsBuildLlControl*()` helpers from `ble_channel_sounding.h` for raw CS LL-control packet construction.
 
 Latency characterization note:
 

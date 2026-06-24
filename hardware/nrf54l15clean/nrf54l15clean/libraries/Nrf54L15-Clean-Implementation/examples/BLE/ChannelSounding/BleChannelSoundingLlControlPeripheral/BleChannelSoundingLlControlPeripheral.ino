@@ -11,6 +11,7 @@
 
 #include <Arduino.h>
 
+#include "ble_channel_sounding.h"
 #include "nrf54l15_hal.h"
 
 using namespace xiao_nrf54l15;
@@ -61,6 +62,13 @@ static void printDebug(const char* prefix) {
 }
 
 static bool queuePdu(const uint8_t* payload, uint8_t length, const char* label) {
+  if (!bleCsLlControlPduIsValid(payload, length)) {
+    Serial.print("invalid ");
+    Serial.print(label);
+    Serial.print("\r\n");
+    return false;
+  }
+
   if (g_ble.queueChannelSoundingLlControlPdu(payload, length)) {
     ++g_rspQueued;
     Serial.print("queued ");
@@ -76,80 +84,57 @@ static bool queuePdu(const uint8_t* payload, uint8_t length, const char* label) 
 }
 
 static bool queueCsResponse(uint8_t configId) {
-  const uint8_t payload[] = {
-      kBleCsLlCtrlRsp,
-      0x02U,
-      0x01U,
-      configId,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_RSP");
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlRsp(configId, true, &pdu)) {
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_RSP");
 }
 
 static bool queueCsConfig(uint8_t configId) {
-  uint8_t payload[23] = {
-      kBleCsLlCtrlCfg,
-      21U,
-      configId,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_CFG");
+  BleCsLlControlConfigParams params{};
+  params.configId = configId;
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlConfig(params, &pdu)) {
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_CFG");
 }
 
 static bool queueCsSecurityResponse(uint8_t configId) {
-  const uint8_t payload[] = {
-      kBleCsLlCtrlSecRsp,
-      0x01U,
-      configId,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_SEC_RSP");
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlSecurityRsp(configId, &pdu)) {
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_SEC_RSP");
 }
 
 static bool queueCsProcedureResponse(uint8_t configId) {
-  uint8_t payload[21] = {
-      kBleCsLlCtrlProcRsp,
-      19U,
-      configId,
-  };
-  payload[3] = 0x80U;
-  payload[4] = 0x0CU;
-  payload[5] = 0x18U;
-  payload[6] = 0x00U;
-  payload[7] = 0x18U;
-  payload[8] = 0x00U;
-  payload[9] = 0x01U;
-  payload[10] = 0x00U;
-  payload[11] = 0x80U;
-  payload[12] = 0x0CU;
-  payload[15] = 0x80U;
-  payload[16] = 0x0CU;
-  payload[19] = 0x01U;
-  payload[20] = 0x00U;
-  return queuePdu(payload, sizeof(payload), "CS_PROC_RSP");
+  BleCsLlControlProcedureParams params{};
+  params.configId = configId;
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlProcedureRsp(params, &pdu)) {
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_PROC_RSP");
 }
 
 static bool queueCsStart(uint8_t configId) {
-  uint8_t payload[16] = {
-      kBleCsLlCtrlStart,
-      14U,
-      configId,
-      0x80U, // subevent length diagnostic value
-      0x01U, // subevents per event
-      0x18U, 0x00U,
-      0x18U, 0x00U,
-      0x18U, 0x00U,
-      0x01U, 0x00U,
-      0x00U,
-      0x00U,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_START");
+  BleCsLlControlStartParams params{};
+  params.configId = configId;
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlStart(params, &pdu)) {
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_START");
 }
 
 static bool queueCsAbort() {
-  const uint8_t payload[] = {
-      kBleCsLlCtrlAbort,
-      0x01U,
-      0x42U,
-  };
-  return queuePdu(payload, sizeof(payload), "CS_ABORT");
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlAbort(0x42U, &pdu)) {
+    return false;
+  }
+  return queuePdu(pdu.data(), pdu.length, "CS_ABORT");
 }
 
 static uint8_t configIdFromEvent(const BleConnectionEvent& evt) {

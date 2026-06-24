@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "nrf54l15_hal.h"
 #include "nrf54l15_vpr.h"
@@ -99,6 +100,247 @@ constexpr uint8_t kBleCsVprPeerStageAwaitingProcRsp = 3U;
 constexpr uint8_t kBleCsVprPeerStageAwaitingSecRsp = 4U;
 constexpr uint8_t kBleCsVprPeerStageAwaitingStart = 5U;
 constexpr uint8_t kBleCsVprPeerStageProcedureActive = 6U;
+
+constexpr uint8_t kBleCsLlControlReqRspPduLength = 4U;
+constexpr uint8_t kBleCsLlControlReqRspPayloadLength = 2U;
+constexpr uint8_t kBleCsLlControlCfgPduLength = 23U;
+constexpr uint8_t kBleCsLlControlCfgPayloadLength = 21U;
+constexpr uint8_t kBleCsLlControlProcedurePduLength = 21U;
+constexpr uint8_t kBleCsLlControlProcedurePayloadLength = 19U;
+constexpr uint8_t kBleCsLlControlSecurityPduLength = 3U;
+constexpr uint8_t kBleCsLlControlSecurityPayloadLength = 1U;
+constexpr uint8_t kBleCsLlControlStartPduLength = 16U;
+constexpr uint8_t kBleCsLlControlStartPayloadLength = 14U;
+constexpr uint8_t kBleCsLlControlTerminateAbortPduLength = 3U;
+constexpr uint8_t kBleCsLlControlTerminateAbortPayloadLength = 1U;
+constexpr uint8_t kBleCsLlControlMaxPduLength = 255U;
+
+struct BleCsLlControlPdu {
+  uint8_t bytes[kBleCsLlControlMaxPduLength] = {0};
+  uint8_t length = 0U;
+
+  const uint8_t* data() const { return bytes; }
+};
+
+struct BleCsLlControlConfigParams {
+  uint8_t configId = 1U;
+  uint8_t params[kBleCsLlControlCfgPayloadLength - 1U] = {0};
+};
+
+struct BleCsLlControlProcedureParams {
+  uint8_t configId = 1U;
+  uint16_t maxProcedureLen = 0x0C80U;
+  uint16_t minProcedureInterval = 0x0018U;
+  uint16_t maxProcedureInterval = 0x0018U;
+  uint16_t maxProcedureCount = 1U;
+  uint32_t minSubeventLen = 0x00000C80UL;
+  uint32_t maxSubeventLen = 0x00000C80UL;
+  uint8_t phy = 0x01U;
+  int8_t txPowerDelta = 0;
+};
+
+struct BleCsLlControlStartParams {
+  uint8_t configId = 1U;
+  uint16_t subeventLen = 0x0180U;
+  uint16_t subeventInterval = 0x0018U;
+  uint16_t eventInterval = 0x0018U;
+  uint16_t procedureInterval = 0x0018U;
+  uint16_t procedureCount = 1U;
+  uint8_t reserved0 = 0U;
+  uint8_t reserved1 = 0U;
+  uint8_t reserved2 = 0U;
+};
+
+inline void bleCsLlWriteLe16(uint8_t* data, uint16_t value) {
+  data[0] = static_cast<uint8_t>(value & 0xFFU);
+  data[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
+}
+
+inline void bleCsLlWriteLe32(uint8_t* data, uint32_t value) {
+  data[0] = static_cast<uint8_t>(value & 0xFFU);
+  data[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
+  data[2] = static_cast<uint8_t>((value >> 16U) & 0xFFU);
+  data[3] = static_cast<uint8_t>((value >> 24U) & 0xFFU);
+}
+
+inline bool bleCsLlControlOpcodeSupported(uint8_t opcode) {
+  return opcode >= kBleCsLlCtrlReq && opcode <= kBleCsLlCtrlAbort;
+}
+
+inline bool bleCsLlControlPduIsValid(const uint8_t* payload, uint8_t length) {
+  return payload != nullptr && length >= 2U &&
+         bleCsLlControlOpcodeSupported(payload[0]) &&
+         static_cast<uint8_t>(payload[1] + 2U) == length;
+}
+
+inline bool bleCsLlControlInitPdu(uint8_t opcode,
+                                  uint8_t payloadLength,
+                                  uint8_t totalLength,
+                                  BleCsLlControlPdu* outPdu) {
+  if (outPdu == nullptr || !bleCsLlControlOpcodeSupported(opcode) ||
+      totalLength < 2U ||
+      static_cast<uint8_t>(payloadLength + 2U) != totalLength) {
+    return false;
+  }
+
+  memset(outPdu->bytes, 0, sizeof(outPdu->bytes));
+  outPdu->bytes[0] = opcode;
+  outPdu->bytes[1] = payloadLength;
+  outPdu->length = totalLength;
+  return true;
+}
+
+inline bool bleCsBuildLlControlReqRsp(uint8_t opcode,
+                                      uint8_t configId,
+                                      bool accessAddressReuse,
+                                      BleCsLlControlPdu* outPdu) {
+  if (opcode != kBleCsLlCtrlReq && opcode != kBleCsLlCtrlRsp) {
+    return false;
+  }
+  if (!bleCsLlControlInitPdu(opcode, kBleCsLlControlReqRspPayloadLength,
+                             kBleCsLlControlReqRspPduLength, outPdu)) {
+    return false;
+  }
+  outPdu->bytes[2] = accessAddressReuse ? 1U : 0U;
+  outPdu->bytes[3] = configId;
+  return true;
+}
+
+inline bool bleCsBuildLlControlReq(uint8_t configId,
+                                   bool accessAddressReuse,
+                                   BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlReqRsp(kBleCsLlCtrlReq, configId,
+                                   accessAddressReuse, outPdu);
+}
+
+inline bool bleCsBuildLlControlRsp(uint8_t configId,
+                                   bool accessAddressReuse,
+                                   BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlReqRsp(kBleCsLlCtrlRsp, configId,
+                                   accessAddressReuse, outPdu);
+}
+
+inline bool bleCsBuildLlControlConfig(
+    const BleCsLlControlConfigParams& params,
+    BleCsLlControlPdu* outPdu) {
+  if (!bleCsLlControlInitPdu(kBleCsLlCtrlCfg, kBleCsLlControlCfgPayloadLength,
+                             kBleCsLlControlCfgPduLength, outPdu)) {
+    return false;
+  }
+  outPdu->bytes[2] = params.configId;
+  memcpy(&outPdu->bytes[3], params.params, sizeof(params.params));
+  return true;
+}
+
+inline bool bleCsBuildLlControlSecurityReqRsp(uint8_t opcode,
+                                              uint8_t configId,
+                                              BleCsLlControlPdu* outPdu) {
+  if (opcode != kBleCsLlCtrlSecReq && opcode != kBleCsLlCtrlSecRsp) {
+    return false;
+  }
+  if (!bleCsLlControlInitPdu(opcode, kBleCsLlControlSecurityPayloadLength,
+                             kBleCsLlControlSecurityPduLength, outPdu)) {
+    return false;
+  }
+  outPdu->bytes[2] = configId;
+  return true;
+}
+
+inline bool bleCsBuildLlControlSecurityReq(uint8_t configId,
+                                           BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlSecurityReqRsp(kBleCsLlCtrlSecReq, configId,
+                                           outPdu);
+}
+
+inline bool bleCsBuildLlControlSecurityRsp(uint8_t configId,
+                                           BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlSecurityReqRsp(kBleCsLlCtrlSecRsp, configId,
+                                           outPdu);
+}
+
+inline bool bleCsBuildLlControlProcedureReqRsp(
+    uint8_t opcode,
+    const BleCsLlControlProcedureParams& params,
+    BleCsLlControlPdu* outPdu) {
+  if (opcode != kBleCsLlCtrlProcReq && opcode != kBleCsLlCtrlProcRsp) {
+    return false;
+  }
+  if (!bleCsLlControlInitPdu(opcode, kBleCsLlControlProcedurePayloadLength,
+                             kBleCsLlControlProcedurePduLength, outPdu)) {
+    return false;
+  }
+  outPdu->bytes[2] = params.configId;
+  bleCsLlWriteLe16(&outPdu->bytes[3], params.maxProcedureLen);
+  bleCsLlWriteLe16(&outPdu->bytes[5], params.minProcedureInterval);
+  bleCsLlWriteLe16(&outPdu->bytes[7], params.maxProcedureInterval);
+  bleCsLlWriteLe16(&outPdu->bytes[9], params.maxProcedureCount);
+  bleCsLlWriteLe32(&outPdu->bytes[11], params.minSubeventLen);
+  bleCsLlWriteLe32(&outPdu->bytes[15], params.maxSubeventLen);
+  outPdu->bytes[19] = params.phy;
+  outPdu->bytes[20] = static_cast<uint8_t>(params.txPowerDelta);
+  return true;
+}
+
+inline bool bleCsBuildLlControlProcedureReq(
+    const BleCsLlControlProcedureParams& params,
+    BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlProcedureReqRsp(kBleCsLlCtrlProcReq, params,
+                                            outPdu);
+}
+
+inline bool bleCsBuildLlControlProcedureRsp(
+    const BleCsLlControlProcedureParams& params,
+    BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlProcedureReqRsp(kBleCsLlCtrlProcRsp, params,
+                                            outPdu);
+}
+
+inline bool bleCsBuildLlControlStart(
+    const BleCsLlControlStartParams& params,
+    BleCsLlControlPdu* outPdu) {
+  if (!bleCsLlControlInitPdu(kBleCsLlCtrlStart,
+                             kBleCsLlControlStartPayloadLength,
+                             kBleCsLlControlStartPduLength, outPdu)) {
+    return false;
+  }
+  outPdu->bytes[2] = params.configId;
+  bleCsLlWriteLe16(&outPdu->bytes[3], params.subeventLen);
+  bleCsLlWriteLe16(&outPdu->bytes[5], params.subeventInterval);
+  bleCsLlWriteLe16(&outPdu->bytes[7], params.eventInterval);
+  bleCsLlWriteLe16(&outPdu->bytes[9], params.procedureInterval);
+  bleCsLlWriteLe16(&outPdu->bytes[11], params.procedureCount);
+  outPdu->bytes[13] = params.reserved0;
+  outPdu->bytes[14] = params.reserved1;
+  outPdu->bytes[15] = params.reserved2;
+  return true;
+}
+
+inline bool bleCsBuildLlControlTerminateAbort(uint8_t opcode,
+                                              uint8_t reason,
+                                              BleCsLlControlPdu* outPdu) {
+  if (opcode != kBleCsLlCtrlTerminate && opcode != kBleCsLlCtrlAbort) {
+    return false;
+  }
+  if (!bleCsLlControlInitPdu(opcode,
+                             kBleCsLlControlTerminateAbortPayloadLength,
+                             kBleCsLlControlTerminateAbortPduLength,
+                             outPdu)) {
+    return false;
+  }
+  outPdu->bytes[2] = reason;
+  return true;
+}
+
+inline bool bleCsBuildLlControlTerminate(uint8_t reason,
+                                         BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlTerminateAbort(kBleCsLlCtrlTerminate, reason,
+                                           outPdu);
+}
+
+inline bool bleCsBuildLlControlAbort(uint8_t reason,
+                                     BleCsLlControlPdu* outPdu) {
+  return bleCsBuildLlControlTerminateAbort(kBleCsLlCtrlAbort, reason, outPdu);
+}
 
 struct BleCsToneSample {
   bool valid = false;
