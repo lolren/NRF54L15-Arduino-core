@@ -288,11 +288,12 @@ This confirms:
 - Malformed raw PDU length is rejected with `0x12` (`Invalid HCI Command Parameters`).
 
 Remaining before physical parity:
-- Replace the test-only injection source with real BLE link-layer received CS
-  control PDUs.
-- Transmit local CS control PDUs at the correct connection-event phase.
 - Keep the injected-PDU example as the deterministic regression test for the
-  state machine after real over-air transport is wired.
+  state machine. The real over-air LL-control transport is now covered by
+  `BleChannelSoundingLlControlWorkflowCentral` plus
+  `BleChannelSoundingLlControlPeripheral`.
+- Move from CPUAPP/sketch-polled LL-control scheduling to a controller/VPR-owned
+  connection-event scheduler before claiming physical RF parity.
 
 ## Completed in This Pass — Two-Board CS LL-Control VPR Bridge
 
@@ -310,6 +311,9 @@ File > Examples > Nrf54L15-Clean-Implementation > BLE > ChannelSounding >
 
 File > Examples > Nrf54L15-Clean-Implementation > BLE > ChannelSounding >
   BleChannelSoundingLlControlCentral
+
+File > Examples > Nrf54L15-Clean-Implementation > BLE > ChannelSounding >
+  BleChannelSoundingLlControlWorkflowCentral
 ```
 
 What the pair verifies:
@@ -345,6 +349,12 @@ What the pair verifies:
   `loopOnceWithInitiatorLlControlBridge()` to pump the existing CS host/VPR
   stream path and then service one real BLE LL-control bridge event through the
   same helper.
+- The workflow central diagnostic now uses
+  `loopOnceWithInitiatorLlControlBridge()` and verifies that the normal host
+  workflow reaches ready state and publishes local/peer procedure results after
+  over-air `CS_START`.
+- The VPR now gates connected-procedure result publication so local/peer results
+  are not emitted before peer exchange reaches `PROCEDURE_ACTIVE`.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted
   by `BleChannelSoundingLlControlDebug`.
 - The central injects the received peer PDUs into `BleCsControllerVprHost` and
@@ -353,36 +363,47 @@ What the pair verifies:
 Hardware used:
 
 ```text
-/dev/ttyACM1  XIAO nRF54L15 / Sense  peripheral  probe 761FDE87
-/dev/ttyACM2  XIAO nRF54L15 / Sense  central     probe E91217E8
+/dev/ttyACM1  XIAO nRF54L15 / Sense  central     probe 761FDE87
+/dev/ttyACM2  XIAO nRF54L15 / Sense  peripheral  probe E91217E8
 ```
 
 Observed output:
 
 ```text
 Peripheral:
-link ev=3 queued=6
-debug rx=3 txq=6 txsent=3 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+debug rx=3 txq=6 txsent=6 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
 
-Central:
-cs_ll_vpr_bridge=PASS progress=0x1FFF injected=6
-debug phase=complete ev=6 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
+Workflow central:
+VPR inject op=0x30 prev=3 stage=5
+VPR inject op=0x33 prev=5 stage=6
+VPR inject op=0x35 prev=6 stage=0
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F injected=6 direct=3 local=1 peer=1 proc=1 est=1
+```
+
+Regression command:
+
+```bash
+scripts/test_cs_ll_workflow_bridge.sh
 ```
 
 Status:
 
 - Raw over-air CS LL-control PDU movement is hardware-verified.
 - VPR peer-stage consumption of real received peer PDUs is hardware-verified.
+- The workflow bridge reaches host ready state and publishes local/peer
+  synthetic procedure results only after the over-air `CS_START`.
 - This is still not physical CS ranging. The examples do not yet run the RF tone
   exchange, hardware scheduler, timestamp/IQ capture, or real result reporting.
 
 Next required slice:
 
-- Move CS LL-control PDU emission/consumption fully into the normal
-  VPR/controller workflow. The packet builders, host-owned bridge service,
-  peer-event consumer, one-event poll helper, and stream-workflow wrappers now
-  exist; the production workflow still needs to call them automatically from the
-  connected-CS scheduling path rather than from the diagnostic sketch loop.
+- Move CS LL-control PDU emission/consumption from the CPUAPP sketch loop into
+  a VPR/controller-owned connected-CS scheduler. The packet builders,
+  host-owned bridge service, peer-event consumer, one-event poll helper, and
+  stream-workflow wrappers now exist and are hardware-tested.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.
@@ -654,8 +675,8 @@ Required work:
    - Store capabilities and FAE tables.
    - Add lifecycle and invalidation tests.
 
-3. **Real link-layer control exchange** — IN PROGRESS (disconnect/timeout done)
-   - Replace local acceptance with peer negotiation.
+3. **Real link-layer control exchange** — WORKFLOW BRIDGE HARDWARE-VERIFIED
+   - Real over-air peer negotiation is working in the diagnostic bridge.
    - Disconnect detection, timeout tracking, and abort reason propagation
      implemented (see "Completed in This Pass — Disconnect/Timeout/Abort
      Framework" above).
@@ -663,7 +684,8 @@ Required work:
      `BleChannelSoundingHostAbortCleanup`.
    - Test-only peer LL PDU injection/readback is hardware-verified with
      `BleChannelSoundingVprPeerPduInjection`.
-   - Real LL Control PDU reception/transmission over the BLE data path remains.
+   - Real LL Control PDU reception/transmission over the BLE data path is
+     hardware-verified with `BleChannelSoundingLlControlWorkflowCentral`.
 
 4. **Hardware event scheduler**
    - Port the timing model from Zephyr/Nordic open code where licensing permits.

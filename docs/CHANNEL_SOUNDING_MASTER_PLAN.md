@@ -411,7 +411,7 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-████████░░░░░░░░ 50% Raw CS LL-control bridge + host poll seam hardware-verified
+████████████░░░░ 75% Raw CS LL-control workflow bridge hardware-verified
 ```
 
 ### Completed in this slice
@@ -456,22 +456,49 @@ surface now intentionally avoids that failure mode by draining responses.
   callers that already use the normal CS host stream workflow. These pump/poll
   the existing host/VPR stream path first, then service one real BLE LL-control
   bridge event through the same helper.
+- Added `BleChannelSoundingLlControlWorkflowCentral`, a two-board workflow
+  diagnostic that uses `loopOnceWithInitiatorLlControlBridge()` instead of
+  manually driving direct HCI transitions from the sketch.
+- Tightened the VPR peer-exchange timing so connected-procedure result packets
+  are published only after over-air `CS_START` moves the peer exchange to
+  `PROCEDURE_ACTIVE`.
+- Expanded peer-response timeouts to match the slower software-polled
+  over-air bridge path, avoiding false resets while waiting for `CS_PROC_RSP`
+  and `CS_START`.
+- Added `scripts/test_cs_ll_workflow_bridge.sh` to compile/upload both boards,
+  capture serial, and require the full workflow PASS line.
 
 Two-board hardware result:
 
 ```text
-Peripheral /dev/ttyACM1:
-link ev=3 queued=6
-debug rx=3 txq=6 txsent=3 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
+Peripheral /dev/ttyACM2:
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+debug rx=3 txq=6 txsent=6 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
 
-Central /dev/ttyACM2:
-cs_ll_vpr_bridge=PASS progress=0x1FFF injected=6
-debug phase=complete ev=6 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
+Workflow central /dev/ttyACM1:
+VPR inject op=0x30 prev=3 stage=5
+VPR inject op=0x33 prev=5 stage=6
+VPR inject op=0x35 prev=6 stage=0
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F injected=6 direct=3 local=1 peer=1 proc=1 est=1
 ```
 
 This proves the current CPUAPP BLE LL-control transport can move CS control
-payloads over a real connection and that the VPR peer state machine can consume
-the received peer PDUs.
+payloads over a real connection, that the VPR peer state machine can consume
+the received peer PDUs, and that the normal host workflow can reach ready state
+and publish local/peer procedure results after the over-air `CS_START`.
+
+Regression command:
+
+```bash
+scripts/test_cs_ll_workflow_bridge.sh
+```
+
+Defaults match the current local test bench:
+central `/dev/ttyACM1` / UID `761FDE87`, peripheral `/dev/ttyACM2` / UID
+`E91217E8`. Override with `CS_CENTRAL_PORT`, `CS_PERIPHERAL_PORT`,
+`CS_CENTRAL_UID`, `CS_PERIPHERAL_UID`, and `CS_INSTALLED_VERSION`.
 
 ### Still required
 
@@ -480,9 +507,9 @@ the received peer PDUs.
    them into VPR.
 2. **Automatic controller-owned scheduling** — packet construction, host-owned
    initiator queueing, peer-event consumption, direct-HCI bridge service, and
-   one-event polling are now shared, but production CS still needs the normal
-   VPR/controller workflow to call this from a controller/VPR-owned connected-CS
-   scheduler instead of the diagnostic sketch's `loop()`.
+   one-event polling are now shared and workflow-tested, but production CS still
+   needs a controller/VPR-owned connected-CS scheduler rather than the Arduino
+   sketch loop calling the helper.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling.
 4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps

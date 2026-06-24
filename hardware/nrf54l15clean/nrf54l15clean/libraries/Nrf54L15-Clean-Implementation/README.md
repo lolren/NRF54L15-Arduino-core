@@ -993,6 +993,13 @@ BLE examples:
   - The central uses `BleCsControllerVprHost::pollInitiatorLlControlBridge()` so duplicate-safe initiator queueing, one BLE connection-event poll, and peer-PDU service are owned by the CS host API instead of the sketch loop.
   - Production-style stream workflow callers can use `pollWithInitiatorLlControlBridge()` or `loopOnceWithInitiatorLlControlBridge()` to combine normal host/VPR stream polling with one real BLE LL-control bridge poll.
   - Received peer PDUs are consumed through `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`.
+- `examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral/BleChannelSoundingLlControlWorkflowCentral.ino`
+  - Two-board workflow central for raw Channel Sounding LL-control transport.
+  - Uses `BleCsControllerVprHost::loopOnceWithInitiatorLlControlBridge()` so the normal CS host workflow reaches ready state through real over-air CS LL-control PDUs.
+  - Expected PASS line: `cs_ll_workflow_bridge=PASS ... rx=0x3F ... local=1 peer=1 proc=1 est=1`.
+- `scripts/test_cs_ll_workflow_bridge.sh`
+  - Local regression harness for the XIAO pair.
+  - Compiles/uploads the LL-control peripheral and workflow central, resets both probes, captures serial, and fails unless the full workflow PASS line is observed.
 
 Latency characterization note:
 
