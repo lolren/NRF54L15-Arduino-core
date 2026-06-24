@@ -4,11 +4,10 @@
  * Opcodes and packed structs per Bluetooth Core Spec v5.4+
  * Vol 6, Part F — Link Layer Channel Sounding Control PDUs.
  *
- * These are NOT currently exchanged over-the-air (no second board,
- * no RADIO access from the VPR).  The header exists so the VPR
- * peer-exchange state machine can reference real PDU types rather
- * than magic numbers, and so raw-control-PDU serialisation helpers
- * are ready when the link-layer transport is implemented.
+ * These definitions are used by the VPR peer-exchange state machine and by
+ * the Arduino-side raw LL-control transport. A sketch can now queue these
+ * payloads over an active BLE connection with queueChannelSoundingLlControlPdu();
+ * the full CS procedure state machine still lives above this raw transport.
  */
 #ifndef VPR_CS_LL_CONTROL_H_
 #define VPR_CS_LL_CONTROL_H_
@@ -34,6 +33,25 @@ extern "C" {
 #define VPR_CS_LL_CS_TERMINATE  0x34U  /* Terminate CS procedure (normal)       */
 #define VPR_CS_LL_CS_ABORT      0x35U  /* Abort CS procedure (error)            */
 
+/* Raw over-air CS LL Control PDU sizes used by the current VPR peer-exchange
+ * validator and two-board diagnostics. The payload length byte excludes the
+ * opcode/length header. */
+#define VPR_CS_LL_REQ_RSP_PDU_LEN       4U
+#define VPR_CS_LL_REQ_RSP_PAYLOAD_LEN   2U
+#define VPR_CS_LL_CFG_PDU_LEN           23U
+#define VPR_CS_LL_CFG_PAYLOAD_LEN       21U
+#define VPR_CS_LL_PROC_PDU_LEN          21U
+#define VPR_CS_LL_PROC_PAYLOAD_LEN      19U
+#define VPR_CS_LL_SEC_PDU_LEN           3U
+#define VPR_CS_LL_SEC_PAYLOAD_LEN       1U
+#define VPR_CS_LL_START_PDU_LEN         16U
+#define VPR_CS_LL_START_PAYLOAD_LEN     14U
+#define VPR_CS_LL_TERMINATE_ABORT_PDU_LEN     3U
+#define VPR_CS_LL_TERMINATE_ABORT_PAYLOAD_LEN 1U
+
+#define VPR_CS_LL_STATIC_ASSERT(name, cond) \
+  typedef char vpr_cs_ll_static_assert_##name[(cond) ? 1 : -1]
+
 /* ── Common header — 2 bytes ───────────────────────────────────── */
 
 typedef struct __attribute__((__packed__)) {
@@ -51,46 +69,37 @@ typedef struct __attribute__((__packed__)) {
   uint8_t config_id; /* 0 = use default / implicit config    */
 } vpr_cs_ll_pdu_req_rsp_t;
 
-/* ── LL_CS_CFG (from initiator) ─────────────────────────────────── */
+VPR_CS_LL_STATIC_ASSERT(req_rsp_size,
+                        sizeof(vpr_cs_ll_pdu_req_rsp_t) ==
+                            VPR_CS_LL_REQ_RSP_PDU_LEN);
+
+/* ── LL_CS_CFG ──────────────────────────────────────────────────── */
 /* Total: 23 bytes */
 
 typedef struct __attribute__((__packed__)) {
-  uint8_t opcode;           /* VPR_CS_LL_CS_CFG         */
-  uint8_t len;              /* 21                        */
+  uint8_t opcode;   /* VPR_CS_LL_CS_CFG */
+  uint8_t len;      /* 21 */
   uint8_t config_id;
-  uint8_t main_mode_type;
-  uint8_t sub_mode_type;
-  uint8_t min_main_mode_steps;
-  uint8_t max_main_mode_steps;
-  uint8_t main_mode_repetition;
-  uint8_t mode0_steps;
-  uint8_t role;             /* 0 = initiator, 1 = reflector */
-  uint8_t rtt_type;
-  uint8_t cs_sync_phy;
-  uint8_t channel_map[10];
-  uint8_t channel_map_repetition;
-  uint8_t channel_selection_type;
-  uint8_t ch3c_shape;
-  uint8_t ch3c_jump;
+  uint8_t params[VPR_CS_LL_CFG_PAYLOAD_LEN - 1U];
 } vpr_cs_ll_pdu_cfg_t;
+
+VPR_CS_LL_STATIC_ASSERT(cfg_size,
+                        sizeof(vpr_cs_ll_pdu_cfg_t) ==
+                            VPR_CS_LL_CFG_PDU_LEN);
 
 /* ── LL_CS_PROC_REQ / LL_CS_PROC_RSP ────────────────────────────── */
 /* Total: 21 bytes */
 
 typedef struct __attribute__((__packed__)) {
-  uint8_t  opcode;          /* VPR_CS_LL_CS_PROC_REQ or _RSP */
-  uint8_t  len;             /* 19                            */
-  uint8_t  config_id;
-  uint16_t max_procedure_len;     /* in μs */
-  uint16_t min_procedure_interval; /* in units of 1.25 ms */
-  uint16_t max_procedure_interval; /* in units of 1.25 ms */
-  uint16_t max_procedure_count;
-  uint32_t min_subevent_len; /* in μs */
-  uint32_t max_subevent_len; /* in μs */
-  uint8_t  tone_antenna_config_selection;
-  uint8_t  phy;              /* 1 = LE 1M, 2 = LE 2M */
-  int8_t   tx_power_delta;  /* dBm delta (signed) */
+  uint8_t opcode;   /* VPR_CS_LL_CS_PROC_REQ or _RSP */
+  uint8_t len;      /* 19 */
+  uint8_t config_id;
+  uint8_t params[VPR_CS_LL_PROC_PAYLOAD_LEN - 1U];
 } vpr_cs_ll_pdu_proc_req_rsp_t;
+
+VPR_CS_LL_STATIC_ASSERT(proc_size,
+                        sizeof(vpr_cs_ll_pdu_proc_req_rsp_t) ==
+                            VPR_CS_LL_PROC_PDU_LEN);
 
 /* ── LL_CS_SEC_REQ / LL_CS_SEC_RSP ──────────────────────────────── */
 /* Total: 3 bytes */
@@ -101,22 +110,23 @@ typedef struct __attribute__((__packed__)) {
   uint8_t config_id;
 } vpr_cs_ll_pdu_sec_req_rsp_t;
 
+VPR_CS_LL_STATIC_ASSERT(sec_size,
+                        sizeof(vpr_cs_ll_pdu_sec_req_rsp_t) ==
+                            VPR_CS_LL_SEC_PDU_LEN);
+
 /* ── LL_CS_START ────────────────────────────────────────────────── */
 /* Total: 16 bytes */
 
 typedef struct __attribute__((__packed__)) {
-  uint8_t  opcode;              /* VPR_CS_LL_CS_START */
-  uint8_t  len;                 /* 14                  */
-  uint8_t  config_id;
-  uint8_t  subevent_len;        /* in μs units */
-  uint8_t  subevents_per_event;
-  uint16_t subevent_interval;   /* in units of 1.25 ms */
-  uint16_t event_interval;      /* in units of 1.25 ms */
-  uint16_t procedure_interval;  /* in units of 1.25 ms */
-  uint16_t procedure_count;
-  uint8_t  snr_control_initiator;
-  uint8_t  snr_control_reflector;
+  uint8_t opcode;   /* VPR_CS_LL_CS_START */
+  uint8_t len;      /* 14 */
+  uint8_t config_id;
+  uint8_t params[VPR_CS_LL_START_PAYLOAD_LEN - 1U];
 } vpr_cs_ll_pdu_start_t;
+
+VPR_CS_LL_STATIC_ASSERT(start_size,
+                        sizeof(vpr_cs_ll_pdu_start_t) ==
+                            VPR_CS_LL_START_PDU_LEN);
 
 /* ── LL_CS_TERMINATE / LL_CS_ABORT ──────────────────────────────── */
 /* Total: 3 bytes */
@@ -126,6 +136,10 @@ typedef struct __attribute__((__packed__)) {
   uint8_t len;     /* 1                                 */
   uint8_t reason;  /* 0x00 = normal, else abort reason   */
 } vpr_cs_ll_pdu_terminate_abort_t;
+
+VPR_CS_LL_STATIC_ASSERT(terminate_abort_size,
+                        sizeof(vpr_cs_ll_pdu_terminate_abort_t) ==
+                            VPR_CS_LL_TERMINATE_ABORT_PDU_LEN);
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 

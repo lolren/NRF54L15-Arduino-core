@@ -2038,6 +2038,7 @@ struct BleConnectionEvent {
   bool disconnectReasonValid;
   bool disconnectReasonRemote;
   bool llControlPacket;
+  bool channelSoundingLlControlPacket;
   bool attPacket;
   bool txPacketSent;
   uint16_t eventCounter;
@@ -2059,6 +2060,32 @@ struct BleConnectionEvent {
   const uint8_t* payload;
   const uint8_t* txPayload;
 };
+
+struct BleChannelSoundingLlControlDebug {
+  uint32_t rxCount;
+  uint32_t txQueuedCount;
+  uint32_t txSentCount;
+  uint32_t txDropCount;
+  uint32_t rxDropCount;
+  uint8_t lastRxOpcode;
+  uint8_t lastRxLength;
+  uint8_t lastTxOpcode;
+  uint8_t lastTxLength;
+};
+
+// Public Channel Sounding LL-control opcode aliases. The payload passed to
+// queueChannelSoundingLlControlPdu() is the raw LL-control payload beginning
+// with one of these opcode bytes; it is not L2CAP-wrapped.
+constexpr uint8_t kBleCsLlCtrlReq = 0x2CU;
+constexpr uint8_t kBleCsLlCtrlRsp = 0x2DU;
+constexpr uint8_t kBleCsLlCtrlCfg = 0x2EU;
+constexpr uint8_t kBleCsLlCtrlProcReq = 0x2FU;
+constexpr uint8_t kBleCsLlCtrlProcRsp = 0x30U;
+constexpr uint8_t kBleCsLlCtrlSecReq = 0x31U;
+constexpr uint8_t kBleCsLlCtrlSecRsp = 0x32U;
+constexpr uint8_t kBleCsLlCtrlStart = 0x33U;
+constexpr uint8_t kBleCsLlCtrlTerminate = 0x34U;
+constexpr uint8_t kBleCsLlCtrlAbort = 0x35U;
 
 enum class BleDisconnectReason : uint8_t {
   kNone = 0U,
@@ -2601,6 +2628,10 @@ class BleRadio {
                             uint8_t valueLength, bool withResponse = true);
   bool queueAttCccdWrite(uint16_t cccdHandle, bool notify,
                          bool indicate = false, bool withResponse = true);
+  bool queueChannelSoundingLlControlPdu(const uint8_t* payload, uint8_t length);
+  void getChannelSoundingLlControlDebug(
+      BleChannelSoundingLlControlDebug* out) const;
+  void clearChannelSoundingLlControlDebug();
   void setPreferredConnectionParameters(uint16_t intervalMinUnits,
                                         uint16_t intervalMaxUnits,
                                         uint16_t latency,
@@ -2999,6 +3030,14 @@ class BleRadio {
                              uint8_t* outPayloadLength) const;
   bool queuePendingSmpL2capResponse(const uint8_t* smpPayload,
                                     uint8_t smpLength);
+  bool isChannelSoundingLlControlOpcode(uint8_t opcode) const;
+  bool isChannelSoundingLlControlPdu(const uint8_t* payload,
+                                     uint8_t length) const;
+  void rememberChannelSoundingLlControlRx(const uint8_t* payload,
+                                          uint8_t length);
+  bool dequeueChannelSoundingLlControlTx(uint8_t* outPayload,
+                                         uint8_t* outLength);
+  void clearChannelSoundingLlControlState();
   void serviceSecureConnectionsWork();
   void prefetchConnectionSecurityMaterial(uint32_t spinLimit);
   bool isBondRecordUsable(const BleBondRecord& record) const;
@@ -3266,6 +3305,13 @@ class BleRadio {
   uint8_t connectionPendingTxLength_;
   bool connectionPendingTxValid_;
   uint8_t connectionPendingTxPayload_[255];
+  static constexpr uint8_t kChannelSoundingLlControlQueueDepth = 4U;
+  uint8_t channelSoundingLlControlTxPayloads_[kChannelSoundingLlControlQueueDepth][255];
+  uint8_t channelSoundingLlControlTxLengths_[kChannelSoundingLlControlQueueDepth];
+  uint8_t channelSoundingLlControlTxHead_;
+  uint8_t channelSoundingLlControlTxTail_;
+  uint8_t channelSoundingLlControlTxCount_;
+  BleChannelSoundingLlControlDebug channelSoundingLlControlDebug_;
   bool connectionUpdatePending_;
   uint16_t connectionUpdateInstant_;
   uint8_t connectionPendingWinSize_;

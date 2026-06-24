@@ -294,6 +294,71 @@ Remaining before physical parity:
 - Keep the injected-PDU example as the deterministic regression test for the
   state machine after real over-air transport is wired.
 
+## Completed in This Pass — Two-Board CS LL-Control VPR Bridge
+
+The raw CS LL-control transport has now been exercised over a real BLE
+connection between two XIAO nRF54L15 boards. This moves the previous
+single-board `0xFCE8` injection proof one step closer to production: peer PDUs
+are received from the actual link-layer control path, then injected into the
+VPR peer-exchange state machine.
+
+Added diagnostics:
+
+```text
+File > Examples > Nrf54L15-Clean-Implementation > BLE > ChannelSounding >
+  BleChannelSoundingLlControlPeripheral
+
+File > Examples > Nrf54L15-Clean-Implementation > BLE > ChannelSounding >
+  BleChannelSoundingLlControlCentral
+```
+
+What the pair verifies:
+
+- The central sends real-shaped raw CS LL-control PDUs:
+  `CS_REQ`, `CS_SEC_REQ`, and `CS_PROC_REQ`.
+- The peripheral answers with:
+  `CS_RSP`, `CS_CFG`, `CS_SEC_RSP`, `CS_PROC_RSP`, `CS_START`, and `CS_ABORT`.
+- Both sides use the raw LL-control payload shape:
+  `opcode`, `payload_length`, payload bytes.
+- Received CS LL-control packets are tagged in `BleConnectionEvent` and counted
+  by `BleChannelSoundingLlControlDebug`.
+- The central injects the received peer PDUs into `BleCsControllerVprHost` and
+  drives the VPR peer stage sequence back to idle after abort.
+
+Hardware used:
+
+```text
+/dev/ttyACM1  XIAO nRF54L15 / Sense  peripheral  probe 761FDE87
+/dev/ttyACM2  XIAO nRF54L15 / Sense  central     probe E91217E8
+```
+
+Observed output:
+
+```text
+Peripheral:
+link ev=15 queued=6
+debug rx=3 txq=6 txsent=6 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
+
+Central:
+cs_ll_vpr_bridge=PASS progress=0x1FFF injected=6
+debug phase=complete ev=17 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
+```
+
+Status:
+
+- Raw over-air CS LL-control PDU movement is hardware-verified.
+- VPR peer-stage consumption of real received peer PDUs is hardware-verified.
+- This is still not physical CS ranging. The examples do not yet run the RF tone
+  exchange, hardware scheduler, timestamp/IQ capture, or real result reporting.
+
+Next required slice:
+
+- Move local CS LL-control PDU generation out of sketch code and into the
+  VPR/controller workflow.
+- Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
+  RADIO/VPR scheduler owns the timing.
+- Then replace synthetic result data with real CS subevent capture.
+
 ## Hardware Verification
 
 `BleChannelSoundingVprHciParity` was compiled, uploaded, and run on a XIAO

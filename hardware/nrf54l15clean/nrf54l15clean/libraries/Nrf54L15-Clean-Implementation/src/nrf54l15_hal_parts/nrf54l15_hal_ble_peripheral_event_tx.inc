@@ -21,6 +21,9 @@
   if ((llid == kBlePduLlControl) &&
       (rxLength >= 1U)) {
     const uint8_t opcode = rxPacket_[2];
+    if (packetIsNew && isChannelSoundingLlControlOpcode(opcode)) {
+      rememberChannelSoundingLlControlRx(&rxPacket_[2], rxLength);
+    }
     if (connectionEncStartReqPending_) {
       ++encDebug_.startPendingControlRxSeen;
       encDebug_.startPendingLastHdr = hdr0;
@@ -55,9 +58,12 @@
     event->rxNesn = nesn;
     event->rxSn = sn;
     event->payloadLength = rxLength;
+    event->payload = (rxLength > 0U) ? &rxPacket_[2] : nullptr;
     if (llid == kBlePduLlControl && rxLength >= 1U) {
       event->llControlPacket = true;
       event->llControlOpcode = rxPacket_[2];
+      event->channelSoundingLlControlPacket =
+          isChannelSoundingLlControlOpcode(rxPacket_[2]);
     }
     if (llid == kBlePduDataStartOrComplete && rxLength >= 5U) {
       const uint16_t l2capLen = readLe16(&rxPacket_[2]);
@@ -495,6 +501,12 @@
       txLength = immediateL2capResponseLength;
       immediateL2capResponseSent = true;
       emitAttTxChoiceTrace(connectionTxPayload_, txLength, "PERIPH_TX_IMMEDIATE");
+    } else if (!connectionPendingTxValid_ &&
+               (channelSoundingLlControlTxCount_ > 0U) &&
+               dequeueChannelSoundingLlControlTx(connectionTxPayload_,
+                                                &txLength)) {
+      txLlid = kBlePduLlControl;
+      emitBleTrace("CS_LL_TX");
     } else if (connectionPendingTxValid_ &&
                !suppressPendingServerPushForDeferredWrite) {
       txLlid = connectionPendingTxLlid_;
@@ -1354,6 +1366,13 @@
         encDebug_.lastFollowLen = rxLengthFollow;
         encDebug_.lastFollowByte0 =
             (rxLengthFollow >= 1U) ? rxPacket_[2] : 0U;
+
+        if (packetIsNewFollow &&
+            (llidFollow == kBlePduLlControl) &&
+            (rxLengthFollow >= 1U) &&
+            isChannelSoundingLlControlOpcode(rxPacket_[2])) {
+          rememberChannelSoundingLlControlRx(&rxPacket_[2], rxLengthFollow);
+        }
 
         if ((llidFollow == kBlePduLlControl) &&
             (rxLengthFollow >= 2U) &&

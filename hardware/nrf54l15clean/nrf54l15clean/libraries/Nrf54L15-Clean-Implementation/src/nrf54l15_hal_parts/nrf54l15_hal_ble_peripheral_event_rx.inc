@@ -747,6 +747,8 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         event->payloadLength = rxLengthEarly;
         event->llControlPacket = candidateLlControl;
         event->llControlOpcode = candidateLlControl ? rxLlOpcodeFast : 0U;
+        event->channelSoundingLlControlPacket =
+            candidateLlControl && isChannelSoundingLlControlOpcode(rxLlOpcodeFast);
         event->attPacket = candidateAttImmediate;
         event->attOpcode = candidateAttImmediate ? rxAttOpcodeFast : 0U;
         event->txPacketSent = false;
@@ -808,6 +810,9 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     } else if (candidateSignaling) {
       ++encDebug_.connFastSignalingTurnaroundCount;
     }
+    if (candidateLlControl && isChannelSoundingLlControlOpcode(rxLlOpcodeFast)) {
+      rememberChannelSoundingLlControlRx(&rxPacket_[2], rxLengthEarly);
+    }
 
     if (event != nullptr) {
       event->packetReceived = true;
@@ -825,6 +830,8 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       event->payloadLength = rxLengthEarly;
       event->llControlPacket = candidateLlControl;
       event->llControlOpcode = candidateLlControl ? rxLlOpcodeFast : 0U;
+      event->channelSoundingLlControlPacket =
+          candidateLlControl && isChannelSoundingLlControlOpcode(rxLlOpcodeFast);
       event->attPacket = candidateAttImmediate;
       event->attOpcode = candidateAttImmediate ? rxAttOpcodeFast : 0U;
       event->txPacketSent = true;

@@ -104,6 +104,12 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionPendingTxLength_(0U),
       connectionPendingTxValid_(false),
       connectionPendingTxPayload_{0},
+      channelSoundingLlControlTxPayloads_{0},
+      channelSoundingLlControlTxLengths_{0},
+      channelSoundingLlControlTxHead_(0U),
+      channelSoundingLlControlTxTail_(0U),
+      channelSoundingLlControlTxCount_(0U),
+      channelSoundingLlControlDebug_{0},
       connectionUpdatePending_(false),
       connectionUpdateInstant_(0U),
       connectionPendingWinSize_(0U),
@@ -560,6 +566,7 @@ bool BleRadio::begin(int8_t txPowerDbm) {
   connectionServiceBusy_ = false;
   latestConnectionRssiDbm_ = 0;
   latestConnectionRssiValid_ = false;
+  clearChannelSoundingLlControlState();
   clearQueuedConnectionEvents();
   clearCustomGattConnectionState();
 
@@ -644,6 +651,7 @@ void BleRadio::end() {
     latestConnectionRssiDbm_ = 0;
     latestConnectionRssiValid_ = false;
     connectionServiceBusy_ = false;
+    clearChannelSoundingLlControlState();
     clearQueuedConnectionEvents();
     clearCustomGattConnectionState();
     if (g_activeBleRadio == this) {
@@ -664,6 +672,7 @@ void BleRadio::end() {
   latestConnectionRssiDbm_ = 0;
   latestConnectionRssiValid_ = false;
   connectionServiceBusy_ = false;
+  clearChannelSoundingLlControlState();
   clearQueuedConnectionEvents();
   clearCustomGattConnectionState();
   if (g_activeBleRadio == this) {

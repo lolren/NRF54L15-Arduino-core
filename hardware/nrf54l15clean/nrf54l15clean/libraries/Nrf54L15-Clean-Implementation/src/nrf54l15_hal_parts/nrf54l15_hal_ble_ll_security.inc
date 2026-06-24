@@ -674,6 +674,20 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       }
       return false;
 
+    case kBleLlCtrlCsReq:
+    case kBleLlCtrlCsRsp:
+    case kBleLlCtrlCsCfg:
+    case kBleLlCtrlCsProcReq:
+    case kBleLlCtrlCsProcRsp:
+    case kBleLlCtrlCsSecReq:
+    case kBleLlCtrlCsSecRsp:
+    case kBleLlCtrlCsStart:
+    case kBleLlCtrlCsTerminate:
+    case kBleLlCtrlCsAbort:
+      // Channel Sounding LL control PDUs are consumed by the CS transport
+      // layer. Do not reject them as unknown LLCP opcodes.
+      return false;
+
     case kBleLlCtrlUnknownRsp:
       if (length != 2U) {
         return false;

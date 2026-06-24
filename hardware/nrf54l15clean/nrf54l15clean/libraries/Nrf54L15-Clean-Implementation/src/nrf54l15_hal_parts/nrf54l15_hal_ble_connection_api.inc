@@ -193,6 +193,119 @@ bool BleRadio::queueAttRequest(const uint8_t* attPayload, uint8_t attPayloadLeng
   return true;
 }
 
+bool BleRadio::isChannelSoundingLlControlOpcode(uint8_t opcode) const {
+  return opcode >= kBleLlCtrlCsReq && opcode <= kBleLlCtrlCsAbort;
+}
+
+bool BleRadio::isChannelSoundingLlControlPdu(const uint8_t* payload,
+                                             uint8_t length) const {
+  if (payload == nullptr || length < 2U ||
+      !isChannelSoundingLlControlOpcode(payload[0])) {
+    return false;
+  }
+
+  return static_cast<uint8_t>(payload[1] + 2U) == length;
+}
+
+bool BleRadio::queueChannelSoundingLlControlPdu(const uint8_t* payload,
+                                                uint8_t length) {
+  if (!connected_ || payload == nullptr || length == 0U ||
+      length > currentTxDataPduPayloadLength() ||
+      !isChannelSoundingLlControlPdu(payload, length)) {
+    return false;
+  }
+
+  const uint32_t irqState = bleEnterCritical();
+  if (channelSoundingLlControlTxCount_ >= kChannelSoundingLlControlQueueDepth) {
+    ++channelSoundingLlControlDebug_.txDropCount;
+    bleExitCritical(irqState);
+    return false;
+  }
+
+  memcpy(channelSoundingLlControlTxPayloads_[channelSoundingLlControlTxTail_],
+         payload, length);
+  channelSoundingLlControlTxLengths_[channelSoundingLlControlTxTail_] = length;
+  channelSoundingLlControlTxTail_ =
+      static_cast<uint8_t>((channelSoundingLlControlTxTail_ + 1U) %
+                           kChannelSoundingLlControlQueueDepth);
+  ++channelSoundingLlControlTxCount_;
+  ++channelSoundingLlControlDebug_.txQueuedCount;
+  channelSoundingLlControlDebug_.lastTxOpcode = payload[0];
+  channelSoundingLlControlDebug_.lastTxLength = length;
+  bleExitCritical(irqState);
+  return true;
+}
+
+bool BleRadio::dequeueChannelSoundingLlControlTx(uint8_t* outPayload,
+                                                 uint8_t* outLength) {
+  if (outPayload == nullptr || outLength == nullptr ||
+      channelSoundingLlControlTxCount_ == 0U) {
+    return false;
+  }
+
+  const uint8_t index = channelSoundingLlControlTxHead_;
+  const uint8_t length = channelSoundingLlControlTxLengths_[index];
+  if (length == 0U || length > kBleDataPduMaxPayload) {
+    channelSoundingLlControlTxHead_ =
+        static_cast<uint8_t>((channelSoundingLlControlTxHead_ + 1U) %
+                             kChannelSoundingLlControlQueueDepth);
+    --channelSoundingLlControlTxCount_;
+    ++channelSoundingLlControlDebug_.txDropCount;
+    return false;
+  }
+
+  memcpy(outPayload, channelSoundingLlControlTxPayloads_[index], length);
+  *outLength = length;
+  memset(channelSoundingLlControlTxPayloads_[index], 0,
+         sizeof(channelSoundingLlControlTxPayloads_[index]));
+  channelSoundingLlControlTxLengths_[index] = 0U;
+  channelSoundingLlControlTxHead_ =
+      static_cast<uint8_t>((channelSoundingLlControlTxHead_ + 1U) %
+                           kChannelSoundingLlControlQueueDepth);
+  --channelSoundingLlControlTxCount_;
+  ++channelSoundingLlControlDebug_.txSentCount;
+  channelSoundingLlControlDebug_.lastTxOpcode = outPayload[0];
+  channelSoundingLlControlDebug_.lastTxLength = length;
+  return true;
+}
+
+void BleRadio::rememberChannelSoundingLlControlRx(const uint8_t* payload,
+                                                  uint8_t length) {
+  if (!isChannelSoundingLlControlPdu(payload, length)) {
+    ++channelSoundingLlControlDebug_.rxDropCount;
+    return;
+  }
+
+  ++channelSoundingLlControlDebug_.rxCount;
+  channelSoundingLlControlDebug_.lastRxOpcode = payload[0];
+  channelSoundingLlControlDebug_.lastRxLength = length;
+}
+
+void BleRadio::getChannelSoundingLlControlDebug(
+    BleChannelSoundingLlControlDebug* out) const {
+  if (out == nullptr) {
+    return;
+  }
+
+  *out = channelSoundingLlControlDebug_;
+}
+
+void BleRadio::clearChannelSoundingLlControlDebug() {
+  memset(&channelSoundingLlControlDebug_, 0,
+         sizeof(channelSoundingLlControlDebug_));
+}
+
+void BleRadio::clearChannelSoundingLlControlState() {
+  memset(channelSoundingLlControlTxPayloads_, 0,
+         sizeof(channelSoundingLlControlTxPayloads_));
+  memset(channelSoundingLlControlTxLengths_, 0,
+         sizeof(channelSoundingLlControlTxLengths_));
+  channelSoundingLlControlTxHead_ = 0U;
+  channelSoundingLlControlTxTail_ = 0U;
+  channelSoundingLlControlTxCount_ = 0U;
+  clearChannelSoundingLlControlDebug();
+}
+
 bool BleRadio::queueAttReadRequest(uint16_t handle) {
   if (handle == 0U) {
     return false;

@@ -3,7 +3,7 @@
 ```
 CHANNEL SOUNDING — FULL ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-███████████████████████████████████████░░░░░░░  80%
+████████████████████████████████████████░░░░░░  84%
         done           |        remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -25,10 +25,10 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Host abort reason reaction | ✅ Hardware-verified |
 | ██ | Config removal / retained promotion example | ✅ Hardware-verified |
 | ██ | Multi-config slot testing | ✅ Hardware-verified |
-| ░░ | LL Control PDU over-the-air exchange | 🔒 Second board |
+| ██ | CS LL-control over-the-air bridge | ✅ Two-board hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
-| ░░ | Two-board interoperability | 🔒 Second board |
+| ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
 | ██ | Power / soak / stress testing | ✅ Hardware-verified |
 
 ---
@@ -408,37 +408,85 @@ surface now intentionally avoids that failure mode by draining responses.
 # Item 8 — Real LL Control PDU Exchange
 
 ```
-██░░░░░░░░░░░░░░ 12% Framework hardware-verified; over-air path open
+██████░░░░░░░░░░ 38% Raw CS LL-control bridge hardware-verified
 ```
 
-### Requires:
-1. **Second nRF54L15 board** (or Zephyr board) to act as peer
-2. **RADIO access from VPR** — VPR currently has no RADIO peripheral access
-3. **LL Control PDU transmission** — build actual LL data-channel PDUs with LLID/control framing and the CS control payloads
-4. **Connection-event-relative timing** — schedule CS exchanges in µs windows between BLE events
+### Completed in this slice
+
+- Added `BleRadio::queueChannelSoundingLlControlPdu()` validation for the real
+  raw CS LL-control shape: `opcode`, `payload length`, payload bytes.
+- Added BLE connection-event tagging for received CS LL-control packets so
+  examples can distinguish them from normal LL control and L2CAP/GATT data.
+- Added a two-board diagnostic pair:
+  - `BleChannelSoundingLlControlPeripheral`
+  - `BleChannelSoundingLlControlCentral`
+- The peripheral now answers real-shaped CS LL-control PDUs:
+  `CS_RSP`, `CS_CFG`, `CS_SEC_RSP`, `CS_PROC_RSP`, `CS_START`, and `CS_ABORT`.
+- The central now injects those real over-air peer PDUs into the VPR
+  peer-exchange state machine through the existing direct peer-PDU test seam.
+
+Two-board hardware result:
+
+```text
+Peripheral /dev/ttyACM1:
+link ev=15 queued=6
+debug rx=3 txq=6 txsent=6 txdrop=0 rxdrop=0 last_rx=0x2F last_tx=0x35
+
+Central /dev/ttyACM2:
+cs_ll_vpr_bridge=PASS progress=0x1FFF injected=6
+debug phase=complete ev=17 txq=3 inj=6 ble_rx=6 ble_txsent=3 ble_txdrop=0 ble_rxdrop=0 vpr_stage=0 vpr_status=0x0 progress=0x1FFF last_rx=0x35 last_tx=0x2F
+```
+
+This proves the current CPUAPP BLE LL-control transport can move CS control
+payloads over a real connection and that the VPR peer state machine can consume
+the received peer PDUs.
+
+### Still required
+
+1. **VPR/RADIO ownership** — the VPR still does not own the actual RADIO
+   subevent procedure. The current bridge receives PDUs on CPUAPP and injects
+   them into VPR.
+2. **Controller-owned local PDU generation** — the central example builds local
+   CS_REQ / CS_SEC_REQ / CS_PROC_REQ in sketch code. Production CS needs the
+   VPR/controller workflow to emit those local LL-control PDUs.
+3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
+   windows between BLE events, not by sketch polling.
+4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps
+   and IQ, then feed real result data into the existing host reassembler.
 
 ### Implementation steps (after hardware access):
 
-**Step 1** — VPR RADIO initialization:
+**Step 1** — Move local CS LL-control PDU source into the VPR/controller workflow:
+- Keep the existing CPUAPP queue as the transport sink.
+- Replace sketch-built CS_REQ/SEC_REQ/PROC_REQ packets with VPR-generated
+  packets from the current peer-exchange stage.
+- Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression
+  harness.
+
+**Step 2** — VPR RADIO initialization:
 - Configure `NRF_RADIO` for CS tone exchange
 - Set up PPI channels for event chaining
 - Configure `TIMER` instances for µs-precision scheduling
 
-**Step 2** — LL Control PDU construction:
+**Step 3** — LL Control PDU construction:
 - Use `vpr_cs_ll_control.h` structs to build real CS PDUs
 - Inject into the BLE data/control path at the right connection-event phase
 - Reuse the test-only `0xFCE8` path as the deterministic validation harness while replacing its source with real received peer PDUs
 
-**Step 3** — Peer negotiation state machine:
-- Wire `handle_peer_cs_pdu()` into the BLE connection event dequeue
-- Verify state transitions through the 7-stage peer-exchange enum; the injected-PDU hardware diagnostic already proves the local state machine.
+**Step 4** — Peer negotiation state machine:
+- Promote the temporary direct-injection bridge into the normal connected-CS
+  host/controller path.
+- Verify state transitions through the 7-stage peer-exchange enum; the
+  two-board LL-control diagnostic already proves the local state machine and
+  raw over-air PDU transport.
 
-**Step 4** — Procedure execution:
+**Step 5** — Procedure execution:
 - Schedule CS subevents at connection-event-anchor-relative times
 - Execute TX/RX tone exchange
 - Capture RTT timestamps and IQ samples
 
-**Estimated effort:** 1–2 weeks with hardware access.
+**Estimated effort:** raw LL-control transport is now unblocked and tested;
+physical RF parity remains a multi-slice VPR/RADIO scheduler task.
 
 ---
 
@@ -517,10 +565,10 @@ Use real test parameters and hardware measurements instead of synthetic mode-2 d
 
 Phase E — Hardware (2nd board, 1–2 weeks)
 ─────────────────────────────────────────
-Item 8    LL PDU exchange
+Item 8    VPR-owned LL PDU generation
 Item 9    Hardware event scheduler
 Item 10   Physical ranging
-Item 11   Two-board interoperability
+Item 11   Zephyr/Arduino physical interoperability
 ```
 
 ---

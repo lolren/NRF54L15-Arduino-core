@@ -732,6 +732,12 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       llid, rxLength,
       bleConnectionPayloadProtocolOpcode(llid, &rxPacket_[2], rxLength), nesn, sn,
       packetIsNew, peerAckedLastTx);
+  if (packetIsNew &&
+      (llid == kBlePduLlControl) &&
+      (rxLength >= 1U) &&
+      isChannelSoundingLlControlOpcode(rxPacket_[2])) {
+    rememberChannelSoundingLlControlRx(&rxPacket_[2], rxLength);
+  }
 
   if (event != nullptr) {
     event->packetIsNew = packetIsNew;
@@ -745,6 +751,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     if (packetIsNew && llid == kBlePduLlControl && rxLength >= 1U) {
       event->llControlPacket = true;
       event->llControlOpcode = rxPacket_[2];
+      event->channelSoundingLlControlPacket =
+          isChannelSoundingLlControlOpcode(rxPacket_[2]);
     }
     if (packetIsNew &&
         llid == kBlePduDataStartOrComplete &&
@@ -855,6 +863,18 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   }
 
   maybeQueueCentralLinkSetupRequest();
+
+  if (!connectionPendingTxValid_ &&
+      (channelSoundingLlControlTxCount_ > 0U)) {
+    uint8_t csLength = 0U;
+    if (dequeueChannelSoundingLlControlTx(connectionPendingTxPayload_,
+                                         &csLength)) {
+      connectionPendingTxLlid_ = kBlePduLlControl;
+      connectionPendingTxLength_ = csLength;
+      connectionPendingTxValid_ = true;
+      emitBleTrace("CS_LL_TXQ");
+    }
+  }
 
   auto pendingTxIsHandleValueCfm = [&]() {
     return connectionPendingTxValid_ &&
@@ -1322,6 +1342,12 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
           llidFollow, rxLengthFollow,
           bleConnectionPayloadProtocolOpcode(llidFollow, &rxPacket_[2], rxLengthFollow),
           nesnFollow, snFollow, packetIsNewFollow, peerAckedLastTxFollow);
+      if (packetIsNewFollow &&
+          (llidFollow == kBlePduLlControl) &&
+          (rxLengthFollow >= 1U) &&
+          isChannelSoundingLlControlOpcode(rxPacket_[2])) {
+        rememberChannelSoundingLlControlRx(&rxPacket_[2], rxLengthFollow);
+      }
 
       const bool rxHasL2capFollow =
           packetIsNewFollow &&
@@ -1421,6 +1447,17 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       }
 
       maybeQueueCentralLinkSetupRequest();
+      if (!connectionPendingTxValid_ &&
+          (channelSoundingLlControlTxCount_ > 0U)) {
+        uint8_t csLength = 0U;
+        if (dequeueChannelSoundingLlControlTx(connectionPendingTxPayload_,
+                                             &csLength)) {
+          connectionPendingTxLlid_ = kBlePduLlControl;
+          connectionPendingTxLength_ = csLength;
+          connectionPendingTxValid_ = true;
+          emitBleTrace("CS_LL_TXQ");
+        }
+      }
       const bool followRxIsAttServerPush =
           rxHasL2capFollow &&
           (rxL2capCidFollow == kBleL2capCidAtt) &&

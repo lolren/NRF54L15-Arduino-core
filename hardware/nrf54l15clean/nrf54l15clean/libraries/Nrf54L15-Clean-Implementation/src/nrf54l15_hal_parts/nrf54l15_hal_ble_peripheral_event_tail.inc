@@ -313,6 +313,19 @@
         !connectionEncStartReqTxPending_ &&
         !connectionEncAwaitingStartRsp_ &&
         !connectionEncStartReqPending_ &&
+        (channelSoundingLlControlTxCount_ > 0U) &&
+        dequeueChannelSoundingLlControlTx(connectionTxPayload_,
+                                         &deferredLength)) {
+      deferredLlid = kBlePduLlControl;
+      emitBleTrace("CS_LL_TXQ");
+    }
+
+    if ((deferredLength == 0U) &&
+        !connectionPendingTxValid_ &&
+        !encryptionProcedureBusy &&
+        !connectionEncStartReqTxPending_ &&
+        !connectionEncAwaitingStartRsp_ &&
+        !connectionEncStartReqPending_ &&
         connectionServiceChangedIndicationsEnabled_ &&
         connectionServiceChangedIndicationPending_ &&
         !connectionServiceChangedIndicationAwaitingConfirm_) {

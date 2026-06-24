@@ -981,6 +981,12 @@ BLE examples:
 - `examples/BLE/ChannelSounding/BleChannelSoundingVprServicePowerProbe/BleChannelSoundingVprServicePowerProbe.ino`
   - Quiet single-board power-measurement harness for the generic VPR BLE -> CS runtime.
   - Splits service-idle, BLE-connected, and BLE+CS phases, then prints a repeated summary line after the measured window.
+- `examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral/BleChannelSoundingLlControlPeripheral.ino`
+  - Two-board diagnostic peripheral for raw Channel Sounding LL-control transport.
+  - Answers CS_REQ, CS_SEC_REQ, and CS_PROC_REQ with real-shaped CS LL-control peer PDUs.
+- `examples/BLE/ChannelSounding/BleChannelSoundingLlControlCentral/BleChannelSoundingLlControlCentral.ino`
+  - Two-board diagnostic central for raw Channel Sounding LL-control transport.
+  - Injects received peer CS LL-control PDUs into the VPR peer-exchange state machine and reports the bridge pass/fail status.
 
 Latency characterization note:
 
