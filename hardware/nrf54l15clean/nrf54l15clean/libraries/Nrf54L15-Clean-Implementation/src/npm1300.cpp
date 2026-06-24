@@ -73,6 +73,9 @@ bool pmic_write_burst(uint8_t base, uint8_t offset, const uint8_t* data, size_t 
 
 // ─── Register offsets ──────────────────────────────────────
 constexpr uint8_t kMainOffsetVersion = 0x26U;
+constexpr uint8_t kVbusOffsetIlimUpdate = 0x00U;
+constexpr uint8_t kVbusOffsetIlim0 = 0x01U;
+constexpr uint8_t kVbusOffsetIlimStartup = 0x02U;
 constexpr uint8_t kVbusOffsetStatus = 0x07U;
 constexpr uint8_t kChargerOffsetErrClr = 0x00U;
 constexpr uint8_t kChargerOffsetEnSet = 0x04U;
@@ -148,6 +151,10 @@ static constexpr uint16_t kChargeCurrentMinMa = 32U;
 static constexpr uint16_t kChargeCurrentMaxMa = 800U;
 static constexpr uint16_t kChargeCurrentIndexMin = 16U;
 static constexpr uint16_t kChargeCurrentIndexMax = 400U;
+static constexpr uint16_t kVbusInputLimitMinMa = 100U;
+static constexpr uint16_t kVbusInputLimitMaxMa = 1500U;
+static constexpr uint16_t kVbusInputLimitStepMa = 100U;
+static constexpr uint16_t kVbusChargeHeadroomMa = 100U;
 static constexpr uint16_t kDischargeLimitLowMa = 200U;
 static constexpr uint16_t kDischargeLimitHighMa = 1000U;
 static constexpr uint16_t kDischargeLimitLowCode = 84U;
@@ -175,6 +182,7 @@ static uint8_t g_chargerError = 0;
 static uint8_t g_vbusStatus = 0;
 static int32_t g_chargeCurrentUa = 32000;
 static int32_t g_dischargeLimitUa = 1000000;
+static int32_t g_vbusInputLimitUa = 100000;
 
 static inline uint16_t adc10(uint8_t msb, uint8_t lsb, uint8_t shift) {
     return (uint16_t)(((uint16_t)msb << 2U) | ((lsb >> shift) & 0x03U));
@@ -313,6 +321,41 @@ static uint16_t charger_current_index(uint16_t ma) {
     uint16_t idx = (uint16_t)(kChargeCurrentIndexMin + ((ma - kChargeCurrentMinMa) / 2U));
     if (idx > kChargeCurrentIndexMax) idx = kChargeCurrentIndexMax;
     return idx;
+}
+
+static uint8_t vbus_input_limit_code_from_ma(uint16_t ma) {
+    if (ma <= kVbusInputLimitMinMa) {
+        return 1U;
+    }
+    if (ma >= kVbusInputLimitMaxMa) {
+        return 15U;
+    }
+
+    return static_cast<uint8_t>((ma + (kVbusInputLimitStepMa - 1U)) /
+                                kVbusInputLimitStepMa);
+}
+
+static uint16_t vbus_input_limit_code_to_ma(uint8_t code) {
+    code &= 0x0FU;
+    if (code == 0U) {
+        return 500U;
+    }
+    if (code > 15U) {
+        return kVbusInputLimitMaxMa;
+    }
+    return static_cast<uint16_t>(code * kVbusInputLimitStepMa);
+}
+
+static uint16_t recommended_vbus_limit_for_charge_ma(uint16_t chargeMa) {
+    const uint32_t requestedMa = clamp_charge_current_ma(chargeMa);
+    uint32_t limitMa = requestedMa + (requestedMa / 4U) + kVbusChargeHeadroomMa;
+    if (limitMa < 200U) {
+        limitMa = 200U;
+    }
+    if (limitMa > kVbusInputLimitMaxMa) {
+        limitMa = kVbusInputLimitMaxMa;
+    }
+    return static_cast<uint16_t>(limitMa);
 }
 
 static uint8_t charger_vterm_index(uint16_t mv) {
@@ -521,10 +564,16 @@ bool npm1300_charger_enable(bool e) {
 }
 bool npm1300_charger_set_current(uint16_t ma) {
     const uint16_t idx = charger_current_index(ma);
+    const uint16_t actualMa = charge_current_index_to_ma(idx);
     const uint8_t data[] = {
         static_cast<uint8_t>(idx / 2U),
         static_cast<uint8_t>(idx & 1U)
     };
+
+    if (!npm1300_vbus_set_input_current_limit_ma(
+            recommended_vbus_limit_for_charge_ma(actualMa))) {
+        return false;
+    }
 
     bool wasEnabled = false;
     if (!begin_charger_config(&wasEnabled)) {
@@ -532,7 +581,7 @@ bool npm1300_charger_set_current(uint16_t ma) {
     }
     const bool ok = npm1300_write_burst(NPM1300_BASE_CHARGER, kChargerOffsetISet,
                                         data, sizeof(data));
-    g_chargeCurrentUa = (int32_t)charge_current_index_to_ma(idx) * 1000;
+    g_chargeCurrentUa = static_cast<int32_t>(actualMa) * 1000;
     return end_charger_config(wasEnabled, ok);
 }
 bool npm1300_charger_set_term_voltage(uint16_t mv) {
@@ -552,6 +601,29 @@ bool npm1300_charger_is_charging(void) {
 bool npm1300_charger_status(uint8_t* s) { return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetStatus, s); }
 bool npm1300_charger_error(uint8_t* e) { return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetError, e); }
 bool npm1300_vbus_status(uint8_t* s) { return npm1300_read_reg(NPM1300_BASE_VBUS, kVbusOffsetStatus, s); }
+
+bool npm1300_vbus_set_input_current_limit_ma(uint16_t ma) {
+    const uint8_t code = vbus_input_limit_code_from_ma(ma);
+    const uint16_t actualMa = vbus_input_limit_code_to_ma(code);
+
+    const bool ok = npm1300_write_reg(NPM1300_BASE_VBUS, kVbusOffsetIlim0, code) &&
+                    npm1300_write_reg(NPM1300_BASE_VBUS, kVbusOffsetIlimStartup, code) &&
+                    npm1300_write_reg(NPM1300_BASE_VBUS, kVbusOffsetIlimUpdate, 1U);
+    if (ok) {
+        g_vbusInputLimitUa = static_cast<int32_t>(actualMa) * 1000;
+    }
+    return ok;
+}
+
+uint16_t npm1300_vbus_get_input_current_limit_ma(void) {
+    uint8_t code = 0U;
+    if (!npm1300_read_reg(NPM1300_BASE_VBUS, kVbusOffsetIlim0, &code)) {
+        return static_cast<uint16_t>(g_vbusInputLimitUa / 1000);
+    }
+    const uint16_t actualMa = vbus_input_limit_code_to_ma(code);
+    g_vbusInputLimitUa = static_cast<int32_t>(actualMa) * 1000;
+    return actualMa;
+}
 
 int32_t npm1300_read_vbat_mv(void) {
     AdcResults r{}; if (!read_adc_results(&r)) return -1;

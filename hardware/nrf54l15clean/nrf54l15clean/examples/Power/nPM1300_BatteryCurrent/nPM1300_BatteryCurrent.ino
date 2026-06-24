@@ -19,6 +19,11 @@
  * Output (Serial 115200):
  *   CSV: IBAT_mA, VBAT_mV, VSYS_mV, VBUS_mV, Direction
  *
+ * Note:
+ *   npm1300_charger_set_current() also raises the PMIC VBUS input-current
+ *   limit, otherwise the default 100 mA VBUS limiter can throttle charge
+ *   current before the requested battery-current setpoint is reached.
+ *
  * Wiring:
  *   No external wiring needed — nPM1300 is onboard.
  *   USB-C for serial output + charging.
@@ -38,14 +43,15 @@ void setup() {
     Serial.println(F("IBAT = 0   = no battery or fully charged"));
     Serial.println(F("VBAT ~10mV = no battery connected"));
     Serial.println(F("VBAT ~3.7V = LiPo battery present"));
+    Serial.println(F("VBUS_ILIM is the PMIC input limit, not battery current"));
     Serial.println(F(""));
     Serial.println(F("Direction: CHARGE / DISCHARGE / IDLE / NO_BAT"));
     Serial.println(F(""));
-    Serial.println(F("IBAT_mA,VBAT_mV,VSYS_mV,VBUS_mV,Direction"));
+    Serial.println(F("IBAT_mA,VBAT_mV,VSYS_mV,VBUS_mV,VBUS_ILIM_mA,Direction"));
 
     npm1300_begin();
-    npm1300_charger_enable(true);
     npm1300_charger_set_current(500);
+    npm1300_charger_enable(true);
 }
 
 void loop() {
@@ -65,6 +71,7 @@ void loop() {
     Serial.print(vbat); Serial.print(F(","));
     Serial.print(vsys); Serial.print(F(","));
     Serial.print(vbus); Serial.print(F(","));
+    Serial.print(npm1300_vbus_get_input_current_limit_ma()); Serial.print(F(","));
     Serial.println(dir);
 
     delay(2000);

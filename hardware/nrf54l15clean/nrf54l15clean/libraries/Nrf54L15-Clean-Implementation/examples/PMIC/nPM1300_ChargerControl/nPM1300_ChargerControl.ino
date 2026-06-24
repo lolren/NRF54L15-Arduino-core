@@ -30,12 +30,15 @@ void applyProfile(int idx) {
     npm1300_charger_set_current(ma);
     npm1300_charger_set_term_voltage(4200);
     npm1300_charger_enable(true);
+    uint16_t vbusLimitMa = npm1300_vbus_get_input_current_limit_ma();
 
     Serial.print("\n=== Profile ");
     Serial.print(idx + 1); Serial.print("/");
     Serial.print(kNumProfiles);
     Serial.print(": "); Serial.print(ma);
-    Serial.println(" mA, 4.20 V ===\n");
+    Serial.print(" mA, 4.20 V, VBUS limit ");
+    Serial.print(vbusLimitMa);
+    Serial.println(" mA ===\n");
 }
 
 void setup() {
@@ -83,6 +86,7 @@ void loop() {
 
     Serial.print("VBAT="); Serial.print(vbat); Serial.print("mV  ");
     Serial.print("IBAT="); Serial.print(ibat); Serial.print("mA  ");
+    Serial.print("VBUS_ILIM="); Serial.print(npm1300_vbus_get_input_current_limit_ma()); Serial.print("mA  ");
     Serial.print("CHG_ST=0x"); Serial.print(chg_st, HEX);
     Serial.print(" CHG_ERR=0x"); Serial.print(chg_err, HEX);
     Serial.print(" VBUS=0x"); Serial.print(vbus_st, HEX);

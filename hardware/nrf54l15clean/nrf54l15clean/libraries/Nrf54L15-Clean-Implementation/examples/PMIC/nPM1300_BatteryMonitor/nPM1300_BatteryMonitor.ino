@@ -54,6 +54,7 @@ void loop() {
     Serial.print("TEMP="); Serial.print(temp / 1000); Serial.print(".");
     Serial.print(abs(temp) % 1000 / 100); Serial.print("C  ");
     Serial.print("IBAT="); Serial.print(ibat); Serial.print("mA  ");
+    Serial.print("VBUS_ILIM="); Serial.print(npm1300_vbus_get_input_current_limit_ma()); Serial.print("mA  ");
     Serial.print("VSYS="); Serial.print(vsys); Serial.print("mV  ");
     Serial.print("VBUS="); Serial.print(vbus); Serial.print("mV  ");
     Serial.print("VBUS_ST=0x"); Serial.print(vbus_st, HEX);

@@ -140,6 +140,14 @@ bool npm1300_charger_status(uint8_t *status);
 bool npm1300_charger_error(uint8_t *error);
 bool npm1300_vbus_status(uint8_t *status);
 
+/* VBUS input-current limit.
+ * This is the PMIC input limiter, not the battery charge-current setpoint.
+ * Range: 100 mA to 1500 mA in 100 mA steps. The setter also applies the
+ * active ILIM switch task so the new limit takes effect immediately.
+ */
+bool npm1300_vbus_set_input_current_limit_ma(uint16_t ma);
+uint16_t npm1300_vbus_get_input_current_limit_ma(void);
+
 /* Measurements. Returns value in requested units, or -1 when unavailable. */
 int32_t npm1300_read_vbat_mv(void);
 int32_t npm1300_read_temp_mc(void);  /* PMIC die temperature in millicelsius */

@@ -183,6 +183,12 @@ Examples:
 - `systemOffWakeReset(ms)` enters real no-retention `SYSTEMOFF`: the GRTC wake timer restarts the chip, so execution begins again from `setup()`.
 - `wasSystemOffWakeReset()`, `wasSystemOffWakeFromGrtc()`, and `clearSystemOffWakeResetReason()` are available for boot diagnostics. See `File > Examples > Power > SystemOffWakeReset`.
 
+## XIAO nRF54LM20A nPM1300 Charging Notes
+
+- `npm1300_charger_set_current(ma)` sets the battery charge-current target and now also updates the nPM1300 VBUS input-current limiter so the default 100 mA input limit does not throttle higher charge currents.
+- `npm1300_vbus_set_input_current_limit_ma(ma)` and `npm1300_vbus_get_input_current_limit_ma()` expose the VBUS limiter directly. This limit is the allowed USB/VBUS input draw, not the measured battery charge or discharge current.
+- Use `File > Examples > Nrf54L15-Clean-Implementation > PMIC > nPM1300_ChargerControl` or `File > Examples > Power > nPM1300_BatteryCurrent` to compare `IBAT` with the configured `VBUS_ILIM`.
+
 ---
 
 ## 📊 Stack Maturity
