@@ -77,6 +77,14 @@ enum RxBits : uint8_t {
   kRxAbort,
 };
 
+static bool resultPathComplete() {
+  const BleCsControllerHostState& host = g_csHost.hostState();
+  const BleCsControllerSessionState& session = g_csHost.sessionState();
+  return host.localSubeventResults > 0U &&
+         host.peerSubeventResults > 0U &&
+         session.completedProcedureCounter > 0U;
+}
+
 static void markBit(uint32_t* mask, uint8_t bit) {
   if (mask != nullptr && bit < 32U) {
     *mask |= (1UL << bit);
@@ -163,6 +171,14 @@ static void printStatus(const char* prefix) {
   Serial.print(g_lastVprStage);
   Serial.print(" status=0x");
   Serial.print(g_lastVprStatus, HEX);
+  Serial.print(" local=");
+  Serial.print(g_csHost.hostState().localSubeventResults);
+  Serial.print(" peer=");
+  Serial.print(g_csHost.hostState().peerSubeventResults);
+  Serial.print(" proc=");
+  Serial.print(g_csHost.sessionState().completedProcedureCounter);
+  Serial.print(" est=");
+  Serial.print(g_csHost.estimateValid() ? 1 : 0);
   Serial.print(" last_rx=");
   printOpcode(dbg.lastRxOpcode);
   Serial.print(" last_tx=");
@@ -384,7 +400,7 @@ void loop() {
     }
     updateWorkflowMask();
 
-    if (!g_passPrinted && bridgeComplete()) {
+    if (!g_passPrinted && bridgeComplete() && resultPathComplete()) {
       g_passPrinted = true;
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_workflowMask, HEX);
@@ -396,6 +412,14 @@ void loop() {
       Serial.print(g_peerPdusInjected);
       Serial.print(" direct=");
       Serial.print(g_directCommands);
+      Serial.print(" local=");
+      Serial.print(g_csHost.hostState().localSubeventResults);
+      Serial.print(" peer=");
+      Serial.print(g_csHost.hostState().peerSubeventResults);
+      Serial.print(" proc=");
+      Serial.print(g_csHost.sessionState().completedProcedureCounter);
+      Serial.print(" est=");
+      Serial.print(g_csHost.estimateValid() ? 1 : 0);
       Serial.print("\r\n");
     }
 

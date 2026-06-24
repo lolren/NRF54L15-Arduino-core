@@ -31,6 +31,9 @@ static uint32_t g_advEvents = 0;
 static uint32_t g_linkEvents = 0;
 static uint32_t g_rspQueued = 0;
 static uint32_t g_lastStatusMs = 0;
+static bool g_abortPending = false;
+static uint8_t g_abortDelayEvents = 0U;
+static constexpr uint8_t kAbortAfterProcedureEvents = 2U;
 
 static void printOpcode(uint8_t opcode) {
   Serial.print("0x");
@@ -137,6 +140,26 @@ static bool queueCsAbort() {
   return queuePdu(pdu.data(), pdu.length, "CS_ABORT");
 }
 
+static void scheduleCsAbort() {
+  g_abortPending = true;
+  g_abortDelayEvents = kAbortAfterProcedureEvents;
+  Serial.print("scheduled CS_ABORT after ");
+  Serial.print(kAbortAfterProcedureEvents);
+  Serial.print(" events\r\n");
+}
+
+static void serviceScheduledCsAbort() {
+  if (!g_abortPending) {
+    return;
+  }
+  if (g_abortDelayEvents > 0U) {
+    --g_abortDelayEvents;
+    return;
+  }
+  (void)queueCsAbort();
+  g_abortPending = false;
+}
+
 static uint8_t configIdFromEvent(const BleConnectionEvent& evt) {
   if (evt.payload == nullptr || evt.payloadLength < 3U) {
     return 0U;
@@ -165,7 +188,7 @@ static void respondToCsControl(const BleConnectionEvent& evt) {
       if (evt.payloadLength >= 21U && evt.payload[1] == 19U) {
         (void)queueCsProcedureResponse(configId);
         (void)queueCsStart(configId);
-        (void)queueCsAbort();
+        scheduleCsAbort();
       }
       break;
     default:
@@ -235,6 +258,8 @@ void loop() {
     g_ble.clearChannelSoundingLlControlDebug();
     g_linkEvents = 0U;
     g_rspQueued = 0U;
+    g_abortPending = false;
+    g_abortDelayEvents = 0U;
     Serial.print("connected\r\n");
     Gpio::write(kPinUserLed, false);
   }
@@ -254,6 +279,8 @@ void loop() {
       Serial.print("\r\n");
       respondToCsControl(evt);
     }
+
+    serviceScheduledCsAbort();
 
     const uint32_t now = millis();
     if ((now - g_lastStatusMs) >= 1000UL) {
