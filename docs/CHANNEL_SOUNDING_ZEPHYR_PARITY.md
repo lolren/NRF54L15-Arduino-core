@@ -450,6 +450,30 @@ remaining work is to move that physical execution under the connected CS
 controller workflow and produce those real subevent results from the
 controller/VPR scheduler rather than from the standalone sketch loop.
 
+## Completed in This Pass — Direct Completed-Result Ingress Seam
+
+The controller host stack now accepts already-built completed
+`BleCsSubeventResult` objects through `consumeCompletedResult()` on:
+
+- `BleCsControllerSession`
+- `BleCsControllerHost`
+- `BleCsControllerStreamHost`
+- `BleCsControllerVprHost`
+
+This is the seam needed by the physical scheduler: once the RADIO/VPR layer has
+captured local and peer tone data and encoded them as Mode 2 result objects, it
+can feed those objects directly into the same accumulation, abort filtering,
+completed-result snapshot, and distance-estimation logic used by the HCI event
+stream. It no longer has to wrap real physical measurements as synthetic HCI
+event bytes just to reach the estimator.
+
+Hardware check:
+
+```text
+BleChannelSoundingHostAbortCleanup
+cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 direct_ingress=1 abort=0xB/0x0
+```
+
 Next required slice:
 
 - Move CS LL-control PDU emission/consumption from the CPUAPP sketch loop into

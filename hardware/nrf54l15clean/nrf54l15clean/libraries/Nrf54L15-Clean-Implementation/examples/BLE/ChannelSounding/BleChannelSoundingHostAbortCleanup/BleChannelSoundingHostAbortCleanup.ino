@@ -7,7 +7,7 @@
  * that cleanup, a later valid packet can be combined with stale pre-abort data.
  *
  * Serial output:
- *   cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 abort=0xB/0x0
+ *   cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 direct_ingress=1 abort=0xB/0x0
  */
 
 #include <Arduino.h>
@@ -197,6 +197,55 @@ bool beginHost() {
   return gHost.begin(kConnHandle, hostConfig);
 }
 
+bool buildCompletedResult(uint16_t procedureCounter,
+                          const uint8_t* steps,
+                          size_t stepLen,
+                          BleCsSubeventResult* outResult) {
+  if (steps == nullptr || outResult == nullptr || stepLen == 0U ||
+      stepLen > 0xFFFFU) {
+    return false;
+  }
+
+  BleCsSubeventResult result{};
+  result.header.connHandle = kConnHandle;
+  result.header.configId = kConfigId;
+  result.header.procedureCounter = procedureCounter;
+  result.header.procedureDoneStatus = kBleCsProcedureDoneComplete;
+  result.header.subeventDoneStatus = kBleCsSubeventDoneComplete;
+  result.header.numAntennaPaths = 2U;
+  result.header.numStepsReported = static_cast<uint16_t>(stepLen / 8U);
+  result.stepData = steps;
+  result.stepDataLen = static_cast<uint16_t>(stepLen);
+  result.isComplete = true;
+  *outResult = result;
+  return true;
+}
+
+bool runDirectResultIngressProbe(const uint8_t* localSteps,
+                                 size_t localStepsLen,
+                                 const uint8_t* peerSteps,
+                                 size_t peerStepsLen) {
+  if (!beginHost()) {
+    return false;
+  }
+
+  BleCsSubeventResult localResult{};
+  BleCsSubeventResult peerResult{};
+  const bool built =
+      buildCompletedResult(3U, localSteps, localStepsLen, &localResult) &&
+      buildCompletedResult(3U, peerSteps, peerStepsLen, &peerResult);
+  const bool localOk =
+      built && gHost.consumeCompletedResult(BleCsControllerResultSource::kLocal,
+                                            localResult);
+  const bool peerOk =
+      localOk && gHost.consumeCompletedResult(BleCsControllerResultSource::kPeer,
+                                              peerResult);
+  return peerOk && gHost.estimateValid() &&
+         gHost.sessionState().completedProcedureCounter == 3U &&
+         gHost.state().localSubeventResults >= 1U &&
+         gHost.state().peerSubeventResults >= 1U;
+}
+
 bool runAbortCleanupProbe() {
   uint8_t localSteps[64] = {0};
   uint8_t peerSteps[64] = {0};
@@ -262,18 +311,23 @@ bool runAbortCleanupProbe() {
                   peerPacketLen, true);
   const bool recovery = gHost.estimateValid() &&
                         gHost.sessionState().completedProcedureCounter == 2U;
+  const bool directIngress =
+      ok && runDirectResultIngressProbe(localSteps, localStepsLen,
+                                        peerSteps, peerStepsLen);
 
   Serial.print(F("cs_host_abort_cleanup="));
-  Serial.print((ok && staleBlocked && recovery) ? F("PASS") : F("FAIL"));
+  Serial.print((ok && staleBlocked && recovery && directIngress) ? F("PASS") : F("FAIL"));
   Serial.print(F(" stale_blocked="));
   Serial.print(staleBlocked ? 1 : 0);
   Serial.print(F(" recovery="));
   Serial.print(recovery ? 1 : 0);
+  Serial.print(F(" direct_ingress="));
+  Serial.print(directIngress ? 1 : 0);
   Serial.print(F(" abort=0x"));
   Serial.print(procedureAbort, HEX);
   Serial.print(F("/0x"));
   Serial.println(subeventAbort, HEX);
-  return ok && staleBlocked && recovery;
+  return ok && staleBlocked && recovery && directIngress;
 }
 
 }  // namespace

@@ -31,6 +31,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Host-owned initiator LL bridge poll helper | ✅ Two-board hardware-verified |
 | ██ | VPR-owned initiator LL PDU source | ✅ Two-board hardware-verified |
 | ██ | Standalone raw RF tone/DFE + Mode 2 result encoder harness | ✅ Two-board hardware-verified |
+| ██ | Direct completed-result ingress seam | ✅ Hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
 | ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
@@ -555,6 +556,9 @@ VPR/controller workflow:
   standalone RADIO tone/DFE behavior and real-measurement Mode 2 subevent
   result encoding while moving execution under the connected controller
   workflow.
+- Feed completed local/peer result objects into the host through
+  `consumeCompletedResult()` instead of wrapping physical result data as
+  synthetic HCI event bytes.
 
 **Step 3** — LL Control PDU construction:
 - Use the public `bleCsBuildLlControl*()` helpers for CPUAPP-side packet

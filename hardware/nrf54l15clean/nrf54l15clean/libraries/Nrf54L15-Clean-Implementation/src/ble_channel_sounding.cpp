@@ -3786,6 +3786,31 @@ bool BleCsControllerSession::consumeResultPacket(BleCsControllerResultSource sou
   return true;
 }
 
+bool BleCsControllerSession::consumeCompletedResult(
+    BleCsControllerResultSource source,
+    const BleCsSubeventResult& result) {
+  if (!result.isComplete) {
+    return false;
+  }
+  if (!accumulateProcedureResult(source, result)) {
+    return false;
+  }
+
+  const BleCsSubeventResult& accumulated =
+      (source == BleCsControllerResultSource::kLocal) ? accumulatedLocalResult_
+                                                      : accumulatedPeerResult_;
+  if (source == BleCsControllerResultSource::kLocal) {
+    localResult_ = accumulated;
+    state_.localResultComplete = accumulated.isComplete;
+  } else {
+    peerResult_ = accumulated;
+    state_.peerResultComplete = accumulated.isComplete;
+  }
+
+  updateEstimateIfComplete();
+  return true;
+}
+
 bool BleCsControllerSession::snapshotCompletedResultPair(
     const BleCsSubeventResult& localResult,
     const BleCsSubeventResult& peerResult) {
@@ -4074,6 +4099,21 @@ bool BleCsControllerHost::consumeIngressPacket(BleCsControllerIngressSource sour
   return ok;
 }
 
+bool BleCsControllerHost::consumeCompletedResult(
+    BleCsControllerResultSource source,
+    const BleCsSubeventResult& result) {
+  const bool ok = session_.consumeCompletedResult(source, result);
+  if (ok) {
+    if (source == BleCsControllerResultSource::kLocal) {
+      ++state_.localSubeventResults;
+    } else {
+      ++state_.peerSubeventResults;
+      controllerPeerResultsExpected_ = false;
+    }
+  }
+  return ok;
+}
+
 bool BleCsControllerHost::consumeIngressBytes(BleCsControllerIngressSource source,
                                               const uint8_t* data,
                                               size_t len) {
@@ -4252,6 +4292,12 @@ bool BleCsControllerStreamHost::consumePeerPacket(const uint8_t* packet, size_t 
   }
   state_.peerBytesRead = static_cast<uint32_t>(state_.peerBytesRead + packetLen);
   return host_.consumeIngressPacket(BleCsControllerIngressSource::kPeerResult, packet, packetLen);
+}
+
+bool BleCsControllerStreamHost::consumeCompletedResult(
+    BleCsControllerResultSource source,
+    const BleCsSubeventResult& result) {
+  return host_.consumeCompletedResult(source, result);
 }
 
 bool BleCsControllerStreamHost::poll() {
@@ -6244,6 +6290,12 @@ bool BleCsControllerVprHost::drainPendingControllerEvents() {
   }
   VprControllerServiceHost directHost(&transport_);
   return drainDirectControllerEvents(&directHost, nullptr, 0U, true);
+}
+
+bool BleCsControllerVprHost::consumeCompletedResult(
+    BleCsControllerResultSource source,
+    const BleCsSubeventResult& result) {
+  return host_.consumeCompletedResult(source, result);
 }
 
 bool BleCsControllerVprHost::ready() const { return host_.ready(); }

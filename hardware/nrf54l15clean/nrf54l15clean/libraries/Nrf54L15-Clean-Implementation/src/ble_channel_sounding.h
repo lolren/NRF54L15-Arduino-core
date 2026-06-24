@@ -1302,6 +1302,8 @@ class BleCsControllerSession {
   bool consumeResultStreamBytes(BleCsControllerResultSource source,
                                 const uint8_t* data,
                                 size_t len);
+  bool consumeCompletedResult(BleCsControllerResultSource source,
+                              const BleCsSubeventResult& result);
 
   bool ready() const;
   bool failed() const;
@@ -1403,6 +1405,8 @@ class BleCsControllerHost {
   bool consumeIngressBytes(BleCsControllerIngressSource source,
                            const uint8_t* data,
                            size_t len);
+  bool consumeCompletedResult(BleCsControllerResultSource source,
+                              const BleCsSubeventResult& result);
 
   bool ready() const;
   bool failed() const;
@@ -1466,6 +1470,8 @@ class BleCsControllerStreamHost {
   bool pollPeerResults();
   bool consumeControllerPacket(const uint8_t* packet, size_t packetLen);
   bool consumePeerPacket(const uint8_t* packet, size_t packetLen);
+  bool consumeCompletedResult(BleCsControllerResultSource source,
+                              const BleCsSubeventResult& result);
   bool poll();
   bool loopOnce();
 
@@ -1975,6 +1981,8 @@ class BleCsControllerVprHost {
    * stream path feeds the connected-procedure session. Returns false if the
    * host is not begun. */
   bool drainPendingControllerEvents();
+  bool consumeCompletedResult(BleCsControllerResultSource source,
+                              const BleCsSubeventResult& result);
 
   bool ready() const;
   bool failed() const;
