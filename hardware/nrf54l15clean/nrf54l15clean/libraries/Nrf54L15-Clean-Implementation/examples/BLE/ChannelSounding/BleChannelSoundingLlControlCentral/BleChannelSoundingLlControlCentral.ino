@@ -118,37 +118,29 @@ static void printDebug(const char* prefix) {
   Serial.print("\r\n");
 }
 
-static const char* localPduLabelForStage(uint8_t stage) {
-  switch (stage) {
-    case kBleCsVprPeerStageAwaitingCsRsp:
+static const char* pduLabelForOpcode(uint8_t opcode) {
+  switch (opcode) {
+    case kBleCsLlCtrlReq:
       return "CS_REQ";
-    case kBleCsVprPeerStageAwaitingSecRsp:
+    case kBleCsLlCtrlSecReq:
       return "CS_SEC_REQ";
-    case kBleCsVprPeerStageAwaitingProcRsp:
+    case kBleCsLlCtrlProcReq:
       return "CS_PROC_REQ";
+    case kBleCsLlCtrlRsp:
+      return "CS_RSP";
+    case kBleCsLlCtrlCfg:
+      return "CS_CFG";
+    case kBleCsLlCtrlSecRsp:
+      return "CS_SEC_RSP";
+    case kBleCsLlCtrlProcRsp:
+      return "CS_PROC_RSP";
+    case kBleCsLlCtrlStart:
+      return "CS_START";
+    case kBleCsLlCtrlAbort:
+      return "CS_ABORT";
     default:
       return "CS_UNKNOWN";
   }
-}
-
-static bool queuePendingInitiatorPdu() {
-  BleCsLlControlPdu pdu{};
-  BleCsVprPeerExchangeState state{};
-  if (!g_csHost.queuePendingInitiatorLlControlPdu(g_ble, &state, &pdu)) {
-    Serial.print("queue failed stage=");
-    Serial.print(state.currentStage);
-    Serial.print(" status=0x");
-    Serial.print(state.status, HEX);
-    Serial.print("\r\n");
-    g_phase = BridgePhase::kFailed;
-    return false;
-  }
-
-  ++g_txQueued;
-  Serial.print("queued ");
-  Serial.print(localPduLabelForStage(state.currentStage));
-  Serial.print("\r\n");
-  return true;
 }
 
 static bool bootVprPeerBridge() {
@@ -192,84 +184,93 @@ static bool bootVprPeerBridge() {
   return ok;
 }
 
-static bool injectPeerPdu(const BleConnectionEvent& evt) {
-  BleCsVprPeerExchangeState state{};
-  if (!g_csHost.consumePeerLlControlPduFromEvent(evt, &state) || !state.valid ||
-      state.status != 0U) {
-    g_lastVprStatus = state.status;
-    g_lastVprStage = state.currentStage;
-    g_phase = BridgePhase::kFailed;
-    Serial.print("VPR inject failed status=0x");
-    Serial.print(state.status, HEX);
+static void handleBridgeServiceResult(
+    const BleCsLlControlBridgeServiceResult& result) {
+  g_lastVprStage = result.state.currentStage;
+  g_lastVprStatus = result.state.status;
+
+  if (result.peerPduConsumed) {
+    ++g_peerPdusInjected;
+    Serial.print("VPR inject op=");
+    printOpcode(result.rxOpcode);
+    Serial.print(" prev=");
+    Serial.print(result.peerState.previousStage);
     Serial.print(" stage=");
-    Serial.print(state.currentStage);
+    Serial.print(result.peerState.currentStage);
     Serial.print("\r\n");
-    return false;
   }
 
-  ++g_peerPdusInjected;
-  g_lastVprStage = state.currentStage;
-  g_lastVprStatus = state.status;
-  Serial.print("VPR inject op=");
-  printOpcode(evt.payload[0]);
-  Serial.print(" prev=");
-  Serial.print(state.previousStage);
-  Serial.print(" stage=");
-  Serial.print(state.currentStage);
-  Serial.print("\r\n");
-  return true;
-}
+  if (result.directCommandSent) {
+    g_lastVprStatus = result.directStatus;
+  }
 
-static void advanceAfterPeerPdu(uint8_t opcode) {
+  if (result.initiatorPduQueued) {
+    ++g_txQueued;
+    Serial.print("queued ");
+    Serial.print(pduLabelForOpcode(result.txOpcode));
+    Serial.print("\r\n");
+  }
+
+  if (g_phase == BridgePhase::kSendCsReq &&
+      result.initiatorPduQueued &&
+      result.txOpcode == kBleCsLlCtrlReq) {
+    markProgress(4U);
+    g_phase = BridgePhase::kWaitConfig;
+    return;
+  }
+
   if (g_phase == BridgePhase::kWaitConfig &&
-      opcode == kBleCsLlCtrlRsp &&
-      g_lastVprStage == kBleCsVprPeerStageAwaitingCsCfg) {
+      result.rxOpcode == kBleCsLlCtrlRsp &&
+      result.state.currentStage == kBleCsVprPeerStageAwaitingCsCfg) {
     markProgress(5U);
     return;
   }
 
   if (g_phase == BridgePhase::kWaitConfig &&
-      opcode == kBleCsLlCtrlCfg &&
-      g_lastVprStage == kBleCsVprPeerStageIdle) {
+      result.rxOpcode == kBleCsLlCtrlCfg &&
+      result.directCommandSent &&
+      result.directStatus == 0U &&
+      result.initiatorPduQueued &&
+      result.txOpcode == kBleCsLlCtrlSecReq) {
     markProgress(6U);
-    g_phase = BridgePhase::kSendSecurityReq;
+    markProgress(7U);
+    g_phase = BridgePhase::kWaitSecurity;
     return;
   }
 
   if (g_phase == BridgePhase::kWaitSecurity &&
-      opcode == kBleCsLlCtrlSecRsp &&
-      g_lastVprStage == kBleCsVprPeerStageIdle) {
+      result.rxOpcode == kBleCsLlCtrlSecRsp &&
+      result.directCommandSent &&
+      result.directStatus == 0U &&
+      result.initiatorPduQueued &&
+      result.txOpcode == kBleCsLlCtrlProcReq) {
     markProgress(8U);
-    g_phase = BridgePhase::kSendProcReq;
+    markProgress(9U);
+    g_phase = BridgePhase::kWaitProcedure;
     return;
   }
 
   if (g_phase == BridgePhase::kWaitProcedure &&
-      opcode == kBleCsLlCtrlProcRsp &&
-      g_lastVprStage == kBleCsVprPeerStageAwaitingStart) {
-    uint8_t status = 0xFFU;
-    if (g_csHost.directProcedureEnable(
-            g_csConfig.session.workflow.procedureEnable, &status) &&
-        status == 0U) {
-      g_lastVprStatus = status;
+      result.rxOpcode == kBleCsLlCtrlProcRsp &&
+      result.state.currentStage == kBleCsVprPeerStageAwaitingStart) {
+    if (result.directCommandSent && result.directStatus == 0U) {
       markProgress(10U);
     } else {
-      g_lastVprStatus = status;
       g_phase = BridgePhase::kFailed;
     }
     return;
   }
 
   if (g_phase == BridgePhase::kWaitProcedure &&
-      opcode == kBleCsLlCtrlStart &&
-      g_lastVprStage == kBleCsVprPeerStageProcedureActive) {
+      result.rxOpcode == kBleCsLlCtrlStart &&
+      result.state.currentStage == kBleCsVprPeerStageProcedureActive) {
     markProgress(11U);
     return;
   }
 
   if (g_phase == BridgePhase::kWaitProcedure &&
-      opcode == kBleCsLlCtrlAbort &&
-      g_lastVprStage == kBleCsVprPeerStageIdle) {
+      result.rxOpcode == kBleCsLlCtrlAbort &&
+      result.exchangeComplete) {
     markProgress(12U);
     g_phase = BridgePhase::kComplete;
     Serial.print("cs_ll_vpr_bridge=PASS progress=0x");
@@ -278,6 +279,27 @@ static void advanceAfterPeerPdu(uint8_t opcode) {
     Serial.print(g_peerPdusInjected);
     Serial.print("\r\n");
   }
+}
+
+static bool serviceBridge(const BleConnectionEvent* evt) {
+  BleCsLlControlBridgeServiceResult result{};
+  if (!g_csHost.serviceInitiatorLlControlBridge(g_ble, evt, &result)) {
+    g_lastVprStage = result.state.currentStage;
+    g_lastVprStatus = result.directCommandSent ? result.directStatus
+                                               : result.state.status;
+    g_phase = BridgePhase::kFailed;
+    Serial.print("bridge service failed rx=");
+    printOpcode(result.rxOpcode);
+    Serial.print(" stage=");
+    Serial.print(result.state.currentStage);
+    Serial.print(" status=0x");
+    Serial.print(g_lastVprStatus, HEX);
+    Serial.print("\r\n");
+    return false;
+  }
+
+  handleBridgeServiceResult(result);
+  return true;
 }
 
 static void resetBridgeState() {
@@ -354,33 +376,7 @@ void loop() {
   }
 
   if (g_phase == BridgePhase::kSendCsReq) {
-    if (queuePendingInitiatorPdu()) {
-      markProgress(4U);
-      g_phase = BridgePhase::kWaitConfig;
-    }
-  } else if (g_phase == BridgePhase::kSendSecurityReq) {
-    uint8_t status = 0xFFU;
-    if (g_csHost.directSecurityEnable(&status) && status == 0U &&
-        queuePendingInitiatorPdu()) {
-      g_lastVprStatus = status;
-      markProgress(7U);
-      g_phase = BridgePhase::kWaitSecurity;
-    } else {
-      g_lastVprStatus = status;
-      g_phase = BridgePhase::kFailed;
-    }
-  } else if (g_phase == BridgePhase::kSendProcReq) {
-    uint8_t status = 0xFFU;
-    if (g_csHost.directSetProcedureParameters(
-            g_csConfig.session.workflow.procedureParameters, &status) &&
-        status == 0U && queuePendingInitiatorPdu()) {
-      g_lastVprStatus = status;
-      markProgress(9U);
-      g_phase = BridgePhase::kWaitProcedure;
-    } else {
-      g_lastVprStatus = status;
-      g_phase = BridgePhase::kFailed;
-    }
+    (void)serviceBridge(nullptr);
   }
 
   BleConnectionEvent evt{};
@@ -397,9 +393,7 @@ void loop() {
       Serial.print(" len=");
       Serial.print(evt.payloadLength);
       Serial.print("\r\n");
-      if (injectPeerPdu(evt)) {
-        advanceAfterPeerPdu(evt.llControlOpcode);
-      }
+      (void)serviceBridge(&evt);
     }
   } else {
     delay(1);

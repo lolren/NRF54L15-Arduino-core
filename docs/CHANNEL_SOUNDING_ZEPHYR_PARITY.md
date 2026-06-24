@@ -332,6 +332,10 @@ What the pair verifies:
   `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`, keeping the
   VPR peer-stage injection behind the CS host API instead of exposing the raw
   direct-injection seam in the diagnostic loop.
+- The central now services the initiator LL-control bridge through
+  `BleCsControllerVprHost::serviceInitiatorLlControlBridge()`, which consumes
+  peer CS LL-control events, performs the required direct-HCI transition, and
+  queues the next initiator PDU through the host API.
 - Received CS LL-control packets are tagged in `BleConnectionEvent` and counted
   by `BleChannelSoundingLlControlDebug`.
 - The central injects the received peer PDUs into `BleCsControllerVprHost` and
@@ -366,9 +370,9 @@ Status:
 Next required slice:
 
 - Move CS LL-control PDU emission/consumption fully into the normal
-  VPR/controller workflow. The packet builders, host-owned stage-to-queued-PDU
-  helper, and peer-event consumer now exist; the production workflow still
-  needs to call them automatically from the connected-CS scheduling path.
+  VPR/controller workflow. The packet builders, host-owned bridge service, and
+  peer-event consumer now exist; the production workflow still needs to call
+  them automatically from the connected-CS scheduling path.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.

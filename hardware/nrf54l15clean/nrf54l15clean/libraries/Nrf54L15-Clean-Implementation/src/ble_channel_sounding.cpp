@@ -4790,6 +4790,50 @@ bool BleCsControllerVprHost::queuePendingInitiatorLlControlPdu(
   return radio.queueChannelSoundingLlControlPdu(pdu.data(), pdu.length);
 }
 
+static bool bleCsVprStageNeedsInitiatorLlControlPdu(uint8_t stage) {
+  return stage == kBleCsVprPeerStageAwaitingCsRsp ||
+         stage == kBleCsVprPeerStageAwaitingSecRsp ||
+         stage == kBleCsVprPeerStageAwaitingProcRsp;
+}
+
+static bool bleCsVprBridgeQueueIfPending(
+    BleCsControllerVprHost& host,
+    BleRadio& radio,
+    BleCsLlControlBridgeServiceResult* result) {
+  BleCsVprPeerExchangeState state{};
+  if (!host.directReadPeerExchangeStateForTest(&state)) {
+    if (result != nullptr) {
+      result->state = state;
+    }
+    return false;
+  }
+
+  if (result != nullptr) {
+    result->state = state;
+  }
+  if (!state.valid || state.status != 0U) {
+    return false;
+  }
+  if (!bleCsVprStageNeedsInitiatorLlControlPdu(state.currentStage)) {
+    return true;
+  }
+
+  BleCsLlControlPdu pdu{};
+  if (!host.queuePendingInitiatorLlControlPdu(radio, &state, &pdu)) {
+    if (result != nullptr) {
+      result->state = state;
+    }
+    return false;
+  }
+
+  if (result != nullptr) {
+    result->initiatorPduQueued = true;
+    result->state = state;
+    result->txOpcode = pdu.length > 0U ? pdu.bytes[0] : 0U;
+  }
+  return true;
+}
+
 bool BleCsControllerVprHost::consumePeerLlControlPdu(
     const uint8_t* payload,
     uint8_t length,
@@ -4810,6 +4854,102 @@ bool BleCsControllerVprHost::consumePeerLlControlPduFromEvent(
   }
 
   return consumePeerLlControlPdu(event.payload, event.payloadLength, outState);
+}
+
+bool BleCsControllerVprHost::serviceInitiatorLlControlBridge(
+    BleRadio& radio,
+    const BleConnectionEvent* event,
+    BleCsLlControlBridgeServiceResult* outResult) {
+  BleCsLlControlBridgeServiceResult result{};
+
+  if (event != nullptr && event->packetReceived && event->crcOk &&
+      event->packetIsNew && event->channelSoundingLlControlPacket &&
+      event->payload != nullptr && event->payloadLength >= 2U) {
+    result.rxOpcode = event->llControlOpcode;
+    if (!consumePeerLlControlPduFromEvent(*event, &result.state) ||
+        !result.state.valid || result.state.status != 0U) {
+      if (outResult != nullptr) {
+        *outResult = result;
+      }
+      return false;
+    }
+    result.peerPduConsumed = true;
+    result.peerState = result.state;
+
+    if (event->llControlOpcode == kBleCsLlCtrlCfg &&
+        result.state.currentStage == kBleCsVprPeerStageIdle) {
+      uint8_t status = 0xFFU;
+      result.directCommandSent = true;
+      if (!directSecurityEnable(&status) || status != 0U) {
+        result.directStatus = status;
+        if (outResult != nullptr) {
+          *outResult = result;
+        }
+        return false;
+      }
+      result.directStatus = status;
+      const bool queued =
+          bleCsVprBridgeQueueIfPending(*this, radio, &result);
+      if (outResult != nullptr) {
+        *outResult = result;
+      }
+      return queued;
+    }
+
+    if (event->llControlOpcode == kBleCsLlCtrlSecRsp &&
+        result.state.currentStage == kBleCsVprPeerStageIdle) {
+      uint8_t status = 0xFFU;
+      result.directCommandSent = true;
+      if (!directSetProcedureParameters(config_.session.workflow.procedureParameters,
+                                        &status) ||
+          status != 0U) {
+        result.directStatus = status;
+        if (outResult != nullptr) {
+          *outResult = result;
+        }
+        return false;
+      }
+      result.directStatus = status;
+      const bool queued =
+          bleCsVprBridgeQueueIfPending(*this, radio, &result);
+      if (outResult != nullptr) {
+        *outResult = result;
+      }
+      return queued;
+    }
+
+    if (event->llControlOpcode == kBleCsLlCtrlProcRsp &&
+        result.state.currentStage == kBleCsVprPeerStageAwaitingStart) {
+      uint8_t status = 0xFFU;
+      result.directCommandSent = true;
+      if (!directProcedureEnable(config_.session.workflow.procedureEnable,
+                                 &status) ||
+          status != 0U) {
+        result.directStatus = status;
+        if (outResult != nullptr) {
+          *outResult = result;
+        }
+        return false;
+      }
+      result.directStatus = status;
+    }
+
+    if (event->llControlOpcode == kBleCsLlCtrlAbort &&
+        result.state.currentStage == kBleCsVprPeerStageIdle) {
+      result.exchangeComplete = true;
+    }
+
+    if (outResult != nullptr) {
+      *outResult = result;
+    }
+    return true;
+  }
+
+  const bool queued = bleCsVprBridgeQueueIfPending(*this, radio, &result);
+  if (outResult != nullptr) {
+    *outResult = result;
+  }
+  return queued;
 }
 
 bool BleCsControllerVprHost::directReadRemoteSupportedCapabilities(uint8_t* outStatus) {

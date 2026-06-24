@@ -531,6 +531,18 @@ struct BleCsVprPeerExchangeState {
   uint8_t subeventAbortReason = 0U;
 };
 
+struct BleCsLlControlBridgeServiceResult {
+  bool peerPduConsumed = false;
+  bool initiatorPduQueued = false;
+  bool directCommandSent = false;
+  bool exchangeComplete = false;
+  uint8_t rxOpcode = 0U;
+  uint8_t txOpcode = 0U;
+  uint8_t directStatus = 0xFFU;
+  BleCsVprPeerExchangeState peerState{};
+  BleCsVprPeerExchangeState state{};
+};
+
 enum class BleCsControllerResultSource : uint8_t {
   kLocal = 0U,
   kPeer,
@@ -1753,6 +1765,10 @@ class BleCsControllerVprHost {
                                BleCsVprPeerExchangeState* outState);
   bool consumePeerLlControlPduFromEvent(const BleConnectionEvent& event,
                                         BleCsVprPeerExchangeState* outState);
+  bool serviceInitiatorLlControlBridge(
+      BleRadio& radio,
+      const BleConnectionEvent* event,
+      BleCsLlControlBridgeServiceResult* outResult = nullptr);
   bool pollUntilRunningWithProcedureCount(uint16_t targetProcedureCount,
                                           uint8_t maxPolls,
                                           uint8_t* outPolls);

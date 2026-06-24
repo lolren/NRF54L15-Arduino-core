@@ -27,6 +27,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | Multi-config slot testing | ✅ Hardware-verified |
 | ██ | CS LL-control over-the-air bridge | ✅ Two-board hardware-verified |
 | ██ | Host-owned initiator LL PDU queue seam | ✅ Two-board hardware-verified |
+| ██ | Host-owned initiator LL bridge service | ✅ Two-board hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
 | ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
@@ -439,6 +440,11 @@ surface now intentionally avoids that failure mode by draining responses.
 - Added `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`, which
   validates a received CS LL-control connection event and advances the VPR
   peer-exchange state behind the CS host API.
+- Added `BleCsControllerVprHost::serviceInitiatorLlControlBridge()`, which
+  combines peer CS LL-control consumption, the required direct-HCI transition
+  (`Security Enable`, `Set Procedure Parameters`, `Procedure Enable`), and
+  queueing of the next initiator PDU. The central diagnostic now calls this
+  host service instead of owning the CS LL-control phase sequence itself.
 
 Two-board hardware result:
 
@@ -461,11 +467,11 @@ the received peer PDUs.
 1. **VPR/RADIO ownership** — the VPR still does not own the actual RADIO
    subevent procedure. The current bridge receives PDUs on CPUAPP and injects
    them into VPR.
-2. **Automatic controller-owned PDU emission/consumption** — packet
-   construction, host-owned initiator queueing, and peer-event consumption are
-   now shared, but production CS still needs the normal VPR/controller workflow
-   to call those helpers automatically instead of having the diagnostic sketch
-   drive the exchange.
+2. **Automatic controller-owned scheduling** — packet construction, host-owned
+   initiator queueing, peer-event consumption, and the current direct-HCI
+   bridge service are now shared, but production CS still needs the normal
+   VPR/controller workflow to call that service from the connected-CS scheduler
+   instead of having the diagnostic sketch decide when to poll BLE events.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling.
 4. **Physical CS subevents** — execute TX/RX tone exchange, capture timestamps
@@ -482,8 +488,10 @@ the received peer PDUs.
   the CS host API.
 - Use `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()` for received
   CS_RSP/CFG/SEC_RSP/PROC_RSP/START/ABORT events.
-- Move the helper call out of the diagnostic loop and into the normal
-  connected-CS workflow once the production scheduling seam is ready.
+- Use `BleCsControllerVprHost::serviceInitiatorLlControlBridge()` as the
+  current CPUAPP bridge seam. Move this service call out of the diagnostic loop
+  and into the normal connected-CS workflow once the production scheduling seam
+  is ready.
 - Preserve `BleChannelSoundingLlControlCentral/Peripheral` as the regression
   harness.
 
