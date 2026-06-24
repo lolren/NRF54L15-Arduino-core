@@ -460,18 +460,27 @@ The controller host stack now accepts already-built completed
 - `BleCsControllerStreamHost`
 - `BleCsControllerVprHost`
 
+The higher-level host wrappers also accept raw Mode 2 channel measurements
+through `consumeMode2ResultsFromMeasurements()` on:
+
+- `BleCsControllerHost`
+- `BleCsControllerStreamHost`
+- `BleCsControllerVprHost`
+
 This is the seam needed by the physical scheduler: once the RADIO/VPR layer has
-captured local and peer tone data and encoded them as Mode 2 result objects, it
-can feed those objects directly into the same accumulation, abort filtering,
+captured local and peer tone data, it can either feed already-built Mode 2
+result objects directly into the same accumulation, abort filtering,
 completed-result snapshot, and distance-estimation logic used by the HCI event
-stream. It no longer has to wrap real physical measurements as synthetic HCI
-event bytes just to reach the estimator.
+stream, or hand raw `BleCsChannelMeasurement` arrays to the host and let the
+host build the local/peer Mode 2 result objects before consuming them. It no
+longer has to wrap real physical measurements as synthetic HCI event bytes just
+to reach the estimator.
 
 Hardware check:
 
 ```text
 BleChannelSoundingHostAbortCleanup
-cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 direct_ingress=1 abort=0xB/0x0
+cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 direct_ingress=1 measurement_ingress=1 abort=0xB/0x0
 ```
 
 Next required slice:

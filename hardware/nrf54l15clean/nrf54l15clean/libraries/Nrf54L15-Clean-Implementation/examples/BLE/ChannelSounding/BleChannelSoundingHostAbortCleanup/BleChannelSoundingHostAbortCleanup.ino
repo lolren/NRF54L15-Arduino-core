@@ -7,7 +7,7 @@
  * that cleanup, a later valid packet can be combined with stale pre-abort data.
  *
  * Serial output:
- *   cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 direct_ingress=1 abort=0xB/0x0
+ *   cs_host_abort_cleanup=PASS stale_blocked=1 recovery=1 direct_ingress=1 measurement_ingress=1 abort=0xB/0x0
  */
 
 #include <Arduino.h>
@@ -29,6 +29,8 @@ constexpr float kSpeedOfLightMetersPerSecond = 299792458.0f;
 constexpr float kDemoDistanceMeters = 0.75f;
 constexpr float kDemoAmplitude = 1024.0f;
 const uint8_t kDemoChannels[] = {0U, 12U, 24U, 36U};
+constexpr size_t kDemoChannelCount =
+    sizeof(kDemoChannels) / sizeof(kDemoChannels[0]);
 
 BleCsControllerHost gHost;
 
@@ -112,6 +114,57 @@ bool buildSteps(uint8_t* localSteps,
     }
   }
   return true;
+}
+
+bool buildMeasurements(BleCsChannelMeasurement* measurements,
+                       size_t maxCount,
+                       size_t* outCount) {
+  if (measurements == nullptr || outCount == nullptr ||
+      maxCount < kDemoChannelCount) {
+    return false;
+  }
+
+  *outCount = 0U;
+  for (size_t i = 0U; i < kDemoChannelCount; ++i) {
+    const uint8_t channel = kDemoChannels[i];
+    const float freqHz =
+        (2400.0f + static_cast<float>(csFrequencyOffsetMHz(channel))) *
+        1000000.0f;
+    const float theta = -((4.0f * kPi * kDemoDistanceMeters * freqHz) /
+                          kSpeedOfLightMetersPerSecond);
+    const int16_t peerI =
+        static_cast<int16_t>(lroundf(cosf(theta) * kDemoAmplitude));
+    const int16_t peerQ =
+        static_cast<int16_t>(lroundf(sinf(theta) * kDemoAmplitude));
+
+    BleCsChannelMeasurement& measurement = measurements[*outCount];
+    measurement = BleCsChannelMeasurement{};
+    measurement.valid = true;
+    measurement.channelIndex = channel;
+    measurement.sequence = static_cast<uint8_t>(*outCount);
+    measurement.localTone.valid = true;
+    measurement.localTone.i = 1024;
+    measurement.localTone.q = 0;
+    measurement.localTone.magnitude = 1024U;
+    measurement.peerTone.valid = true;
+    measurement.peerTone.i = peerI;
+    measurement.peerTone.q = peerQ;
+    measurement.peerTone.magnitude = 1024U;
+    measurement.combinedPhaseRad = theta;
+    ++(*outCount);
+  }
+  return *outCount == kDemoChannelCount;
+}
+
+BleCsSubeventResultHeader buildResultHeader(uint16_t procedureCounter) {
+  BleCsSubeventResultHeader header{};
+  header.connHandle = kConnHandle;
+  header.configId = kConfigId;
+  header.procedureCounter = procedureCounter;
+  header.procedureDoneStatus = kBleCsProcedureDoneComplete;
+  header.subeventDoneStatus = kBleCsSubeventDoneComplete;
+  header.numAntennaPaths = 2U;
+  return header;
 }
 
 bool buildH4LeMetaEvent(uint8_t* out,
@@ -246,6 +299,31 @@ bool runDirectResultIngressProbe(const uint8_t* localSteps,
          gHost.state().peerSubeventResults >= 1U;
 }
 
+bool runMeasurementIngressProbe() {
+  if (!beginHost()) {
+    return false;
+  }
+
+  BleCsChannelMeasurement measurements[kDemoChannelCount];
+  size_t measurementCount = 0U;
+  uint8_t localStepData[64] = {0};
+  uint8_t peerStepData[64] = {0};
+  const BleCsSubeventResultHeader header = buildResultHeader(4U);
+  const bool consumed =
+      buildMeasurements(measurements, kDemoChannelCount, &measurementCount) &&
+      gHost.consumeMode2ResultsFromMeasurements(
+          measurements, measurementCount, header, localStepData,
+          sizeof(localStepData), peerStepData, sizeof(peerStepData));
+  return consumed && gHost.estimateValid() &&
+         gHost.sessionState().completedProcedureCounter == 4U &&
+         gHost.completedLocalResult().header.numStepsReported ==
+             kDemoChannelCount &&
+         gHost.completedPeerResult().header.numStepsReported ==
+             kDemoChannelCount &&
+         gHost.state().localSubeventResults >= 1U &&
+         gHost.state().peerSubeventResults >= 1U;
+}
+
 bool runAbortCleanupProbe() {
   uint8_t localSteps[64] = {0};
   uint8_t peerSteps[64] = {0};
@@ -314,20 +392,26 @@ bool runAbortCleanupProbe() {
   const bool directIngress =
       ok && runDirectResultIngressProbe(localSteps, localStepsLen,
                                         peerSteps, peerStepsLen);
+  const bool measurementIngress = ok && runMeasurementIngressProbe();
 
   Serial.print(F("cs_host_abort_cleanup="));
-  Serial.print((ok && staleBlocked && recovery && directIngress) ? F("PASS") : F("FAIL"));
+  Serial.print((ok && staleBlocked && recovery && directIngress &&
+                measurementIngress)
+                   ? F("PASS")
+                   : F("FAIL"));
   Serial.print(F(" stale_blocked="));
   Serial.print(staleBlocked ? 1 : 0);
   Serial.print(F(" recovery="));
   Serial.print(recovery ? 1 : 0);
   Serial.print(F(" direct_ingress="));
   Serial.print(directIngress ? 1 : 0);
+  Serial.print(F(" measurement_ingress="));
+  Serial.print(measurementIngress ? 1 : 0);
   Serial.print(F(" abort=0x"));
   Serial.print(procedureAbort, HEX);
   Serial.print(F("/0x"));
   Serial.println(subeventAbort, HEX);
-  return ok && staleBlocked && recovery && directIngress;
+  return ok && staleBlocked && recovery && directIngress && measurementIngress;
 }
 
 }  // namespace

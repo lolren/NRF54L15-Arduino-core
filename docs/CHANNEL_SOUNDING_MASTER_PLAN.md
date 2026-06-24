@@ -32,6 +32,7 @@ CHANNEL SOUNDING — FULL ZEPHYR PARITY
 | ██ | VPR-owned initiator LL PDU source | ✅ Two-board hardware-verified |
 | ██ | Standalone raw RF tone/DFE + Mode 2 result encoder harness | ✅ Two-board hardware-verified |
 | ██ | Direct completed-result ingress seam | ✅ Hardware-verified |
+| ██ | Raw measurement -> host result ingress seam | ✅ Hardware-verified |
 | ░░ | Hardware event scheduler (RADIO/PPI) | 🔒 Second board |
 | ░░ | Physical RF ranging / measurements | 🔒 Second board |
 | ░░ | Two-board physical interoperability | 🔒 Second board + RF scheduler |
@@ -559,6 +560,12 @@ VPR/controller workflow:
 - Feed completed local/peer result objects into the host through
   `consumeCompletedResult()` instead of wrapping physical result data as
   synthetic HCI event bytes.
+- For real Mode 2 tone captures, use `consumeMode2ResultsFromMeasurements()`
+  on `BleCsControllerHost`, `BleCsControllerStreamHost`, or
+  `BleCsControllerVprHost`. It builds local and peer `BleCsSubeventResult`
+  objects from raw `BleCsChannelMeasurement` arrays and then uses the same
+  completed-result ingress path. This is hardware-verified by
+  `BleChannelSoundingHostAbortCleanup` with `measurement_ingress=1`.
 
 **Step 3** — LL Control PDU construction:
 - Use the public `bleCsBuildLlControl*()` helpers for CPUAPP-side packet

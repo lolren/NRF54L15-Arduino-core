@@ -4114,6 +4114,35 @@ bool BleCsControllerHost::consumeCompletedResult(
   return ok;
 }
 
+bool BleCsControllerHost::consumeMode2ResultsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  BleCsSubeventResult localResult{};
+  BleCsSubeventResult peerResult{};
+  if (!BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          measurements, count, false, headerTemplate, localStepData,
+          localMaxStepDataLen, &localResult) ||
+      !BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          measurements, count, true, headerTemplate, peerStepData,
+          peerMaxStepDataLen, &peerResult)) {
+    return false;
+  }
+
+  if (!consumeCompletedResult(BleCsControllerResultSource::kLocal, localResult)) {
+    return false;
+  }
+  if (!consumeCompletedResult(BleCsControllerResultSource::kPeer, peerResult)) {
+    resetProcedureRunState();
+    return false;
+  }
+  return true;
+}
+
 bool BleCsControllerHost::consumeIngressBytes(BleCsControllerIngressSource source,
                                               const uint8_t* data,
                                               size_t len) {
@@ -4298,6 +4327,19 @@ bool BleCsControllerStreamHost::consumeCompletedResult(
     BleCsControllerResultSource source,
     const BleCsSubeventResult& result) {
   return host_.consumeCompletedResult(source, result);
+}
+
+bool BleCsControllerStreamHost::consumeMode2ResultsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  return host_.consumeMode2ResultsFromMeasurements(
+      measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
 }
 
 bool BleCsControllerStreamHost::poll() {
@@ -6296,6 +6338,19 @@ bool BleCsControllerVprHost::consumeCompletedResult(
     BleCsControllerResultSource source,
     const BleCsSubeventResult& result) {
   return host_.consumeCompletedResult(source, result);
+}
+
+bool BleCsControllerVprHost::consumeMode2ResultsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  return host_.consumeMode2ResultsFromMeasurements(
+      measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
 }
 
 bool BleCsControllerVprHost::ready() const { return host_.ready(); }

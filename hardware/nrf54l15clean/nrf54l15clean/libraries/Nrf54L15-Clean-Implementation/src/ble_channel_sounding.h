@@ -1407,6 +1407,14 @@ class BleCsControllerHost {
                            size_t len);
   bool consumeCompletedResult(BleCsControllerResultSource source,
                               const BleCsSubeventResult& result);
+  bool consumeMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
 
   bool ready() const;
   bool failed() const;
@@ -1472,6 +1480,14 @@ class BleCsControllerStreamHost {
   bool consumePeerPacket(const uint8_t* packet, size_t packetLen);
   bool consumeCompletedResult(BleCsControllerResultSource source,
                               const BleCsSubeventResult& result);
+  bool consumeMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
   bool poll();
   bool loopOnce();
 
@@ -1983,6 +1999,14 @@ class BleCsControllerVprHost {
   bool drainPendingControllerEvents();
   bool consumeCompletedResult(BleCsControllerResultSource source,
                               const BleCsSubeventResult& result);
+  bool consumeMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
 
   bool ready() const;
   bool failed() const;
