@@ -36,7 +36,7 @@ DEFAULT_UF2_LABELS = (
     "DAPLINK",
 )
 UF2_MARKER_FILES = ("INFO_UF2.TXT", "CURRENT.UF2", "INDEX.HTM")
-OPEN_NRF_OCD_RELEASE = "v0.1.0"
+OPEN_NRF_OCD_RELEASE = "v0.3.2"
 OPEN_NRF_OCD_RELEASE_BASE_URL = (
     "https://github.com/lolren/open-nrf-ocd/releases/download"
 )
@@ -1372,7 +1372,7 @@ def upload_nrf_ocd(
     # do not pass a serial-port path as -u.
     if uid:
         args.extend(["-u", uid])
-    args.extend(["-e", "chip", "-R", "load", hex_path])
+    args.extend(["-e", "chip", "-R", "--no-verify", "load", hex_path])
     print(f"Flashing {hex_path}")
     print(f"Runner: nrf_ocd")
     print(f"Probe UID: {uid or 'auto-select'}")
