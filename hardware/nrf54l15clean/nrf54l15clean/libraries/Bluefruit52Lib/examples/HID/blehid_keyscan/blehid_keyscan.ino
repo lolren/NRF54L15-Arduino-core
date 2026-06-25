@@ -57,7 +57,9 @@ void setup()
 
 #if CFG_DEBUG
   // Blocking wait for connection when debug mode is enabled via IDE
-  while ( !Serial ) delay(10);
+  for (uint32_t start = millis(); !Serial && (millis() - start) < 1500; ) {
+    delay(10);
+  }
 #endif
 
   Serial.println("Bluefruit52 HID Keyscan Example");

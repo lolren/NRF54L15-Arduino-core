@@ -257,6 +257,45 @@ bool BleRadio::customGattPermissionSatisfied(uint8_t permission,
   }
 }
 
+bool BleRadio::customGattPermissionRequiresSecurity(uint8_t permission) const {
+  switch (permission) {
+    case kBleGattPermEncNoMitm:
+    case kBleGattPermEncWithMitm:
+    case kBleGattPermEncWithLescMitm:
+    case kBleGattPermSignedNoMitm:
+    case kBleGattPermSignedWithMitm:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool BleRadio::customGattHasSecureHidService() const {
+  static constexpr uint16_t kHidServiceUuid = 0x1812U;
+
+  for (uint8_t i = 0U; i < customGattServiceCount_; ++i) {
+    const BleCustomServiceState& service = customGattServices_[i];
+    if (service.uuidSize != kBleUuid16Size ||
+        bleUuidRead16(service.uuid, service.uuidSize) != kHidServiceUuid) {
+      continue;
+    }
+
+    for (uint8_t j = 0U; j < customGattCharacteristicCount_; ++j) {
+      const BleCustomCharacteristicState& characteristic =
+          customGattCharacteristics_[j];
+      if (characteristic.serviceHandle != service.serviceHandle) {
+        continue;
+      }
+      if (customGattPermissionRequiresSecurity(characteristic.readPermission) ||
+          customGattPermissionRequiresSecurity(characteristic.writePermission)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 bool BleRadio::customGattReadPermissionSatisfied(
     const BleCustomCharacteristicState* characteristic,
     uint8_t* outAttError) const {

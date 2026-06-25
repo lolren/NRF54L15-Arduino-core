@@ -21,7 +21,9 @@ BLEHidAdafruit blehid;
 void setup() 
 {
   Serial.begin(115200);
-  while ( !Serial ) delay(10);   // for nrf52840 with native usb
+  for (uint32_t start = millis(); !Serial && (millis() - start) < 1500; ) {
+    delay(10);
+  }
 
   Serial.println("Bluefruit52 HID Mouse Example");
   Serial.println("-----------------------------\n");

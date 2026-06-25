@@ -3106,6 +3106,8 @@ class BleRadio {
   bool customGattPermissionSatisfied(uint8_t permission,
                                      uint8_t defaultDenyError,
                                      uint8_t* outAttError) const;
+  bool customGattPermissionRequiresSecurity(uint8_t permission) const;
+  bool customGattHasSecureHidService() const;
   bool customGattReadPermissionSatisfied(
       const BleCustomCharacteristicState* characteristic,
       uint8_t* outAttError) const;

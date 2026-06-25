@@ -124,10 +124,26 @@ bool BleRadio::assembleIncomingL2capPayload(uint8_t llid,
   }
 
   const uint16_t remaining = static_cast<uint16_t>(expected - received);
-  const uint16_t copyLength = minU16(remaining, l2capPayloadLength);
-  memcpy(&connectionRxL2capReassemblyBuffer_[received], l2capPayload, copyLength);
+  if (l2capPayloadLength > remaining) {
+    // LL payload length is exact. A continuation longer than the remaining
+    // L2CAP SDU cannot be the final fragment; it is usually the same RX packet
+    // being observed again by a later event path. Never partial-copy it,
+    // otherwise the tail of SMP public keys can be replaced with duplicate data.
+    if (received >= l2capPayloadLength &&
+        memcmp(&connectionRxL2capReassemblyBuffer_[received - l2capPayloadLength],
+               l2capPayload, l2capPayloadLength) == 0) {
+      emitBleTrace("L2CAP_FRAG_DUP_CONT");
+      return false;
+    }
+    emitBleTrace("L2CAP_FRAG_OVERSIZE_CONT");
+    clearIncomingL2capReassembly();
+    return false;
+  }
+
+  memcpy(&connectionRxL2capReassemblyBuffer_[received], l2capPayload,
+         l2capPayloadLength);
   connectionRxL2capReassemblyReceivedLength_ =
-      static_cast<uint16_t>(received + copyLength);
+      static_cast<uint16_t>(received + l2capPayloadLength);
   emitBleTrace("L2CAP_FRAG_CONT");
   if (connectionRxL2capReassemblyReceivedLength_ < expected) {
     return false;
@@ -735,6 +751,8 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       uint16_t used = 2U;
       uint8_t entryLen = 0U;
       uint16_t recordCount = 0U;
+      uint16_t firstSecurityBlockedHandle = 0U;
+      uint8_t firstSecurityBlockedError = 0U;
       for (size_t i = 0; i < (sizeof(kBlePrimaryServices) / sizeof(kBlePrimaryServices[0]));
            ++i) {
         const BlePrimaryServiceRecord& service = kBlePrimaryServices[i];
@@ -824,6 +842,8 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       uint16_t used = 2U;
       uint8_t entryLen = 0U;
       uint16_t recordCount = 0U;
+      uint16_t firstSecurityBlockedHandle = 0U;
+      uint8_t firstSecurityBlockedError = 0U;
 
       if (typeLen == kBleUuid16Size && type == kUuidCharacteristic) {
         entryLen = 7U;
@@ -964,7 +984,21 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
           uint8_t temp[kReadByTypeScratchLen] = {0};
           const uint8_t vlen =
               readAttributeValue(handle, 0U, temp, readByTypeValueLimit);
-          if (vlen >= kAttrReadInsufficientAuthenticationLen) {
+          const uint8_t readError =
+              attReadSentinelToError(vlen, kAttErrReadNotPermitted);
+          if (readError != 0U) {
+            if (readError == kAttErrInsufficientEncryption ||
+                readError == kAttErrInsufficientAuthentication) {
+              if (recordCount == 0U) {
+                return buildAttErrorResponse(opcode, handle, readError,
+                                             outAttResponse, outAttResponseLength);
+              }
+              if (firstSecurityBlockedHandle == 0U) {
+                firstSecurityBlockedHandle = handle;
+                firstSecurityBlockedError = readError;
+              }
+              break;
+            }
             continue;
           }
 
@@ -1016,11 +1050,21 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
           uint8_t temp[kReadByTypeScratchLen] = {0};
           const uint8_t vlen =
               readAttributeValue(handle, 0U, temp, readByTypeValueLimit);
-          if (vlen == kAttrReadInvalidHandleLen ||
-              vlen == kAttrReadInvalidOffsetLen ||
-              vlen == kAttrReadInsufficientEncryptionLen ||
-              vlen == kAttrReadInsufficientAuthenticationLen ||
-              vlen == kAttrReadNotPermittedLen) {
+          const uint8_t readError =
+              attReadSentinelToError(vlen, kAttErrReadNotPermitted);
+          if (readError != 0U) {
+            if (readError == kAttErrInsufficientEncryption ||
+                readError == kAttErrInsufficientAuthentication) {
+              if (recordCount == 0U) {
+                return buildAttErrorResponse(opcode, handle, readError,
+                                             outAttResponse, outAttResponseLength);
+              }
+              if (firstSecurityBlockedHandle == 0U) {
+                firstSecurityBlockedHandle = handle;
+                firstSecurityBlockedError = readError;
+              }
+              break;
+            }
             continue;
           }
 
@@ -1048,6 +1092,11 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       }
 
       if (recordCount == 0U) {
+        if (firstSecurityBlockedHandle != 0U && firstSecurityBlockedError != 0U) {
+          return buildAttErrorResponse(opcode, firstSecurityBlockedHandle,
+                                       firstSecurityBlockedError, outAttResponse,
+                                       outAttResponseLength);
+        }
         return buildAttErrorResponse(opcode, start, kAttErrAttributeNotFound,
                                      outAttResponse, outAttResponseLength);
       }
