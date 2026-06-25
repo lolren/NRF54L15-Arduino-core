@@ -92,6 +92,8 @@ static uint8_t g_physicalSweepCount = 0U;
 static uint8_t g_physicalValidChannels = 0U;
 static BleCsChannelMeasurement
     g_connectedPhysicalMeasurements[kConnectedPhysicalSweepChannelCount];
+static uint8_t g_connectedPhysicalLocalStepData[kBleCsMaxControllerStepDataBytes];
+static uint8_t g_connectedPhysicalPeerStepData[kBleCsMaxControllerStepDataBytes];
 static BleCsChannelMeasurement g_physicalMeasurements[kPhysicalChannelCount];
 static uint8_t g_physicalLocalStepData[kBleCsMaxControllerStepDataBytes];
 static uint8_t g_physicalPeerStepData[kBleCsMaxControllerStepDataBytes];
@@ -382,6 +384,10 @@ static void resetBridgeState() {
   g_connectedPhysicalRunAfterEventCounter = 0U;
   memset(g_connectedPhysicalMeasurements, 0,
          sizeof(g_connectedPhysicalMeasurements));
+  memset(g_connectedPhysicalLocalStepData, 0,
+         sizeof(g_connectedPhysicalLocalStepData));
+  memset(g_connectedPhysicalPeerStepData, 0,
+         sizeof(g_connectedPhysicalPeerStepData));
   g_bridgeStarted = beginWorkflowBridge();
 
   Serial.print("workflow bridge init: ");
@@ -523,7 +529,7 @@ static bool sendConnectedPhysicalTriggerAndWaitAck() {
     return false;
   }
 
-  for (uint8_t attempt = 0U; attempt < 3U; ++attempt) {
+  for (uint8_t attempt = 0U; attempt < 6U; ++attempt) {
     BleConnectionEvent evt{};
     const bool ran = g_ble.pollConnectionEvent(&evt, 450000UL);
     if (ran && evt.eventStarted) {
@@ -634,9 +640,35 @@ static bool runConnectedPhysicalSweep() {
       BleChannelSoundingRadio::estimateDistancePhaseSlope(
           g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
           &connectedEstimate);
+
+  BleCsSubeventResultHeader connectedHeader{};
+  connectedHeader.connHandle = kCsConnHandle;
+  connectedHeader.configId = 1U;
+  connectedHeader.procedureCounter =
+      static_cast<uint16_t>(
+          g_csHost.sessionState().completedProcedureCounter + 1U);
+  if (connectedHeader.procedureCounter == 0U) {
+    connectedHeader.procedureCounter = 1U;
+  }
+  connectedHeader.numAntennaPaths = 1U;
+  const bool connectedHostOk =
+      g_csHost.consumeMode2ResultsFromMeasurements(
+          g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
+          connectedHeader, g_connectedPhysicalLocalStepData,
+          sizeof(g_connectedPhysicalLocalStepData),
+          g_connectedPhysicalPeerStepData,
+          sizeof(g_connectedPhysicalPeerStepData)) &&
+      g_csHost.estimateValid();
+  const uint16_t connectedLocalSteps =
+      connectedHostOk ? g_csHost.completedLocalResult().header.numStepsReported
+                      : 0U;
+  const uint16_t connectedPeerSteps =
+      connectedHostOk ? g_csHost.completedPeerResult().header.numStepsReported
+                      : 0U;
+
   g_connectedPhysicalOk =
       g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels &&
-      connectedEstimateValid;
+      connectedHostOk;
   Serial.print("cs_connected_sweep=");
   Serial.print(g_connectedPhysicalOk ? "PASS" : "FAIL");
   Serial.print(" attempts=");
@@ -656,6 +688,14 @@ static bool runConnectedPhysicalSweep() {
   printDistanceField(" raw_m=", connectedEstimate.phaseSlopeDistanceMeters);
   Serial.print(" residual=");
   Serial.print(connectedEstimate.residualVariance, 6);
+  Serial.print(" host_est=");
+  Serial.print(connectedHostOk ? 1 : 0);
+  Serial.print(" host_steps=");
+  Serial.print(connectedLocalSteps);
+  Serial.print('/');
+  Serial.print(connectedPeerSteps);
+  printDistanceField(" host_m=",
+                     g_csHost.sessionState().estimate.phaseSlopeDistanceMeters);
   Serial.print("\r\n");
   return g_connectedPhysicalOk;
 }
