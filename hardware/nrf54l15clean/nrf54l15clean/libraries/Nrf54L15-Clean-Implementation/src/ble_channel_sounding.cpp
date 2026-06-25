@@ -5442,6 +5442,44 @@ bool BleCsControllerVprHost::currentConnHandle(uint16_t* outConnHandle) const {
   return true;
 }
 
+bool BleCsControllerVprHost::buildConnectedMode2ResultHeader(
+    uint8_t fallbackConfigId,
+    uint8_t numAntennaPaths,
+    BleCsSubeventResultHeader* outHeader) const {
+  if (outHeader == nullptr) {
+    return false;
+  }
+
+  uint16_t connHandle = 0U;
+  if (!currentConnHandle(&connHandle)) {
+    return false;
+  }
+
+  BleCsSubeventResultHeader header{};
+  header.connHandle = connHandle;
+  header.configId = fallbackConfigId;
+  header.procedureCounter =
+      static_cast<uint16_t>(sessionState().completedProcedureCounter + 1U);
+  if (header.procedureCounter == 0U) {
+    header.procedureCounter = 1U;
+  }
+
+  const BleCsVprSchedulerState& scheduler = vprState_.scheduler;
+  const bool schedulerMatchesLink =
+      scheduler.valid && scheduler.status == 0U &&
+      scheduler.procedureCounter != 0U && scheduler.connHandle == connHandle;
+  if (schedulerMatchesLink) {
+    if (scheduler.configId != 0U) {
+      header.configId = scheduler.configId;
+    }
+    header.procedureCounter = scheduler.procedureCounter;
+  }
+
+  header.numAntennaPaths = (numAntennaPaths == 0U) ? 1U : numAntennaPaths;
+  *outHeader = header;
+  return true;
+}
+
 bool BleCsControllerVprHost::sendDirectBuiltCommand(const BleCsHciCommand& command,
                                                     uint8_t* outStatus) {
   uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
@@ -6888,20 +6926,10 @@ bool BleCsControllerVprHost::consumeConnectedMode2ResultsFromMeasurements(
     uint8_t* peerStepData,
     size_t peerMaxStepDataLen,
     uint8_t numAntennaPaths) {
-  uint16_t connHandle = 0U;
-  if (!currentConnHandle(&connHandle)) {
+  BleCsSubeventResultHeader header{};
+  if (!buildConnectedMode2ResultHeader(configId, numAntennaPaths, &header)) {
     return false;
   }
-
-  BleCsSubeventResultHeader header{};
-  header.connHandle = connHandle;
-  header.configId = configId;
-  header.procedureCounter =
-      static_cast<uint16_t>(sessionState().completedProcedureCounter + 1U);
-  if (header.procedureCounter == 0U) {
-    header.procedureCounter = 1U;
-  }
-  header.numAntennaPaths = (numAntennaPaths == 0U) ? 1U : numAntennaPaths;
 
   return consumeMode2ResultsFromMeasurements(
       measurements, count, header, localStepData, localMaxStepDataLen,
@@ -6917,20 +6945,10 @@ bool BleCsControllerVprHost::consumeConnectedMode2ResultEventsFromMeasurements(
     uint8_t* peerStepData,
     size_t peerMaxStepDataLen,
     uint8_t numAntennaPaths) {
-  uint16_t connHandle = 0U;
-  if (!currentConnHandle(&connHandle)) {
+  BleCsSubeventResultHeader header{};
+  if (!buildConnectedMode2ResultHeader(configId, numAntennaPaths, &header)) {
     return false;
   }
-
-  BleCsSubeventResultHeader header{};
-  header.connHandle = connHandle;
-  header.configId = configId;
-  header.procedureCounter =
-      static_cast<uint16_t>(sessionState().completedProcedureCounter + 1U);
-  if (header.procedureCounter == 0U) {
-    header.procedureCounter = 1U;
-  }
-  header.numAntennaPaths = (numAntennaPaths == 0U) ? 1U : numAntennaPaths;
 
   return consumeMode2ResultEventsFromMeasurements(
       measurements, count, header, localStepData, localMaxStepDataLen,
@@ -8460,6 +8478,10 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
             config.numAntennaPaths) &&
         host->estimateValid();
     result.hostEstimateValid = hostOk;
+    result.hostConfigId =
+        hostOk ? host->completedLocalResult().header.configId : 0U;
+    result.hostProcedureCounter =
+        hostOk ? host->completedLocalResult().header.procedureCounter : 0U;
     result.hostLocalSteps =
         hostOk ? host->completedLocalResult().header.numStepsReported : 0U;
     result.hostPeerSteps =

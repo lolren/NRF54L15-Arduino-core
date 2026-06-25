@@ -547,6 +547,10 @@ static bool runConnectedPhysicalSweep() {
   Serial.print(sweepResult.rawEstimate.residualVariance, 6);
   Serial.print(" host_est=");
   Serial.print(sweepResult.hostEstimateValid ? 1 : 0);
+  Serial.print(" host_cfg=");
+  Serial.print(sweepResult.hostConfigId);
+  Serial.print(" host_proc=");
+  Serial.print(sweepResult.hostProcedureCounter);
   Serial.print(" host_steps=");
   Serial.print(sweepResult.hostLocalSteps);
   Serial.print('/');
@@ -831,11 +835,11 @@ void loop() {
 
     if (!g_passPrinted && g_bridgeTracker.complete()) {
       g_passPrinted = true;
-      (void)runConnectedPhysicalSweep();
       BleCsVprSchedulerState scheduler{};
       const bool schedulerOk =
           g_csHost.directReadSchedulerStateForTest(&scheduler) &&
           scheduler.valid && scheduler.status == 0U;
+      (void)runConnectedPhysicalSweep();
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_bridgeTracker.workflowMask, HEX);
       Serial.print(" tx=0x");

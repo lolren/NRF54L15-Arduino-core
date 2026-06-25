@@ -1349,6 +1349,8 @@ struct BleCsConnectedMode2SweepResult {
   bool hostEstimateValid = false;
   uint8_t attempts = 0U;
   uint8_t validChannels = 0U;
+  uint8_t hostConfigId = 0U;
+  uint16_t hostProcedureCounter = 0U;
   uint16_t hostLocalSteps = 0U;
   uint16_t hostPeerSteps = 0U;
   BleCsEstimate rawEstimate{};
@@ -2303,6 +2305,9 @@ class BleCsControllerVprHost {
 
  private:
   bool currentConnHandle(uint16_t* outConnHandle) const;
+  bool buildConnectedMode2ResultHeader(uint8_t fallbackConfigId,
+                                       uint8_t numAntennaPaths,
+                                       BleCsSubeventResultHeader* outHeader) const;
   bool sendDirectBuiltCommand(const BleCsHciCommand& command, uint8_t* outStatus);
   bool consumeDirectAuxiliaryEvent(const uint8_t* packet, size_t packetLen);
   bool consumeTestResultEvent(uint8_t subeventCode,

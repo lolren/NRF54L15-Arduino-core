@@ -632,6 +632,28 @@ advances the connected procedure/subevent/chunk plan. The remaining parity
 work is to move the physical RADIO measurement window into that scheduler and
 emit native result events from VPR/RADIO-owned measurements.
 
+## Completed in This Pass — Scheduler-Aware Connected Result Headers
+
+Connected Mode 2 physical measurement ingress now uses the cached VPR scheduler
+snapshot when stamping host-consumed result headers.
+
+- `BleCsControllerVprHost::consumeConnectedMode2ResultEventsFromMeasurements()`
+  and the completed-result variant now derive `connHandle`, `configId`, and
+  `procedureCounter` from a valid scheduler snapshot when one matches the
+  active connection.
+- If the scheduler snapshot is absent or invalid, the old fallback remains:
+  use the active connection handle and `completedProcedureCounter + 1`.
+- `BleChannelSoundingLlControlWorkflowCentral` reads the scheduler before the
+  connected physical sweep and prints `host_cfg` / `host_proc` in the
+  `cs_connected_sweep=PASS` line.
+- `scripts/test_cs_ll_workflow_bridge.sh` now requires `host_cfg=1` and
+  `host_proc=1`, proving the measured connected sweep was consumed under the
+  controller scheduler's procedure identity, not a sketch-local guess.
+
+This still does not make CS fully Zephyr-parity. The RADIO window is still
+executed by the CPUAPP helper, but the result ingestion now follows the
+controller-owned scheduler identity.
+
 Hardware check:
 
 ```text

@@ -544,9 +544,10 @@ mix current repo CS/HAL code with older Board Manager sources.
    initiator queueing, peer-event consumption, direct-HCI bridge service, and
    one-event polling are now shared and workflow-tested. The VPR scheduler
    snapshot command (`0xFCEB`) now proves the controller image owns the
-   procedure/subevent/chunk plan, but production CS still needs VPR/RADIO to
-   own the timed physical measurement window rather than the Arduino sketch
-   loop calling the helper.
+   procedure/subevent/chunk plan, and connected physical result ingestion now
+   stamps result headers from that scheduler snapshot. Production CS still
+   needs VPR/RADIO to own the timed physical measurement window rather than the
+   Arduino sketch loop calling the helper.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
    windows between BLE events, not by sketch polling. The read-only timing
    snapshot and connected-window planner now exist; the remaining work is to
@@ -588,8 +589,10 @@ VPR/controller workflow:
 - Use `scripts/test_cs_ll_workflow_bridge.sh` as the connected-workflow handoff
   baseline. It now requires `cs_ll_workflow_bridge=PASS` and
   `cs_ll_physical_followup=PASS`, and the PASS line must include `sched=1`,
-  proving LL-control negotiation, VPR scheduler-state readback, and real
-  physical measurement host-ingress in one two-board run.
+  while the connected sweep must include `host_cfg=1` and `host_proc=1`,
+  proving LL-control negotiation, VPR scheduler-state readback, scheduler-owned
+  result identity, and real physical measurement host-ingress in one two-board
+  run.
 - `BleChannelSoundingRadio::measureMode2Sweep()` is the shared raw RADIO
   centre-out sweep primitive used by the workflow follow-up; future connected
   scheduler work should call through this primitive or move its internals into
