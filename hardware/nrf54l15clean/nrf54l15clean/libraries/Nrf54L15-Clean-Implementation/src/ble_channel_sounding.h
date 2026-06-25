@@ -1239,6 +1239,78 @@ class BleChannelSoundingRadio {
   BleCsReflectorTiming lastReflectorTiming_;
 };
 
+struct BleCsConnectedMode2SweepConfig {
+  const uint8_t* channels = nullptr;
+  uint8_t channelCount = 0U;
+  uint8_t minValidChannels = 1U;
+  uint8_t configId = 1U;
+  uint8_t numAntennaPaths = 1U;
+  uint8_t triggerReason = 0x7EU;
+  uint8_t ackReason = 0x7DU;
+  uint8_t windowEventOffset = 4U;
+  uint8_t triggerAckPolls = 6U;
+  uint8_t startEventPollSlack = 4U;
+  uint32_t singleChannelWindowUs = 14000UL;
+  uint32_t guardBeforeUs = 4000UL;
+  uint32_t guardAfterUs = 4500UL;
+  uint32_t pollSpinLimit = 450000UL;
+  BoardAntennaPath antennaPath = BoardAntennaPath::kCeramic;
+  BleCsConfig radioConfig{};
+  uint8_t* inOutSequence = nullptr;
+};
+
+struct BleCsConnectedMode2ChannelResult {
+  BleCsConnectedWindowMeasurement window{};
+  BleCsDfeCaptureInfo dfeInfo{};
+  uint8_t channel = 0U;
+  uint8_t order = 0U;
+  bool triggerQueued = false;
+  bool triggerSent = false;
+  bool triggerAcked = false;
+  bool startEventSeen = false;
+  bool rfPathEnabled = false;
+  bool radioStarted = false;
+  bool snapshotValid = false;
+  bool channelOk = false;
+  uint16_t triggerEventCounter = 0U;
+  uint16_t ackEventCounter = 0U;
+  uint16_t runAfterEventCounter = 0U;
+  uint8_t reason = 0U;
+};
+
+struct BleCsConnectedMode2SweepResult {
+  bool ok = false;
+  bool rawEstimateValid = false;
+  bool hostEstimateValid = false;
+  uint8_t attempts = 0U;
+  uint8_t validChannels = 0U;
+  uint16_t hostLocalSteps = 0U;
+  uint16_t hostPeerSteps = 0U;
+  BleCsEstimate rawEstimate{};
+  BleCsConnectedMode2ChannelResult lastChannel{};
+};
+
+using BleCsConnectedMode2ChannelCallback =
+    void (*)(const BleCsConnectedMode2ChannelResult& result,
+             void* userData);
+
+class BleCsConnectedMode2SweepRunner {
+ public:
+  static bool runInitiator(
+      BleRadio& ble,
+      BleChannelSoundingRadio& radio,
+      BleCsControllerVprHost* host,
+      const BleCsConnectedMode2SweepConfig& config,
+      BleCsChannelMeasurement* measurements,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen,
+      BleCsConnectedMode2SweepResult* outResult,
+      BleCsConnectedMode2ChannelCallback channelCallback = nullptr,
+      void* channelCallbackUserData = nullptr);
+};
+
 class BleCsSubeventResultReassembler {
  public:
   BleCsSubeventResultReassembler();

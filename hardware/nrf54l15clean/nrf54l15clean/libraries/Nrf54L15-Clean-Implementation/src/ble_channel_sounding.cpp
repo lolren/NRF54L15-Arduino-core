@@ -219,6 +219,19 @@ bool appendMode2DemoStep(uint8_t* buffer,
 
 inline bool validDataChannel(uint8_t channelIndex);
 
+inline bool bleCsEventCounterReached(uint16_t current, uint16_t target) {
+  return static_cast<int16_t>(current - target) >= 0;
+}
+
+bool bleCsEventIsConnectedSweepAck(const BleConnectionEvent& evt,
+                                   uint8_t ackReason) {
+  return (evt.llControlOpcode == kBleCsLlCtrlAbort ||
+          evt.llControlOpcode == kBleCsLlCtrlTerminate) &&
+         evt.payload != nullptr &&
+         evt.payloadLength >= kBleCsLlControlTerminateAbortPduLength &&
+         evt.payload[2U] == ackReason;
+}
+
 uint8_t qualityFromRawTone(const BleCsToneSample& tone) {
   if (!tone.valid) {
     return kBleCsToneQualityUnavailable;
@@ -7836,6 +7849,166 @@ bool BleChannelSoundingRadio::measureConnectedWindowChannel(
                                   : 9U;
   *outMeasurement = result;
   return result.measured && result.completedBeforeDeadline;
+}
+
+bool BleCsConnectedMode2SweepRunner::runInitiator(
+    BleRadio& ble,
+    BleChannelSoundingRadio& radio,
+    BleCsControllerVprHost* host,
+    const BleCsConnectedMode2SweepConfig& config,
+    BleCsChannelMeasurement* measurements,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen,
+    BleCsConnectedMode2SweepResult* outResult,
+    BleCsConnectedMode2ChannelCallback channelCallback,
+    void* channelCallbackUserData) {
+  BleCsConnectedMode2SweepResult result{};
+  if (outResult == nullptr || config.channels == nullptr ||
+      measurements == nullptr || config.channelCount == 0U ||
+      config.channelCount > kMaxCsChannels) {
+    if (outResult != nullptr) {
+      *outResult = result;
+    }
+    return false;
+  }
+
+  memset(measurements, 0,
+         static_cast<size_t>(config.channelCount) * sizeof(measurements[0]));
+
+  uint8_t localSequence = 0U;
+  uint8_t* sequence = (config.inOutSequence != nullptr)
+                          ? config.inOutSequence
+                          : &localSequence;
+
+  for (uint8_t order = 0U; order < config.channelCount; ++order) {
+    BleCsConnectedMode2ChannelResult channelResult{};
+    channelResult.channel = config.channels[order];
+    channelResult.order = order;
+    ++result.attempts;
+
+    BleChannelSoundingLlControlDebug dbgBefore{};
+    ble.getChannelSoundingLlControlDebug(&dbgBefore);
+
+    BleCsLlControlPdu triggerPdu{};
+    if (bleCsBuildLlControlTerminate(config.triggerReason, &triggerPdu)) {
+      channelResult.triggerQueued =
+          ble.queueChannelSoundingLlControlPdu(triggerPdu.data(),
+                                               triggerPdu.length);
+    }
+
+    if (channelResult.triggerQueued) {
+      for (uint8_t attempt = 0U; attempt < config.triggerAckPolls; ++attempt) {
+        BleConnectionEvent evt{};
+        const bool ran = ble.pollConnectionEvent(&evt, config.pollSpinLimit);
+
+        if (!channelResult.triggerSent &&
+            ran && evt.txPacketSent && evt.txPayload != nullptr &&
+            evt.txPayloadLength >= kBleCsLlControlTerminateAbortPduLength &&
+            evt.txPayload[0U] == kBleCsLlCtrlTerminate &&
+            evt.txPayload[2U] == config.triggerReason) {
+          channelResult.triggerSent = true;
+          channelResult.triggerEventCounter = evt.eventCounter;
+        }
+
+        BleChannelSoundingLlControlDebug dbg{};
+        ble.getChannelSoundingLlControlDebug(&dbg);
+        if (!channelResult.triggerSent &&
+            dbg.lastTxOpcode == kBleCsLlCtrlTerminate &&
+            dbg.txSentCount > dbgBefore.txSentCount) {
+          channelResult.triggerSent = true;
+          channelResult.triggerEventCounter = evt.eventCounter;
+        }
+
+        if (ran && bleCsEventIsConnectedSweepAck(evt, config.ackReason)) {
+          channelResult.triggerAcked = true;
+          channelResult.ackEventCounter = evt.eventCounter;
+          break;
+        }
+      }
+    }
+
+    if (channelResult.triggerSent && channelResult.triggerAcked) {
+      const uint16_t runAfterEvent =
+          static_cast<uint16_t>(channelResult.triggerEventCounter +
+                                config.windowEventOffset);
+      const uint8_t maxPolls =
+          static_cast<uint8_t>(config.windowEventOffset +
+                               config.startEventPollSlack);
+      for (uint8_t attempt = 0U; attempt < maxPolls; ++attempt) {
+        BleConnectionEvent evt{};
+        const bool ran = ble.pollConnectionEvent(&evt, config.pollSpinLimit);
+        if (ran && evt.eventStarted &&
+            bleCsEventCounterReached(evt.eventCounter, runAfterEvent)) {
+          channelResult.startEventSeen = true;
+          channelResult.runAfterEventCounter = evt.eventCounter;
+          break;
+        }
+      }
+    }
+
+    if (channelResult.startEventSeen) {
+      channelResult.rfPathEnabled =
+          BoardControl::enableRfPath(config.antennaPath);
+      channelResult.radioStarted =
+          channelResult.rfPathEnabled && radio.begin(config.radioConfig);
+
+      BleConnectionTimingSnapshot snapshot{};
+      channelResult.snapshotValid =
+          channelResult.radioStarted &&
+          ble.getConnectionTimingSnapshot(&snapshot);
+
+      if (channelResult.snapshotValid) {
+        channelResult.channelOk =
+            radio.measureConnectedWindowChannel(
+                snapshot, channelResult.channel, (*sequence)++,
+                config.singleChannelWindowUs, config.guardBeforeUs,
+                config.guardAfterUs, &channelResult.window);
+      }
+
+      channelResult.dfeInfo = radio.lastDfeCaptureInfo();
+      radio.end();
+    }
+
+    channelResult.reason =
+        channelResult.snapshotValid ? channelResult.window.reason : 11U;
+    measurements[order] = channelResult.window.measurement;
+    if (channelResult.channelOk) {
+      ++result.validChannels;
+    }
+    result.lastChannel = channelResult;
+
+    if (channelCallback != nullptr) {
+      channelCallback(channelResult, channelCallbackUserData);
+    }
+  }
+
+  result.rawEstimateValid =
+      BleChannelSoundingRadio::estimateDistancePhaseSlope(
+          measurements, config.channelCount, &result.rawEstimate);
+
+  bool hostOk = true;
+  if (host != nullptr) {
+    hostOk =
+        host->consumeConnectedMode2ResultsFromMeasurements(
+            measurements, config.channelCount, config.configId, localStepData,
+            localMaxStepDataLen, peerStepData, peerMaxStepDataLen,
+            config.numAntennaPaths) &&
+        host->estimateValid();
+    result.hostEstimateValid = hostOk;
+    result.hostLocalSteps =
+        hostOk ? host->completedLocalResult().header.numStepsReported : 0U;
+    result.hostPeerSteps =
+        hostOk ? host->completedPeerResult().header.numStepsReported : 0U;
+  } else {
+    result.hostEstimateValid = false;
+  }
+
+  result.ok = (result.validChannels >= config.minValidChannels) &&
+              (host == nullptr || hostOk);
+  *outResult = result;
+  return result.ok;
 }
 
 bool BleChannelSoundingRadio::measureMode2Sweep(

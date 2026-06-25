@@ -69,12 +69,6 @@ static bool g_connectedPhysicalAttempted = false;
 static bool g_connectedPhysicalOk = false;
 static uint8_t g_connectedPhysicalAttemptCount = 0U;
 static uint8_t g_connectedPhysicalValidChannels = 0U;
-static bool g_connectedTriggerQueued = false;
-static bool g_connectedTriggerSent = false;
-static bool g_connectedTriggerAcked = false;
-static uint16_t g_connectedTriggerEventCounter = 0U;
-static uint16_t g_connectedTriggerAckEventCounter = 0U;
-static uint16_t g_connectedPhysicalRunAfterEventCounter = 0U;
 static uint32_t g_connectAttempts = 0U;
 static uint32_t g_linkEvents = 0U;
 static uint32_t g_txQueued = 0U;
@@ -97,10 +91,6 @@ static uint8_t g_connectedPhysicalPeerStepData[kBleCsMaxControllerStepDataBytes]
 static BleCsChannelMeasurement g_physicalMeasurements[kPhysicalChannelCount];
 static uint8_t g_physicalLocalStepData[kBleCsMaxControllerStepDataBytes];
 static uint8_t g_physicalPeerStepData[kBleCsMaxControllerStepDataBytes];
-
-static bool eventCounterReached(uint16_t current, uint16_t target) {
-  return static_cast<int16_t>(current - target) >= 0;
-}
 
 enum WorkflowBits : uint8_t {
   kBitRemoteCaps = 0U,
@@ -376,12 +366,6 @@ static void resetBridgeState() {
   g_connectedPhysicalOk = false;
   g_connectedPhysicalAttemptCount = 0U;
   g_connectedPhysicalValidChannels = 0U;
-  g_connectedTriggerQueued = false;
-  g_connectedTriggerSent = false;
-  g_connectedTriggerAcked = false;
-  g_connectedTriggerEventCounter = 0U;
-  g_connectedTriggerAckEventCounter = 0U;
-  g_connectedPhysicalRunAfterEventCounter = 0U;
   memset(g_connectedPhysicalMeasurements, 0,
          sizeof(g_connectedPhysicalMeasurements));
   memset(g_connectedPhysicalLocalStepData, 0,
@@ -397,77 +381,49 @@ static void resetBridgeState() {
   Serial.print("\r\n");
 }
 
-static bool runConnectedPhysicalChannel(uint8_t channel, uint8_t channelOrder) {
-  g_connectedPhysicalOk = false;
-  ++g_connectedPhysicalAttemptCount;
-
-  BleCsConfig config;
-  config.txPowerDbm = -8;
-  config.controlChannel = 37U;
-  config.controlToProbeDelayUs = 5000U;
-  config.probeToReportDelayUs = 1000U;
-  config.probeRetries = 1U;
-  config.probeListenWindowUs = 10000U;
-  config.responseListenWindowUs = 9000U;
-  config.maxPayloadLength = 32U;
-  config.minToneMagnitude = 8U;
-  config.enableRtt = false;
-  config.enableRawDfeCapture = true;
-
-  const bool rfOk = BoardControl::enableRfPath(kPhysicalAntennaPath);
-  const bool rawOk = rfOk && g_physicalCs.begin(config);
-  BleConnectionTimingSnapshot snapshot{};
-  const bool snapshotOk = rawOk && g_ble.getConnectionTimingSnapshot(&snapshot);
-  BleCsConnectedWindowMeasurement result{};
-  if (snapshotOk) {
-    g_connectedPhysicalOk =
-        g_physicalCs.measureConnectedWindowChannel(
-            snapshot, channel, g_physicalSequence++,
-            kConnectedCsSingleChannelWindowUs, kConnectedCsGuardBeforeUs,
-            kConnectedCsGuardAfterUs, &result);
-  }
-  const BleCsDfeCaptureInfo dfeInfo = g_physicalCs.lastDfeCaptureInfo();
-  g_physicalCs.end();
-  if (channelOrder < kConnectedPhysicalSweepChannelCount) {
-    g_connectedPhysicalMeasurements[channelOrder] = result.measurement;
-  }
+static void printConnectedPhysicalChannelResult(
+    const BleCsConnectedMode2ChannelResult& result,
+    void*) {
+  const BleCsConnectedWindowMeasurement& window = result.window;
+  const BleCsChannelMeasurement& measurement = window.measurement;
+  const BleCsDfeCaptureInfo& dfeInfo = result.dfeInfo;
 
   Serial.print("cs_connected_physical snapshot=");
-  Serial.print(snapshotOk ? 1 : 0);
+  Serial.print(result.snapshotValid ? 1 : 0);
   Serial.print(" rf=");
-  Serial.print(rfOk ? 1 : 0);
+  Serial.print(result.rfPathEnabled ? 1 : 0);
   Serial.print(" raw=");
-  Serial.print(rawOk ? 1 : 0);
+  Serial.print(result.radioStarted ? 1 : 0);
   Serial.print(" fit=");
-  Serial.print(result.plan.fits ? 1 : 0);
+  Serial.print(window.plan.fits ? 1 : 0);
   Serial.print(" attempted=");
-  Serial.print(result.attempted ? 1 : 0);
+  Serial.print(window.attempted ? 1 : 0);
   Serial.print(" ok=");
-  Serial.print(g_connectedPhysicalOk ? 1 : 0);
+  Serial.print(result.channelOk ? 1 : 0);
   Serial.print(" idx=");
-  Serial.print(channelOrder);
+  Serial.print(result.order);
   Serial.print(" ch=");
-  Serial.print(channel);
+  Serial.print(result.channel);
   Serial.print(" valid=");
-  Serial.print(result.measurement.valid ? 1 : 0);
+  Serial.print(measurement.valid ? 1 : 0);
   Serial.print(" status=");
-  Serial.print(result.measurement.status);
+  Serial.print(measurement.status);
   Serial.print(" local_tone=");
-  Serial.print(result.measurement.localTone.valid ? 1 : 0);
+  Serial.print(measurement.localTone.valid ? 1 : 0);
   Serial.print(" peer_tone=");
-  Serial.print(result.measurement.peerTone.valid ? 1 : 0);
+  Serial.print(measurement.peerTone.valid ? 1 : 0);
   Serial.print(" local_mag=");
-  Serial.print(result.measurement.localTone.magnitude);
+  Serial.print(measurement.localTone.magnitude);
   Serial.print(" peer_mag=");
-  Serial.print(result.measurement.peerTone.magnitude);
+  Serial.print(measurement.peerTone.magnitude);
   Serial.print(" local_i=");
-  Serial.print(result.measurement.localTone.i);
+  Serial.print(measurement.localTone.i);
   Serial.print(" local_q=");
-  Serial.print(result.measurement.localTone.q);
+  Serial.print(measurement.localTone.q);
   Serial.print(" peer_i=");
-  Serial.print(result.measurement.peerTone.i);
+  Serial.print(measurement.peerTone.i);
   Serial.print(" peer_q=");
-  Serial.print(result.measurement.peerTone.q);
+  Serial.print(measurement.peerTone.q);
   Serial.print(" dfe_present=");
   Serial.print(dfeInfo.present ? 1 : 0);
   Serial.print(" dfe_zero=");
@@ -477,137 +433,44 @@ static bool runConnectedPhysicalChannel(uint8_t channel, uint8_t channelOrder) {
   Serial.print(" dfe_current=");
   Serial.print(dfeInfo.currentAmountBytes);
   Serial.print(" avail_us=");
-  Serial.print(result.plan.availableUs);
+  Serial.print(window.plan.availableUs);
   Serial.print(" start_delay_us=");
-  Serial.print(result.startDelayUs);
+  Serial.print(window.startDelayUs);
   Serial.print(" elapsed_us=");
-  Serial.print(result.elapsedUs);
+  Serial.print(window.elapsedUs);
   Serial.print(" remaining_us=");
-  Serial.print(result.remainingUs);
+  Serial.print(window.remainingUs);
   Serial.print(" ctrl_tx_us=");
-  Serial.print(result.measurement.controlTxUs);
+  Serial.print(measurement.controlTxUs);
   Serial.print(" probe_gap_us=");
-  Serial.print(result.measurement.controlToProbeGapUs);
+  Serial.print(measurement.controlToProbeGapUs);
   Serial.print(" probe_tx_us=");
-  Serial.print(result.measurement.probeTxUs);
+  Serial.print(measurement.probeTxUs);
   Serial.print(" report_rx_us=");
-  Serial.print(result.measurement.reportRxUs);
+  Serial.print(measurement.reportRxUs);
   Serial.print(" reason=");
-  Serial.print(snapshotOk ? result.reason : 11U);
+  Serial.print(result.reason);
   Serial.print("\r\n");
 
-  return g_connectedPhysicalOk;
-}
-
-static bool isConnectedPhysicalAck(const BleConnectionEvent& evt) {
-  return (evt.llControlOpcode == kBleCsLlCtrlAbort ||
-          evt.llControlOpcode == kBleCsLlCtrlTerminate) &&
-         evt.payload != nullptr &&
-         evt.payloadLength >= 3U &&
-         evt.payload[2] == kConnectedPhysicalAckReason;
-}
-
-static bool sendConnectedPhysicalTriggerAndWaitAck() {
-  g_connectedTriggerQueued = false;
-  g_connectedTriggerSent = false;
-  g_connectedTriggerAcked = false;
-  g_connectedTriggerEventCounter = 0U;
-  g_connectedTriggerAckEventCounter = 0U;
-  g_connectedPhysicalRunAfterEventCounter = 0U;
-
-  BleChannelSoundingLlControlDebug dbgBefore{};
-  g_ble.getChannelSoundingLlControlDebug(&dbgBefore);
-
-  BleCsLlControlPdu pdu{};
-  if (!bleCsBuildLlControlTerminate(kConnectedPhysicalTriggerReason, &pdu)) {
-    return false;
-  }
-
-  g_connectedTriggerQueued =
-      g_ble.queueChannelSoundingLlControlPdu(pdu.data(), pdu.length);
-  if (!g_connectedTriggerQueued) {
-    return false;
-  }
-
-  for (uint8_t attempt = 0U; attempt < 6U; ++attempt) {
-    BleConnectionEvent evt{};
-    const bool ran = g_ble.pollConnectionEvent(&evt, 450000UL);
-    if (ran && evt.eventStarted) {
-      ++g_linkEvents;
-    }
-    if (!g_connectedTriggerSent &&
-        evt.txPacketSent && evt.txPayload != nullptr &&
-        evt.txPayloadLength >= 3U &&
-        evt.txPayload[0] == kBleCsLlCtrlTerminate &&
-        evt.txPayload[2] == kConnectedPhysicalTriggerReason) {
-      g_connectedTriggerSent = true;
-      g_connectedTriggerEventCounter = evt.eventCounter;
-    }
-
-    BleChannelSoundingLlControlDebug dbg{};
-    g_ble.getChannelSoundingLlControlDebug(&dbg);
-    if (!g_connectedTriggerSent &&
-        dbg.lastTxOpcode == kBleCsLlCtrlTerminate &&
-        dbg.txSentCount > dbgBefore.txSentCount) {
-      g_connectedTriggerSent = true;
-      g_connectedTriggerEventCounter = evt.eventCounter;
-    }
-
-    if (ran && isConnectedPhysicalAck(evt)) {
-      g_connectedTriggerAcked = true;
-      g_connectedTriggerAckEventCounter = evt.eventCounter;
-      return true;
-    }
-  }
-
-  return g_connectedTriggerAcked;
-}
-
-static void printConnectedPhysicalTrigger(uint8_t channel, uint8_t channelOrder) {
   Serial.print("cs_connected_trigger queued=");
-  Serial.print(g_connectedTriggerQueued ? 1 : 0);
+  Serial.print(result.triggerQueued ? 1 : 0);
   Serial.print(" sent=");
-  Serial.print(g_connectedTriggerSent ? 1 : 0);
+  Serial.print(result.triggerSent ? 1 : 0);
   Serial.print(" ce=");
-  Serial.print(g_connectedTriggerEventCounter);
+  Serial.print(result.triggerEventCounter);
   Serial.print(" ack=");
-  Serial.print(g_connectedTriggerAcked ? 1 : 0);
+  Serial.print(result.triggerAcked ? 1 : 0);
   Serial.print(" ack_ce=");
-  Serial.print(g_connectedTriggerAckEventCounter);
+  Serial.print(result.ackEventCounter);
   Serial.print(" run_after_ce=");
-  Serial.print(g_connectedPhysicalRunAfterEventCounter);
+  Serial.print(result.runAfterEventCounter);
   Serial.print(" raw_before_ce=");
-  Serial.print(static_cast<uint16_t>(
-      g_connectedPhysicalRunAfterEventCounter + 1U));
+  Serial.print(static_cast<uint16_t>(result.runAfterEventCounter + 1U));
   Serial.print(" idx=");
-  Serial.print(channelOrder);
+  Serial.print(result.order);
   Serial.print(" ch=");
-  Serial.print(channel);
+  Serial.print(result.channel);
   Serial.print("\r\n");
-}
-
-static bool waitConnectedPhysicalStartEvent() {
-  if (!g_connectedTriggerAcked || !g_connectedTriggerSent) {
-    return false;
-  }
-
-  const uint16_t runAfterEvent =
-      static_cast<uint16_t>(g_connectedTriggerEventCounter +
-                            kConnectedPhysicalWindowEventOffset);
-  for (uint8_t attempt = 0U;
-       attempt < static_cast<uint8_t>(kConnectedPhysicalWindowEventOffset + 4U);
-       ++attempt) {
-    BleConnectionEvent evt{};
-    const bool ran = g_ble.pollConnectionEvent(&evt, 450000UL);
-    if (ran && evt.eventStarted) {
-      ++g_linkEvents;
-      if (eventCounterReached(evt.eventCounter, runAfterEvent)) {
-        g_connectedPhysicalRunAfterEventCounter = evt.eventCounter;
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 static bool runConnectedPhysicalSweep() {
@@ -620,45 +483,49 @@ static bool runConnectedPhysicalSweep() {
   g_connectedPhysicalAttemptCount = 0U;
   g_connectedPhysicalValidChannels = 0U;
 
-  for (uint8_t order = 0U; order < kConnectedPhysicalSweepChannelCount;
-       ++order) {
-    const uint8_t channel = kConnectedPhysicalSweepChannels[order];
-    const bool triggerOk = sendConnectedPhysicalTriggerAndWaitAck();
-    const bool startOk = triggerOk && waitConnectedPhysicalStartEvent();
-    bool channelOk = false;
-    if (startOk) {
-      channelOk = runConnectedPhysicalChannel(channel, order);
-      if (channelOk) {
-        ++g_connectedPhysicalValidChannels;
-      }
-    }
-    printConnectedPhysicalTrigger(channel, order);
-  }
+  BleCsConfig radioConfig;
+  radioConfig.txPowerDbm = -8;
+  radioConfig.controlChannel = 37U;
+  radioConfig.controlToProbeDelayUs = 5000U;
+  radioConfig.probeToReportDelayUs = 1000U;
+  radioConfig.probeRetries = 1U;
+  radioConfig.probeListenWindowUs = 10000U;
+  radioConfig.responseListenWindowUs = 9000U;
+  radioConfig.maxPayloadLength = 32U;
+  radioConfig.minToneMagnitude = 8U;
+  radioConfig.enableRtt = false;
+  radioConfig.enableRawDfeCapture = true;
 
-  BleCsEstimate connectedEstimate{};
-  const bool connectedEstimateValid =
-      BleChannelSoundingRadio::estimateDistancePhaseSlope(
-          g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
-          &connectedEstimate);
+  BleCsConnectedMode2SweepConfig sweepConfig{};
+  sweepConfig.channels = kConnectedPhysicalSweepChannels;
+  sweepConfig.channelCount = kConnectedPhysicalSweepChannelCount;
+  sweepConfig.minValidChannels = kConnectedPhysicalMinValidChannels;
+  sweepConfig.configId = 1U;
+  sweepConfig.numAntennaPaths = 1U;
+  sweepConfig.triggerReason = kConnectedPhysicalTriggerReason;
+  sweepConfig.ackReason = kConnectedPhysicalAckReason;
+  sweepConfig.windowEventOffset = kConnectedPhysicalWindowEventOffset;
+  sweepConfig.singleChannelWindowUs = kConnectedCsSingleChannelWindowUs;
+  sweepConfig.guardBeforeUs = kConnectedCsGuardBeforeUs;
+  sweepConfig.guardAfterUs = kConnectedCsGuardAfterUs;
+  sweepConfig.antennaPath = kPhysicalAntennaPath;
+  sweepConfig.radioConfig = radioConfig;
+  sweepConfig.inOutSequence = &g_physicalSequence;
 
-  const bool connectedHostOk =
-      g_csHost.consumeConnectedMode2ResultsFromMeasurements(
-          g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
-          1U, g_connectedPhysicalLocalStepData,
+  BleCsConnectedMode2SweepResult sweepResult{};
+  g_connectedPhysicalOk =
+      BleCsConnectedMode2SweepRunner::runInitiator(
+          g_ble, g_physicalCs, &g_csHost, sweepConfig,
+          g_connectedPhysicalMeasurements,
+          g_connectedPhysicalLocalStepData,
           sizeof(g_connectedPhysicalLocalStepData),
           g_connectedPhysicalPeerStepData,
-          sizeof(g_connectedPhysicalPeerStepData), 1U) &&
-      g_csHost.estimateValid();
-  const uint16_t connectedLocalSteps =
-      connectedHostOk ? g_csHost.completedLocalResult().header.numStepsReported
-                      : 0U;
-  const uint16_t connectedPeerSteps =
-      connectedHostOk ? g_csHost.completedPeerResult().header.numStepsReported
-                      : 0U;
-
-  g_connectedPhysicalOk =
-      g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels &&
-      connectedHostOk;
+          sizeof(g_connectedPhysicalPeerStepData),
+          &sweepResult,
+          printConnectedPhysicalChannelResult,
+          nullptr);
+  g_connectedPhysicalAttemptCount = sweepResult.attempts;
+  g_connectedPhysicalValidChannels = sweepResult.validChannels;
   Serial.print("cs_connected_sweep=");
   Serial.print(g_connectedPhysicalOk ? "PASS" : "FAIL");
   Serial.print(" attempts=");
@@ -670,20 +537,20 @@ static bool runConnectedPhysicalSweep() {
   Serial.print(" requested_channels=");
   Serial.print(kConnectedPhysicalSweepChannelCount);
   Serial.print(" raw_est=");
-  Serial.print(connectedEstimateValid ? 1 : 0);
+  Serial.print(sweepResult.rawEstimateValid ? 1 : 0);
   Serial.print(" used=");
-  Serial.print(connectedEstimate.usedChannels);
+  Serial.print(sweepResult.rawEstimate.usedChannels);
   Serial.print('/');
-  Serial.print(connectedEstimate.totalToneChannels);
-  printDistanceField(" raw_m=", connectedEstimate.phaseSlopeDistanceMeters);
+  Serial.print(sweepResult.rawEstimate.totalToneChannels);
+  printDistanceField(" raw_m=", sweepResult.rawEstimate.phaseSlopeDistanceMeters);
   Serial.print(" residual=");
-  Serial.print(connectedEstimate.residualVariance, 6);
+  Serial.print(sweepResult.rawEstimate.residualVariance, 6);
   Serial.print(" host_est=");
-  Serial.print(connectedHostOk ? 1 : 0);
+  Serial.print(sweepResult.hostEstimateValid ? 1 : 0);
   Serial.print(" host_steps=");
-  Serial.print(connectedLocalSteps);
+  Serial.print(sweepResult.hostLocalSteps);
   Serial.print('/');
-  Serial.print(connectedPeerSteps);
+  Serial.print(sweepResult.hostPeerSteps);
   printDistanceField(" host_m=",
                      g_csHost.sessionState().estimate.phaseSlopeDistanceMeters);
   Serial.print("\r\n");

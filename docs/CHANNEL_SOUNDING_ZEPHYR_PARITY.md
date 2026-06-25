@@ -483,6 +483,41 @@ host build the local/peer Mode 2 result objects before consuming them. It no
 longer has to wrap real physical measurements as synthetic HCI event bytes just
 to reach the estimator.
 
+## Completed in This Pass — Connected Mode 2 Sweep Runner
+
+The connected physical Mode 2 diagnostic now has a reusable core-level runner
+instead of sketch-owned trigger/ACK/measurement sequencing.
+
+- Added `BleCsConnectedMode2SweepRunner::runInitiator()`.
+- Added `BleCsConnectedMode2SweepConfig`, `BleCsConnectedMode2ChannelResult`,
+  and `BleCsConnectedMode2SweepResult` to make connected RF sweep execution
+  visible without forcing examples to own the scheduler details.
+- The runner owns:
+  - connected LL-control trigger PDU queueing,
+  - peer ACK detection,
+  - connection-event-offset wait,
+  - RF path enable,
+  - `BleChannelSoundingRadio::measureConnectedWindowChannel()` execution,
+  - DFE capture metadata collection,
+  - raw phase-slope estimate,
+  - and optional `BleCsControllerVprHost` Mode 2 host ingestion.
+- `BleChannelSoundingLlControlWorkflowCentral` now calls this runner and only
+  prints the per-channel diagnostics used by the regression harness.
+
+Hardware check:
+
+```text
+scripts/test_cs_ll_workflow_bridge.sh
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
+cs_connected_sweep=PASS attempts=9 valid_channels=8 min_valid=3 requested_channels=9 raw_est=1 host_est=1 host_steps=8/8
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 host_est=1 host_steps=21/21 proc=3
+```
+
+This is still not full Zephyr parity. The sweep runner is a CPUAPP/core-owned
+orchestration seam. The next parity step is to move the connected timing owner
+from the sketch/core runner into a controller/VPR scheduler that emits native CS
+subevent results from real physical measurements.
+
 Hardware check:
 
 ```text
@@ -494,8 +529,9 @@ Next required slice:
 
 - Move CS LL-control PDU emission/consumption from the CPUAPP sketch loop into
   a VPR/controller-owned connected-CS scheduler. The packet builders,
-  host-owned bridge service, peer-event consumer, one-event poll helper, and
-  stream-workflow wrappers now exist and are hardware-tested.
+  host-owned bridge service, peer-event consumer, one-event poll helper,
+  connected Mode 2 sweep runner, and stream-workflow wrappers now exist and
+  are hardware-tested.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
 - Then replace synthetic result data with real CS subevent capture.
