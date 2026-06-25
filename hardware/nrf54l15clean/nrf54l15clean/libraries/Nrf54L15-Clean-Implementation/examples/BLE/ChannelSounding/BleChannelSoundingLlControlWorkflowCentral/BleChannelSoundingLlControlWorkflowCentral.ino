@@ -832,6 +832,10 @@ void loop() {
     if (!g_passPrinted && g_bridgeTracker.complete()) {
       g_passPrinted = true;
       (void)runConnectedPhysicalSweep();
+      BleCsVprSchedulerState scheduler{};
+      const bool schedulerOk =
+          g_csHost.directReadSchedulerStateForTest(&scheduler) &&
+          scheduler.valid && scheduler.status == 0U;
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_bridgeTracker.workflowMask, HEX);
       Serial.print(" tx=0x");
@@ -852,6 +856,24 @@ void loop() {
       Serial.print(g_bridgeTracker.completedProcedureCounter);
       Serial.print(" est=");
       Serial.print(g_bridgeTracker.estimateValid ? 1 : 0);
+      Serial.print(" sched=");
+      Serial.print(schedulerOk ? 1 : 0);
+      Serial.print(" sched_flags=0x");
+      Serial.print(scheduler.flags, HEX);
+      Serial.print(" sched_stage=");
+      Serial.print(scheduler.pendingResultStage);
+      Serial.print(" sched_proc=");
+      Serial.print(scheduler.procedureCounter);
+      Serial.print(" sched_sub=");
+      Serial.print(scheduler.activeSubeventIndex);
+      Serial.print('/');
+      Serial.print(scheduler.totalSubevents);
+      Serial.print(" sched_steps=");
+      Serial.print(scheduler.totalSteps);
+      Serial.print(" sched_chunk=");
+      Serial.print(scheduler.localChunkStartStep);
+      Serial.print('/');
+      Serial.print(scheduler.peerChunkStartStep);
       Serial.print("\r\n");
       printConnectedWindowPlan();
       (void)beginPhysicalFollowup();

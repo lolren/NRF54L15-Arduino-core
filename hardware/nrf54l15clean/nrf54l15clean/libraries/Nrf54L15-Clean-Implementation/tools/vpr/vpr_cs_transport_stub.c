@@ -44,6 +44,7 @@
 #define VPR_HCI_OP_VENDOR_BLE_CS_PEER_PDU_INJECT 0xFCE8U
 #define VPR_HCI_OP_VENDOR_BLE_CS_PEER_STAGE_READ 0xFCE9U
 #define VPR_HCI_OP_VENDOR_BLE_CS_PENDING_LOCAL_PDU_READ 0xFCEAU
+#define VPR_HCI_OP_VENDOR_BLE_CS_SCHEDULER_READ 0xFCEBU
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -2588,7 +2589,7 @@ static uint8_t validate_read_remote_caps_command(void) {
                                                           : BLE_CS_HCI_STATUS_INVALID_PARAMS;
 }
 
-static uint32_t current_procedure_interval_ticks(void) {
+static uint32_t compute_procedure_interval_ticks(uint8_t *out_selector) {
   const uint32_t min_ticks =
       (g_cs_min_procedure_interval != 0U) ? (uint32_t)g_cs_min_procedure_interval : 1U;
   const uint32_t max_ticks =
@@ -2596,22 +2597,33 @@ static uint32_t current_procedure_interval_ticks(void) {
        g_cs_max_procedure_interval != 0U)
           ? (uint32_t)g_cs_max_procedure_interval
           : min_ticks;
+  uint8_t selector_out = 0U;
+  uint32_t ticks = min_ticks;
   if (max_ticks <= min_ticks) {
-    g_cs_last_interval_selector = 0U;
-    return min_ticks;
+    ticks = min_ticks;
+  } else if (g_cs_max_procedure_count <= 2U || g_cs_procedure_counter <= 1U) {
+    ticks = min_ticks;
+  } else {
+    const uint32_t gap_index = (uint32_t)g_cs_procedure_counter - 1U;
+    const uint32_t gap_span = (uint32_t)g_cs_max_procedure_count - 2U;
+    uint32_t selector = (gap_index * 15U + (gap_span / 2U)) / gap_span;
+    if (selector > 15U) {
+      selector = 15U;
+    }
+    selector_out = (uint8_t)selector;
+    ticks = min_ticks + (((max_ticks - min_ticks) * selector + 7U) / 15U);
   }
-  if (g_cs_max_procedure_count <= 2U || g_cs_procedure_counter <= 1U) {
-    g_cs_last_interval_selector = 0U;
-    return min_ticks;
+  if (out_selector != NULL) {
+    *out_selector = selector_out;
   }
-  const uint32_t gap_index = (uint32_t)g_cs_procedure_counter - 1U;
-  const uint32_t gap_span = (uint32_t)g_cs_max_procedure_count - 2U;
-  uint32_t selector = (gap_index * 15U + (gap_span / 2U)) / gap_span;
-  if (selector > 15U) {
-    selector = 15U;
-  }
-  g_cs_last_interval_selector = (uint8_t)selector;
-  return min_ticks + (((max_ticks - min_ticks) * selector + 7U) / 15U);
+  return ticks;
+}
+
+static uint32_t current_procedure_interval_ticks(void) {
+  uint8_t selector = 0U;
+  const uint32_t ticks = compute_procedure_interval_ticks(&selector);
+  g_cs_last_interval_selector = selector;
+  return ticks;
 }
 
 static uint32_t current_peer_stage_delay_ticks(void) {
@@ -3997,6 +4009,75 @@ static size_t build_vendor_ble_cs_peer_stage_read_complete_payload(uint8_t *payl
                              : BLE_CS_HCI_STATUS_INVALID_PARAMS;
   return build_vendor_ble_cs_peer_exchange_payload(payload, max_len, status, previous_stage);
 }
+
+static size_t build_vendor_ble_cs_scheduler_read_complete_payload(uint8_t *payload,
+                                                                  size_t max_len) {
+  if (payload == NULL || max_len < 55U) {
+    return 0U;
+  }
+
+  const uint8_t status = command_layout_is_exact(0U)
+                             ? BLE_CS_HCI_STATUS_SUCCESS
+                             : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  uint8_t flags = 0U;
+  uint8_t interval_selector = 0U;
+  const uint8_t subevent_count = current_demo_subevent_count();
+  const uint8_t total_steps = current_demo_total_step_count();
+  const uint8_t subevent_start =
+      current_demo_subevent_start_step(g_cs_active_subevent_index);
+  const uint8_t subevent_steps =
+      current_demo_subevent_step_count(g_cs_active_subevent_index);
+  const uint16_t subevent_bytes =
+      (uint16_t)current_demo_subevent_encoded_step_bytes(g_cs_active_subevent_index);
+  const uint32_t procedure_interval_ticks =
+      compute_procedure_interval_ticks(&interval_selector);
+
+  if (g_cs_session_open != 0U) {
+    flags |= 0x01U;
+  }
+  if (g_cs_procedure_enabled != 0U) {
+    flags |= 0x02U;
+  }
+  if (g_pending_cs_result_stage != 0U) {
+    flags |= 0x04U;
+  }
+  if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+    flags |= 0x08U;
+  }
+  if (g_cs_builtin_peer_demo_enabled != 0U) {
+    flags |= 0x10U;
+  }
+  if (g_cs_test_active != 0U) {
+    flags |= 0x20U;
+  }
+
+  payload[0] = status;
+  payload[1] = flags;
+  payload[2] = g_pending_cs_result_stage;
+  payload[3] = g_cs_active_subevent_index;
+  payload[4] = subevent_count;
+  payload[5] = total_steps;
+  payload[6] = subevent_start;
+  payload[7] = subevent_steps;
+  payload[8] = g_cs_local_chunk_start_step;
+  payload[9] = g_cs_peer_chunk_start_step;
+  write_le16(&payload[10], g_cs_procedure_counter);
+  write_le16(&payload[12], g_cs_session_conn_handle);
+  write_le32(&payload[14], g_vpr_transport->heartbeat);
+  write_le32(&payload[18], g_cs_next_procedure_heartbeat);
+  write_le32(&payload[22], g_cs_next_subevent_heartbeat);
+  write_le32(&payload[26], g_cs_next_peer_stage_heartbeat);
+  write_le32(&payload[30], g_cs_next_chunk_stage_heartbeat);
+  write_le32(&payload[34], procedure_interval_ticks);
+  write_le32(&payload[38], current_subevent_stage_delay_ticks());
+  write_le32(&payload[42], current_peer_stage_delay_ticks());
+  write_le32(&payload[46], current_chunk_stage_delay_ticks());
+  write_le16(&payload[50], subevent_bytes);
+  payload[52] = g_cs_config_id;
+  payload[53] = interval_selector;
+  payload[54] = g_cs_last_peer_gap_ticks;
+  return 55U;
+}
 #endif
 
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
@@ -4458,6 +4539,21 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       len = append_h4_command_complete_payload(
           (uint8_t *)g_vpr_transport->vprData + offset,
           NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_SCHEDULER_READ: {
+      size_t len =
+          build_vendor_ble_cs_scheduler_read_complete_payload(payload, sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload((uint8_t *)g_vpr_transport->vprData + offset,
+                                               NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
+                                               opcode, payload, len);
       if (len == 0U) {
         return false;
       }

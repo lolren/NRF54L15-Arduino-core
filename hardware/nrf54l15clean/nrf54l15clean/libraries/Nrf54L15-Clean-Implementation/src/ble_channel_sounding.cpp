@@ -3870,6 +3870,60 @@ bool parseVprPendingLocalLlControlPduResponse(
   return true;
 }
 
+bool parseVprSchedulerStateResponse(const uint8_t* packet,
+                                    size_t packetLen,
+                                    uint16_t expectedOpcode,
+                                    BleCsVprSchedulerState* outState) {
+  if (outState == nullptr) {
+    return false;
+  }
+  *outState = BleCsVprSchedulerState{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 55U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outState->valid = true;
+  outState->status = params[0];
+  outState->flags = params[1];
+  outState->sessionOpen = (params[1] & 0x01U) != 0U;
+  outState->procedureEnabled = (params[1] & 0x02U) != 0U;
+  outState->resultPending = (params[1] & 0x04U) != 0U;
+  outState->peerProcedureActive = (params[1] & 0x08U) != 0U;
+  outState->builtInPeerDemoEnabled = (params[1] & 0x10U) != 0U;
+  outState->testActive = (params[1] & 0x20U) != 0U;
+  outState->pendingResultStage = params[2];
+  outState->activeSubeventIndex = params[3];
+  outState->totalSubevents = params[4];
+  outState->totalSteps = params[5];
+  outState->subeventStartStep = params[6];
+  outState->subeventStepCount = params[7];
+  outState->localChunkStartStep = params[8];
+  outState->peerChunkStartStep = params[9];
+  outState->procedureCounter = readLe16(params + 10U);
+  outState->connHandle = readLe16(params + 12U);
+  outState->heartbeat = readLe32(params + 14U);
+  outState->nextProcedureHeartbeat = readLe32(params + 18U);
+  outState->nextSubeventHeartbeat = readLe32(params + 22U);
+  outState->nextPeerStageHeartbeat = readLe32(params + 26U);
+  outState->nextChunkStageHeartbeat = readLe32(params + 30U);
+  outState->procedureIntervalTicks = readLe32(params + 34U);
+  outState->subeventDelayTicks = readLe32(params + 38U);
+  outState->peerDelayTicks = readLe32(params + 42U);
+  outState->chunkDelayTicks = readLe32(params + 46U);
+  outState->subeventEncodedStepBytes = readLe16(params + 50U);
+  outState->configId = params[52];
+  outState->intervalSelector = params[53];
+  outState->peerGapTicks = params[54];
+  return true;
+}
+
 bool BleCsControllerSession::begin(uint16_t connHandle,
                                    const BleCsControllerSessionConfig& config) {
   reset();
@@ -5320,7 +5374,8 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
   const bool peerExchangeDebugCommand =
       opcode == kBleCsVprHciOpPeerPduInject ||
       opcode == kBleCsVprHciOpPeerStageRead ||
-      opcode == kBleCsVprHciOpPendingLocalPduRead;
+      opcode == kBleCsVprHciOpPendingLocalPduRead ||
+      opcode == kBleCsVprHciOpSchedulerRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
     case kBleCsHciOpSetProcedureParameters:
@@ -5447,6 +5502,27 @@ bool BleCsControllerVprHost::directReadPendingLocalLlControlPduForTest(
   return parseVprPendingLocalLlControlPduResponse(
       response, responseLen, kBleCsVprHciOpPendingLocalPduRead, outPdu,
       outState);
+}
+
+bool BleCsControllerVprHost::directReadSchedulerStateForTest(
+    BleCsVprSchedulerState* outState) {
+  if (outState == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpSchedulerRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  if (!parseVprSchedulerStateResponse(response, responseLen,
+                                      kBleCsVprHciOpSchedulerRead, outState)) {
+    return false;
+  }
+  vprState_.scheduler = *outState;
+  vprState_.linkProcedureCounter = outState->procedureCounter;
+  return true;
 }
 
 bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
@@ -7207,7 +7283,7 @@ void BleCsControllerVprHost::syncVprState() {
   nextState.linkSlot1ProcedureParamsApplied = (packedConfigState & 0x200U) != 0U;
   nextState.linkPreviousSlotProcedureParamsApplied = (packedConfigState & 0x400U) != 0U;
   nextState.linkSelectedConfigProcedureParamsApplied = (packedConfigState & 0x800U) != 0U;
-  nextState.linkProcedureCounter = 0U;
+  nextState.linkProcedureCounter = nextState.scheduler.procedureCounter;
   vprState_ = nextState;
 
   const bool linkSessionInvalidated =

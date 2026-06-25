@@ -610,6 +610,28 @@ Remaining limitation: result publication now uses controller-style HCI packets,
 but CPUAPP still owns the connected RF sweep timing. Zephyr parity still
 requires moving the scheduler/timing owner into the controller/VPR side.
 
+## Completed in This Pass — VPR Scheduler State Readback
+
+The dedicated CS VPR image now exposes a controller-owned scheduler snapshot
+through test/vendor HCI opcode `0xFCEB`.
+
+- The snapshot reports the VPR procedure counter, pending result stage, active
+  subevent index, total subevents/steps, local/peer chunk offsets, heartbeat,
+  next procedure/subevent/peer/chunk deadlines, computed delay ticks, config
+  id, interval selector, and peer-gap ticks.
+- `BleCsControllerVprHost::directReadSchedulerStateForTest()` parses the
+  response into `BleCsVprSchedulerState` and mirrors the latest snapshot in
+  `BleCsControllerVprHostState::scheduler`.
+- `BleChannelSoundingLlControlWorkflowCentral` now prints this scheduler
+  snapshot in the PASS line, and `scripts/test_cs_ll_workflow_bridge.sh`
+  requires `sched=1`, `sched_proc=1`, and a non-zero subevent plan.
+
+This does not make CS Zephyr-parity by itself. It closes a diagnostics gap:
+the two-board workflow can now prove that the VPR/controller image owns and
+advances the connected procedure/subevent/chunk plan. The remaining parity
+work is to move the physical RADIO measurement window into that scheduler and
+emit native result events from VPR/RADIO-owned measurements.
+
 Hardware check:
 
 ```text
