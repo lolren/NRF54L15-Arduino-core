@@ -503,6 +503,13 @@ struct BleCsSubeventResult {
   bool isContinuation = false;
 };
 
+struct BleCsSubeventResultFragment {
+  size_t nextStepDataOffset = 0U;
+  uint16_t stepsIncluded = 0U;
+  bool more = false;
+  bool continuation = false;
+};
+
 struct BleCsHciCommand {
   uint16_t opcode = 0U;
   uint8_t payload[kBleCsMaxHciCommandPayloadBytes] = {0};
@@ -1076,6 +1083,13 @@ class BleChannelSoundingRadio {
       uint8_t* outPacket,
       size_t maxPacketLen,
       size_t* outPacketLen);
+  static bool buildH4LeMetaSubeventResultFragmentPacket(
+      const BleCsSubeventResult& result,
+      size_t stepDataOffset,
+      uint8_t* outPacket,
+      size_t maxPacketLen,
+      size_t* outPacketLen,
+      BleCsSubeventResultFragment* outFragment);
   static bool estimateDistanceFromSubeventResults(const BleCsSubeventResult& localResult,
                                                   const BleCsSubeventResult& peerResult,
                                                   bool localRoleIsInitiator,

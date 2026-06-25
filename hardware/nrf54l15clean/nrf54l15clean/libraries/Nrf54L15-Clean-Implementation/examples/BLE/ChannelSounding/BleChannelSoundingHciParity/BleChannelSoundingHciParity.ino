@@ -164,6 +164,85 @@ void testCachedCapabilitiesCommands() {
          "cached capabilities v2 IPT fields");
 }
 
+void appendTestMode2Step(uint8_t* stepData, size_t* offset, uint8_t channel) {
+  stepData[*offset + 0U] = kBleCsMainMode2;
+  stepData[*offset + 1U] = channel;
+  stepData[*offset + 2U] = 5U;
+  stepData[*offset + 3U] = 0U;
+  stepData[*offset + 4U] = static_cast<uint8_t>(0x10U + channel);
+  stepData[*offset + 5U] = static_cast<uint8_t>(0x20U + channel);
+  stepData[*offset + 6U] = 0U;
+  stepData[*offset + 7U] =
+      static_cast<uint8_t>(kBleCsToneQualityHigh |
+                           (kBleCsToneExtensionNone << 4U));
+  *offset += 8U;
+}
+
+void testSubeventResultFragmentation() {
+  uint8_t stepData[40U * 8U] = {};
+  size_t stepLen = 0U;
+  for (uint8_t i = 0U; i < 40U; ++i) {
+    appendTestMode2Step(stepData, &stepLen, static_cast<uint8_t>(i % 37U));
+  }
+
+  BleCsSubeventResult result{};
+  result.header.connHandle = 0x1234U;
+  result.header.configId = 7U;
+  result.header.startAclConnEventCounter = 0x0102U;
+  result.header.procedureCounter = 0x0304U;
+  result.header.numAntennaPaths = 1U;
+  result.header.numStepsReported = 40U;
+  result.stepData = stepData;
+  result.stepDataLen = static_cast<uint16_t>(stepLen);
+  result.isComplete = true;
+
+  uint8_t packet[260] = {};
+  size_t packetLen = 0U;
+  BleCsSubeventResultFragment fragment{};
+  expect(BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket(
+             result, 0U, packet, sizeof(packet), &packetLen, &fragment),
+         "build fragmented initial subevent result");
+  expect(fragment.more && !fragment.continuation &&
+             fragment.nextStepDataOffset > 0U &&
+             fragment.nextStepDataOffset < result.stepDataLen,
+         "initial fragment cursor");
+
+  BleCsHciLeMetaEvent meta{};
+  BleCsSubeventResult parsed{};
+  expect(BleChannelSoundingRadio::parseHciLeMetaEvent(packet, packetLen, &meta) &&
+             meta.subeventCode == kBleCsHciEvtSubeventResult,
+         "parse fragmented initial H4 event");
+  expect(BleChannelSoundingRadio::parseHciSubeventResultEvent(
+             meta.payload, meta.payloadLen, &parsed),
+         "parse fragmented initial payload");
+  expect(parsed.isPartial && !parsed.isContinuation &&
+             parsed.header.numStepsReported == fragment.stepsIncluded &&
+             parsed.stepDataLen == fragment.nextStepDataOffset,
+         "fragmented initial status");
+
+  const size_t nextOffset = fragment.nextStepDataOffset;
+  expect(BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket(
+             result, nextOffset, packet, sizeof(packet), &packetLen, &fragment),
+         "build continuation subevent result");
+  expect(!fragment.more && fragment.continuation &&
+             fragment.nextStepDataOffset == result.stepDataLen,
+         "continuation fragment cursor");
+  expect(BleChannelSoundingRadio::parseHciLeMetaEvent(packet, packetLen, &meta) &&
+             meta.subeventCode == kBleCsHciEvtSubeventResultContinue,
+         "parse continuation H4 event");
+  expect(BleChannelSoundingRadio::parseHciSubeventResultContinueEvent(
+             meta.payload, meta.payloadLen, &parsed),
+         "parse continuation payload");
+  expect(parsed.isComplete && parsed.isContinuation &&
+             parsed.header.numStepsReported == fragment.stepsIncluded &&
+             parsed.stepDataLen == (result.stepDataLen - nextOffset),
+         "continuation final status");
+
+  expect(!BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket(
+             result, 1U, packet, sizeof(packet), &packetLen, &fragment),
+         "reject unaligned fragment offset");
+}
+
 }  // namespace
 
 void setup() {
@@ -180,6 +259,7 @@ void setup() {
   testCsTestCommands();
   testFaeCommands();
   testCachedCapabilitiesCommands();
+  testSubeventResultFragmentation();
 
   Serial.print("checks=");
   Serial.print(g_checks);

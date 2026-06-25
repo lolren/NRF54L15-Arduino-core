@@ -42,6 +42,7 @@ constexpr size_t kBleCsMode3StepBaseLen = 7U;
 constexpr size_t kBleCsMode3SsRttStepBaseLen = 15U;
 constexpr size_t kBleCsHciSubeventResultHeaderLen = 15U;
 constexpr size_t kBleCsHciSubeventResultContinueHeaderLen = 8U;
+constexpr size_t kBleCsHciLeMetaMaxPayloadLen = 254U;
 /* Reserved connection handle for standalone CS Test subevent results
  * (Zephyr BT_HCI_LE_CS_TEST_CONN_HANDLE). */
 constexpr uint16_t kBleCsHciTestConnHandle = 0x0FFFU;
@@ -1277,6 +1278,90 @@ uint8_t packAbortReasonNibble(uint8_t procedureAbortReason,
                               ((subeventAbortReason & 0x0FU) << 4U));
 }
 
+bool advanceSubeventStep(const uint8_t* stepData,
+                         size_t stepDataLen,
+                         size_t* offset) {
+  if (stepData == nullptr || offset == nullptr || *offset > stepDataLen ||
+      (stepDataLen - *offset) < kBleCsStepHeaderLen) {
+    return false;
+  }
+
+  const size_t stepLen =
+      kBleCsStepHeaderLen + static_cast<size_t>(stepData[*offset + 2U]);
+  if (stepLen == kBleCsStepHeaderLen || (stepDataLen - *offset) < stepLen) {
+    return false;
+  }
+
+  *offset += stepLen;
+  return true;
+}
+
+bool subeventStepOffsetIsBoundary(const uint8_t* stepData,
+                                  size_t stepDataLen,
+                                  size_t targetOffset) {
+  if (targetOffset > stepDataLen || (stepDataLen > 0U && stepData == nullptr)) {
+    return false;
+  }
+  if (targetOffset == 0U) {
+    return true;
+  }
+
+  size_t offset = 0U;
+  while (offset < targetOffset) {
+    if (!advanceSubeventStep(stepData, stepDataLen, &offset)) {
+      return false;
+    }
+  }
+  return offset == targetOffset;
+}
+
+bool selectSubeventStepFragment(const uint8_t* stepData,
+                                size_t stepDataLen,
+                                size_t startOffset,
+                                size_t maxStepBytes,
+                                size_t* outBytes,
+                                uint16_t* outSteps,
+                                bool* outMore) {
+  if (outBytes == nullptr || outSteps == nullptr || outMore == nullptr ||
+      startOffset > stepDataLen ||
+      (stepDataLen > 0U && stepData == nullptr) ||
+      !subeventStepOffsetIsBoundary(stepData, stepDataLen, startOffset)) {
+    return false;
+  }
+
+  *outBytes = 0U;
+  *outSteps = 0U;
+  *outMore = startOffset < stepDataLen;
+  if (startOffset == stepDataLen) {
+    return true;
+  }
+
+  size_t offset = startOffset;
+  while (offset < stepDataLen) {
+    if ((stepDataLen - offset) < kBleCsStepHeaderLen) {
+      return false;
+    }
+    const size_t stepLen =
+        kBleCsStepHeaderLen + static_cast<size_t>(stepData[offset + 2U]);
+    if (stepLen == kBleCsStepHeaderLen || (stepDataLen - offset) < stepLen) {
+      return false;
+    }
+    if ((*outBytes + stepLen) > maxStepBytes) {
+      break;
+    }
+    *outBytes += stepLen;
+    ++(*outSteps);
+    offset += stepLen;
+  }
+
+  if (*outSteps == 0U) {
+    return false;
+  }
+
+  *outMore = offset < stepDataLen;
+  return true;
+}
+
 bool rawBytesAllZero(const uint8_t* data, uint8_t len) {
   if (data == nullptr || len == 0U) {
     return true;
@@ -1905,6 +1990,71 @@ bool BleChannelSoundingRadio::buildH4LeMetaSubeventResultPacket(
   }
 
   *outPacketLen = 4U + payloadLen;
+  return true;
+}
+
+bool BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket(
+    const BleCsSubeventResult& result,
+    size_t stepDataOffset,
+    uint8_t* outPacket,
+    size_t maxPacketLen,
+    size_t* outPacketLen,
+    BleCsSubeventResultFragment* outFragment) {
+  if (outPacket == nullptr || outPacketLen == nullptr || outFragment == nullptr ||
+      stepDataOffset > result.stepDataLen ||
+      (result.stepDataLen > 0U && result.stepData == nullptr)) {
+    return false;
+  }
+  *outPacketLen = 0U;
+  *outFragment = BleCsSubeventResultFragment{};
+
+  const bool continuation = stepDataOffset > 0U;
+  const size_t headerLen = continuation
+                               ? kBleCsHciSubeventResultContinueHeaderLen
+                               : kBleCsHciSubeventResultHeaderLen;
+  if (headerLen >= kBleCsHciLeMetaMaxPayloadLen ||
+      maxPacketLen < (4U + headerLen)) {
+    return false;
+  }
+
+  const size_t hciStepCapacity = kBleCsHciLeMetaMaxPayloadLen - headerLen;
+  const size_t callerStepCapacity = maxPacketLen - 4U - headerLen;
+  const size_t maxStepBytes =
+      (callerStepCapacity < hciStepCapacity) ? callerStepCapacity : hciStepCapacity;
+
+  size_t fragmentBytes = 0U;
+  uint16_t fragmentSteps = 0U;
+  bool more = false;
+  if (!selectSubeventStepFragment(result.stepData, result.stepDataLen, stepDataOffset,
+                                  maxStepBytes, &fragmentBytes, &fragmentSteps,
+                                  &more)) {
+    return false;
+  }
+
+  BleCsSubeventResult fragment = result;
+  fragment.stepData = (fragmentBytes > 0U) ? (result.stepData + stepDataOffset) : nullptr;
+  fragment.stepDataLen = static_cast<uint16_t>(fragmentBytes);
+  fragment.header.numStepsReported = fragmentSteps;
+  fragment.isContinuation = continuation;
+  fragment.isPartial = more;
+  fragment.isComplete = !more;
+
+  if (more) {
+    fragment.header.procedureDoneStatus = kBleCsProcedureDonePartial;
+    fragment.header.subeventDoneStatus = kBleCsSubeventDonePartial;
+    fragment.header.procedureAbortReason = 0U;
+    fragment.header.subeventAbortReason = 0U;
+  }
+
+  if (!buildH4LeMetaSubeventResultPacket(fragment, outPacket, maxPacketLen,
+                                         outPacketLen)) {
+    return false;
+  }
+
+  outFragment->nextStepDataOffset = stepDataOffset + fragmentBytes;
+  outFragment->stepsIncluded = fragmentSteps;
+  outFragment->more = more;
+  outFragment->continuation = continuation;
   return true;
 }
 

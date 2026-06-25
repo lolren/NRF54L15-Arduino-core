@@ -542,9 +542,37 @@ cs_connected_sweep=PASS attempts=9 valid_channels=7 min_valid=3 requested_channe
 cs_ll_physical_followup=PASS sweeps=1 valid_channels=17 raw_est=1 host_est=1 host_steps=17/17 proc=3
 ```
 
-Remaining limitation: this is a single-event serializer. Full Zephyr-style
-publication still needs controller-owned result fragmentation and continuation
-event scheduling for long result streams.
+## Completed in This Pass — CS Result Fragmentation Helper
+
+The serializer seam now also supports controller-style fragmentation:
+
+- `BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket()` emits
+  either the initial `CS Subevent Result` (`0x31`) or the continuation
+  `CS Subevent Result Continue` (`0x32`) based on the current step-data offset.
+- Fragmenting is done only on whole CS step records. Malformed step buffers,
+  zero-length steps, incomplete steps, and unaligned offsets are rejected.
+- Intermediate fragments report `procedure_done_status = partial` and
+  `subevent_done_status = partial`; the final fragment preserves the source
+  result's final status and abort reasons.
+- `BleChannelSoundingHciParity` now includes a 40-step Mode 2 fragmentation
+  self-test which forces one initial result plus one continuation result and
+  round-trips both through the existing HCI parser.
+
+Hardware/regression check:
+
+```text
+arduino-cli compile --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingHciParity
+
+scripts/test_cs_ll_workflow_bridge.sh
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
+cs_connected_sweep=PASS attempts=9 valid_channels=8 min_valid=3 requested_channels=9 raw_est=1 host_est=1 host_steps=8/8
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 host_est=1 host_steps=21/21 proc=3
+```
+
+Remaining limitation: fragmentation can now be built correctly by the host, but
+the connected controller/VPR scheduler still does not own native publication of
+those fragments from real RF measurements.
 
 Hardware check:
 
