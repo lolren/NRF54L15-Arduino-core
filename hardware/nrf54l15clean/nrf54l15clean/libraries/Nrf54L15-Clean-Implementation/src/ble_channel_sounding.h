@@ -908,6 +908,26 @@ struct BleCsConfig {
   int16_t dfeSampleOffset16M = 0;
 };
 
+struct BleCsConnectedWindowPlan {
+  bool valid = false;
+  bool connected = false;
+  bool fits = false;
+  BleConnectionRole role = BleConnectionRole::kNone;
+  uint16_t nextEventCounter = 0U;
+  uint16_t intervalUnits = 0U;
+  uint32_t intervalUs = 0U;
+  uint32_t nowUs = 0U;
+  uint32_t nextEventUs = 0U;
+  uint32_t timeUntilNextEventUs = 0U;
+  uint32_t startUs = 0U;
+  uint32_t deadlineUs = 0U;
+  uint32_t availableUs = 0U;
+  uint32_t requestedWindowUs = 0U;
+  uint32_t guardBeforeUs = 0U;
+  uint32_t guardAfterUs = 0U;
+  uint8_t reason = 0U;
+};
+
 class BleChannelSoundingRadio {
  public:
   explicit BleChannelSoundingRadio(uint32_t radioBase = nrf54l15::RADIO_BASE);
@@ -929,6 +949,12 @@ class BleChannelSoundingRadio {
 
   static uint8_t centeredDataChannelAt(uint8_t order,
                                        uint8_t channelCount = 37U);
+  static bool planConnectedWindow(
+      const BleConnectionTimingSnapshot& snapshot,
+      uint32_t requestedWindowUs,
+      uint32_t guardBeforeUs,
+      uint32_t guardAfterUs,
+      BleCsConnectedWindowPlan* outPlan);
   static float combinedPhaseRad(const BleCsChannelMeasurement& measurement);
   static bool rttDistanceMeters(const BleCsChannelMeasurement& measurement,
                                 float* outDistanceMeters);

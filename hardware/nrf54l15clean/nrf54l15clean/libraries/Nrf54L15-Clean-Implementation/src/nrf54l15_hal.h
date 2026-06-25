@@ -2025,6 +2025,25 @@ struct BleConnectionInfo {
   uint8_t rxPhy;
 };
 
+struct BleConnectionTimingSnapshot {
+  bool connected;
+  BleConnectionRole role;
+  uint16_t nextEventCounter;
+  uint16_t missedEventCount;
+  uint16_t intervalUnits;
+  uint32_t intervalUs;
+  uint32_t nowUs;
+  uint32_t nextEventUs;
+  uint32_t timeUntilNextEventUs;
+  uint32_t firstEventListenUs;
+  uint8_t syncAttemptsRemaining;
+  uint8_t txPhy;
+  uint8_t rxPhy;
+  uint8_t channelCount;
+  uint8_t hopIncrement;
+  uint8_t sleepClockAccuracy;
+};
+
 struct BleConnectionEvent {
   bool eventStarted;
   bool packetReceived;
@@ -2678,6 +2697,7 @@ class BleRadio {
   bool replyPendingPairingPasskey(bool accept);
   bool consumePairingFailureReason(uint8_t* outReason);
   bool getConnectionInfo(BleConnectionInfo* info) const;
+  bool getConnectionTimingSnapshot(BleConnectionTimingSnapshot* snapshot) const;
   void getEncryptionDebugCounters(BleEncryptionDebugCounters* out) const;
   void clearEncryptionDebugCounters();
   void getSecureConnectionsDebugState(BleSecureConnectionsDebugState* out) const;

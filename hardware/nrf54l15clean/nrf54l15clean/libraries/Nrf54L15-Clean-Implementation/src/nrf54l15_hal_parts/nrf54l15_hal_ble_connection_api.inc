@@ -566,6 +566,46 @@ bool BleRadio::getConnectionInfo(BleConnectionInfo* info) const {
   return true;
 }
 
+bool BleRadio::getConnectionTimingSnapshot(
+    BleConnectionTimingSnapshot* snapshot) const {
+  if (snapshot == nullptr) {
+    return false;
+  }
+
+  const uint32_t irqState = bleEnterCritical();
+  if (!connected_) {
+    bleExitCritical(irqState);
+    *snapshot = BleConnectionTimingSnapshot{};
+    return false;
+  }
+
+  const uint32_t nowUs = bleTimingUs();
+  snapshot->connected = true;
+  snapshot->role = connectionRole_;
+  snapshot->nextEventCounter = connectionEventCounter_;
+  snapshot->missedEventCount = connectionMissedEventCount_;
+  snapshot->intervalUnits = connectionIntervalUnits_;
+  snapshot->intervalUs = (connectionIntervalUnits_ > 0U)
+                             ? (static_cast<uint32_t>(connectionIntervalUnits_) *
+                                1250UL)
+                             : 0U;
+  snapshot->nowUs = nowUs;
+  snapshot->nextEventUs = connectionNextEventUs_;
+  snapshot->timeUntilNextEventUs =
+      timeReachedUs(nowUs, connectionNextEventUs_)
+          ? 0U
+          : static_cast<uint32_t>(connectionNextEventUs_ - nowUs);
+  snapshot->firstEventListenUs = connectionFirstEventListenUs_;
+  snapshot->syncAttemptsRemaining = connectionSyncAttemptsRemaining_;
+  snapshot->txPhy = connectionCurrentTxPhy_;
+  snapshot->rxPhy = connectionCurrentRxPhy_;
+  snapshot->channelCount = connectionChannelCount_;
+  snapshot->hopIncrement = connectionHop_;
+  snapshot->sleepClockAccuracy = connectionSca_;
+  bleExitCritical(irqState);
+  return true;
+}
+
 void BleRadio::getEncryptionDebugCounters(BleEncryptionDebugCounters* out) const {
   if (out == nullptr) {
     return;

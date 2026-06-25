@@ -7520,6 +7520,68 @@ uint8_t BleChannelSoundingRadio::centeredDataChannelAt(uint8_t order,
   return validDataChannel(channel) ? channel : 0xFFU;
 }
 
+bool BleChannelSoundingRadio::planConnectedWindow(
+    const BleConnectionTimingSnapshot& snapshot,
+    uint32_t requestedWindowUs,
+    uint32_t guardBeforeUs,
+    uint32_t guardAfterUs,
+    BleCsConnectedWindowPlan* outPlan) {
+  if (outPlan == nullptr) {
+    return false;
+  }
+
+  BleCsConnectedWindowPlan plan{};
+  plan.connected = snapshot.connected;
+  plan.role = snapshot.role;
+  plan.nextEventCounter = snapshot.nextEventCounter;
+  plan.intervalUnits = snapshot.intervalUnits;
+  plan.intervalUs = snapshot.intervalUs;
+  plan.nowUs = snapshot.nowUs;
+  plan.nextEventUs = snapshot.nextEventUs;
+  plan.timeUntilNextEventUs = snapshot.timeUntilNextEventUs;
+  plan.requestedWindowUs = requestedWindowUs;
+  plan.guardBeforeUs = guardBeforeUs;
+  plan.guardAfterUs = guardAfterUs;
+
+  if (!snapshot.connected || snapshot.role == BleConnectionRole::kNone) {
+    plan.reason = 1U;
+    *outPlan = plan;
+    return false;
+  }
+  if (requestedWindowUs == 0U || snapshot.intervalUs == 0U) {
+    plan.reason = 2U;
+    *outPlan = plan;
+    return false;
+  }
+  const uint32_t guardTotalUs = guardBeforeUs + guardAfterUs;
+  if (guardTotalUs < guardBeforeUs) {
+    plan.reason = 5U;
+    *outPlan = plan;
+    return false;
+  }
+  if (snapshot.timeUntilNextEventUs <= guardTotalUs) {
+    plan.valid = true;
+    plan.startUs = static_cast<uint32_t>(snapshot.nowUs + guardBeforeUs);
+    plan.deadlineUs =
+        (snapshot.nextEventUs > guardAfterUs)
+            ? static_cast<uint32_t>(snapshot.nextEventUs - guardAfterUs)
+            : snapshot.nextEventUs;
+    plan.reason = 3U;
+    *outPlan = plan;
+    return false;
+  }
+
+  plan.valid = true;
+  plan.startUs = static_cast<uint32_t>(snapshot.nowUs + guardBeforeUs);
+  plan.deadlineUs = static_cast<uint32_t>(snapshot.nextEventUs - guardAfterUs);
+  plan.availableUs = static_cast<uint32_t>(snapshot.timeUntilNextEventUs -
+                                           guardTotalUs);
+  plan.fits = plan.availableUs >= requestedWindowUs;
+  plan.reason = plan.fits ? 0U : 4U;
+  *outPlan = plan;
+  return plan.fits;
+}
+
 bool BleChannelSoundingRadio::measureMode2Sweep(
     uint8_t channelCount,
     uint8_t* inOutSequence,

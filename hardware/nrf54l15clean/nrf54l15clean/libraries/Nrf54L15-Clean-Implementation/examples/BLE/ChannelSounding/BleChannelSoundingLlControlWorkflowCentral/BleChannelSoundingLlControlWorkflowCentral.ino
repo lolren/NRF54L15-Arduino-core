@@ -41,6 +41,11 @@ static constexpr BoardAntennaPath kPhysicalAntennaPath = BoardAntennaPath::kCera
 static constexpr uint8_t kPhysicalChannelCount = 37U;
 static constexpr uint8_t kPhysicalMinValidChannels = 8U;
 static constexpr uint8_t kPhysicalMaxSweeps = 3U;
+static constexpr uint32_t kConnectedCsSingleChannelWindowUs = 18000UL;
+static constexpr uint32_t kConnectedCsFullSweepWindowUs =
+    kConnectedCsSingleChannelWindowUs * kPhysicalChannelCount;
+static constexpr uint32_t kConnectedCsGuardBeforeUs = 1800UL;
+static constexpr uint32_t kConnectedCsGuardAfterUs = 4500UL;
 
 static bool g_wasConnected = false;
 static bool g_bridgeStarted = false;
@@ -391,6 +396,47 @@ static bool beginPhysicalFollowup() {
   return g_physicalReady;
 }
 
+static void printConnectedWindowPlan() {
+  BleConnectionTimingSnapshot snapshot{};
+  BleCsConnectedWindowPlan singlePlan{};
+  BleCsConnectedWindowPlan sweepPlan{};
+  const bool snapshotOk = g_ble.getConnectionTimingSnapshot(&snapshot);
+  const bool singleFits =
+      snapshotOk && BleChannelSoundingRadio::planConnectedWindow(
+                        snapshot, kConnectedCsSingleChannelWindowUs,
+                        kConnectedCsGuardBeforeUs, kConnectedCsGuardAfterUs,
+                        &singlePlan);
+  const bool sweepFits =
+      snapshotOk && BleChannelSoundingRadio::planConnectedWindow(
+                        snapshot, kConnectedCsFullSweepWindowUs,
+                        kConnectedCsGuardBeforeUs, kConnectedCsGuardAfterUs,
+                        &sweepPlan);
+
+  Serial.print("cs_connected_window snapshot=");
+  Serial.print(snapshotOk ? 1 : 0);
+  Serial.print(" role=");
+  Serial.print(static_cast<uint8_t>(snapshot.role));
+  Serial.print(" next_ce=");
+  Serial.print(snapshot.nextEventCounter);
+  Serial.print(" interval_us=");
+  Serial.print(snapshot.intervalUs);
+  Serial.print(" until_next_us=");
+  Serial.print(snapshot.timeUntilNextEventUs);
+  Serial.print(" single_fit=");
+  Serial.print(singleFits ? 1 : 0);
+  Serial.print(" single_avail_us=");
+  Serial.print(singlePlan.availableUs);
+  Serial.print(" single_reason=");
+  Serial.print(singlePlan.reason);
+  Serial.print(" sweep_fit=");
+  Serial.print(sweepFits ? 1 : 0);
+  Serial.print(" sweep_avail_us=");
+  Serial.print(sweepPlan.availableUs);
+  Serial.print(" sweep_reason=");
+  Serial.print(sweepPlan.reason);
+  Serial.print("\r\n");
+}
+
 static void runPhysicalFollowup() {
   if (g_physicalDone || g_physicalFailed) {
     delay(100);
@@ -602,6 +648,7 @@ void loop() {
       Serial.print(" est=");
       Serial.print(g_bridgeTracker.estimateValid ? 1 : 0);
       Serial.print("\r\n");
+      printConnectedWindowPlan();
       (void)beginPhysicalFollowup();
     }
 

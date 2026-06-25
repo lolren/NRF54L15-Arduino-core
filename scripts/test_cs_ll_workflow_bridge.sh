@@ -31,10 +31,7 @@ if [[ ! -x "${nrf_ocd}" ]]; then
 fi
 
 if [[ "${sync_installed}" != "0" ]]; then
-  rsync -a "${impl_src}/src/ble_channel_sounding.cpp" \
-           "${impl_src}/src/ble_channel_sounding.h" \
-           "${impl_src}/src/vpr_cs_controller_stub_firmware.h" \
-           "${installed_impl}/src/"
+  rsync -a "${impl_src}/src/" "${installed_impl}/src/"
   rsync -a "${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral" \
            "${installed_impl}/examples/BLE/ChannelSounding/"
   rsync -a "${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral" \

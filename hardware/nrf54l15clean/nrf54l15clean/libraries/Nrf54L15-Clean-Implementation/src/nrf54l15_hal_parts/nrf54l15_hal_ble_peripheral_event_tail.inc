@@ -497,7 +497,7 @@ bool BleRadio::pollConnectionEvent(BleConnectionEvent* event,
     return true;
   }
 
-  if (!bleRunningInIsr()) {
+  if (!bleRunningInIsr() && backgroundConnectionServiceEnabled_) {
     // Non-ISR callers share the BLE idle/yield hooks with the same radio.
     // Drive connection progress through the queued service path here as well,
     // otherwise sketch polling can race a concurrent idle-service poll and

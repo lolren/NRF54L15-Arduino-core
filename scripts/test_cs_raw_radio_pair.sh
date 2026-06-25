@@ -32,9 +32,7 @@ if [[ ! -x "${nrf_ocd}" ]]; then
 fi
 
 if [[ "${sync_installed}" != "0" ]]; then
-  rsync -a "${impl_src}/src/ble_channel_sounding.cpp" \
-           "${impl_src}/src/ble_channel_sounding.h" \
-           "${installed_impl}/src/"
+  rsync -a "${impl_src}/src/" "${installed_impl}/src/"
   rsync -a "${initiator_sketch}" \
            "${reflector_sketch}" \
            "${installed_impl}/examples/BLE/ChannelSounding/"

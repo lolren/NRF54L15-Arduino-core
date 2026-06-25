@@ -269,6 +269,17 @@ Current controller note:
 - if you pass different TX/RX masks, the API narrows them to their common
   symmetric subset; if there is no common subset, the call fails
 
+Channel Sounding bring-up note:
+
+- `BleRadio::getConnectionTimingSnapshot(...)` exposes the current BLE
+  connection event cadence for diagnostics and controller bring-up.
+- `BleChannelSoundingRadio::planConnectedWindow(...)` can check whether a
+  requested CS work window fits between the current time and the next
+  connection event after guard time.
+- `BLE -> ChannelSounding -> BleChannelSoundingLlControlWorkflowCentral`
+  prints a `cs_connected_window ...` line before its physical follow-up. That
+  line is the current handoff point toward true in-connection CS scheduling.
+
 Arduino IDE organization:
 
 - `File -> Examples -> Nrf54L15-Clean-Implementation -> BLE`

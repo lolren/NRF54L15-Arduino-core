@@ -498,7 +498,8 @@ VPR inject op=0x30 prev=3 stage=5
 VPR inject op=0x33 prev=5 stage=6
 VPR inject op=0x35 prev=6 stage=0
 cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
-cs_ll_physical_followup=PASS sweeps=3 valid_channels=18 raw_est=1 raw_m=0.4320 host_est=1 host_steps=18/18 host_m=0.4108 proc=4
+cs_connected_window snapshot=1 role=2 next_ce=105 interval_us=30000 until_next_us=28949 single_fit=1 single_avail_us=22649 single_reason=0 sweep_fit=0 sweep_avail_us=22649 sweep_reason=4
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=10 raw_est=1 raw_m=0.9242 host_est=1 host_steps=10/10 host_m=1.7047 proc=2
 ```
 
 This proves the current CPUAPP BLE LL-control transport can move CS control
@@ -510,16 +511,28 @@ raw RADIO CS and feed real measurement data through the controller-host Mode 2
 result ingestion path. That is still a staged handoff after disconnect, not a
 true in-connection CS subevent scheduler.
 
+The `cs_connected_window` line is the current timing seam for the next hard
+slice. `BleRadio::getConnectionTimingSnapshot()` exposes a read-only snapshot
+of the active BLE event cadence, and
+`BleChannelSoundingRadio::planConnectedWindow()` reports whether a requested
+single-channel or full-sweep CS work window fits before the next connection
+event after configurable guard time. This is intentionally planning-only: it
+does not yet take RADIO ownership inside the connected event schedule.
+
 Regression command:
 
 ```bash
 scripts/test_cs_ll_workflow_bridge.sh
+scripts/test_cs_raw_radio_pair.sh
 ```
 
 Defaults match the current local test bench:
 central `/dev/ttyACM1` / UID `761FDE87`, peripheral `/dev/ttyACM2` / UID
 `E91217E8`. Override with `CS_CENTRAL_PORT`, `CS_PERIPHERAL_PORT`,
 `CS_CENTRAL_UID`, `CS_PERIPHERAL_UID`, and `CS_INSTALLED_VERSION`.
+Both scripts sync the full implementation `src/` tree into the installed
+Arduino package before compiling so local hardware tests do not accidentally
+mix current repo CS/HAL code with older Board Manager sources.
 
 ### Still required
 
@@ -533,7 +546,10 @@ central `/dev/ttyACM1` / UID `761FDE87`, peripheral `/dev/ttyACM2` / UID
    needs a controller/VPR-owned connected-CS scheduler rather than the Arduino
    sketch loop calling the helper.
 3. **Connection-event-relative timing** — schedule CS exchanges in microsecond
-   windows between BLE events, not by sketch polling.
+   windows between BLE events, not by sketch polling. The read-only timing
+   snapshot and connected-window planner now exist; the remaining work is to
+   make VPR/RADIO consume that plan and own the timed subevent rather than only
+   printing the plan from the diagnostic sketch.
 4. **Physical CS subevents inside the connected procedure** — the raw RADIO
    tone exchange and real result ingestion are now hardware-tested as a
    post-LL-control follow-up, but production parity still requires moving that
