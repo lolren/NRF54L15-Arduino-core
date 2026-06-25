@@ -90,6 +90,8 @@ static uint8_t g_lastVprStatus = 0xFFU;
 static uint8_t g_physicalSequence = 0U;
 static uint8_t g_physicalSweepCount = 0U;
 static uint8_t g_physicalValidChannels = 0U;
+static BleCsChannelMeasurement
+    g_connectedPhysicalMeasurements[kConnectedPhysicalSweepChannelCount];
 static BleCsChannelMeasurement g_physicalMeasurements[kPhysicalChannelCount];
 static uint8_t g_physicalLocalStepData[kBleCsMaxControllerStepDataBytes];
 static uint8_t g_physicalPeerStepData[kBleCsMaxControllerStepDataBytes];
@@ -378,6 +380,8 @@ static void resetBridgeState() {
   g_connectedTriggerEventCounter = 0U;
   g_connectedTriggerAckEventCounter = 0U;
   g_connectedPhysicalRunAfterEventCounter = 0U;
+  memset(g_connectedPhysicalMeasurements, 0,
+         sizeof(g_connectedPhysicalMeasurements));
   g_bridgeStarted = beginWorkflowBridge();
 
   Serial.print("workflow bridge init: ");
@@ -418,6 +422,9 @@ static bool runConnectedPhysicalChannel(uint8_t channel, uint8_t channelOrder) {
   }
   const BleCsDfeCaptureInfo dfeInfo = g_physicalCs.lastDfeCaptureInfo();
   g_physicalCs.end();
+  if (channelOrder < kConnectedPhysicalSweepChannelCount) {
+    g_connectedPhysicalMeasurements[channelOrder] = result.measurement;
+  }
 
   Serial.print("cs_connected_physical snapshot=");
   Serial.print(snapshotOk ? 1 : 0);
@@ -622,8 +629,14 @@ static bool runConnectedPhysicalSweep() {
     printConnectedPhysicalTrigger(channel, order);
   }
 
+  BleCsEstimate connectedEstimate{};
+  const bool connectedEstimateValid =
+      BleChannelSoundingRadio::estimateDistancePhaseSlope(
+          g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
+          &connectedEstimate);
   g_connectedPhysicalOk =
-      g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels;
+      g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels &&
+      connectedEstimateValid;
   Serial.print("cs_connected_sweep=");
   Serial.print(g_connectedPhysicalOk ? "PASS" : "FAIL");
   Serial.print(" attempts=");
@@ -634,6 +647,15 @@ static bool runConnectedPhysicalSweep() {
   Serial.print(kConnectedPhysicalMinValidChannels);
   Serial.print(" requested_channels=");
   Serial.print(kConnectedPhysicalSweepChannelCount);
+  Serial.print(" raw_est=");
+  Serial.print(connectedEstimateValid ? 1 : 0);
+  Serial.print(" used=");
+  Serial.print(connectedEstimate.usedChannels);
+  Serial.print('/');
+  Serial.print(connectedEstimate.totalToneChannels);
+  printDistanceField(" raw_m=", connectedEstimate.phaseSlopeDistanceMeters);
+  Serial.print(" residual=");
+  Serial.print(connectedEstimate.residualVariance, 6);
   Serial.print("\r\n");
   return g_connectedPhysicalOk;
 }

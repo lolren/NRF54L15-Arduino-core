@@ -98,7 +98,7 @@ if ! grep -Eq "cs_connected_physical .*ok=1.*status=0.*local_tone=1.*peer_tone=1
   exit 1
 fi
 
-if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9])" "${central_log}"; then
+if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9]).*raw_est=1" "${central_log}"; then
   echo "Connected-window raw CS sweep did not reach the minimum valid channel count" >&2
   echo "central log:" >&2
   sed -n '1,320p' "${central_log}" >&2
