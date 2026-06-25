@@ -4434,12 +4434,22 @@ bool BleCsControllerHost::consumeIngressPacket(BleCsControllerIngressSource sour
       (source == BleCsControllerIngressSource::kPeerResult)
           ? BleCsControllerResultSource::kPeer
           : BleCsControllerResultSource::kLocal;
+  BleCsHciLeMetaEvent metaEvent{};
+  const bool isInitialSubevent =
+      BleChannelSoundingRadio::parseHciLeMetaEvent(packet, packetLen, &metaEvent) &&
+      metaEvent.subeventCode == kBleCsHciEvtSubeventResult;
   const bool ok = session_.consumeResultEventPacket(resultSource, packet, packetLen);
   if (ok) {
     if (resultSource == BleCsControllerResultSource::kLocal) {
       ++state_.localResultPackets;
+      if (isInitialSubevent) {
+        ++state_.localSubeventResults;
+      }
     } else {
       ++state_.peerResultPackets;
+      if (isInitialSubevent) {
+        ++state_.peerSubeventResults;
+      }
     }
   }
   return ok;
@@ -4458,6 +4468,45 @@ bool BleCsControllerHost::consumeCompletedResult(
     }
   }
   return ok;
+}
+
+bool BleCsControllerHost::consumeResultEventStream(
+    BleCsControllerResultSource source,
+    const BleCsSubeventResult& result) {
+  if (!result.isComplete ||
+      (result.stepDataLen > 0U && result.stepData == nullptr)) {
+    return false;
+  }
+
+  const BleCsControllerIngressSource ingressSource =
+      (source == BleCsControllerResultSource::kPeer)
+          ? BleCsControllerIngressSource::kPeerResult
+          : BleCsControllerIngressSource::kLocalResult;
+  uint8_t packet[260] = {0};
+  size_t packetLen = 0U;
+  size_t offset = 0U;
+  bool emitted = false;
+
+  while (true) {
+    BleCsSubeventResultFragment fragment{};
+    if (!BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket(
+            result, offset, packet, sizeof(packet), &packetLen, &fragment)) {
+      return false;
+    }
+    if (!consumeIngressPacket(ingressSource, packet, packetLen)) {
+      return false;
+    }
+    emitted = true;
+    offset = fragment.nextStepDataOffset;
+    if (!fragment.more) {
+      break;
+    }
+    if (offset >= result.stepDataLen) {
+      return false;
+    }
+  }
+
+  return emitted;
 }
 
 bool BleCsControllerHost::consumeMode2ResultsFromMeasurements(
@@ -4483,6 +4532,35 @@ bool BleCsControllerHost::consumeMode2ResultsFromMeasurements(
     return false;
   }
   if (!consumeCompletedResult(BleCsControllerResultSource::kPeer, peerResult)) {
+    resetProcedureRunState();
+    return false;
+  }
+  return true;
+}
+
+bool BleCsControllerHost::consumeMode2ResultEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  BleCsSubeventResult localResult{};
+  BleCsSubeventResult peerResult{};
+  if (!BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          measurements, count, false, headerTemplate, localStepData,
+          localMaxStepDataLen, &localResult) ||
+      !BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          measurements, count, true, headerTemplate, peerStepData,
+          peerMaxStepDataLen, &peerResult)) {
+    return false;
+  }
+
+  if (!consumeResultEventStream(BleCsControllerResultSource::kLocal, localResult)) {
+    return false;
+  }
+  if (!consumeResultEventStream(BleCsControllerResultSource::kPeer, peerResult)) {
     resetProcedureRunState();
     return false;
   }
@@ -4684,6 +4762,19 @@ bool BleCsControllerStreamHost::consumeMode2ResultsFromMeasurements(
     uint8_t* peerStepData,
     size_t peerMaxStepDataLen) {
   return host_.consumeMode2ResultsFromMeasurements(
+      measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
+bool BleCsControllerStreamHost::consumeMode2ResultEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  return host_.consumeMode2ResultEventsFromMeasurements(
       measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
       peerStepData, peerMaxStepDataLen);
 }
@@ -6699,6 +6790,19 @@ bool BleCsControllerVprHost::consumeMode2ResultsFromMeasurements(
       peerStepData, peerMaxStepDataLen);
 }
 
+bool BleCsControllerVprHost::consumeMode2ResultEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  return host_.consumeMode2ResultEventsFromMeasurements(
+      measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
 bool BleCsControllerVprHost::consumeConnectedMode2ResultsFromMeasurements(
     const BleCsChannelMeasurement* measurements,
     size_t count,
@@ -6724,6 +6828,35 @@ bool BleCsControllerVprHost::consumeConnectedMode2ResultsFromMeasurements(
   header.numAntennaPaths = (numAntennaPaths == 0U) ? 1U : numAntennaPaths;
 
   return consumeMode2ResultsFromMeasurements(
+      measurements, count, header, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
+bool BleCsControllerVprHost::consumeConnectedMode2ResultEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    uint8_t configId,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen,
+    uint8_t numAntennaPaths) {
+  uint16_t connHandle = 0U;
+  if (!currentConnHandle(&connHandle)) {
+    return false;
+  }
+
+  BleCsSubeventResultHeader header{};
+  header.connHandle = connHandle;
+  header.configId = configId;
+  header.procedureCounter =
+      static_cast<uint16_t>(sessionState().completedProcedureCounter + 1U);
+  if (header.procedureCounter == 0U) {
+    header.procedureCounter = 1U;
+  }
+  header.numAntennaPaths = (numAntennaPaths == 0U) ? 1U : numAntennaPaths;
+
+  return consumeMode2ResultEventsFromMeasurements(
       measurements, count, header, localStepData, localMaxStepDataLen,
       peerStepData, peerMaxStepDataLen);
 }
@@ -8245,7 +8378,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   bool hostOk = true;
   if (host != nullptr) {
     hostOk =
-        host->consumeConnectedMode2ResultsFromMeasurements(
+        host->consumeConnectedMode2ResultEventsFromMeasurements(
             measurements, config.channelCount, config.configId, localStepData,
             localMaxStepDataLen, peerStepData, peerMaxStepDataLen,
             config.numAntennaPaths) &&

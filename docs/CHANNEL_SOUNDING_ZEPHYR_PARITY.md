@@ -574,6 +574,42 @@ Remaining limitation: fragmentation can now be built correctly by the host, but
 the connected controller/VPR scheduler still does not own native publication of
 those fragments from real RF measurements.
 
+## Completed in This Pass — Connected Physical Results Through HCI Event Path
+
+The connected Mode 2 sweep no longer bypasses the controller/session HCI result
+path for physical measurements.
+
+- `BleCsControllerHost::consumeResultEventStream()` takes a completed
+  `BleCsSubeventResult`, fragments it into HCI LE Meta `0x31/0x32` packets, and
+  feeds those packets back through the existing session reassembler.
+- `BleCsControllerHost::consumeMode2ResultEventsFromMeasurements()` builds
+  local and peer Mode 2 results from real `BleCsChannelMeasurement` arrays and
+  consumes them via that HCI event stream.
+- `BleCsControllerStreamHost` and `BleCsControllerVprHost` now expose matching
+  forwarding APIs.
+- `BleCsConnectedMode2SweepRunner::runInitiator()` now uses
+  `consumeConnectedMode2ResultEventsFromMeasurements()` instead of the older
+  direct completed-result shortcut.
+- Source-specific local/peer event ingestion now increments subevent counters
+  on initial `0x31` events, so diagnostics still reflect actual completed local
+  and peer procedure result streams.
+
+Hardware/regression check:
+
+```text
+arduino-cli compile --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingHciParity
+
+scripts/test_cs_ll_workflow_bridge.sh
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
+cs_connected_sweep=PASS attempts=9 valid_channels=7 min_valid=3 requested_channels=9 host_est=1 host_steps=7/7
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 host_est=1 host_steps=21/21 proc=3
+```
+
+Remaining limitation: result publication now uses controller-style HCI packets,
+but CPUAPP still owns the connected RF sweep timing. Zephyr parity still
+requires moving the scheduler/timing owner into the controller/VPR side.
+
 Hardware check:
 
 ```text

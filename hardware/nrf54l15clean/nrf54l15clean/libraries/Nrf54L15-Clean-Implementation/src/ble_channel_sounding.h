@@ -1583,7 +1583,17 @@ class BleCsControllerHost {
                            size_t len);
   bool consumeCompletedResult(BleCsControllerResultSource source,
                               const BleCsSubeventResult& result);
+  bool consumeResultEventStream(BleCsControllerResultSource source,
+                                const BleCsSubeventResult& result);
   bool consumeMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
+  bool consumeMode2ResultEventsFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
       const BleCsSubeventResultHeader& headerTemplate,
@@ -1657,6 +1667,14 @@ class BleCsControllerStreamHost {
   bool consumeCompletedResult(BleCsControllerResultSource source,
                               const BleCsSubeventResult& result);
   bool consumeMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
+  bool consumeMode2ResultEventsFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
       const BleCsSubeventResultHeader& headerTemplate,
@@ -2183,7 +2201,24 @@ class BleCsControllerVprHost {
       size_t localMaxStepDataLen,
       uint8_t* peerStepData,
       size_t peerMaxStepDataLen);
+  bool consumeMode2ResultEventsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
   bool consumeConnectedMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      uint8_t configId,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen,
+      uint8_t numAntennaPaths = 1U);
+  bool consumeConnectedMode2ResultEventsFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
       uint8_t configId,
