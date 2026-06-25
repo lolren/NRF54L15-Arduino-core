@@ -616,6 +616,8 @@ struct BleCsVprMeasurementWorkItem {
   uint32_t nextSubeventHeartbeat = 0U;
   uint32_t nextPeerStageHeartbeat = 0U;
   uint32_t nextChunkStageHeartbeat = 0U;
+  uint8_t stepChannelCount = 0U;
+  uint8_t stepChannels[6] = {0};
 };
 
 class BleCsControllerVprHost;
@@ -1392,6 +1394,8 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t workSubeventCount = 0U;
   uint8_t workSubeventStepCount = 0U;
   uint8_t workTotalSteps = 0U;
+  uint8_t workStepChannelCount = 0U;
+  uint8_t workStepChannels[6] = {0};
   uint16_t workProcedureCounter = 0U;
   uint8_t hostConfigId = 0U;
   uint16_t hostProcedureCounter = 0U;

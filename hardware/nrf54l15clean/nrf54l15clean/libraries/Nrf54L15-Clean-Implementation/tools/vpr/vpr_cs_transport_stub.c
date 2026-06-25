@@ -4082,7 +4082,7 @@ static size_t build_vendor_ble_cs_scheduler_read_complete_payload(uint8_t *paylo
 
 static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t *payload,
                                                                          size_t max_len) {
-  if (payload == NULL || max_len < 55U) {
+  if (payload == NULL || max_len < 62U) {
     return 0U;
   }
 
@@ -4094,6 +4094,8 @@ static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t
   const uint8_t active_subevent = g_cs_active_subevent_index;
   const uint8_t subevent_count = current_demo_subevent_count();
   const uint8_t total_steps = current_demo_total_step_count();
+  const uint8_t phase_step_count = current_demo_step_count();
+  uint8_t step_channels[6] = {0};
   const uint8_t subevent_start = current_demo_subevent_start_step(active_subevent);
   const uint8_t subevent_steps = current_demo_subevent_step_count(active_subevent);
   const uint16_t subevent_bytes =
@@ -4155,7 +4157,11 @@ static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t
   write_le32(&payload[46], g_cs_next_peer_stage_heartbeat);
   write_le32(&payload[50], g_cs_next_chunk_stage_heartbeat);
   payload[54] = ready;
-  return 55U;
+  payload[55] = fill_demo_channels_for_procedure(step_channels, phase_step_count);
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    payload[56U + i] = step_channels[i];
+  }
+  return 62U;
 }
 #endif
 

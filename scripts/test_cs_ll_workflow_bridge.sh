@@ -98,7 +98,7 @@ if ! grep -Eq "cs_connected_physical .*ok=1.*status=0.*local_tone=1.*peer_tone=1
   exit 1
 fi
 
-if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9]).*host_est=1.*work_applied=1.*work_proc=1.*host_cfg=1.*host_proc=1" "${central_log}"; then
+if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9]).*host_est=1.*work_applied=1.*work_proc=1.*work_ch=[1-9][0-9]*:.*host_cfg=1.*host_proc=1" "${central_log}"; then
   echo "Connected-window raw CS sweep did not reach the minimum valid channel count and host estimate" >&2
   echo "central log:" >&2
   sed -n '1,320p' "${central_log}" >&2
@@ -120,7 +120,7 @@ if ! grep -q "rx=0x3F" "${central_log}" ||
    ! grep -q "vpr_pdu=3" "${central_log}" ||
    ! grep -q "local=1 peer=1 proc=1 est=1" "${central_log}" ||
    ! grep -Eq "sched=1 .*sched_proc=1 .*sched_sub=[0-9]+/[1-9]" "${central_log}" ||
-   ! grep -Eq "work=1 .*work_proc=1 .*work_sub=[0-9]+/[1-9].*work_steps=[1-9][0-9]*/[1-9]" "${central_log}"; then
+   ! grep -Eq "work=1 .*work_proc=1 .*work_sub=[0-9]+/[1-9].*work_steps=[1-9][0-9]*/[1-9].*work_ch=[1-9][0-9]*:" "${central_log}"; then
   echo "CS LL workflow bridge PASS was incomplete" >&2
   sed -n '1,220p' "${central_log}" >&2
   exit 1

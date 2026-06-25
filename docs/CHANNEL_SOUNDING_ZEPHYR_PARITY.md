@@ -677,6 +677,9 @@ unit through test/vendor HCI opcode `0xFCEC`.
   input and uses it as the authoritative config/procedure/subevent metadata
   for host-ingress result stamping. The sweep output now prints
   `work_applied=1`, `work_cfg`, `work_proc`, `work_sub`, and `work_plan`.
+- The work-item payload now includes up to six VPR-selected phase-step
+  channels from the controller's channel-selection helper. The workflow PASS
+  and connected-sweep PASS lines print them as `work_ch=count:ch0,ch1,...`.
 
 This is still not full Zephyr parity. The work item is now controller-owned,
 but the physical RADIO operation is still executed by the CPUAPP helper. The
@@ -687,8 +690,8 @@ Hardware check:
 
 ```text
 scripts/test_cs_ll_workflow_bridge.sh
-cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=3 sched_chunk=3/3 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=3/3 work_chunk=3/3
-cs_connected_sweep=PASS attempts=9 valid_channels=8 min_valid=3 requested_channels=9 raw_est=1 host_est=1 work_applied=1 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=3/3 host_cfg=1 host_proc=1 host_steps=8/8
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=3 sched_chunk=3/3 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=3/3 work_chunk=3/3 work_ch=3:2,3,4
+cs_connected_sweep=PASS attempts=9 valid_channels=9 min_valid=3 requested_channels=9 raw_est=1 host_est=1 work_applied=1 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=3/3 work_ch=3:2,3,4 host_cfg=1 host_proc=1 host_steps=9/9
 cs_ll_physical_followup=PASS sweeps=1 valid_channels=22 raw_est=1 host_est=1 host_steps=22/22 proc=2
 ```
 

@@ -3975,6 +3975,12 @@ bool parseVprMeasurementWorkItemResponse(const uint8_t* packet,
   outWork->nextSubeventHeartbeat = readLe32(params + 42U);
   outWork->nextPeerStageHeartbeat = readLe32(params + 46U);
   outWork->nextChunkStageHeartbeat = readLe32(params + 50U);
+  if (completeEvent.returnParamsLen >= 62U) {
+    outWork->stepChannelCount = (params[55] <= sizeof(outWork->stepChannels))
+                                    ? params[55]
+                                    : sizeof(outWork->stepChannels);
+    memcpy(outWork->stepChannels, params + 56U, sizeof(outWork->stepChannels));
+  }
   return true;
 }
 
@@ -8456,6 +8462,9 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     result.workSubeventCount = work->totalSubevents;
     result.workSubeventStepCount = work->subeventStepCount;
     result.workTotalSteps = work->totalSteps;
+    result.workStepChannelCount = work->stepChannelCount;
+    memcpy(result.workStepChannels, work->stepChannels,
+           sizeof(result.workStepChannels));
   }
 
   for (uint8_t order = 0U; order < config.channelCount; ++order) {

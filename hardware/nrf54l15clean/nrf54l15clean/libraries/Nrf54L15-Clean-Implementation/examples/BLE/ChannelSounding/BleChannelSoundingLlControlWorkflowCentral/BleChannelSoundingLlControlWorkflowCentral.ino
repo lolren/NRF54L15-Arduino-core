@@ -562,6 +562,15 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workSubeventStepCount);
   Serial.print('/');
   Serial.print(sweepResult.workTotalSteps);
+  Serial.print(" work_ch=");
+  Serial.print(sweepResult.workStepChannelCount);
+  Serial.print(':');
+  for (uint8_t i = 0U; i < sweepResult.workStepChannelCount; ++i) {
+    if (i != 0U) {
+      Serial.print(',');
+    }
+    Serial.print(sweepResult.workStepChannels[i]);
+  }
   Serial.print(" host_cfg=");
   Serial.print(sweepResult.hostConfigId);
   Serial.print(" host_proc=");
@@ -915,6 +924,15 @@ void loop() {
       Serial.print(work.localChunkStartStep);
       Serial.print('/');
       Serial.print(work.peerChunkStartStep);
+      Serial.print(" work_ch=");
+      Serial.print(work.stepChannelCount);
+      Serial.print(':');
+      for (uint8_t i = 0U; i < work.stepChannelCount; ++i) {
+        if (i != 0U) {
+          Serial.print(',');
+        }
+        Serial.print(work.stepChannels[i]);
+      }
       Serial.print("\r\n");
       printConnectedWindowPlan();
       (void)beginPhysicalFollowup();

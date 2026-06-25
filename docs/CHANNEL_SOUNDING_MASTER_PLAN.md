@@ -592,9 +592,9 @@ VPR/controller workflow:
   `work=1`, `work_proc=1`, and a non-zero `work_steps` plan, while the
   connected sweep must include `host_cfg=1` and `host_proc=1`, proving
   LL-control negotiation, VPR scheduler-state readback, VPR measurement-work
-  readback, VPR work-item consumption by the connected sweep runner,
-  scheduler-owned result identity, and real physical measurement host-ingress
-  in one two-board run.
+  readback, VPR-selected channel-plan readback, VPR work-item consumption by
+  the connected sweep runner, scheduler-owned result identity, and real
+  physical measurement host-ingress in one two-board run.
 - `BleChannelSoundingRadio::measureMode2Sweep()` is the shared raw RADIO
   centre-out sweep primitive used by the workflow follow-up; future connected
   scheduler work should call through this primitive or move its internals into
