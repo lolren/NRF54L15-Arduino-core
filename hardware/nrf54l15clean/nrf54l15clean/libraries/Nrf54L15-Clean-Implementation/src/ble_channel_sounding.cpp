@@ -1271,6 +1271,12 @@ bool parseAbortReasonNibble(uint8_t packed,
   return true;
 }
 
+uint8_t packAbortReasonNibble(uint8_t procedureAbortReason,
+                              uint8_t subeventAbortReason) {
+  return static_cast<uint8_t>((procedureAbortReason & 0x0FU) |
+                              ((subeventAbortReason & 0x0FU) << 4U));
+}
+
 bool rawBytesAllZero(const uint8_t* data, uint8_t len) {
   if (data == nullptr || len == 0U) {
     return true;
@@ -1801,6 +1807,104 @@ bool BleChannelSoundingRadio::parseHciSubeventResultContinueEvent(
   }
 
   *outResult = result;
+  return true;
+}
+
+bool BleChannelSoundingRadio::buildHciSubeventResultEvent(
+    const BleCsSubeventResult& result,
+    uint8_t* outEventData,
+    size_t maxEventLen,
+    size_t* outEventLen) {
+  if (outEventData == nullptr || outEventLen == nullptr ||
+      result.header.numStepsReported > 0xFFU ||
+      maxEventLen < (kBleCsHciSubeventResultHeaderLen + result.stepDataLen) ||
+      (result.stepDataLen > 0U && result.stepData == nullptr)) {
+    return false;
+  }
+
+  const size_t eventLen = kBleCsHciSubeventResultHeaderLen + result.stepDataLen;
+  writeLe16(outEventData + 0U, result.header.connHandle);
+  outEventData[2U] = result.header.configId;
+  writeLe16(outEventData + 3U, result.header.startAclConnEventCounter);
+  writeLe16(outEventData + 5U, result.header.procedureCounter);
+  writeLe16(outEventData + 7U, result.header.frequencyCompensation);
+  outEventData[9U] = static_cast<uint8_t>(result.header.referencePowerLevelDbm);
+  outEventData[10U] = result.header.procedureDoneStatus;
+  outEventData[11U] = result.header.subeventDoneStatus;
+  outEventData[12U] =
+      packAbortReasonNibble(result.header.procedureAbortReason,
+                            result.header.subeventAbortReason);
+  outEventData[13U] =
+      (result.header.numAntennaPaths != 0U) ? result.header.numAntennaPaths : 1U;
+  outEventData[14U] = static_cast<uint8_t>(result.header.numStepsReported);
+  if (result.stepDataLen > 0U) {
+    memcpy(outEventData + kBleCsHciSubeventResultHeaderLen,
+           result.stepData, result.stepDataLen);
+  }
+  *outEventLen = eventLen;
+  return true;
+}
+
+bool BleChannelSoundingRadio::buildHciSubeventResultContinueEvent(
+    const BleCsSubeventResult& result,
+    uint8_t* outEventData,
+    size_t maxEventLen,
+    size_t* outEventLen) {
+  if (outEventData == nullptr || outEventLen == nullptr ||
+      result.header.numStepsReported > 0xFFU ||
+      maxEventLen < (kBleCsHciSubeventResultContinueHeaderLen + result.stepDataLen) ||
+      (result.stepDataLen > 0U && result.stepData == nullptr)) {
+    return false;
+  }
+
+  const size_t eventLen =
+      kBleCsHciSubeventResultContinueHeaderLen + result.stepDataLen;
+  writeLe16(outEventData + 0U, result.header.connHandle);
+  outEventData[2U] = result.header.configId;
+  outEventData[3U] = result.header.procedureDoneStatus;
+  outEventData[4U] = result.header.subeventDoneStatus;
+  outEventData[5U] =
+      packAbortReasonNibble(result.header.procedureAbortReason,
+                            result.header.subeventAbortReason);
+  outEventData[6U] =
+      (result.header.numAntennaPaths != 0U) ? result.header.numAntennaPaths : 1U;
+  outEventData[7U] = static_cast<uint8_t>(result.header.numStepsReported);
+  if (result.stepDataLen > 0U) {
+    memcpy(outEventData + kBleCsHciSubeventResultContinueHeaderLen,
+           result.stepData, result.stepDataLen);
+  }
+  *outEventLen = eventLen;
+  return true;
+}
+
+bool BleChannelSoundingRadio::buildH4LeMetaSubeventResultPacket(
+    const BleCsSubeventResult& result,
+    uint8_t* outPacket,
+    size_t maxPacketLen,
+    size_t* outPacketLen) {
+  if (outPacket == nullptr || outPacketLen == nullptr) {
+    return false;
+  }
+  *outPacketLen = 0U;
+
+  uint8_t payload[255] = {0};
+  size_t payloadLen = 0U;
+  const uint8_t subeventCode =
+      result.isContinuation ? kBleCsHciEvtSubeventResultContinue
+                            : kBleCsHciEvtSubeventResult;
+  const bool payloadOk =
+      result.isContinuation
+          ? buildHciSubeventResultContinueEvent(result, payload,
+                                                sizeof(payload), &payloadLen)
+          : buildHciSubeventResultEvent(result, payload,
+                                        sizeof(payload), &payloadLen);
+  if (!payloadOk || payloadLen > 254U ||
+      !buildH4LeMetaEvent(outPacket, maxPacketLen, subeventCode,
+                          payload, payloadLen)) {
+    return false;
+  }
+
+  *outPacketLen = 4U + payloadLen;
   return true;
 }
 

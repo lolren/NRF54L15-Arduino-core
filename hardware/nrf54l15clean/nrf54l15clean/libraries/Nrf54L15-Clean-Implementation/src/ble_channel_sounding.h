@@ -1061,6 +1061,21 @@ class BleChannelSoundingRadio {
   static bool parseHciSubeventResultContinueEvent(const uint8_t* eventData,
                                                   size_t eventLen,
                                                   BleCsSubeventResult* outResult);
+  static bool buildHciSubeventResultEvent(
+      const BleCsSubeventResult& result,
+      uint8_t* outEventData,
+      size_t maxEventLen,
+      size_t* outEventLen);
+  static bool buildHciSubeventResultContinueEvent(
+      const BleCsSubeventResult& result,
+      uint8_t* outEventData,
+      size_t maxEventLen,
+      size_t* outEventLen);
+  static bool buildH4LeMetaSubeventResultPacket(
+      const BleCsSubeventResult& result,
+      uint8_t* outPacket,
+      size_t maxPacketLen,
+      size_t* outPacketLen);
   static bool estimateDistanceFromSubeventResults(const BleCsSubeventResult& localResult,
                                                   const BleCsSubeventResult& peerResult,
                                                   bool localRoleIsInitiator,

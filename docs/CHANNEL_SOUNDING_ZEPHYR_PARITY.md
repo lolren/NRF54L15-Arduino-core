@@ -518,6 +518,34 @@ orchestration seam. The next parity step is to move the connected timing owner
 from the sketch/core runner into a controller/VPR scheduler that emits native CS
 subevent results from real physical measurements.
 
+## Completed in This Pass — CS Subevent Result Serialization Seam
+
+The host-side Channel Sounding code now has public serializers for the same
+subevent result layouts that the parser already accepted:
+
+- `BleChannelSoundingRadio::buildHciSubeventResultEvent()`
+- `BleChannelSoundingRadio::buildHciSubeventResultContinueEvent()`
+- `BleChannelSoundingRadio::buildH4LeMetaSubeventResultPacket()`
+
+This removes another temporary gap between physical measurement capture and
+controller-style event publication. A real `BleCsSubeventResult` produced from
+connected Mode 2 measurements can now be emitted as an LE Meta `CS Subevent
+Result` (`0x31`) or `CS Subevent Result Continue` (`0x32`) packet without each
+diagnostic sketch rebuilding the HCI byte layout by hand.
+
+Hardware check after adding the serializers:
+
+```text
+scripts/test_cs_ll_workflow_bridge.sh
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1
+cs_connected_sweep=PASS attempts=9 valid_channels=7 min_valid=3 requested_channels=9 host_est=1 host_steps=7/7
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=17 raw_est=1 host_est=1 host_steps=17/17 proc=3
+```
+
+Remaining limitation: this is a single-event serializer. Full Zephyr-style
+publication still needs controller-owned result fragmentation and continuation
+event scheduling for long result streams.
+
 Hardware check:
 
 ```text
