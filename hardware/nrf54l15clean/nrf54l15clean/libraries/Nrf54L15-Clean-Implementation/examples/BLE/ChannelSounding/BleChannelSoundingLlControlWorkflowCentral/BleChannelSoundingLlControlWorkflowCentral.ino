@@ -473,7 +473,7 @@ static void printConnectedPhysicalChannelResult(
   Serial.print("\r\n");
 }
 
-static bool runConnectedPhysicalSweep() {
+static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workItem = nullptr) {
   if (g_connectedPhysicalAttempted) {
     return g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels;
   }
@@ -501,6 +501,7 @@ static bool runConnectedPhysicalSweep() {
   sweepConfig.channelCount = kConnectedPhysicalSweepChannelCount;
   sweepConfig.minValidChannels = kConnectedPhysicalMinValidChannels;
   sweepConfig.configId = 1U;
+  sweepConfig.workItem = workItem;
   sweepConfig.numAntennaPaths = 1U;
   sweepConfig.triggerReason = kConnectedPhysicalTriggerReason;
   sweepConfig.ackReason = kConnectedPhysicalAckReason;
@@ -547,6 +548,20 @@ static bool runConnectedPhysicalSweep() {
   Serial.print(sweepResult.rawEstimate.residualVariance, 6);
   Serial.print(" host_est=");
   Serial.print(sweepResult.hostEstimateValid ? 1 : 0);
+  Serial.print(" work_applied=");
+  Serial.print(sweepResult.workItemApplied ? 1 : 0);
+  Serial.print(" work_cfg=");
+  Serial.print(sweepResult.workConfigId);
+  Serial.print(" work_proc=");
+  Serial.print(sweepResult.workProcedureCounter);
+  Serial.print(" work_sub=");
+  Serial.print(sweepResult.workSubeventIndex);
+  Serial.print('/');
+  Serial.print(sweepResult.workSubeventCount);
+  Serial.print(" work_plan=");
+  Serial.print(sweepResult.workSubeventStepCount);
+  Serial.print('/');
+  Serial.print(sweepResult.workTotalSteps);
   Serial.print(" host_cfg=");
   Serial.print(sweepResult.hostConfigId);
   Serial.print(" host_proc=");
@@ -843,7 +858,7 @@ void loop() {
       const bool workOk =
           g_csHost.directReadMeasurementWorkItemForTest(&work) &&
           work.valid && work.status == 0U && work.ready;
-      (void)runConnectedPhysicalSweep();
+      (void)runConnectedPhysicalSweep(workOk ? &work : nullptr);
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_bridgeTracker.workflowMask, HEX);
       Serial.print(" tx=0x");

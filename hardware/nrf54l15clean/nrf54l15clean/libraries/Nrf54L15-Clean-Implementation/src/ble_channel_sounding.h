@@ -1342,6 +1342,7 @@ class BleChannelSoundingRadio {
 
 struct BleCsConnectedMode2SweepConfig {
   const uint8_t* channels = nullptr;
+  const BleCsVprMeasurementWorkItem* workItem = nullptr;
   uint8_t channelCount = 0U;
   uint8_t minValidChannels = 1U;
   uint8_t configId = 1U;
@@ -1383,8 +1384,15 @@ struct BleCsConnectedMode2SweepResult {
   bool ok = false;
   bool rawEstimateValid = false;
   bool hostEstimateValid = false;
+  bool workItemApplied = false;
   uint8_t attempts = 0U;
   uint8_t validChannels = 0U;
+  uint8_t workConfigId = 0U;
+  uint8_t workSubeventIndex = 0U;
+  uint8_t workSubeventCount = 0U;
+  uint8_t workSubeventStepCount = 0U;
+  uint8_t workTotalSteps = 0U;
+  uint16_t workProcedureCounter = 0U;
   uint8_t hostConfigId = 0U;
   uint16_t hostProcedureCounter = 0U;
   uint16_t hostLocalSteps = 0U;

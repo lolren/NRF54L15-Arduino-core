@@ -8441,6 +8441,22 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   uint8_t* sequence = (config.inOutSequence != nullptr)
                           ? config.inOutSequence
                           : &localSequence;
+  const BleCsVprMeasurementWorkItem* work = config.workItem;
+  const bool workItemApplied =
+      work != nullptr && work->valid && work->status == 0U && work->ready &&
+      work->procedureCounter != 0U && work->configId != 0U &&
+      work->subeventStepCount != 0U && work->totalSteps != 0U;
+  const uint8_t effectiveConfigId =
+      workItemApplied ? work->configId : config.configId;
+  if (workItemApplied) {
+    result.workItemApplied = true;
+    result.workConfigId = work->configId;
+    result.workProcedureCounter = work->procedureCounter;
+    result.workSubeventIndex = work->activeSubeventIndex;
+    result.workSubeventCount = work->totalSubevents;
+    result.workSubeventStepCount = work->subeventStepCount;
+    result.workTotalSteps = work->totalSteps;
+  }
 
   for (uint8_t order = 0U; order < config.channelCount; ++order) {
     BleCsConnectedMode2ChannelResult channelResult{};
@@ -8552,7 +8568,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   if (host != nullptr) {
     hostOk =
         host->consumeConnectedMode2ResultEventsFromMeasurements(
-            measurements, config.channelCount, config.configId, localStepData,
+            measurements, config.channelCount, effectiveConfigId, localStepData,
             localMaxStepDataLen, peerStepData, peerMaxStepDataLen,
             config.numAntennaPaths) &&
         host->estimateValid();
