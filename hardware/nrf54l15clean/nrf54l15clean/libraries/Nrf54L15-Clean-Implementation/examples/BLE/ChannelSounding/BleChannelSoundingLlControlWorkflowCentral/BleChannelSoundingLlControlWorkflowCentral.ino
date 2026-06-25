@@ -641,23 +641,13 @@ static bool runConnectedPhysicalSweep() {
           g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
           &connectedEstimate);
 
-  BleCsSubeventResultHeader connectedHeader{};
-  connectedHeader.connHandle = kCsConnHandle;
-  connectedHeader.configId = 1U;
-  connectedHeader.procedureCounter =
-      static_cast<uint16_t>(
-          g_csHost.sessionState().completedProcedureCounter + 1U);
-  if (connectedHeader.procedureCounter == 0U) {
-    connectedHeader.procedureCounter = 1U;
-  }
-  connectedHeader.numAntennaPaths = 1U;
   const bool connectedHostOk =
-      g_csHost.consumeMode2ResultsFromMeasurements(
+      g_csHost.consumeConnectedMode2ResultsFromMeasurements(
           g_connectedPhysicalMeasurements, kConnectedPhysicalSweepChannelCount,
-          connectedHeader, g_connectedPhysicalLocalStepData,
+          1U, g_connectedPhysicalLocalStepData,
           sizeof(g_connectedPhysicalLocalStepData),
           g_connectedPhysicalPeerStepData,
-          sizeof(g_connectedPhysicalPeerStepData)) &&
+          sizeof(g_connectedPhysicalPeerStepData), 1U) &&
       g_csHost.estimateValid();
   const uint16_t connectedLocalSteps =
       connectedHostOk ? g_csHost.completedLocalResult().header.numStepsReported

@@ -6432,6 +6432,35 @@ bool BleCsControllerVprHost::consumeMode2ResultsFromMeasurements(
       peerStepData, peerMaxStepDataLen);
 }
 
+bool BleCsControllerVprHost::consumeConnectedMode2ResultsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    uint8_t configId,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen,
+    uint8_t numAntennaPaths) {
+  uint16_t connHandle = 0U;
+  if (!currentConnHandle(&connHandle)) {
+    return false;
+  }
+
+  BleCsSubeventResultHeader header{};
+  header.connHandle = connHandle;
+  header.configId = configId;
+  header.procedureCounter =
+      static_cast<uint16_t>(sessionState().completedProcedureCounter + 1U);
+  if (header.procedureCounter == 0U) {
+    header.procedureCounter = 1U;
+  }
+  header.numAntennaPaths = (numAntennaPaths == 0U) ? 1U : numAntennaPaths;
+
+  return consumeMode2ResultsFromMeasurements(
+      measurements, count, header, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
 bool BleCsControllerVprHost::ready() const { return host_.ready(); }
 
 bool BleCsControllerVprHost::failed() const { return host_.failed(); }

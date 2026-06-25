@@ -2082,6 +2082,15 @@ class BleCsControllerVprHost {
       size_t localMaxStepDataLen,
       uint8_t* peerStepData,
       size_t peerMaxStepDataLen);
+  bool consumeConnectedMode2ResultsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      uint8_t configId,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen,
+      uint8_t numAntennaPaths = 1U);
 
   bool ready() const;
   bool failed() const;
