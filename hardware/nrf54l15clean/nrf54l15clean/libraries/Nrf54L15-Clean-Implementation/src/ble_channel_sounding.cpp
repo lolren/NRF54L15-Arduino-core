@@ -3924,6 +3924,60 @@ bool parseVprSchedulerStateResponse(const uint8_t* packet,
   return true;
 }
 
+bool parseVprMeasurementWorkItemResponse(const uint8_t* packet,
+                                         size_t packetLen,
+                                         uint16_t expectedOpcode,
+                                         BleCsVprMeasurementWorkItem* outWork) {
+  if (outWork == nullptr) {
+    return false;
+  }
+  *outWork = BleCsVprMeasurementWorkItem{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 55U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outWork->valid = true;
+  outWork->status = params[0];
+  outWork->flags = params[1];
+  outWork->sessionOpen = (params[1] & 0x01U) != 0U;
+  outWork->procedureEnabled = (params[1] & 0x02U) != 0U;
+  outWork->resultPending = (params[1] & 0x04U) != 0U;
+  outWork->peerProcedureActive = (params[1] & 0x08U) != 0U;
+  outWork->builtInPeerDemoEnabled = (params[1] & 0x10U) != 0U;
+  outWork->testActive = (params[1] & 0x20U) != 0U;
+  outWork->ready = (params[1] & 0x40U) != 0U || params[54] != 0U;
+  outWork->activeSubeventIndex = params[2];
+  outWork->totalSubevents = params[3];
+  outWork->totalSteps = params[4];
+  outWork->subeventStartStep = params[5];
+  outWork->subeventStepCount = params[6];
+  outWork->localChunkStartStep = params[7];
+  outWork->peerChunkStartStep = params[8];
+  outWork->intervalSelector = params[9];
+  outWork->procedureCounter = readLe16(params + 10U);
+  outWork->connHandle = readLe16(params + 12U);
+  outWork->configId = params[14];
+  outWork->peerGapTicks = params[15];
+  outWork->subeventEncodedStepBytes = readLe16(params + 16U);
+  outWork->heartbeat = readLe32(params + 18U);
+  outWork->procedureIntervalTicks = readLe32(params + 22U);
+  outWork->subeventDelayTicks = readLe32(params + 26U);
+  outWork->peerDelayTicks = readLe32(params + 30U);
+  outWork->chunkDelayTicks = readLe32(params + 34U);
+  outWork->nextProcedureHeartbeat = readLe32(params + 38U);
+  outWork->nextSubeventHeartbeat = readLe32(params + 42U);
+  outWork->nextPeerStageHeartbeat = readLe32(params + 46U);
+  outWork->nextChunkStageHeartbeat = readLe32(params + 50U);
+  return true;
+}
+
 bool BleCsControllerSession::begin(uint16_t connHandle,
                                    const BleCsControllerSessionConfig& config) {
   reset();
@@ -5375,7 +5429,8 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       opcode == kBleCsVprHciOpPeerPduInject ||
       opcode == kBleCsVprHciOpPeerStageRead ||
       opcode == kBleCsVprHciOpPendingLocalPduRead ||
-      opcode == kBleCsVprHciOpSchedulerRead;
+      opcode == kBleCsVprHciOpSchedulerRead ||
+      opcode == kBleCsVprHciOpMeasurementWorkRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
     case kBleCsHciOpSetProcedureParameters:
@@ -5560,6 +5615,30 @@ bool BleCsControllerVprHost::directReadSchedulerStateForTest(
   }
   vprState_.scheduler = *outState;
   vprState_.linkProcedureCounter = outState->procedureCounter;
+  return true;
+}
+
+bool BleCsControllerVprHost::directReadMeasurementWorkItemForTest(
+    BleCsVprMeasurementWorkItem* outWork) {
+  if (outWork == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementWorkRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  if (!parseVprMeasurementWorkItemResponse(response, responseLen,
+                                           kBleCsVprHciOpMeasurementWorkRead,
+                                           outWork)) {
+    return false;
+  }
+  vprState_.measurementWork = *outWork;
+  if (outWork->procedureCounter != 0U) {
+    vprState_.linkProcedureCounter = outWork->procedureCounter;
+  }
   return true;
 }
 

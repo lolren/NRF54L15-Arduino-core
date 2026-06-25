@@ -53,6 +53,7 @@ constexpr uint16_t kBleCsVprHciOpPeerPduInject = 0xFCE8U;
 constexpr uint16_t kBleCsVprHciOpPeerStageRead = 0xFCE9U;
 constexpr uint16_t kBleCsVprHciOpPendingLocalPduRead = 0xFCEAU;
 constexpr uint16_t kBleCsVprHciOpSchedulerRead = 0xFCEBU;
+constexpr uint16_t kBleCsVprHciOpMeasurementWorkRead = 0xFCECU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
@@ -580,6 +581,41 @@ struct BleCsVprSchedulerState {
   uint8_t configId = 0U;
   uint8_t intervalSelector = 0U;
   uint8_t peerGapTicks = 0U;
+};
+
+struct BleCsVprMeasurementWorkItem {
+  bool valid = false;
+  uint8_t status = 0xFFU;
+  uint8_t flags = 0U;
+  bool sessionOpen = false;
+  bool procedureEnabled = false;
+  bool resultPending = false;
+  bool peerProcedureActive = false;
+  bool builtInPeerDemoEnabled = false;
+  bool testActive = false;
+  bool ready = false;
+  uint8_t activeSubeventIndex = 0U;
+  uint8_t totalSubevents = 0U;
+  uint8_t totalSteps = 0U;
+  uint8_t subeventStartStep = 0U;
+  uint8_t subeventStepCount = 0U;
+  uint8_t localChunkStartStep = 0U;
+  uint8_t peerChunkStartStep = 0U;
+  uint8_t intervalSelector = 0U;
+  uint16_t procedureCounter = 0U;
+  uint16_t connHandle = 0U;
+  uint8_t configId = 0U;
+  uint8_t peerGapTicks = 0U;
+  uint16_t subeventEncodedStepBytes = 0U;
+  uint32_t heartbeat = 0U;
+  uint32_t procedureIntervalTicks = 0U;
+  uint32_t subeventDelayTicks = 0U;
+  uint32_t peerDelayTicks = 0U;
+  uint32_t chunkDelayTicks = 0U;
+  uint32_t nextProcedureHeartbeat = 0U;
+  uint32_t nextSubeventHeartbeat = 0U;
+  uint32_t nextPeerStageHeartbeat = 0U;
+  uint32_t nextChunkStageHeartbeat = 0U;
 };
 
 class BleCsControllerVprHost;
@@ -1879,6 +1915,7 @@ struct BleCsControllerVprHostState {
   bool linkSlot1ProcedureParamsApplied = false;
   bool linkPreviousSlotProcedureParamsApplied = false;
   BleCsVprSchedulerState scheduler{};
+  BleCsVprMeasurementWorkItem measurementWork{};
 
   bool retainedConfigMatchesSlots(uint8_t activeConfigId,
                                   uint8_t slot0ConfigId,
@@ -2104,6 +2141,7 @@ class BleCsControllerVprHost {
       BleCsLlControlPdu* outPdu,
       BleCsVprPeerExchangeState* outState);
   bool directReadSchedulerStateForTest(BleCsVprSchedulerState* outState);
+  bool directReadMeasurementWorkItemForTest(BleCsVprMeasurementWorkItem* outWork);
   bool buildPendingInitiatorLlControlPdu(
       BleCsLlControlPdu* outPdu,
       BleCsVprPeerExchangeState* outState = nullptr,

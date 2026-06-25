@@ -839,6 +839,10 @@ void loop() {
       const bool schedulerOk =
           g_csHost.directReadSchedulerStateForTest(&scheduler) &&
           scheduler.valid && scheduler.status == 0U;
+      BleCsVprMeasurementWorkItem work{};
+      const bool workOk =
+          g_csHost.directReadMeasurementWorkItemForTest(&work) &&
+          work.valid && work.status == 0U && work.ready;
       (void)runConnectedPhysicalSweep();
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_bridgeTracker.workflowMask, HEX);
@@ -878,6 +882,24 @@ void loop() {
       Serial.print(scheduler.localChunkStartStep);
       Serial.print('/');
       Serial.print(scheduler.peerChunkStartStep);
+      Serial.print(" work=");
+      Serial.print(workOk ? 1 : 0);
+      Serial.print(" work_flags=0x");
+      Serial.print(work.flags, HEX);
+      Serial.print(" work_proc=");
+      Serial.print(work.procedureCounter);
+      Serial.print(" work_sub=");
+      Serial.print(work.activeSubeventIndex);
+      Serial.print('/');
+      Serial.print(work.totalSubevents);
+      Serial.print(" work_steps=");
+      Serial.print(work.subeventStepCount);
+      Serial.print('/');
+      Serial.print(work.totalSteps);
+      Serial.print(" work_chunk=");
+      Serial.print(work.localChunkStartStep);
+      Serial.print('/');
+      Serial.print(work.peerChunkStartStep);
       Serial.print("\r\n");
       printConnectedWindowPlan();
       (void)beginPhysicalFollowup();

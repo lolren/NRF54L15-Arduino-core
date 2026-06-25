@@ -589,10 +589,11 @@ VPR/controller workflow:
 - Use `scripts/test_cs_ll_workflow_bridge.sh` as the connected-workflow handoff
   baseline. It now requires `cs_ll_workflow_bridge=PASS` and
   `cs_ll_physical_followup=PASS`, and the PASS line must include `sched=1`,
-  while the connected sweep must include `host_cfg=1` and `host_proc=1`,
-  proving LL-control negotiation, VPR scheduler-state readback, scheduler-owned
-  result identity, and real physical measurement host-ingress in one two-board
-  run.
+  `work=1`, `work_proc=1`, and a non-zero `work_steps` plan, while the
+  connected sweep must include `host_cfg=1` and `host_proc=1`, proving
+  LL-control negotiation, VPR scheduler-state readback, VPR measurement-work
+  readback, scheduler-owned result identity, and real physical measurement
+  host-ingress in one two-board run.
 - `BleChannelSoundingRadio::measureMode2Sweep()` is the shared raw RADIO
   centre-out sweep primitive used by the workflow follow-up; future connected
   scheduler work should call through this primitive or move its internals into

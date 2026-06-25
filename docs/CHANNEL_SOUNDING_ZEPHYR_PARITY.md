@@ -654,7 +654,41 @@ This still does not make CS fully Zephyr-parity. The RADIO window is still
 executed by the CPUAPP helper, but the result ingestion now follows the
 controller-owned scheduler identity.
 
+## Completed in This Pass — VPR Measurement Work Item Readback
+
+The dedicated CS VPR image now exposes the next scheduled connected CS work
+unit through test/vendor HCI opcode `0xFCEC`.
+
+- `BleCsVprMeasurementWorkItem` reports the controller-side procedure counter,
+  config id, connection handle, active subevent, total subevents/steps,
+  local/peer chunk offsets, encoded step-byte count, current heartbeat,
+  computed interval/delay ticks, next procedure/subevent/peer/chunk deadlines,
+  and a `ready` flag.
+- `BleCsControllerVprHost::directReadMeasurementWorkItemForTest()` parses the
+  command-complete payload and caches the latest work item in
+  `BleCsControllerVprHostState::measurementWork`.
+- `BleChannelSoundingLlControlWorkflowCentral` prints `work=1`, `work_proc`,
+  `work_sub`, `work_steps`, and `work_chunk` before the connected physical
+  sweep.
+- `scripts/test_cs_ll_workflow_bridge.sh` now requires the work-item readback,
+  proving the VPR/controller image can describe the exact scheduled CS
+  measurement work unit used by the current connected workflow test.
+
+This is still not full Zephyr parity. The work item is now controller-owned,
+but the physical RADIO operation is still executed by the CPUAPP helper. The
+remaining high-value parity step is to have VPR consume this work item and run
+the RADIO/timer window directly, then emit native local/peer result events.
+
 Hardware check:
+
+```text
+scripts/test_cs_ll_workflow_bridge.sh
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=3 sched_chunk=3/3 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=3/3 work_chunk=3/3
+cs_connected_sweep=PASS attempts=9 valid_channels=9 min_valid=3 requested_channels=9 raw_est=1 host_est=1 host_cfg=1 host_proc=1 host_steps=9/9
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 host_est=1 host_steps=21/21 proc=2
+```
+
+Related cleanup regression check:
 
 ```text
 BleChannelSoundingHostAbortCleanup
