@@ -419,8 +419,15 @@ struct BleCsRttSample {
 
 struct BleCsChannelMeasurement {
   bool valid = false;
+  // 0=ok, 1=invalid setup, 2=control TX, 3=probe TX, 4=report RX,
+  // 5=report decode, 6=insufficient tone/RTT quality.
+  uint8_t status = 0U;
   uint8_t channelIndex = 0;
   uint8_t sequence = 0;
+  uint32_t controlTxUs = 0U;
+  uint32_t controlToProbeGapUs = 0U;
+  uint32_t probeTxUs = 0U;
+  uint32_t reportRxUs = 0U;
   BleCsToneSample localTone;
   BleCsToneSample peerTone;
   BleCsRttSample localRtt;
@@ -928,6 +935,28 @@ struct BleCsConnectedWindowPlan {
   uint8_t reason = 0U;
 };
 
+struct BleCsConnectedWindowMeasurement {
+  BleCsConnectedWindowPlan plan{};
+  BleCsChannelMeasurement measurement{};
+  bool attempted = false;
+  bool measured = false;
+  bool completedBeforeDeadline = false;
+  uint8_t channelIndex = 0U;
+  uint8_t sequence = 0U;
+  uint32_t startDelayUs = 0U;
+  uint32_t elapsedUs = 0U;
+  uint32_t remainingUs = 0U;
+  uint8_t reason = 0U;
+};
+
+struct BleCsReflectorTiming {
+  uint32_t controlRxUs = 0U;
+  uint32_t controlToProbeRxGapUs = 0U;
+  uint32_t probeRxUs = 0U;
+  uint32_t probeToReportGapUs = 0U;
+  uint32_t reportTxUs = 0U;
+};
+
 class BleChannelSoundingRadio {
  public:
   explicit BleChannelSoundingRadio(uint32_t radioBase = nrf54l15::RADIO_BASE);
@@ -937,9 +966,19 @@ class BleChannelSoundingRadio {
 
   bool initialized() const;
   const BleCsConfig& config() const;
+  uint8_t lastReflectorStatus() const;
+  BleCsReflectorTiming lastReflectorTiming() const;
 
   bool measureChannel(uint8_t channelIndex, uint8_t sequence,
                       BleCsChannelMeasurement* outMeasurement);
+  bool measureConnectedWindowChannel(
+      const BleConnectionTimingSnapshot& snapshot,
+      uint8_t channelIndex,
+      uint8_t sequence,
+      uint32_t requestedWindowUs,
+      uint32_t guardBeforeUs,
+      uint32_t guardAfterUs,
+      BleCsConnectedWindowMeasurement* outMeasurement);
   bool measureMode2Sweep(uint8_t channelCount,
                          uint8_t* inOutSequence,
                          BleCsChannelMeasurement* outMeasurements,
@@ -1181,6 +1220,7 @@ class BleChannelSoundingRadio {
   void captureAuxDataRtt(BleCsRttSample* outRtt);
   void resetDfeCaptureState();
   void updateDfeCaptureState();
+  bool deriveToneFromRawDfe(BleCsToneSample* outTone) const;
   void parseRttRaw(BleCsRttSample* outRtt) const;
   uint8_t makeCteInfo() const;
 
@@ -1195,6 +1235,8 @@ class BleChannelSoundingRadio {
   uint16_t lastDfePacketAmountBytes_;
   uint16_t lastDfePacketCurrentAmountBytes_;
   bool lastDfePacketAllZero_;
+  uint8_t lastReflectorStatus_;
+  BleCsReflectorTiming lastReflectorTiming_;
 };
 
 class BleCsSubeventResultReassembler {

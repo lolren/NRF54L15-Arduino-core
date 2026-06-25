@@ -587,6 +587,64 @@ void clearRadioEvents(NRF_RADIO_Type* radio) {
   radio->EVENTS_CSTONESEND = 0U;
 }
 
+void detachRawRadioAutomation(NRF_RADIO_Type* radio) {
+  if (radio == nullptr) {
+    return;
+  }
+
+  radio->SUBSCRIBE_TXEN = 0U;
+  radio->SUBSCRIBE_RXEN = 0U;
+  radio->SUBSCRIBE_START = 0U;
+  radio->SUBSCRIBE_STOP = 0U;
+  radio->SUBSCRIBE_DISABLE = 0U;
+  radio->SUBSCRIBE_RSSISTART = 0U;
+  radio->SUBSCRIBE_BCSTART = 0U;
+  radio->SUBSCRIBE_BCSTOP = 0U;
+  radio->SUBSCRIBE_EDSTART = 0U;
+  radio->SUBSCRIBE_EDSTOP = 0U;
+  radio->SUBSCRIBE_CCASTART = 0U;
+  radio->SUBSCRIBE_CCASTOP = 0U;
+  radio->SUBSCRIBE_AUXDATADMASTART = 0U;
+  radio->SUBSCRIBE_AUXDATADMASTOP = 0U;
+  radio->SUBSCRIBE_PLLEN = 0U;
+  radio->SUBSCRIBE_CSTONESSTART = 0U;
+  radio->SUBSCRIBE_SOFTRESET = 0U;
+
+  radio->PUBLISH_READY = 0U;
+  radio->PUBLISH_TXREADY = 0U;
+  radio->PUBLISH_RXREADY = 0U;
+  radio->PUBLISH_ADDRESS = 0U;
+  radio->PUBLISH_FRAMESTART = 0U;
+  radio->PUBLISH_PAYLOAD = 0U;
+  radio->PUBLISH_END = 0U;
+  radio->PUBLISH_PHYEND = 0U;
+  radio->PUBLISH_DISABLED = 0U;
+  radio->PUBLISH_DEVMATCH = 0U;
+  radio->PUBLISH_DEVMISS = 0U;
+  radio->PUBLISH_CRCOK = 0U;
+  radio->PUBLISH_CRCERROR = 0U;
+  radio->PUBLISH_BCMATCH = 0U;
+  radio->PUBLISH_EDEND = 0U;
+  radio->PUBLISH_EDSTOPPED = 0U;
+  radio->PUBLISH_CCAIDLE = 0U;
+  radio->PUBLISH_CCABUSY = 0U;
+  radio->PUBLISH_CCASTOPPED = 0U;
+  radio->PUBLISH_RATEBOOST = 0U;
+  radio->PUBLISH_MHRMATCH = 0U;
+  radio->PUBLISH_SYNC = 0U;
+  radio->PUBLISH_CTEPRESENT = 0U;
+  radio->PUBLISH_PLLREADY = 0U;
+  radio->PUBLISH_RXADDRESS = 0U;
+  radio->PUBLISH_AUXDATADMAEND = 0U;
+  radio->PUBLISH_CSTONESEND = 0U;
+
+  radio->INTENCLR00 = 0xFFFFFFFFUL;
+  radio->INTENCLR01 = 0xFFFFFFFFUL;
+  radio->INTENCLR10 = 0xFFFFFFFFUL;
+  radio->INTENCLR11 = 0xFFFFFFFFUL;
+  NVIC_ClearPendingIRQ(RADIO_0_IRQn);
+}
+
 bool waitForFlag(volatile uint32_t* flag, uint32_t budgetUs) {
   if (flag == nullptr) {
     return false;
@@ -610,6 +668,17 @@ bool waitForFlag(volatile uint32_t* flag, uint32_t budgetUs) {
   }
 
   return (*flag != 0U);
+}
+
+void waitElapsedMicros(uint32_t waitUs) {
+  if (waitUs == 0U) {
+    return;
+  }
+
+  const uint32_t startUs = micros();
+  while (static_cast<uint32_t>(micros() - startUs) < waitUs) {
+    __asm volatile("nop");
+  }
 }
 
 bool waitForCrcDone(NRF_RADIO_Type* radio, uint32_t budgetUs) {
@@ -1283,7 +1352,9 @@ BleChannelSoundingRadio::BleChannelSoundingRadio(uint32_t radioBase)
       auxDataWords_{0},
       lastDfePacketAmountBytes_(0U),
       lastDfePacketCurrentAmountBytes_(0U),
-      lastDfePacketAllZero_(true) {}
+      lastDfePacketAllZero_(true),
+      lastReflectorStatus_(0U),
+      lastReflectorTiming_() {}
 
 bool BleChannelSoundingRadio::begin(const BleCsConfig& config) {
   if (radio_ == nullptr) {
@@ -1334,6 +1405,14 @@ void BleChannelSoundingRadio::end() {
 bool BleChannelSoundingRadio::initialized() const { return initialized_; }
 
 const BleCsConfig& BleChannelSoundingRadio::config() const { return config_; }
+
+uint8_t BleChannelSoundingRadio::lastReflectorStatus() const {
+  return lastReflectorStatus_;
+}
+
+BleCsReflectorTiming BleChannelSoundingRadio::lastReflectorTiming() const {
+  return lastReflectorTiming_;
+}
 
 BleCsIqSample BleChannelSoundingRadio::parsePctSample(const uint8_t pct[3]) {
   if (pct == nullptr) {
@@ -6752,9 +6831,13 @@ bool BleChannelSoundingRadio::copyLastDfePacket(uint8_t* outPacket,
 
 bool BleChannelSoundingRadio::configureBle2MCommon() {
   radio_->SHORTS = 0U;
+  detachRawRadioAutomation(radio_);
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
   (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
+  clearRadioEvents(radio_);
   radio_->TASKS_SOFTRESET = RADIO_TASKS_SOFTRESET_TASKS_SOFTRESET_Trigger;
+  detachRawRadioAutomation(radio_);
+  clearRadioEvents(radio_);
 
   radio_->MODE = ((RADIO_MODE_MODE_Ble_2Mbit << RADIO_MODE_MODE_Pos) &
                   RADIO_MODE_MODE_Msk);
@@ -7287,6 +7370,57 @@ void BleChannelSoundingRadio::updateDfeCaptureState() {
   lastDfePacketAllZero_ = rawBytesAllZero(dfePacket_, cappedAmount);
 }
 
+bool BleChannelSoundingRadio::deriveToneFromRawDfe(BleCsToneSample* outTone) const {
+  if (outTone == nullptr || lastDfePacketAmountBytes_ < 3U ||
+      lastDfePacketAllZero_) {
+    return false;
+  }
+
+  const size_t available =
+      (lastDfePacketAmountBytes_ <= sizeof(dfePacket_))
+          ? lastDfePacketAmountBytes_
+          : sizeof(dfePacket_);
+  const size_t sampleCount = available / 3U;
+  if (sampleCount == 0U) {
+    return false;
+  }
+
+  int32_t sumI = 0;
+  int32_t sumQ = 0;
+  uint16_t used = 0U;
+  for (size_t i = 0U; i < sampleCount; ++i) {
+    const BleCsIqSample sample = parsePctSample(&dfePacket_[i * 3U]);
+    if (sample.i == 0 && sample.q == 0) {
+      continue;
+    }
+    sumI += sample.i;
+    sumQ += sample.q;
+    ++used;
+  }
+
+  if (used == 0U) {
+    return false;
+  }
+
+  const int16_t meanI = static_cast<int16_t>(sumI / static_cast<int32_t>(used));
+  const int16_t meanQ = static_cast<int16_t>(sumQ / static_cast<int32_t>(used));
+  const float mag =
+      sqrtf(static_cast<float>(meanI) * static_cast<float>(meanI) +
+            static_cast<float>(meanQ) * static_cast<float>(meanQ));
+  const uint16_t magnitude =
+      (mag >= 65535.0f) ? 65535U : static_cast<uint16_t>(mag + 0.5f);
+
+  outTone->i = meanI;
+  outTone->q = meanQ;
+  outTone->magnitude = magnitude;
+  outTone->magnitudeStd = 0U;
+  outTone->cteTimeUnits = config_.cteTimeUnits;
+  outTone->cteType = kCteTypeAoA;
+  outTone->valid = (magnitude >= config_.minToneMagnitude) &&
+                   ((meanI != 0) || (meanQ != 0));
+  return outTone->valid;
+}
+
 bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
                                            uint32_t listenWindowUs,
                                            bool captureTone,
@@ -7407,6 +7541,12 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
                          ((outTone->i != 0) || (outTone->q != 0));
       }
     }
+    if (crcOk && outTone != nullptr && !outTone->valid) {
+      (void)deriveToneFromRawDfe(outTone);
+      if (outTone->valid) {
+        outTone->rssiDbm = rssiDbm;
+      }
+    }
 
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
     (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
@@ -7444,36 +7584,55 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
 bool BleChannelSoundingRadio::measureChannel(uint8_t channelIndex,
                                              uint8_t sequence,
                                              BleCsChannelMeasurement* outMeasurement) {
-  if (!initialized_ || outMeasurement == nullptr || !validDataChannel(channelIndex)) {
+  if (outMeasurement == nullptr) {
     return false;
   }
 
   *outMeasurement = BleCsChannelMeasurement{};
   outMeasurement->channelIndex = channelIndex;
   outMeasurement->sequence = sequence;
+  if (!initialized_ || !validDataChannel(channelIndex)) {
+    outMeasurement->status = 1U;
+    return false;
+  }
 
   for (uint8_t attempt = 0U; attempt < config_.probeRetries; ++attempt) {
+    const uint32_t attemptStartUs = micros();
     if (!sendFrame(config_.controlChannel, PacketType::kControl, sequence,
                    channelIndex, 0U, nullptr, 0U, false, false)) {
+      outMeasurement->status = 2U;
       continue;
     }
+    outMeasurement->controlTxUs =
+        static_cast<uint32_t>(micros() - attemptStartUs);
 
-    delayMicroseconds(config_.controlToProbeDelayUs);
+    waitElapsedMicros(config_.controlToProbeDelayUs);
+    outMeasurement->controlToProbeGapUs =
+        static_cast<uint32_t>(micros() - attemptStartUs);
 
     if (!sendFrame(channelIndex, PacketType::kProbe, sequence, channelIndex,
                    0U, nullptr, 0U, config_.enableRtt, false)) {
+      outMeasurement->status = 3U;
       continue;
     }
+    outMeasurement->probeTxUs =
+        static_cast<uint32_t>(micros() - attemptStartUs);
 
     RxFrame report{};
     BleCsToneSample localTone{};
     BleCsRttSample localRtt{};
     if (!receiveFrame(channelIndex, config_.responseListenWindowUs, true,
                       config_.enableRtt, false, &report, &localTone, &localRtt)) {
+      outMeasurement->reportRxUs =
+          static_cast<uint32_t>(micros() - attemptStartUs);
+      outMeasurement->status = 4U;
       continue;
     }
+    outMeasurement->reportRxUs =
+        static_cast<uint32_t>(micros() - attemptStartUs);
     if (!report.valid || report.type != PacketType::kReport ||
         report.sequence != sequence || report.channelIndex != channelIndex) {
+      outMeasurement->status = 5U;
       continue;
     }
 
@@ -7496,6 +7655,7 @@ bool BleChannelSoundingRadio::measureChannel(uint8_t channelIndex,
     (void)rttDistanceMeters(*outMeasurement, &outMeasurement->rttDistanceMeters);
     outMeasurement->valid =
         (localTone.valid && peerTone.valid) || (localRtt.valid && peerRtt.valid);
+    outMeasurement->status = outMeasurement->valid ? 0U : 6U;
     return outMeasurement->valid;
   }
 
@@ -7582,6 +7742,73 @@ bool BleChannelSoundingRadio::planConnectedWindow(
   return plan.fits;
 }
 
+bool BleChannelSoundingRadio::measureConnectedWindowChannel(
+    const BleConnectionTimingSnapshot& snapshot,
+    uint8_t channelIndex,
+    uint8_t sequence,
+    uint32_t requestedWindowUs,
+    uint32_t guardBeforeUs,
+    uint32_t guardAfterUs,
+    BleCsConnectedWindowMeasurement* outMeasurement) {
+  if (outMeasurement == nullptr) {
+    return false;
+  }
+
+  BleCsConnectedWindowMeasurement result{};
+  result.channelIndex = channelIndex;
+  result.sequence = sequence;
+
+  BleCsConnectedWindowPlan plan{};
+  const bool fits = planConnectedWindow(snapshot, requestedWindowUs,
+                                        guardBeforeUs, guardAfterUs, &plan);
+  result.plan = plan;
+  if (!fits) {
+    result.reason = plan.reason;
+    *outMeasurement = result;
+    return false;
+  }
+  if (!initialized_) {
+    result.reason = 6U;
+    *outMeasurement = result;
+    return false;
+  }
+  if (!validDataChannel(channelIndex)) {
+    result.reason = 7U;
+    *outMeasurement = result;
+    return false;
+  }
+
+  const uint32_t scheduleStartUs = micros();
+  while (static_cast<uint32_t>(micros() - scheduleStartUs) < guardBeforeUs) {
+    __asm volatile("nop");
+  }
+
+  const uint32_t startUs = micros();
+  result.startDelayUs = static_cast<uint32_t>(startUs - scheduleStartUs);
+  if (result.startDelayUs >= static_cast<uint32_t>(guardBeforeUs + plan.availableUs)) {
+    result.reason = 8U;
+    *outMeasurement = result;
+    return false;
+  }
+
+  result.attempted = true;
+  BleCsChannelMeasurement measurement{};
+  const bool ok = measureChannel(channelIndex, sequence, &measurement);
+  const uint32_t endUs = micros();
+  result.elapsedUs = static_cast<uint32_t>(endUs - startUs);
+  result.remainingUs =
+      (result.elapsedUs < plan.availableUs)
+          ? static_cast<uint32_t>(plan.availableUs - result.elapsedUs)
+          : 0U;
+  result.completedBeforeDeadline = result.elapsedUs <= plan.availableUs;
+  result.measurement = measurement;
+  result.measured = ok && measurement.valid;
+  result.reason = result.measured ? (result.completedBeforeDeadline ? 0U : 10U)
+                                  : 9U;
+  *outMeasurement = result;
+  return result.measured && result.completedBeforeDeadline;
+}
+
 bool BleChannelSoundingRadio::measureMode2Sweep(
     uint8_t channelCount,
     uint8_t* inOutSequence,
@@ -7610,7 +7837,7 @@ bool BleChannelSoundingRadio::measureMode2Sweep(
       ++validChannels;
     }
     if (interChannelGuardUs > 0U) {
-      delayMicroseconds(interChannelGuardUs);
+      waitElapsedMicros(interChannelGuardUs);
     }
   }
 
@@ -7622,8 +7849,12 @@ bool BleChannelSoundingRadio::measureMode2Sweep(
 
 bool BleChannelSoundingRadio::listenAndReflectOnce(uint32_t controlListenWindowUs) {
   if (!initialized_) {
+    lastReflectorStatus_ = 1U;
     return false;
   }
+  lastReflectorStatus_ = 0U;
+  lastReflectorTiming_ = BleCsReflectorTiming{};
+  const uint32_t attemptStartUs = micros();
 
   const uint32_t windowUs =
       (controlListenWindowUs != 0U) ? controlListenWindowUs
@@ -7632,23 +7863,37 @@ bool BleChannelSoundingRadio::listenAndReflectOnce(uint32_t controlListenWindowU
   RxFrame control{};
   if (!receiveFrame(config_.controlChannel, windowUs, false, false, false, &control,
                     nullptr, nullptr)) {
+    lastReflectorTiming_.controlRxUs =
+        static_cast<uint32_t>(micros() - attemptStartUs);
+    lastReflectorStatus_ = 2U;
     return false;
   }
+  lastReflectorTiming_.controlRxUs =
+      static_cast<uint32_t>(micros() - attemptStartUs);
   if (!control.valid || control.type != PacketType::kControl ||
       !validDataChannel(control.channelIndex)) {
+    lastReflectorStatus_ = 3U;
     return false;
   }
 
+  lastReflectorTiming_.controlToProbeRxGapUs =
+      static_cast<uint32_t>(micros() - attemptStartUs);
   RxFrame probe{};
   BleCsToneSample localTone{};
   BleCsRttSample localRtt{};
   if (!receiveFrame(control.channelIndex, config_.probeListenWindowUs, true,
                     config_.enableRtt, true, &probe, &localTone, &localRtt)) {
+    lastReflectorTiming_.probeRxUs =
+        static_cast<uint32_t>(micros() - attemptStartUs);
+    lastReflectorStatus_ = 4U;
     return false;
   }
+  lastReflectorTiming_.probeRxUs =
+      static_cast<uint32_t>(micros() - attemptStartUs);
   if (!probe.valid || probe.type != PacketType::kProbe ||
       probe.sequence != control.sequence ||
       probe.channelIndex != control.channelIndex) {
+    lastReflectorStatus_ = 5U;
     return false;
   }
 
@@ -7660,12 +7905,19 @@ bool BleChannelSoundingRadio::listenAndReflectOnce(uint32_t controlListenWindowU
     flags |= 0x02U;
   }
   if (config_.probeToReportDelayUs > 0U) {
-    delayMicroseconds(config_.probeToReportDelayUs);
+    waitElapsedMicros(config_.probeToReportDelayUs);
   }
+  lastReflectorTiming_.probeToReportGapUs =
+      static_cast<uint32_t>(micros() - attemptStartUs);
 
-  return sendFrame(probe.channelIndex, PacketType::kReport, probe.sequence,
-                   probe.channelIndex, flags, reportExtra, sizeof(reportExtra),
-                   config_.enableRtt, true);
+  const bool sent = sendFrame(probe.channelIndex, PacketType::kReport,
+                              probe.sequence, probe.channelIndex, flags,
+                              reportExtra, sizeof(reportExtra),
+                              config_.enableRtt, true);
+  lastReflectorTiming_.reportTxUs =
+      static_cast<uint32_t>(micros() - attemptStartUs);
+  lastReflectorStatus_ = sent ? 0U : 6U;
+  return sent;
 }
 
 float BleChannelSoundingRadio::combinedPhaseRad(

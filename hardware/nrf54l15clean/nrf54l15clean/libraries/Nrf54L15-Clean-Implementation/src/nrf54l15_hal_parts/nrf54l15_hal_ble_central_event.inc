@@ -134,6 +134,18 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   uint8_t txLlid = 0x01U;
   uint8_t txLength = 0U;
   if (canSendNewPayloadThisEvent || promotePendingTxAfterEmptyAck) {
+    maybeQueueCentralLinkSetupRequest();
+    if (!connectionPendingTxValid_ &&
+        (channelSoundingLlControlTxCount_ > 0U)) {
+      uint8_t csLength = 0U;
+      if (dequeueChannelSoundingLlControlTx(connectionPendingTxPayload_,
+                                           &csLength)) {
+        connectionPendingTxLlid_ = kBlePduLlControl;
+        connectionPendingTxLength_ = csLength;
+        connectionPendingTxValid_ = true;
+        emitBleTrace("CS_LL_TXQ");
+      }
+    }
     if (connectionPendingTxValid_) {
       txLlid = connectionPendingTxLlid_;
       txLength = connectionPendingTxLength_;
@@ -163,6 +175,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   const bool txHasFollowingPayload =
       (canSendNewPayloadThisEvent || promotePendingTxAfterEmptyAck) &&
       (connectionPendingTxValid_ ||
+       (channelSoundingLlControlTxCount_ > 0U) ||
        (connectionCustomNotificationQueueCount_ > 0U));
   txPacket_[0] = static_cast<uint8_t>((txLlid & 0x03U) |
                                       ((connectionExpectedRxSn_ & 0x01U) << 2U) |

@@ -41,11 +41,21 @@ static constexpr BoardAntennaPath kPhysicalAntennaPath = BoardAntennaPath::kCera
 static constexpr uint8_t kPhysicalChannelCount = 37U;
 static constexpr uint8_t kPhysicalMinValidChannels = 8U;
 static constexpr uint8_t kPhysicalMaxSweeps = 3U;
-static constexpr uint32_t kConnectedCsSingleChannelWindowUs = 18000UL;
+static constexpr uint8_t kConnectedPhysicalSweepChannels[] = {
+    18U, 4U, 32U, 10U, 26U, 1U, 35U, 14U, 22U,
+};
+static constexpr uint8_t kConnectedPhysicalSweepChannelCount =
+    sizeof(kConnectedPhysicalSweepChannels) /
+    sizeof(kConnectedPhysicalSweepChannels[0]);
+static constexpr uint8_t kConnectedPhysicalMinValidChannels = 3U;
+static constexpr uint32_t kConnectedCsSingleChannelWindowUs = 14000UL;
 static constexpr uint32_t kConnectedCsFullSweepWindowUs =
     kConnectedCsSingleChannelWindowUs * kPhysicalChannelCount;
-static constexpr uint32_t kConnectedCsGuardBeforeUs = 1800UL;
+static constexpr uint32_t kConnectedCsGuardBeforeUs = 4000UL;
 static constexpr uint32_t kConnectedCsGuardAfterUs = 4500UL;
+static constexpr uint8_t kConnectedPhysicalTriggerReason = 0x7EU;
+static constexpr uint8_t kConnectedPhysicalAckReason = 0x7DU;
+static constexpr uint16_t kConnectedPhysicalWindowEventOffset = 4U;
 
 static bool g_wasConnected = false;
 static bool g_bridgeStarted = false;
@@ -55,6 +65,16 @@ static bool g_physicalStarted = false;
 static bool g_physicalReady = false;
 static bool g_physicalDone = false;
 static bool g_physicalFailed = false;
+static bool g_connectedPhysicalAttempted = false;
+static bool g_connectedPhysicalOk = false;
+static uint8_t g_connectedPhysicalAttemptCount = 0U;
+static uint8_t g_connectedPhysicalValidChannels = 0U;
+static bool g_connectedTriggerQueued = false;
+static bool g_connectedTriggerSent = false;
+static bool g_connectedTriggerAcked = false;
+static uint16_t g_connectedTriggerEventCounter = 0U;
+static uint16_t g_connectedTriggerAckEventCounter = 0U;
+static uint16_t g_connectedPhysicalRunAfterEventCounter = 0U;
 static uint32_t g_connectAttempts = 0U;
 static uint32_t g_linkEvents = 0U;
 static uint32_t g_txQueued = 0U;
@@ -73,6 +93,10 @@ static uint8_t g_physicalValidChannels = 0U;
 static BleCsChannelMeasurement g_physicalMeasurements[kPhysicalChannelCount];
 static uint8_t g_physicalLocalStepData[kBleCsMaxControllerStepDataBytes];
 static uint8_t g_physicalPeerStepData[kBleCsMaxControllerStepDataBytes];
+
+static bool eventCounterReached(uint16_t current, uint16_t target) {
+  return static_cast<int16_t>(current - target) >= 0;
+}
 
 enum WorkflowBits : uint8_t {
   kBitRemoteCaps = 0U,
@@ -344,6 +368,16 @@ static void resetBridgeState() {
   g_bridgeTracker.reset();
   g_passPrinted = false;
   g_failed = false;
+  g_connectedPhysicalAttempted = false;
+  g_connectedPhysicalOk = false;
+  g_connectedPhysicalAttemptCount = 0U;
+  g_connectedPhysicalValidChannels = 0U;
+  g_connectedTriggerQueued = false;
+  g_connectedTriggerSent = false;
+  g_connectedTriggerAcked = false;
+  g_connectedTriggerEventCounter = 0U;
+  g_connectedTriggerAckEventCounter = 0U;
+  g_connectedPhysicalRunAfterEventCounter = 0U;
   g_bridgeStarted = beginWorkflowBridge();
 
   Serial.print("workflow bridge init: ");
@@ -351,6 +385,257 @@ static void resetBridgeState() {
   Serial.print(" phase=");
   Serial.print(phaseName(g_csHost.workflowState().phase));
   Serial.print("\r\n");
+}
+
+static bool runConnectedPhysicalChannel(uint8_t channel, uint8_t channelOrder) {
+  g_connectedPhysicalOk = false;
+  ++g_connectedPhysicalAttemptCount;
+
+  BleCsConfig config;
+  config.txPowerDbm = -8;
+  config.controlChannel = 37U;
+  config.controlToProbeDelayUs = 5000U;
+  config.probeToReportDelayUs = 1000U;
+  config.probeRetries = 1U;
+  config.probeListenWindowUs = 10000U;
+  config.responseListenWindowUs = 9000U;
+  config.maxPayloadLength = 32U;
+  config.minToneMagnitude = 8U;
+  config.enableRtt = false;
+  config.enableRawDfeCapture = true;
+
+  const bool rfOk = BoardControl::enableRfPath(kPhysicalAntennaPath);
+  const bool rawOk = rfOk && g_physicalCs.begin(config);
+  BleConnectionTimingSnapshot snapshot{};
+  const bool snapshotOk = rawOk && g_ble.getConnectionTimingSnapshot(&snapshot);
+  BleCsConnectedWindowMeasurement result{};
+  if (snapshotOk) {
+    g_connectedPhysicalOk =
+        g_physicalCs.measureConnectedWindowChannel(
+            snapshot, channel, g_physicalSequence++,
+            kConnectedCsSingleChannelWindowUs, kConnectedCsGuardBeforeUs,
+            kConnectedCsGuardAfterUs, &result);
+  }
+  const BleCsDfeCaptureInfo dfeInfo = g_physicalCs.lastDfeCaptureInfo();
+  g_physicalCs.end();
+
+  Serial.print("cs_connected_physical snapshot=");
+  Serial.print(snapshotOk ? 1 : 0);
+  Serial.print(" rf=");
+  Serial.print(rfOk ? 1 : 0);
+  Serial.print(" raw=");
+  Serial.print(rawOk ? 1 : 0);
+  Serial.print(" fit=");
+  Serial.print(result.plan.fits ? 1 : 0);
+  Serial.print(" attempted=");
+  Serial.print(result.attempted ? 1 : 0);
+  Serial.print(" ok=");
+  Serial.print(g_connectedPhysicalOk ? 1 : 0);
+  Serial.print(" idx=");
+  Serial.print(channelOrder);
+  Serial.print(" ch=");
+  Serial.print(channel);
+  Serial.print(" valid=");
+  Serial.print(result.measurement.valid ? 1 : 0);
+  Serial.print(" status=");
+  Serial.print(result.measurement.status);
+  Serial.print(" local_tone=");
+  Serial.print(result.measurement.localTone.valid ? 1 : 0);
+  Serial.print(" peer_tone=");
+  Serial.print(result.measurement.peerTone.valid ? 1 : 0);
+  Serial.print(" local_mag=");
+  Serial.print(result.measurement.localTone.magnitude);
+  Serial.print(" peer_mag=");
+  Serial.print(result.measurement.peerTone.magnitude);
+  Serial.print(" local_i=");
+  Serial.print(result.measurement.localTone.i);
+  Serial.print(" local_q=");
+  Serial.print(result.measurement.localTone.q);
+  Serial.print(" peer_i=");
+  Serial.print(result.measurement.peerTone.i);
+  Serial.print(" peer_q=");
+  Serial.print(result.measurement.peerTone.q);
+  Serial.print(" dfe_present=");
+  Serial.print(dfeInfo.present ? 1 : 0);
+  Serial.print(" dfe_zero=");
+  Serial.print(dfeInfo.allZero ? 1 : 0);
+  Serial.print(" dfe_amount=");
+  Serial.print(dfeInfo.amountBytes);
+  Serial.print(" dfe_current=");
+  Serial.print(dfeInfo.currentAmountBytes);
+  Serial.print(" avail_us=");
+  Serial.print(result.plan.availableUs);
+  Serial.print(" start_delay_us=");
+  Serial.print(result.startDelayUs);
+  Serial.print(" elapsed_us=");
+  Serial.print(result.elapsedUs);
+  Serial.print(" remaining_us=");
+  Serial.print(result.remainingUs);
+  Serial.print(" ctrl_tx_us=");
+  Serial.print(result.measurement.controlTxUs);
+  Serial.print(" probe_gap_us=");
+  Serial.print(result.measurement.controlToProbeGapUs);
+  Serial.print(" probe_tx_us=");
+  Serial.print(result.measurement.probeTxUs);
+  Serial.print(" report_rx_us=");
+  Serial.print(result.measurement.reportRxUs);
+  Serial.print(" reason=");
+  Serial.print(snapshotOk ? result.reason : 11U);
+  Serial.print("\r\n");
+
+  return g_connectedPhysicalOk;
+}
+
+static bool isConnectedPhysicalAck(const BleConnectionEvent& evt) {
+  return (evt.llControlOpcode == kBleCsLlCtrlAbort ||
+          evt.llControlOpcode == kBleCsLlCtrlTerminate) &&
+         evt.payload != nullptr &&
+         evt.payloadLength >= 3U &&
+         evt.payload[2] == kConnectedPhysicalAckReason;
+}
+
+static bool sendConnectedPhysicalTriggerAndWaitAck() {
+  g_connectedTriggerQueued = false;
+  g_connectedTriggerSent = false;
+  g_connectedTriggerAcked = false;
+  g_connectedTriggerEventCounter = 0U;
+  g_connectedTriggerAckEventCounter = 0U;
+  g_connectedPhysicalRunAfterEventCounter = 0U;
+
+  BleChannelSoundingLlControlDebug dbgBefore{};
+  g_ble.getChannelSoundingLlControlDebug(&dbgBefore);
+
+  BleCsLlControlPdu pdu{};
+  if (!bleCsBuildLlControlTerminate(kConnectedPhysicalTriggerReason, &pdu)) {
+    return false;
+  }
+
+  g_connectedTriggerQueued =
+      g_ble.queueChannelSoundingLlControlPdu(pdu.data(), pdu.length);
+  if (!g_connectedTriggerQueued) {
+    return false;
+  }
+
+  for (uint8_t attempt = 0U; attempt < 3U; ++attempt) {
+    BleConnectionEvent evt{};
+    const bool ran = g_ble.pollConnectionEvent(&evt, 450000UL);
+    if (ran && evt.eventStarted) {
+      ++g_linkEvents;
+    }
+    if (!g_connectedTriggerSent &&
+        evt.txPacketSent && evt.txPayload != nullptr &&
+        evt.txPayloadLength >= 3U &&
+        evt.txPayload[0] == kBleCsLlCtrlTerminate &&
+        evt.txPayload[2] == kConnectedPhysicalTriggerReason) {
+      g_connectedTriggerSent = true;
+      g_connectedTriggerEventCounter = evt.eventCounter;
+    }
+
+    BleChannelSoundingLlControlDebug dbg{};
+    g_ble.getChannelSoundingLlControlDebug(&dbg);
+    if (!g_connectedTriggerSent &&
+        dbg.lastTxOpcode == kBleCsLlCtrlTerminate &&
+        dbg.txSentCount > dbgBefore.txSentCount) {
+      g_connectedTriggerSent = true;
+      g_connectedTriggerEventCounter = evt.eventCounter;
+    }
+
+    if (ran && isConnectedPhysicalAck(evt)) {
+      g_connectedTriggerAcked = true;
+      g_connectedTriggerAckEventCounter = evt.eventCounter;
+      return true;
+    }
+  }
+
+  return g_connectedTriggerAcked;
+}
+
+static void printConnectedPhysicalTrigger(uint8_t channel, uint8_t channelOrder) {
+  Serial.print("cs_connected_trigger queued=");
+  Serial.print(g_connectedTriggerQueued ? 1 : 0);
+  Serial.print(" sent=");
+  Serial.print(g_connectedTriggerSent ? 1 : 0);
+  Serial.print(" ce=");
+  Serial.print(g_connectedTriggerEventCounter);
+  Serial.print(" ack=");
+  Serial.print(g_connectedTriggerAcked ? 1 : 0);
+  Serial.print(" ack_ce=");
+  Serial.print(g_connectedTriggerAckEventCounter);
+  Serial.print(" run_after_ce=");
+  Serial.print(g_connectedPhysicalRunAfterEventCounter);
+  Serial.print(" raw_before_ce=");
+  Serial.print(static_cast<uint16_t>(
+      g_connectedPhysicalRunAfterEventCounter + 1U));
+  Serial.print(" idx=");
+  Serial.print(channelOrder);
+  Serial.print(" ch=");
+  Serial.print(channel);
+  Serial.print("\r\n");
+}
+
+static bool waitConnectedPhysicalStartEvent() {
+  if (!g_connectedTriggerAcked || !g_connectedTriggerSent) {
+    return false;
+  }
+
+  const uint16_t runAfterEvent =
+      static_cast<uint16_t>(g_connectedTriggerEventCounter +
+                            kConnectedPhysicalWindowEventOffset);
+  for (uint8_t attempt = 0U;
+       attempt < static_cast<uint8_t>(kConnectedPhysicalWindowEventOffset + 4U);
+       ++attempt) {
+    BleConnectionEvent evt{};
+    const bool ran = g_ble.pollConnectionEvent(&evt, 450000UL);
+    if (ran && evt.eventStarted) {
+      ++g_linkEvents;
+      if (eventCounterReached(evt.eventCounter, runAfterEvent)) {
+        g_connectedPhysicalRunAfterEventCounter = evt.eventCounter;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static bool runConnectedPhysicalSweep() {
+  if (g_connectedPhysicalAttempted) {
+    return g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels;
+  }
+
+  g_connectedPhysicalAttempted = true;
+  g_connectedPhysicalOk = false;
+  g_connectedPhysicalAttemptCount = 0U;
+  g_connectedPhysicalValidChannels = 0U;
+
+  for (uint8_t order = 0U; order < kConnectedPhysicalSweepChannelCount;
+       ++order) {
+    const uint8_t channel = kConnectedPhysicalSweepChannels[order];
+    const bool triggerOk = sendConnectedPhysicalTriggerAndWaitAck();
+    const bool startOk = triggerOk && waitConnectedPhysicalStartEvent();
+    bool channelOk = false;
+    if (startOk) {
+      channelOk = runConnectedPhysicalChannel(channel, order);
+      if (channelOk) {
+        ++g_connectedPhysicalValidChannels;
+      }
+    }
+    printConnectedPhysicalTrigger(channel, order);
+  }
+
+  g_connectedPhysicalOk =
+      g_connectedPhysicalValidChannels >= kConnectedPhysicalMinValidChannels;
+  Serial.print("cs_connected_sweep=");
+  Serial.print(g_connectedPhysicalOk ? "PASS" : "FAIL");
+  Serial.print(" attempts=");
+  Serial.print(g_connectedPhysicalAttemptCount);
+  Serial.print(" valid_channels=");
+  Serial.print(g_connectedPhysicalValidChannels);
+  Serial.print(" min_valid=");
+  Serial.print(kConnectedPhysicalMinValidChannels);
+  Serial.print(" requested_channels=");
+  Serial.print(kConnectedPhysicalSweepChannelCount);
+  Serial.print("\r\n");
+  return g_connectedPhysicalOk;
 }
 
 static bool beginPhysicalFollowup() {
@@ -627,6 +912,7 @@ void loop() {
 
     if (!g_passPrinted && g_bridgeTracker.complete()) {
       g_passPrinted = true;
+      (void)runConnectedPhysicalSweep();
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_bridgeTracker.workflowMask, HEX);
       Serial.print(" tx=0x");

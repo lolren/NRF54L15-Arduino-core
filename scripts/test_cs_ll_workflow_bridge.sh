@@ -89,6 +89,33 @@ if ! grep -q "cs_ll_physical_followup=PASS" "${central_log}"; then
   exit 1
 fi
 
+if ! grep -Eq "cs_connected_physical .*ok=1.*status=0.*local_tone=1.*peer_tone=1" "${central_log}"; then
+  echo "Connected-window raw CS did not complete with valid local and peer tones" >&2
+  echo "central log:" >&2
+  sed -n '1,260p' "${central_log}" >&2
+  echo "peripheral log:" >&2
+  sed -n '1,220p' "${peripheral_log}" >&2
+  exit 1
+fi
+
+if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9])" "${central_log}"; then
+  echo "Connected-window raw CS sweep did not reach the minimum valid channel count" >&2
+  echo "central log:" >&2
+  sed -n '1,320p' "${central_log}" >&2
+  echo "peripheral log:" >&2
+  sed -n '1,260p' "${peripheral_log}" >&2
+  exit 1
+fi
+
+if ! grep -Eq "connected_physical_reflector .*reply=1.*status=0" "${peripheral_log}"; then
+  echo "Connected-window raw CS reflector did not send a valid report" >&2
+  echo "central log:" >&2
+  sed -n '1,260p' "${central_log}" >&2
+  echo "peripheral log:" >&2
+  sed -n '1,220p' "${peripheral_log}" >&2
+  exit 1
+fi
+
 if ! grep -q "rx=0x3F" "${central_log}" ||
    ! grep -q "vpr_pdu=3" "${central_log}" ||
    ! grep -q "local=1 peer=1 proc=1 est=1" "${central_log}"; then
@@ -98,6 +125,7 @@ if ! grep -q "rx=0x3F" "${central_log}" ||
 fi
 
 grep "cs_ll_workflow_bridge=PASS" "${central_log}" | tail -n 1
+grep "cs_connected_sweep=PASS" "${central_log}" | tail -n 1
 grep "cs_ll_physical_followup=PASS" "${central_log}" | tail -n 1
 grep "queued CS_PROC_RSP\\|queued CS_START\\|queued CS_ABORT" "${peripheral_log}" || true
 grep "physical reflector replies=" "${peripheral_log}" | tail -n 1 || true
