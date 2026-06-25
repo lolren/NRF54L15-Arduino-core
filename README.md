@@ -22,11 +22,6 @@ https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l1
 
 Add this URL in **Arduino IDE → Preferences → Additional Boards Manager URLs**, then install **nRF54L15 Boards** from the Boards Manager.
 
-```cpp
-#include <nrf54_all.h>
-void setup() { Serial.begin(115200); Serial.println("Hello nRF54!"); }
-void loop() {}
-```
 
 Normal uploads use the bundled native [**nRF OCD**](https://github.com/lolren/open-nrf-ocd) tool on Linux and Windows, so Windows does not need a separate Python install just to upload. If native upload fails, switch **Tools -> Upload Method** to **pyOCD Recovery**; that recovery path still uses the packaged Python host tools.
 
