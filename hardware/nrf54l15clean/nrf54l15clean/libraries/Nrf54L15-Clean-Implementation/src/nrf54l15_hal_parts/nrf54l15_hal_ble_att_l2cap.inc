@@ -1807,8 +1807,11 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
       if (peerRequestedMitm &&
           ((smpPairingRsp_[3] & kSmpAuthReqMitmMask) == 0U)) {
-        emitBleTrace("SMP_MITM_REQUEST_NO_IO_FALLBACK");
-        return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+        // A phone or host may request MITM even when this peripheral has no
+        // display/keyboard/passkey path. Keep the link alive by responding with
+        // unauthenticated LE Secure Connections; peers that truly require MITM
+        // can still reject the pairing on their side.
+        emitBleTrace("SMP_MITM_REQUEST_JUST_WORKS_FALLBACK");
       }
 
       // Precompute local confirm material here so confirm/random stages avoid
