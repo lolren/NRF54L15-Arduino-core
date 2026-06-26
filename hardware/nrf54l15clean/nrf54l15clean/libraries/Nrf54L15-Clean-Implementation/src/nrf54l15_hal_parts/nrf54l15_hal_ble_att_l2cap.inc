@@ -1840,9 +1840,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (peerRequestedSecureConnections) {
         smpSecureConnectionsActive_ = true;
         smpPairingRsp_[3] |= kSmpAuthReqSecureConnectionsMask;
-        // LE Secure Connections derives the link key from DHKey. Do not ask
-        // for optional ID/signing key packets until this core sends them.
-        initiatorKeyDist = 0U;
+        // LE Secure Connections derives the link key from DHKey. Still request
+        // the peer identity key so bonded phones using RPAs can be resolved
+        // after a reset. Local SC key distribution remains disabled because this
+        // core does not send local ID/signing keys yet.
+        initiatorKeyDist = static_cast<uint8_t>(
+            smp[5] & kSmpKeyDistIdKeyMask);
         responderKeyDist = 0U;
       }
       smpPairingRsp_[5] = initiatorKeyDist;
@@ -2502,10 +2505,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         }
         if ((peerAuthReq & kSmpAuthReqSecureConnectionsMask) != 0U) {
           pairingReq[3] |= kSmpAuthReqSecureConnectionsMask;
-          // SC does not need distributed EncKey, and this core currently keeps
-          // ID/signing key exchange local to avoid stalling bond persistence.
+          // SC does not need distributed EncKey. Request only the peer identity
+          // key so bonded peripherals using RPAs can be resolved after reset.
           pairingReq[5] = 0U;
-          pairingReq[6] = 0U;
+          pairingReq[6] = ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U)
+                              ? kSmpKeyDistIdKeyMask
+                              : 0U;
         } else {
           pairingReq[5] = kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask;
           pairingReq[6] = kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask;

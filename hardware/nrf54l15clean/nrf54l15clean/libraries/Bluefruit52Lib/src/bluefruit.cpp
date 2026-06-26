@@ -5790,7 +5790,11 @@ err_t BLEHidAdafruit::begin() {
     return result;
   }
 
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
+  Bluefruit.Periph.setConnInterval(24, 40);
+#else
   Bluefruit.Periph.setConnInterval(9, 12);
+#endif
   return ERROR_NONE;
 }
 
@@ -6070,7 +6074,11 @@ err_t BLEHidGamepad::begin() {
     return result;
   }
 
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
+  Bluefruit.Periph.setConnInterval(24, 40);
+#else
   Bluefruit.Periph.setConnInterval(9, 12);
+#endif
   return ERROR_NONE;
 }
 

@@ -1167,7 +1167,7 @@ bool BleRadio::requestPairing() {
   }
   pairingReq[4] = 16U;
   pairingReq[5] = 0U;
-  pairingReq[6] = 0U;
+  pairingReq[6] = kSmpKeyDistIdKeyMask;
 
   if (!queuePendingSmpL2capResponse(pairingReq, kSmpPairingRequestLen)) {
     bleExitCritical(irqState);

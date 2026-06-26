@@ -43,8 +43,13 @@ void setup()
   Bluefruit.begin();
   Bluefruit.Security.setIOCaps(true, true, false);
   Bluefruit.Security.setPairPasskeyCallback(pairing_passkey_callback);
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
+  // LM20A needs extra event budget for software P-256 during secure pairing.
+  Bluefruit.Periph.setConnInterval(24, 40); // 30-50 ms
+#else
   // HID Device can have a min connection interval of 9*1.25 = 11.25 ms
   Bluefruit.Periph.setConnInterval(9, 16); // min = 9*1.25=11.25 ms, max = 16*1.25=20ms
+#endif
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
 
