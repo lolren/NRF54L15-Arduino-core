@@ -1070,11 +1070,11 @@ class BluefruitCompatManager {
       const bool centralForegroundSetupActive =
           (role == BleConnectionRole::kCentral) &&
           (central_connect_callback_pending_ || centralSyncProcedureActive());
+      const bool setupWindowActive =
+          static_cast<int32_t>(millis() - last_connection_edge_ms_) <
+          static_cast<int32_t>(kBleNoWfiDuringSetupMs);
       const bool backgroundReady =
-          (role == BleConnectionRole::kPeripheral) ||
-          (static_cast<int32_t>(millis() - last_connection_edge_ms_) >=
-               static_cast<int32_t>(kBleNoWfiDuringSetupMs) &&
-           !centralForegroundSetupActive);
+          !setupWindowActive && !centralForegroundSetupActive;
       if (backgroundReady) {
         if (!radio_.isBackgroundConnectionServiceEnabled()) {
           radio_.setBackgroundConnectionServiceEnabled(true);
@@ -2454,7 +2454,7 @@ class BluefruitCompatManager {
         digitalWrite(LED_BUILTIN, kLedOnState);
       }
       if (last_connection_role_ == BleConnectionRole::kPeripheral) {
-        radio_.setBackgroundConnectionServiceEnabled(true);
+        radio_.setBackgroundConnectionServiceEnabled(false);
         // restartOnDisconnect is a future policy; advertising is not active
         // while a peripheral connection is established.
         Bluefruit.Advertising.running_ = false;
