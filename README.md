@@ -25,6 +25,44 @@ Add this URL in **Arduino IDE → Preferences → Additional Boards Manager URLs
 
 Normal uploads use the bundled native [**nRF OCD**](https://github.com/lolren/open-nrf-ocd) tool on Linux and Windows, so Windows does not need a separate Python install just to upload. If native upload fails, switch **Tools -> Upload Method** to **pyOCD Recovery**; that recovery path still uses the packaged Python host tools.
 
+### Arduino CLI Install And Updates
+
+Arduino IDE users can update through **Tools -> Board -> Boards Manager** by searching for **nRF54L15 Boards** and clicking **Update** when a newer release is available.
+
+Linux/macOS:
+
+```bash
+BOARD_URL="https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l15clean_index.json"
+
+arduino-cli config add board_manager.additional_urls "$BOARD_URL"
+arduino-cli core update-index
+arduino-cli core install nrf54l15clean:nrf54l15clean
+
+# Check whether this core has an available update.
+arduino-cli core list --updatable
+
+# Update this core to the latest Board Manager release.
+arduino-cli core upgrade nrf54l15clean:nrf54l15clean
+```
+
+Windows PowerShell:
+
+```powershell
+$BoardUrl = "https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l15clean_index.json"
+
+arduino-cli config add board_manager.additional_urls $BoardUrl
+arduino-cli core update-index
+arduino-cli core install nrf54l15clean:nrf54l15clean
+
+# Check whether this core has an available update.
+arduino-cli core list --updatable
+
+# Update this core to the latest Board Manager release.
+arduino-cli core upgrade nrf54l15clean:nrf54l15clean
+```
+
+`arduino-cli outdated` is also useful when you want to see all updatable cores and libraries. If `core list --updatable` prints nothing for `nrf54l15clean:nrf54l15clean`, the installed core is already current.
+
 ---
 
 ## 🖥️ Supported Boards
