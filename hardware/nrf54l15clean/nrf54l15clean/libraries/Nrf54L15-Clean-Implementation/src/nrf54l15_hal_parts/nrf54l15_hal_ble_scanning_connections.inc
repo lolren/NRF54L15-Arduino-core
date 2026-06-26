@@ -1921,10 +1921,8 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionSyncAttemptsRemaining_ = 8U;
   connectionCurrentTxPhy_ = kBlePhy1M;
   connectionCurrentRxPhy_ = kBlePhy1M;
-  connectionPreferredTxPhyMask_ =
-      static_cast<uint8_t>(kBlePhy1M | kBlePhy2M | kBlePhyCoded);
-  connectionPreferredRxPhyMask_ =
-      static_cast<uint8_t>(kBlePhy1M | kBlePhy2M | kBlePhyCoded);
+  connectionPreferredTxPhyMask_ = kBlePhy1M;
+  connectionPreferredRxPhyMask_ = kBlePhy1M;
   connectionPhyRequestPending_ = false;
   connectionPhyRequestInFlight_ = false;
   connectionPhyUpdatePending_ = false;
@@ -1981,6 +1979,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
+  connectionGattClientSupportedFeatures_ = 0U;
   connectionSmpSecurityRequestPending_ = false;
   clearPreparedWriteState();
   connectionServiceBusy_ = false;
@@ -2079,10 +2078,8 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   connectionSyncAttemptsRemaining_ = 0U;
   connectionCurrentTxPhy_ = kBlePhy1M;
   connectionCurrentRxPhy_ = kBlePhy1M;
-  connectionPreferredTxPhyMask_ =
-      static_cast<uint8_t>(kBlePhy1M | kBlePhy2M | kBlePhyCoded);
-  connectionPreferredRxPhyMask_ =
-      static_cast<uint8_t>(kBlePhy1M | kBlePhy2M | kBlePhyCoded);
+  connectionPreferredTxPhyMask_ = kBlePhy1M;
+  connectionPreferredRxPhyMask_ = kBlePhy1M;
   connectionPhyRequestPending_ = false;
   connectionPhyRequestInFlight_ = false;
   connectionPhyUpdatePending_ = false;
@@ -2134,6 +2131,7 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
+  connectionGattClientSupportedFeatures_ = 0U;
   clearPreparedWriteState();
   connectionServiceBusy_ = false;
   clearQueuedConnectionEvents();

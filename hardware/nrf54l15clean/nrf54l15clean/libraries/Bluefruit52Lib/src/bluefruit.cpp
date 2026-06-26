@@ -6151,6 +6151,21 @@ err_t BLEDis::begin() {
   static constexpr char kDefaultManufacturer[] = "Seeed Studio";
   static constexpr char kDefaultModel[] = "XIAO nRF54L15";
   static constexpr char kDefaultHardwareRev[] = "XIAO nRF54L15";
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
+  static constexpr char kDefaultPnpId[] = {
+      0x02,       // Vendor ID source: USB Implementers Forum
+      0x86, 0x28, // Seeed USB VID 0x2886
+      0x68, 0x00, // XIAO nRF54LM20 CMSIS-DAP USB PID 0x0068
+      0x01, 0x00  // Product version 0.1
+  };
+#else
+  static constexpr char kDefaultPnpId[] = {
+      0x02,       // Vendor ID source: USB Implementers Forum
+      0x86, 0x28, // Seeed USB VID 0x2886
+      0x66, 0x00, // XIAO nRF54L15 CMSIS-DAP USB PID 0x0066
+      0x01, 0x00  // Product version 0.1
+  };
+#endif
 
   const err_t status = BLEService::begin();
   if (status != ERROR_NONE) {
@@ -6176,6 +6191,9 @@ err_t BLEDis::begin() {
   }
   if (values_[6] == nullptr || lengths_[6] == 0U) {
     setManufacturer(kDefaultManufacturer);
+  }
+  if (values_[8] == nullptr || lengths_[8] == 0U) {
+    setPNPID(kDefaultPnpId, sizeof(kDefaultPnpId));
   }
 
   for (uint8_t i = 0U; i < 9U; ++i) {

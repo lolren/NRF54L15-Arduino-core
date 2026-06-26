@@ -1,19 +1,33 @@
-            txPacket_[0] = static_cast<uint8_t>((txFollowLlid & 0x03U) |
-                                                ((connectionExpectedRxSn_ & 0x01U) << 2U) |
-                                                ((connectionTxSn_ & 0x01U) << 3U) |
-                                                (txFollowHasMoreData ? 0x10U : 0U));
-            txPacket_[1] = txFollowLength;
-            if (txFollowLength > 0U) {
-              memcpy(&txPacket_[2], connectionLastTxPlainPayload_, txFollowLength);
-            }
+	            uint8_t txFollowLengthOnAir = txFollowLength;
+	            uint64_t txFollowCounterUsed = 0ULL;
+	            bool txFollowCounterValid = false;
+	            bool txFollowEncrypted = false;
+	            const uint8_t* const txFollowPlainPayload =
+	                txFollowCanUseFreshPayload
+	                    ? &connectionTxPayload_[0]
+	                    : &connectionLastTxPlainPayload_[0];
+	            const bool txFollowIsStartEncRspPlain =
+	                (txFollowLlid == kBlePduLlControl) &&
+	                (txFollowLength >= 1U) &&
+	                (txFollowPlainPayload[0] == kBleLlCtrlStartEncRsp);
+	            if (!prepareFollowTxPacket(txFollowLlid, txFollowLength,
+	                                       txFollowPlainPayload,
+	                                       txFollowCanUseFreshPayload,
+	                                       txFollowHasMoreData,
+	                                       &txFollowLengthOnAir,
+	                                       &txFollowCounterUsed,
+	                                       &txFollowCounterValid,
+	                                       &txFollowEncrypted)) {
+	              break;
+	            }
 
-            clearRadioCoreEvents(radio_);
-            {
-              const size_t txCopyLen = 2U + static_cast<size_t>(txFollowLength);
-              const size_t copyLen =
-                  (txCopyLen <= sizeof(rxPacket_)) ? txCopyLen : sizeof(rxPacket_);
-              memcpy(rxPacket_, txPacket_, copyLen);
-            }
+	            clearRadioCoreEvents(radio_);
+	            {
+	              const size_t txCopyLen = 2U + static_cast<size_t>(txFollowLengthOnAir);
+	              const size_t copyLen =
+	                  (txCopyLen <= sizeof(rxPacket_)) ? txCopyLen : sizeof(rxPacket_);
+	              memcpy(rxPacket_, txPacket_, copyLen);
+	            }
             radio_->PACKETPTR =
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&rxPacket_[0]));
             radio_->SHORTS =
@@ -37,9 +51,9 @@
             }
             bleTriggerTxAtTargetUsCritical(radio_, txFollowTriggerTargetUs);
 
-            const uint32_t txFollowEndBudgetUs =
-                bleConnectionTxEndBudgetUsOnPhy(txFollowLength,
-                                                connectionCurrentTxPhy_);
+	            const uint32_t txFollowEndBudgetUs =
+	                bleConnectionTxEndBudgetUsOnPhy(txFollowLengthOnAir,
+	                                                connectionCurrentTxPhy_);
             const bool txFollowEndSeen =
                 waitRadioEndBudgeted(radio_, txFollowEndBudgetUs, spinLimit / 2U + 1U);
             bool txFollowOk = false;
@@ -58,11 +72,27 @@
               break;
             }
 
-            connectionTxHistoryValid_ = true;
-            if (txFollowCanUseFreshPayload && txFollowLength > 0U) {
-              connectionFreshTxAllowed_ = false;
-            }
-            radio_->EVENTS_DISABLED = 0U;
+	            connectionTxHistoryValid_ = true;
+	            connectionLastTxSn_ =
+	                static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
+	            if (txFollowCanUseFreshPayload && txFollowLength > 0U) {
+	              connectionFreshTxAllowed_ = false;
+	            }
+	            if (txFollowEncrypted && txFollowCounterValid) {
+	              connectionEncTxCounter_ =
+	                  (txFollowCounterUsed + 1ULL) & kBleEncPacketCounterMask;
+	              if (connectionEncPrecomputedCounter_ != connectionEncTxCounter_) {
+	                connectionEncPrecomputedEmptyValid_ = false;
+	              }
+	              if (txFollowIsStartEncRspPlain) {
+	                connectionEncPrecomputedStartRspTxValid_ = false;
+	              }
+	              ++encDebug_.encTxPacketCount;
+	              if (txFollowIsStartEncRspPlain) {
+	                ++encDebug_.followupStartEncRspTxOk;
+	              }
+	            }
+	            radio_->EVENTS_DISABLED = 0U;
             radio_->EVENTS_CRCOK = 0U;
             radio_->EVENTS_CRCERROR = 0U;
             radio_->SHORTS =
@@ -523,7 +553,12 @@ bool BleRadio::pollConnectionEvent(BleConnectionEvent* event,
     return false;
   }
 
+  if (connectionServiceBusy_) {
+    return false;
+  }
+  connectionServiceBusy_ = true;
   const bool ran = pollConnectionEventInternal(event, spinLimit);
+  connectionServiceBusy_ = false;
   if (ran && event != nullptr) {
     rememberLatestConnectionRssi(*event);
   }

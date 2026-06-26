@@ -46,6 +46,36 @@ static uint8_t attPermissionErrorToReadSentinel(uint8_t errorCode) {
   return kAttrReadNotPermittedLen;
 }
 
+void BleRadio::buildGattDatabaseHash(uint8_t outHash[16]) const {
+  if (outHash == nullptr) {
+    return;
+  }
+
+  uint32_t builtInCrc = crc32(reinterpret_cast<const uint8_t*>(kBlePrimaryServices),
+                              sizeof(kBlePrimaryServices));
+  builtInCrc ^= crc32(reinterpret_cast<const uint8_t*>(kBleCharacteristics),
+                      sizeof(kBleCharacteristics));
+  builtInCrc ^= crc32(reinterpret_cast<const uint8_t*>(kBleAttributeUuids),
+                      sizeof(kBleAttributeUuids));
+
+  const uint32_t serviceCrc =
+      crc32(reinterpret_cast<const uint8_t*>(customGattServices_),
+            sizeof(customGattServices_));
+  const uint32_t characteristicCrc =
+      crc32(reinterpret_cast<const uint8_t*>(customGattCharacteristics_),
+            sizeof(customGattCharacteristics_));
+  const uint32_t countCrc =
+      (static_cast<uint32_t>(customGattServiceCount_) << 24U) ^
+      (static_cast<uint32_t>(customGattCharacteristicCount_) << 16U) ^
+      static_cast<uint32_t>(customGattNextHandle_);
+
+  writeLe32(&outHash[0], builtInCrc);
+  writeLe32(&outHash[4], serviceCrc);
+  writeLe32(&outHash[8], characteristicCrc);
+  writeLe32(&outHash[12], crc32(reinterpret_cast<const uint8_t*>(&countCrc),
+                                sizeof(countCrc)));
+}
+
 void BleRadio::clearPreparedWriteState() {
   connectionPreparedWriteActive_ = false;
   connectionPreparedWriteHandle_ = 0U;
@@ -383,6 +413,38 @@ uint8_t BleRadio::readAttributeValue(uint16_t handle, uint16_t offset,
                 connectionServiceChangedIndicationsEnabled_ ? 0x0002U : 0x0000U);
       fullLen = 2U;
       break;
+    case kHandleGattClientSupportedFeaturesDecl:
+      fullValue[0] = static_cast<uint8_t>(kGattCharacteristicPropRead |
+                                          kGattCharacteristicPropWrite);
+      writeLe16(&fullValue[1], kHandleGattClientSupportedFeaturesValue);
+      writeLe16(&fullValue[3], kUuidGattClientSupportedFeatures);
+      fullLen = 5U;
+      break;
+    case kHandleGattClientSupportedFeaturesValue:
+      fullValue[0] = connectionGattClientSupportedFeatures_;
+      fullLen = 1U;
+      break;
+    case kHandleGattDatabaseHashDecl:
+      fullValue[0] = kGattCharacteristicPropRead;
+      writeLe16(&fullValue[1], kHandleGattDatabaseHashValue);
+      writeLe16(&fullValue[3], kUuidGattDatabaseHash);
+      fullLen = 5U;
+      break;
+    case kHandleGattDatabaseHashValue:
+      buildGattDatabaseHash(fullValue);
+      fullLen = 16U;
+      break;
+    case kHandleGattServerSupportedFeaturesDecl:
+      fullValue[0] = kGattCharacteristicPropRead;
+      writeLe16(&fullValue[1], kHandleGattServerSupportedFeaturesValue);
+      writeLe16(&fullValue[3], kUuidGattServerSupportedFeatures);
+      fullLen = 5U;
+      break;
+    case kHandleGattServerSupportedFeaturesValue:
+      // Bit 0 advertises EATT. This core currently exposes classic ATT only.
+      fullValue[0] = 0x00U;
+      fullLen = 1U;
+      break;
     case kHandleBatteryService:
       writeLe16(&fullValue[0], kUuidBatteryService);
       fullLen = 2U;
@@ -471,8 +533,238 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
   const uint8_t opcode = attRequest[0];
   *outAttResponseLength = 0U;
 
+  const auto emitAttUuidTrace = [this](uint16_t uuid) {
+    const auto emitHexNibbleTrace = [this](uint8_t nibble) {
+      switch (nibble & 0x0FU) {
+        case 0x0U:
+          emitBleTrace("ATT_HEX_0");
+          break;
+        case 0x1U:
+          emitBleTrace("ATT_HEX_1");
+          break;
+        case 0x2U:
+          emitBleTrace("ATT_HEX_2");
+          break;
+        case 0x3U:
+          emitBleTrace("ATT_HEX_3");
+          break;
+        case 0x4U:
+          emitBleTrace("ATT_HEX_4");
+          break;
+        case 0x5U:
+          emitBleTrace("ATT_HEX_5");
+          break;
+        case 0x6U:
+          emitBleTrace("ATT_HEX_6");
+          break;
+        case 0x7U:
+          emitBleTrace("ATT_HEX_7");
+          break;
+        case 0x8U:
+          emitBleTrace("ATT_HEX_8");
+          break;
+        case 0x9U:
+          emitBleTrace("ATT_HEX_9");
+          break;
+        case 0xAU:
+          emitBleTrace("ATT_HEX_A");
+          break;
+        case 0xBU:
+          emitBleTrace("ATT_HEX_B");
+          break;
+        case 0xCU:
+          emitBleTrace("ATT_HEX_C");
+          break;
+        case 0xDU:
+          emitBleTrace("ATT_HEX_D");
+          break;
+        case 0xEU:
+          emitBleTrace("ATT_HEX_E");
+          break;
+        default:
+          emitBleTrace("ATT_HEX_F");
+          break;
+      }
+    };
+
+    switch (uuid) {
+      case kUuidPrimaryService:
+        emitBleTrace("ATT_RX_UUID_PRIMARY");
+        break;
+      case kUuidCharacteristic:
+        emitBleTrace("ATT_RX_UUID_CHAR");
+        break;
+      case kUuidClientCharacteristicConfig:
+        emitBleTrace("ATT_RX_UUID_CCCD");
+        break;
+      case kUuidReportReference:
+        emitBleTrace("ATT_RX_UUID_REPORT_REF");
+        break;
+      case kUuidDeviceName:
+        emitBleTrace("ATT_RX_UUID_NAME");
+        break;
+      case kUuidAppearance:
+        emitBleTrace("ATT_RX_UUID_APPEAR");
+        break;
+      case kUuidPpcp:
+        emitBleTrace("ATT_RX_UUID_PPCP");
+        break;
+      case kUuidServiceChanged:
+        emitBleTrace("ATT_RX_UUID_SVC_CHANGED");
+        break;
+      case kUuidGattClientSupportedFeatures:
+        emitBleTrace("ATT_RX_UUID_GATT_CLIENT_FEATURES");
+        break;
+      case kUuidGattDatabaseHash:
+        emitBleTrace("ATT_RX_UUID_GATT_DB_HASH");
+        break;
+      case kUuidGattServerSupportedFeatures:
+        emitBleTrace("ATT_RX_UUID_GATT_SERVER_FEATURES");
+        break;
+      case kUuidBatteryLevel:
+        emitBleTrace("ATT_RX_UUID_BATT");
+        break;
+      case 0x2A22U:
+        emitBleTrace("ATT_RX_UUID_BOOT_KBD_IN");
+        break;
+      case 0x2A23U:
+        emitBleTrace("ATT_RX_UUID_SYSTEM_ID");
+        break;
+      case 0x2A24U:
+        emitBleTrace("ATT_RX_UUID_MODEL");
+        break;
+      case 0x2A25U:
+        emitBleTrace("ATT_RX_UUID_SERIAL");
+        break;
+      case 0x2A26U:
+        emitBleTrace("ATT_RX_UUID_FW_REV");
+        break;
+      case 0x2A27U:
+        emitBleTrace("ATT_RX_UUID_HW_REV");
+        break;
+      case 0x2A28U:
+        emitBleTrace("ATT_RX_UUID_SW_REV");
+        break;
+      case 0x2A29U:
+        emitBleTrace("ATT_RX_UUID_MANUF");
+        break;
+      case 0x2A2AU:
+        emitBleTrace("ATT_RX_UUID_REG_CERT");
+        break;
+      case 0x2A32U:
+        emitBleTrace("ATT_RX_UUID_BOOT_KBD_OUT");
+        break;
+      case 0x2A33U:
+        emitBleTrace("ATT_RX_UUID_BOOT_MOUSE_IN");
+        break;
+      case 0x2A4AU:
+        emitBleTrace("ATT_RX_UUID_HID_INFO");
+        break;
+      case 0x2A4BU:
+        emitBleTrace("ATT_RX_UUID_REPORT_MAP");
+        break;
+      case 0x2A4CU:
+        emitBleTrace("ATT_RX_UUID_HID_CTRL");
+        break;
+      case 0x2A4DU:
+        emitBleTrace("ATT_RX_UUID_REPORT");
+        break;
+      case 0x2A4EU:
+        emitBleTrace("ATT_RX_UUID_PROTOCOL");
+        break;
+      case 0x2A50U:
+        emitBleTrace("ATT_RX_UUID_PNP_ID");
+        break;
+      case 0x2AA6U:
+        emitBleTrace("ATT_RX_UUID_CENT_ADDR_RES");
+        break;
+      case 0x2AC9U:
+        emitBleTrace("ATT_RX_UUID_RPA_ONLY");
+        break;
+      default:
+        emitBleTrace("ATT_RX_UUID_OTHER");
+        emitBleTrace("ATT_RX_UUID_HEX");
+        emitHexNibbleTrace(static_cast<uint8_t>((uuid >> 12U) & 0x0FU));
+        emitHexNibbleTrace(static_cast<uint8_t>((uuid >> 8U) & 0x0FU));
+        emitHexNibbleTrace(static_cast<uint8_t>((uuid >> 4U) & 0x0FU));
+        emitHexNibbleTrace(static_cast<uint8_t>(uuid & 0x0FU));
+        break;
+    }
+  };
+
+  const auto emitAttServiceTrace = [this](uint16_t uuid) {
+    switch (uuid) {
+      case kUuidGapService:
+        emitBleTrace("ATT_RX_SVC_GAP");
+        break;
+      case kUuidGattService:
+        emitBleTrace("ATT_RX_SVC_GATT");
+        break;
+      case kUuidBatteryService:
+        emitBleTrace("ATT_RX_SVC_BATT");
+        break;
+      case 0x180AU:
+        emitBleTrace("ATT_RX_SVC_DIS");
+        break;
+      case 0x1812U:
+        emitBleTrace("ATT_RX_SVC_HID");
+        break;
+      default:
+        emitBleTrace("ATT_RX_SVC_OTHER");
+        break;
+    }
+  };
+
+  const auto emitAttHandleTrace = [this, &emitAttUuidTrace](uint16_t handle) {
+    if (handle >= kHandleGapService && handle <= kHandleGapPpcpValue) {
+      emitBleTrace("ATT_RX_HANDLE_GAP");
+      return;
+    }
+    if (handle >= kHandleGattService &&
+        handle <= kHandleGattServerSupportedFeaturesValue) {
+      emitBleTrace("ATT_RX_HANDLE_GATT");
+      return;
+    }
+    if (handle >= kHandleBatteryService && handle <= kHandleBatteryLevelCccd) {
+      emitBleTrace("ATT_RX_HANDLE_BATT");
+      return;
+    }
+    for (uint8_t i = 0U; i < customGattCharacteristicCount_; ++i) {
+      const BleCustomCharacteristicState& ch = customGattCharacteristics_[i];
+      if (handle == ch.declarationHandle) {
+        emitBleTrace("ATT_RX_HANDLE_CUSTOM_DECL");
+        emitAttUuidTrace(bleUuidRead16(ch.uuid, ch.uuidSize));
+        return;
+      }
+      if (handle == ch.valueHandle) {
+        emitBleTrace("ATT_RX_HANDLE_CUSTOM_VALUE");
+        emitAttUuidTrace(bleUuidRead16(ch.uuid, ch.uuidSize));
+        return;
+      }
+      if (handle == ch.userDescriptionHandle) {
+        emitBleTrace("ATT_RX_HANDLE_CUSTOM_USERDESC");
+        return;
+      }
+      if (handle == ch.presentationFormatHandle) {
+        emitBleTrace("ATT_RX_HANDLE_CUSTOM_FORMAT");
+        return;
+      }
+      if (handle == ch.reportReferenceHandle) {
+        emitBleTrace("ATT_RX_HANDLE_CUSTOM_REPORTREF");
+        return;
+      }
+      if (handle == ch.cccdHandle) {
+        emitBleTrace("ATT_RX_HANDLE_CUSTOM_CCCD");
+        emitAttUuidTrace(bleUuidRead16(ch.uuid, ch.uuidSize));
+        return;
+      }
+    }
+    emitBleTrace("ATT_RX_HANDLE_OTHER");
+  };
+
   switch (opcode) {
     case kAttOpExchangeMtuReq: {
+      emitBleTrace("ATT_RX_MTU_REQ");
       if (requestLength < 3U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -498,6 +790,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpFindInfoReq: {
+      emitBleTrace("ATT_RX_FIND_INFO_REQ");
       if (requestLength < 5U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -658,6 +951,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpFindByTypeValueReq: {
+      emitBleTrace("ATT_RX_FIND_TYPE_REQ");
       if (requestLength < 9U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -681,6 +975,11 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       const uint8_t* requestedServiceUuid = &attRequest[7];
       const uint16_t serviceUuid16 =
           (valueLen == kBleUuid16Size) ? readLe16(requestedServiceUuid) : 0U;
+      if (valueLen == kBleUuid16Size) {
+        emitAttServiceTrace(serviceUuid16);
+      } else {
+        emitBleTrace("ATT_RX_SVC_128");
+      }
       outAttResponse[0] = kAttOpFindByTypeValueRsp;
       uint16_t used = 1U;
       const uint16_t maxRecords = static_cast<uint16_t>((maxAttResponseLen - 1U) / 4U);
@@ -729,6 +1028,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpReadByGroupTypeReq: {
+      emitBleTrace("ATT_RX_READ_GROUP_REQ");
       if (requestLength < 7U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -753,6 +1053,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
 
       const uint16_t start = rawStart;
       const uint16_t groupType = readLe16(&attRequest[5]);
+      emitAttUuidTrace(groupType);
       if (groupType != kUuidPrimaryService) {
         return buildAttErrorResponse(opcode, start, kAttErrUnsupportedGroupType,
                                      outAttResponse, outAttResponseLength);
@@ -822,6 +1123,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpReadByTypeReq: {
+      emitBleTrace("ATT_RX_READ_TYPE_REQ");
       if (requestLength < 7U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -837,6 +1139,11 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       const uint8_t* requestedType = &attRequest[5];
       const uint16_t type =
           (typeLen == kBleUuid16Size) ? readLe16(requestedType) : 0U;
+      if (typeLen == kBleUuid16Size) {
+        emitAttUuidTrace(type);
+      } else {
+        emitBleTrace("ATT_RX_UUID_128");
+      }
       if (rawStart == 0U || rawStart > end) {
         return buildAttErrorResponse(opcode, rawStart, kAttErrInvalidHandle, outAttResponse,
                                      outAttResponseLength);
@@ -981,6 +1288,15 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         } else if (typeLength == kBleUuidLength16 && type16 == kUuidServiceChanged) {
           handles[handleCount++] = kHandleGattServiceChangedValue;
         } else if (typeLength == kBleUuidLength16 &&
+                   type16 == kUuidGattClientSupportedFeatures) {
+          handles[handleCount++] = kHandleGattClientSupportedFeaturesValue;
+        } else if (typeLength == kBleUuidLength16 &&
+                   type16 == kUuidGattDatabaseHash) {
+          handles[handleCount++] = kHandleGattDatabaseHashValue;
+        } else if (typeLength == kBleUuidLength16 &&
+                   type16 == kUuidGattServerSupportedFeatures) {
+          handles[handleCount++] = kHandleGattServerSupportedFeaturesValue;
+        } else if (typeLength == kBleUuidLength16 &&
                    type16 == kUuidClientCharacteristicConfig) {
           handles[handleCount++] = kHandleGattServiceChangedCccd;
           handles[handleCount++] = kHandleBatteryLevelCccd;
@@ -1117,11 +1433,13 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpReadReq: {
+      emitBleTrace("ATT_RX_READ_REQ");
       if (requestLength < 3U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
       }
       const uint16_t handle = readLe16(&attRequest[1]);
+      emitAttHandleTrace(handle);
       if (handle == 0U) {
         return buildAttErrorResponse(opcode, handle, kAttErrInvalidHandle,
                                      outAttResponse, outAttResponseLength);
@@ -1140,12 +1458,14 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpReadBlobReq: {
+      emitBleTrace("ATT_RX_READ_BLOB_REQ");
       if (requestLength < 5U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
       }
       const uint16_t handle = readLe16(&attRequest[1]);
       const uint16_t offset = readLe16(&attRequest[3]);
+      emitAttHandleTrace(handle);
       if (handle == 0U) {
         return buildAttErrorResponse(opcode, handle, kAttErrInvalidHandle,
                                      outAttResponse, outAttResponseLength);
@@ -1165,6 +1485,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpReadMultipleReq: {
+      emitBleTrace("ATT_RX_READ_MULTI_REQ");
       if (requestLength < 5U || ((requestLength & 0x01U) == 0U)) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -1204,6 +1525,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpReadMultipleVariableReq: {
+      emitBleTrace("ATT_RX_READ_MULTI_VAR_REQ");
       if (requestLength < 5U || ((requestLength & 0x01U) == 0U)) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -1261,6 +1583,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpPrepareWriteReq: {
+      emitBleTrace("ATT_RX_PREP_WRITE_REQ");
       if (requestLength < 5U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -1271,6 +1594,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       }
 
       const uint16_t handle = readLe16(&attRequest[1]);
+      emitAttHandleTrace(handle);
       const bool isCccdHandle =
           (handle == kHandleGattServiceChangedCccd) ||
           (handle == kHandleBatteryLevelCccd) ||
@@ -1358,6 +1682,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpExecuteWriteReq: {
+      emitBleTrace("ATT_RX_EXEC_WRITE_REQ");
       if (requestLength != 2U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
@@ -1413,6 +1738,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpHandleValueCfm: {
+      emitBleTrace("ATT_RX_HANDLE_CFM");
       // Confirmation for ATT Handle Value Indication. This opcode has no response.
       if (requestLength == 1U) {
         connectionServiceChangedIndicationAwaitingConfirm_ = false;
@@ -1423,13 +1749,26 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpWriteReq: {
+      emitBleTrace("ATT_RX_WRITE_REQ");
       if (requestLength < 3U) {
         return buildAttErrorResponse(opcode, 0U, kAttErrInvalidPdu, outAttResponse,
                                      outAttResponseLength);
       }
       const uint16_t handle = readLe16(&attRequest[1]);
+      emitAttHandleTrace(handle);
       const uint16_t valueLen = static_cast<uint16_t>(requestLength - 3U);
       const uint8_t* value = (valueLen > 0U) ? &attRequest[3] : nullptr;
+
+      if (handle == kHandleGattClientSupportedFeaturesValue) {
+        if (valueLen != 1U || value == nullptr) {
+          return buildAttErrorResponse(opcode, handle, kAttErrInvalidAttrValueLen,
+                                       outAttResponse, outAttResponseLength);
+        }
+        connectionGattClientSupportedFeatures_ = value[0];
+        outAttResponse[0] = kAttOpWriteRsp;
+        *outAttResponseLength = 1U;
+        return true;
+      }
 
       const bool isCccdHandle =
           (handle == kHandleGattServiceChangedCccd) ||
@@ -1465,10 +1804,19 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     }
 
     case kAttOpWriteCmd: {
+      emitBleTrace("ATT_RX_WRITE_CMD");
       if (requestLength >= 3U) {
         const uint16_t handle = readLe16(&attRequest[1]);
+        emitAttHandleTrace(handle);
         const uint16_t valueLen = static_cast<uint16_t>(requestLength - 3U);
         const uint8_t* value = (valueLen > 0U) ? &attRequest[3] : nullptr;
+        if (handle == kHandleGattClientSupportedFeaturesValue) {
+          if (valueLen == 1U && value != nullptr) {
+            connectionGattClientSupportedFeatures_ = value[0];
+          }
+          *outAttResponseLength = 0U;
+          return false;
+        }
         const bool isCccdHandle =
             (handle == kHandleGattServiceChangedCccd) ||
             (handle == kHandleBatteryLevelCccd) ||
@@ -1857,9 +2205,6 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpExpectInitiatorIdKey_ = ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
       smpKeySize_ = maxKeySize;
       if (peerRequestedSecureConnections) {
-        if (!ensureSecureConnectionsLocalKeypair()) {
-          return buildSmpPairingFailed(kSmpReasonUnspecified);
-        }
         const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
         if (!secureConnectionsPairAlgorithmSupported(pairAlg)) {
           emitBleTrace("SMP_SC_ALG_UNSUPPORTED");
@@ -1944,8 +2289,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       memset(smpSecureConnectionsReceivedDhKeyCheck_, 0,
              sizeof(smpSecureConnectionsReceivedDhKeyCheck_));
 
-      if (!smpSecureConnectionsLocalKeyReady_ &&
-          !ensureSecureConnectionsLocalKeypair()) {
+      if (!smpSecureConnectionsLocalKeyReady_) {
         smpSecureConnectionsDeferredPublicKey_ = true;
         return false;
       }
@@ -2390,8 +2734,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
             return false;
           }
           smpSecureConnectionsWireFormatBigEndian_ = false;
-          if (!smpSecureConnectionsLocalKeyReady_ &&
-              !ensureSecureConnectionsLocalKeypair()) {
+          if (!smpSecureConnectionsLocalKeyReady_) {
             smpSecureConnectionsDeferredPublicKey_ = true;
             return false;
           }

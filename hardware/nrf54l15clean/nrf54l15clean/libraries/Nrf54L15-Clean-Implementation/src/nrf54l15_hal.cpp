@@ -82,7 +82,8 @@ int32_t pwmIrqNumberForBase(uint32_t base) {
 
 namespace {
 
-constexpr uint32_t kBleSecp256r1CooperateSpinLimit = 0UL;
+constexpr uint32_t kBleSecp256r1BackgroundCooperateSpinLimit = 0UL;
+constexpr uint32_t kBleSecp256r1ForegroundCooperateSpinLimit = 2500UL;
 
 void clearUnownedBleBackgroundGrtcCompares() {
   static constexpr uint8_t kChannels[] = {
@@ -120,13 +121,17 @@ extern "C" void nrf54l15_secp256r1_cooperate_hook(void) {
   if (g_activeBleRadio != nullptr) {
     ++g_activeBleRadio->smpSecureConnectionsCooperateHookCount_;
     g_activeBleRadio->serviceBackgroundConnection(
-        kBleSecp256r1CooperateSpinLimit);
+        g_activeBleRadio->isBackgroundConnectionServiceEnabled()
+            ? kBleSecp256r1BackgroundCooperateSpinLimit
+            : kBleSecp256r1ForegroundCooperateSpinLimit);
   }
   if (g_bleBackgroundRadio != nullptr &&
       g_bleBackgroundRadio != g_activeBleRadio) {
     ++g_bleBackgroundRadio->smpSecureConnectionsCooperateHookCount_;
     g_bleBackgroundRadio->serviceBackgroundConnection(
-        kBleSecp256r1CooperateSpinLimit);
+        g_bleBackgroundRadio->isBackgroundConnectionServiceEnabled()
+            ? kBleSecp256r1BackgroundCooperateSpinLimit
+            : kBleSecp256r1ForegroundCooperateSpinLimit);
   }
 }
 

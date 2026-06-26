@@ -157,6 +157,9 @@ constexpr uint16_t kUuidAppearance = 0x2A01U;
 constexpr uint16_t kUuidPpcp = 0x2A04U;
 constexpr uint16_t kUuidServiceChanged = 0x2A05U;
 constexpr uint16_t kUuidBatteryLevel = 0x2A19U;
+constexpr uint16_t kUuidGattClientSupportedFeatures = 0x2B29U;
+constexpr uint16_t kUuidGattDatabaseHash = 0x2B2AU;
+constexpr uint16_t kUuidGattServerSupportedFeatures = 0x2B3AU;
 
 constexpr uint16_t kHandleGapService = 0x0001U;
 constexpr uint16_t kHandleGapDeviceNameDecl = 0x0002U;
@@ -169,12 +172,19 @@ constexpr uint16_t kHandleGattService = 0x0008U;
 constexpr uint16_t kHandleGattServiceChangedDecl = 0x0009U;
 constexpr uint16_t kHandleGattServiceChangedValue = 0x000AU;
 constexpr uint16_t kHandleGattServiceChangedCccd = 0x000BU;
-constexpr uint16_t kHandleBatteryService = 0x0010U;
-constexpr uint16_t kHandleBatteryLevelDecl = 0x0011U;
-constexpr uint16_t kHandleBatteryLevelValue = 0x0012U;
-constexpr uint16_t kHandleBatteryLevelCccd = 0x0013U;
+constexpr uint16_t kHandleGattClientSupportedFeaturesDecl = 0x000CU;
+constexpr uint16_t kHandleGattClientSupportedFeaturesValue = 0x000DU;
+constexpr uint16_t kHandleGattDatabaseHashDecl = 0x000EU;
+constexpr uint16_t kHandleGattDatabaseHashValue = 0x000FU;
+constexpr uint16_t kHandleGattServerSupportedFeaturesDecl = 0x0010U;
+constexpr uint16_t kHandleGattServerSupportedFeaturesValue = 0x0011U;
+constexpr uint16_t kHandleBatteryService = 0x0018U;
+constexpr uint16_t kHandleBatteryLevelDecl = 0x0019U;
+constexpr uint16_t kHandleBatteryLevelValue = 0x001AU;
+constexpr uint16_t kHandleBatteryLevelCccd = 0x001BU;
 
 constexpr uint8_t kGattCharacteristicPropRead = 0x02U;
+constexpr uint8_t kGattCharacteristicPropWrite = 0x08U;
 constexpr uint8_t kGattCharacteristicPropNotify = 0x10U;
 constexpr uint8_t kGattCharacteristicPropIndicate = 0x20U;
 constexpr uint8_t kBleUuid16Size = 2U;
@@ -261,7 +271,7 @@ uint8_t customCharacteristicDeclarationValueLength(uint8_t uuidLength) {
 
 constexpr BlePrimaryServiceRecord kBlePrimaryServices[] = {
     {kHandleGapService, kHandleGapPpcpValue, kUuidGapService},
-    {kHandleGattService, kHandleGattServiceChangedCccd, kUuidGattService},
+    {kHandleGattService, kHandleGattServerSupportedFeaturesValue, kUuidGattService},
     {kHandleBatteryService, kHandleBatteryLevelCccd, kUuidBatteryService},
 };
 
@@ -274,6 +284,15 @@ constexpr BleCharacteristicRecord kBleCharacteristics[] = {
      kHandleGapPpcpValue, kUuidPpcp},
     {kHandleGattServiceChangedDecl, kGattCharacteristicPropIndicate,
      kHandleGattServiceChangedValue, kUuidServiceChanged},
+    {kHandleGattClientSupportedFeaturesDecl,
+     static_cast<uint8_t>(kGattCharacteristicPropRead |
+                          kGattCharacteristicPropWrite),
+     kHandleGattClientSupportedFeaturesValue,
+     kUuidGattClientSupportedFeatures},
+    {kHandleGattDatabaseHashDecl, kGattCharacteristicPropRead,
+     kHandleGattDatabaseHashValue, kUuidGattDatabaseHash},
+    {kHandleGattServerSupportedFeaturesDecl, kGattCharacteristicPropRead,
+     kHandleGattServerSupportedFeaturesValue, kUuidGattServerSupportedFeatures},
     {kHandleBatteryLevelDecl, static_cast<uint8_t>(kGattCharacteristicPropRead |
                                                    kGattCharacteristicPropNotify),
      kHandleBatteryLevelValue, kUuidBatteryLevel},
@@ -291,6 +310,12 @@ constexpr BleAttributeUuidRecord kBleAttributeUuids[] = {
     {kHandleGattServiceChangedDecl, kUuidCharacteristic},
     {kHandleGattServiceChangedValue, kUuidServiceChanged},
     {kHandleGattServiceChangedCccd, kUuidClientCharacteristicConfig},
+    {kHandleGattClientSupportedFeaturesDecl, kUuidCharacteristic},
+    {kHandleGattClientSupportedFeaturesValue, kUuidGattClientSupportedFeatures},
+    {kHandleGattDatabaseHashDecl, kUuidCharacteristic},
+    {kHandleGattDatabaseHashValue, kUuidGattDatabaseHash},
+    {kHandleGattServerSupportedFeaturesDecl, kUuidCharacteristic},
+    {kHandleGattServerSupportedFeaturesValue, kUuidGattServerSupportedFeatures},
     {kHandleBatteryService, kUuidPrimaryService},
     {kHandleBatteryLevelDecl, kUuidCharacteristic},
     {kHandleBatteryLevelValue, kUuidBatteryLevel},
@@ -988,6 +1013,7 @@ namespace xiao_nrf54l15 {
 
 bool BleRadio::clearPersistentCccdRecord() {
   clearRetainedCccdBondBlob();
+  cccdFlashPersistPending_ = false;
   return clearFlashCccdBondRecord();
 }
 
@@ -1012,9 +1038,17 @@ bool BleRadio::persistBondedCccdState() {
   }
 
   const bool retentionOk = writeRetainedCccdBondRecord(record);
-  const bool flashOk = writeFlashCccdBondRecord(record);
+  bool flashOk = false;
+  if (connected_) {
+    cccdFlashPersistPending_ = true;
+  } else {
+    flashOk = writeFlashCccdBondRecord(record);
+    if (flashOk) {
+      cccdFlashPersistPending_ = false;
+    }
+  }
   if (retentionOk || flashOk) {
-    emitBleTrace("CCCD_SAVED");
+    emitBleTrace(connected_ ? "CCCD_DEFERRED" : "CCCD_SAVED");
   }
   return retentionOk || flashOk;
 }

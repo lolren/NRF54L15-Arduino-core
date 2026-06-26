@@ -902,10 +902,17 @@ constexpr uint8_t kBleConnMicrosPollDivider = 32U;
 constexpr uint32_t kBleConnEventSpinFloor = 450000UL;
 // With fast ramp-up enabled, trigger TXEN ~100 us after RX end so packet start
 // lands near the BLE 150 us inter-frame spacing on strict centrals too.
-constexpr uint32_t kBleConnTxenAfterRxUs = 100U;
+#if !defined(NRF54L15_CLEAN_BLE_CONN_TXEN_AFTER_RX_US)
+#define NRF54L15_CLEAN_BLE_CONN_TXEN_AFTER_RX_US 100U
+#endif
+constexpr uint32_t kBleConnTxenAfterRxUs =
+    static_cast<uint32_t>(NRF54L15_CLEAN_BLE_CONN_TXEN_AFTER_RX_US);
 constexpr uint32_t kBleConnEncRspTxenAfterRxUs = 110U;
 #if !defined(NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US)
-#define NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US 0
+// Snapdragon-based Android centrals reject the first LL_ENC_RSP if it is sent
+// later than the normal connection-control response point. Keep the historical
+// 110 us ENC_RSP target available for override, but default it back to 100 us.
+#define NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US 10
 #endif
 constexpr uint32_t kBleConnEncRspRxEndTimestampCompUs =
     static_cast<uint32_t>(NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US);

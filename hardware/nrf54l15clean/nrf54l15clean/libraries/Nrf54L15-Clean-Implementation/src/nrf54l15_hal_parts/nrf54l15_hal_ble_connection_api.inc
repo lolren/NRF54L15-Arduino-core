@@ -1291,6 +1291,7 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
   waitDisabled(spinLimit);
   connected_ = false;
+  flushDeferredBondStorage();
   connectionRole_ = BleConnectionRole::kNone;
   backgroundConnectionServiceEnabled_ = false;
   backgroundConnectionServiceArmed_ = false;
@@ -1355,6 +1356,7 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
+  connectionGattClientSupportedFeatures_ = 0U;
   latestConnectionRssiDbm_ = 0;
   latestConnectionRssiValid_ = false;
   clearPreparedWriteState();
