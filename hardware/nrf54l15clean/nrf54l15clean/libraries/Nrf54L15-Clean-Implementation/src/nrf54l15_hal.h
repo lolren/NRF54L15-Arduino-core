@@ -2168,6 +2168,20 @@ struct BleEncryptionDebugCounters {
   uint32_t mainStartEncReqSeenDecrypted;
   uint32_t mainEncRspTxOk;
   uint32_t mainStartEncRspTxOk;
+  uint32_t fastEncReqSeen;
+  uint32_t fastEncRspTxOk;
+  uint32_t fastEncRejectNoEnd;
+  uint32_t fastEncRejectBusy;
+  uint32_t fastEncRejectAck;
+  uint32_t fastEncRejectBuild;
+  uint8_t fastEncLastHdr;
+  uint8_t fastEncLastLen;
+  uint8_t fastEncLastNesn;
+  uint8_t fastEncLastSn;
+  uint8_t fastEncLastPeerAcked;
+  uint8_t fastEncLastPacketNew;
+  uint8_t fastEncLastSmpProgressAck;
+  uint8_t reservedFastEnc0;
   // While awaiting LL_START_ENC_REQ, track any LL control PDU observed so we can
   // see what the peer is sending (plain vs encrypted) without spamming Serial.
   uint32_t startPendingControlRxSeen;
@@ -2178,6 +2192,10 @@ struct BleEncryptionDebugCounters {
   // TXEN scheduling lag (relative to the intended target) for LL_ENC_RSP.
   uint32_t encRspTxenLagLastUs;
   uint32_t encRspTxenLagMaxUs;
+  uint8_t encRspLastTxHdr;
+  uint8_t encRspLastTxPlainLen;
+  uint8_t encRspLastTxAirLen;
+  uint8_t encRspLastTxWasFresh;
   // Low-overhead MIC failure diagnostics (kept compact for serial print).
   uint32_t encRxMicFailCount;
   uint32_t encRxShortPduCount;
@@ -2700,6 +2718,7 @@ class BleRadio {
   bool getConnectionTimingSnapshot(BleConnectionTimingSnapshot* snapshot) const;
   void getEncryptionDebugCounters(BleEncryptionDebugCounters* out) const;
   void clearEncryptionDebugCounters();
+  void prefetchConnectionSecurityMaterial(uint32_t spinLimit);
   void getSecureConnectionsDebugState(BleSecureConnectionsDebugState* out) const;
   bool getDisconnectDebug(BleDisconnectDebug* out) const;
   void clearDisconnectDebug();
@@ -3059,7 +3078,6 @@ class BleRadio {
                                          uint8_t* outLength);
   void clearChannelSoundingLlControlState();
   void serviceSecureConnectionsWork();
-  void prefetchConnectionSecurityMaterial(uint32_t spinLimit);
   bool isBondRecordUsable(const BleBondRecord& record) const;
   bool loadBondRecordFromPersistence();
   bool persistBondRecord(const BleBondRecord& record);

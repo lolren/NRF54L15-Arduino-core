@@ -1088,6 +1088,9 @@ class BluefruitCompatManager {
       const bool foregroundConnectionPolling =
           !radio_.isBackgroundConnectionServiceEnabled();
       if (radio_.connectionRole() == BleConnectionRole::kPeripheral) {
+        if (!radio_.isConnectionEncrypted()) {
+          radio_.prefetchConnectionSecurityMaterial(10000UL);
+        }
         if (foregroundConnectionPolling) {
           for (uint8_t i = 0U; i < 2U && radio_.isConnected(); ++i) {
             BleConnectionEvent event{};
@@ -6706,4 +6709,104 @@ BLEConnection* AdafruitBluefruit::Connection(uint16_t conn_hdl) {
     return nullptr;
   }
   return manager().connection();
+}
+
+void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {
+  xiao_nrf54l15::BleEncryptionDebugCounters c{};
+  manager().radio().getEncryptionDebugCounters(&c);
+  out.print("ENCDBG encReq=");
+  out.print(c.mainEncReqSeen);
+  out.print(" encRspTxOk=");
+  out.print(c.mainEncRspTxOk);
+  out.print(" fastSeen=");
+  out.print(c.fastEncReqSeen);
+  out.print(" fastTxOk=");
+  out.print(c.fastEncRspTxOk);
+  out.print(" fastNoEnd=");
+  out.print(c.fastEncRejectNoEnd);
+  out.print(" fastBusy=");
+  out.print(c.fastEncRejectBusy);
+  out.print(" fastAck=");
+  out.print(c.fastEncRejectAck);
+  out.print(" fastBuild=");
+  out.print(c.fastEncRejectBuild);
+  out.print(" fastHdr=0x");
+  if (c.fastEncLastHdr < 16U) {
+    out.print('0');
+  }
+  out.print(c.fastEncLastHdr, HEX);
+  out.print(" fastLen=");
+  out.print(c.fastEncLastLen);
+  out.print(" fastNesn=");
+  out.print(c.fastEncLastNesn);
+  out.print(" fastSn=");
+  out.print(c.fastEncLastSn);
+  out.print(" fastPeerAck=");
+  out.print(c.fastEncLastPeerAcked);
+  out.print(" fastNew=");
+  out.print(c.fastEncLastPacketNew);
+  out.print(" fastSmpAck=");
+  out.print(c.fastEncLastSmpProgressAck);
+  out.print(" startReq=");
+  out.print(c.mainStartEncReqSeen);
+  out.print(" startReqDec=");
+  out.print(c.mainStartEncReqSeenDecrypted);
+  out.print(" followSeen=");
+  out.print(c.followupEndSeen);
+  out.print(" followTimeout=");
+  out.print(c.connFollowupRxTimeoutCount);
+  out.print(" txTimeout=");
+  out.print(c.connTxTimeoutCount);
+  out.print(" encRspLag=");
+  out.print(c.encRspTxenLagLastUs);
+  out.print(" encRspLagMax=");
+  out.print(c.encRspTxenLagMaxUs);
+  out.print(" followBudget=");
+  out.print(c.connLastFollowupListenBudgetUs);
+  out.print(" encRspHdr=0x");
+  if (c.encRspLastTxHdr < 16U) {
+    out.print('0');
+  }
+  out.print(c.encRspLastTxHdr, HEX);
+  out.print(" encRspPlainLen=");
+  out.print(c.encRspLastTxPlainLen);
+  out.print(" encRspAirLen=");
+  out.print(c.encRspLastTxAirLen);
+  out.print(" encRspFresh=");
+  out.print(c.encRspLastTxWasFresh);
+  out.print(" txHdr=0x");
+  if (c.encLastTxHdr < 16U) {
+    out.print('0');
+  }
+  out.print(c.encLastTxHdr, HEX);
+  out.print(" txPlainLen=");
+  out.print(c.encLastTxPlainLen);
+  out.print(" txAirLen=");
+  out.print(c.encLastTxAirLen);
+  out.print(" prefetchUse=");
+  out.print(c.encRandomPrefetchUseCount);
+  out.print(" prefetchFill=");
+  out.print(c.encRandomPrefetchFillCount);
+  out.print(" hwRnd=");
+  out.print(c.encRandomHardwareCount);
+  out.print(" fbRnd=");
+  out.print(c.encRandomFallbackCount);
+  auto printHexBytes = [&](const char* label, const uint8_t* data,
+                           size_t len) {
+    out.print(' ');
+    out.print(label);
+    out.print('=');
+    for (size_t i = 0; i < len; ++i) {
+      if (data[i] < 16U) {
+        out.print('0');
+      }
+      out.print(data[i], HEX);
+    }
+  };
+  printHexBytes("skdm", c.encLastSkdm, sizeof(c.encLastSkdm));
+  printHexBytes("ivm", c.encLastIvm, sizeof(c.encLastIvm));
+  printHexBytes("skds", c.encLastSkds, sizeof(c.encLastSkds));
+  printHexBytes("ivs", c.encLastIvs, sizeof(c.encLastIvs));
+  printHexBytes("stk", c.encLastStk, sizeof(c.encLastStk));
+  out.println();
 }

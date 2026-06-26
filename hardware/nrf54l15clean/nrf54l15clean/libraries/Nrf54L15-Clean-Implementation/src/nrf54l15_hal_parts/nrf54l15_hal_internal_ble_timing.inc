@@ -903,6 +903,7 @@ constexpr uint32_t kBleConnEventSpinFloor = 450000UL;
 // With fast ramp-up enabled, trigger TXEN ~100 us after RX end so packet start
 // lands near the BLE 150 us inter-frame spacing on strict centrals too.
 constexpr uint32_t kBleConnTxenAfterRxUs = 100U;
+constexpr uint32_t kBleConnEncRspTxenAfterRxUs = 110U;
 // SCAN_RSP T_IFS: advertising path has only a few microseconds of software
 // work between rxEndUs capture and the TXEN wait, so target 100 us here to
 // land the actual over-the-air preamble near the BLE 150 us inter-frame space

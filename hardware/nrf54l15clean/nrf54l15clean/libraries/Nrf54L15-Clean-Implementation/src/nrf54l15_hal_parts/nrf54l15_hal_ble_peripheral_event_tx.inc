@@ -763,8 +763,10 @@
   }
   const uint32_t codedRxEndAdjustUs =
       ((connectionCurrentRxPhy_ & kBlePhyCoded) != 0U) ? 256U : 0U;
+  const uint32_t txTurnaroundUs =
+      txIsEncRspPlain ? kBleConnEncRspTxenAfterRxUs : kBleConnTxenAfterRxUs;
   const uint32_t txTriggerTargetUs =
-      rxEndTimestampUs + codedRxEndAdjustUs + kBleConnTxenAfterRxUs;
+      rxEndTimestampUs + codedRxEndAdjustUs + txTurnaroundUs;
   const uint32_t txTriggerArmUs = bleTimingUs();
   const uint32_t txLagUs =
       timeReachedUs(txTriggerArmUs, txTriggerTargetUs)
@@ -783,6 +785,11 @@
     if (txLagUs > encDebug_.encRspTxenLagMaxUs) {
       encDebug_.encRspTxenLagMaxUs = txLagUs;
     }
+    emitBleTrace(doPostTxRxTurnaround ? "LL_ENC_RSP_TX_FOLLOW"
+                                      : "LL_ENC_RSP_TX");
+  } else if (txIsStartEncRspPlain) {
+    emitBleTrace(encryptCurrentTx ? "LL_START_ENC_RSP_TX_ENC"
+                                  : "LL_START_ENC_RSP_TX_PLAIN");
   }
   bleTriggerTxAtTargetUsCritical(radio_, txTriggerTargetUs);
   // Keep ENC_RSP timing deterministic while ensuring encrypted follow-up PDUs
@@ -848,6 +855,11 @@
   }
   if (!txOk) {
     ++encDebug_.connTxTimeoutCount;
+    if (txIsEncRspPlain) {
+      emitBleTrace("LL_ENC_RSP_TX_TIMEOUT");
+    } else if (txIsStartEncRspPlain) {
+      emitBleTrace("LL_START_ENC_RSP_TX_TIMEOUT");
+    }
     emitBleTrace("EVT_TX_TIMEOUT");
   }
 
@@ -857,6 +869,11 @@
     const uint8_t opcode = connectionLastTxPlainPayload_[0];
     if (opcode == kBleLlCtrlEncRsp) {
       ++encDebug_.mainEncRspTxOk;
+      encDebug_.encRspLastTxHdr = txPacket_[0];
+      encDebug_.encRspLastTxPlainLen = txLength;
+      encDebug_.encRspLastTxAirLen = txLengthOnAir;
+      encDebug_.encRspLastTxWasFresh = txPayloadIsNewPlain ? 1U : 0U;
+      emitBleTrace("LL_ENC_RSP_TX_OK");
     } else if (opcode == kBleLlCtrlStartEncReq) {
       connectionEncStartReqTxPending_ = false;
       connectionEncAwaitingStartRsp_ = true;
@@ -986,6 +1003,11 @@
       }
       if (!followEndSeenWithGrace) {
         ++encDebug_.connFollowupRxTimeoutCount;
+        if (txIsEncRspPlain) {
+          emitBleTrace("LL_ENC_RSP_FOLLOW_TIMEOUT");
+        } else if (txIsStartEncRspPlain) {
+          emitBleTrace("LL_START_ENC_RSP_FOLLOW_TIMEOUT");
+        }
         radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
         waitRadioDisabledBudgeted(radio_, kBleConnDisableWaitUs, spinLimit / 2U + 1U);
         radio_->SHORTS = 0U;
