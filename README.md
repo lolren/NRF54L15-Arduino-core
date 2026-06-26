@@ -351,3 +351,9 @@ This core would not have been possible without the invaluable help of:
 - **[lyusupov](https://github.com/lyusupov)** — Deep technical contributions, critical bug fixes, and ongoing collaboration that pushed this project forward.
 
 Thank you both for your time, expertise, and dedication. ❤️
+
+## Adafruit Attribution
+
+[![Adafruit](https://img.shields.io/badge/Adafruit-Open%20Source%20Examples-000000?logo=adafruit&logoColor=white)](https://www.adafruit.com/)
+
+Some bundled Bluefruit52Lib examples, HID sketches, TinyUSB compatibility code, and SPIFlash-compatible APIs preserve Adafruit open-source example text, naming, and API compatibility. The Adafruit name and logo are shown here to acknowledge that origin and to make clear why Adafruit attribution appears in redistributed example sketches.
