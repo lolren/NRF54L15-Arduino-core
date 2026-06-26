@@ -1197,6 +1197,8 @@ class AdafruitBluefruit {
   void setRssiCallback(void (*fp)(uint16_t conn_hdl, int8_t rssi));
   BLEConnection* Connection(uint16_t conn_hdl);
   void debugPrintEncryptionCounters(Stream& out);
+  void debugPrintDisconnectDebug(Stream& out);
+  void debugPrintSecureConnectionsState(Stream& out);
 
  private:
   char device_name_[CFG_MAX_DEVNAME_LEN + 1];

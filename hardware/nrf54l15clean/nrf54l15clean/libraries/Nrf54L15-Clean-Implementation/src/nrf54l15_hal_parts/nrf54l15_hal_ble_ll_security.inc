@@ -501,6 +501,11 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         connectionEncPrecomputedStartRspValid_ = false;
         connectionEncPrecomputedStartRspTxValid_ = false;
         emitBleTrace("LL_START_ENC_RSP_RX");
+        if (connectionRole_ == BleConnectionRole::kPeripheral) {
+          outPayload[0] = kBleLlCtrlStartEncRsp;
+          *outLength = 1U;
+          return true;
+        }
       }
       return false;
 
@@ -1711,6 +1716,10 @@ void BleRadio::clearSmpPairingState() {
   smpSecureConnectionsBackgroundServiceCount_ = 0U;
   memset(smpSecureConnectionsPeerPublicKey_, 0,
          sizeof(smpSecureConnectionsPeerPublicKey_));
+  smpSecureConnectionsLastPublicKeyDecodeFailed_ = false;
+  smpSecureConnectionsLastPublicKeyDecodeLength_ = 0U;
+  memset(smpSecureConnectionsLastPublicKeyWire_, 0,
+         sizeof(smpSecureConnectionsLastPublicKeyWire_));
   memset(smpSecureConnectionsDhKey_, 0, sizeof(smpSecureConnectionsDhKey_));
   memset(smpSecureConnectionsMacKey_, 0,
          sizeof(smpSecureConnectionsMacKey_));
@@ -1772,6 +1781,7 @@ void BleRadio::clearConnectionSecurityState() {
       smpSecureConnectionsDeferredConfirm_ ||
       smpSecureConnectionsDeferredRandom_ ||
       smpSecureConnectionsDeferredDhKeyCheck_ ||
+      smpSecureConnectionsLastPublicKeyDecodeFailed_ ||
       (smpPairingState_ != kSmpPairingStateIdle);
   if (captureScState) {
     latchSecureConnectionsDebugState();

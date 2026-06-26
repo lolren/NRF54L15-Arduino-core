@@ -26,9 +26,15 @@
     }
     if (connectionEncStartReqPending_) {
       ++encDebug_.startPendingControlRxSeen;
+      encDebug_.startPendingLastEventCounter = currentEventCounter;
+      encDebug_.startPendingLastDataChannel = dataChannel;
+      encDebug_.startPendingLastPacketNew = packetIsNew ? 1U : 0U;
+      encDebug_.startPendingLastPeerAcked = peerAckedLastTx ? 1U : 0U;
       encDebug_.startPendingLastHdr = hdr0;
       encDebug_.startPendingLastLenRaw = rxLengthRaw;
       encDebug_.startPendingLastByte0 = opcode;
+      encDebug_.startPendingLastByte1 =
+          (rxLength >= 2U) ? rxPacket_[3] : 0U;
       encDebug_.startPendingLastDecrypted = rxWasDecrypted ? 1U : 0U;
     }
 
@@ -601,8 +607,14 @@
       (readLe16(&txPlainPayloadForCurrentTx[2]) == kBleL2capCidSmp);
 
   const bool sessionEncryptionActive = connectionEncTxEnabled_ && connectionEncSessionValid_;
-  const bool encryptCurrentTx = sessionEncryptionActive &&
-                                (txCanUseFreshPayload || connectionLastTxWasEncrypted_);
+  const bool encryptStartEncRspTransition =
+      connectionEncSessionValid_ &&
+      txIsStartEncRspPlain &&
+      connectionEncEnableTxOnNextEvent_;
+  const bool encryptCurrentTx = !txIsEmptyAckPlain &&
+                                (sessionEncryptionActive ||
+                                 encryptStartEncRspTransition) &&
+                                (txPayloadIsNewPlain || connectionLastTxWasEncrypted_);
   uint8_t txLengthOnAir = txLength;
   uint64_t txCounterUsedForCurrentTx = 0ULL;
   bool txCounterUsedValid = false;
@@ -624,23 +636,18 @@
     if (encryptCurrentTx) {
       uint8_t encryptedLength = 0U;
       bool encryptedOk = false;
+      if (encryptStartEncRspTransition) {
+        connectionEncTxEnabled_ = true;
+        connectionEncEnableTxOnNextEvent_ = false;
+      }
       // `connectionEncTxCounter_` tracks the next TX packet counter to use.
-      // Every fresh encrypted data-channel PDU (including zero-length/MIC-only)
-      // consumes one counter value. Retransmissions reuse the cached ciphertext.
+      // Fresh encrypted non-empty data-channel PDUs consume one counter value.
+      // Retransmissions reuse the cached ciphertext.
       uint64_t txCounterToUse = connectionEncTxCounter_;
       if (txCanUseFreshPayload &&
-          (txLlid == 0x01U) &&
-          (txLength == 0U) &&
-          connectionEncPrecomputedEmptyValid_ &&
-          (connectionEncPrecomputedCounter_ == txCounterToUse)) {
-        encryptedLength = kBleMicLen;
-        memcpy(connectionLastTxEncryptedPayload_, connectionEncPrecomputedPayload_,
-               kBleMicLen);
-        encryptedOk = true;
-      } else if (txCanUseFreshPayload &&
-                 txIsStartEncRspPlain &&
-                 connectionEncPrecomputedStartRspTxValid_ &&
-                 (connectionEncPrecomputedStartRspTxCounter_ == txCounterToUse)) {
+          txIsStartEncRspPlain &&
+          connectionEncPrecomputedStartRspTxValid_ &&
+          (connectionEncPrecomputedStartRspTxCounter_ == txCounterToUse)) {
         encryptedLength = static_cast<uint8_t>(1U + kBleMicLen);
         memcpy(connectionLastTxEncryptedPayload_, connectionEncPrecomputedStartRspTx_,
                encryptedLength);
@@ -654,6 +661,9 @@
       }
 
       if (!encryptedOk) {
+        if (encryptStartEncRspTransition) {
+          connectionEncTxEnabled_ = false;
+        }
         txLengthOnAir = 0U;
         txPacket_[1] = 0U;
         connectionLastTxWasEncrypted_ = false;
@@ -765,8 +775,10 @@
       ((connectionCurrentRxPhy_ & kBlePhyCoded) != 0U) ? 256U : 0U;
   const uint32_t txTurnaroundUs =
       txIsEncRspPlain ? kBleConnEncRspTxenAfterRxUs : kBleConnTxenAfterRxUs;
+  const uint32_t txRxEndCompUs =
+      txIsEncRspPlain ? kBleConnEncRspRxEndTimestampCompUs : 0U;
   const uint32_t txTriggerTargetUs =
-      rxEndTimestampUs + codedRxEndAdjustUs + txTurnaroundUs;
+      rxEndTimestampUs + codedRxEndAdjustUs + txTurnaroundUs - txRxEndCompUs;
   const uint32_t txTriggerArmUs = bleTimingUs();
   const uint32_t txLagUs =
       timeReachedUs(txTriggerArmUs, txTriggerTargetUs)
@@ -869,6 +881,7 @@
     const uint8_t opcode = connectionLastTxPlainPayload_[0];
     if (opcode == kBleLlCtrlEncRsp) {
       ++encDebug_.mainEncRspTxOk;
+      armConnectionResyncWindow(kBleConnResyncExtraListenUs, 16U);
       encDebug_.encRspLastTxHdr = txPacket_[0];
       encDebug_.encRspLastTxPlainLen = txLength;
       encDebug_.encRspLastTxAirLen = txLengthOnAir;
@@ -1040,40 +1053,24 @@
             (txFollowLlid == kBlePduLlControl) &&
             (txFollowLength >= 1U) &&
             (connectionTxPayload_[0] == kBleLlCtrlStartEncRsp);
-        const bool txFollowIsEmptyAck =
-            (txFollowLlid == 0x01U) &&
-            (txFollowLength == 0U);
         const bool encryptFollowStartEncRsp =
             connectionEncSessionValid_ &&
             txFollowIsStartEncRspPlain &&
-            connectionEncEnableTxOnNextEvent_;
-        const bool encryptFollowEmptyAck =
-            connectionEncSessionValid_ &&
-            connectionEncTxEnabled_ &&
-            txFollowIsEmptyAck;
-        if (encryptFollowStartEncRsp || encryptFollowEmptyAck) {
+            (connectionEncEnableTxOnNextEvent_ || connectionEncTxEnabled_);
+        if (encryptFollowStartEncRsp) {
           uint8_t encryptedLength = 0U;
           followTxCounter = connectionEncTxCounter_;
           if (encryptFollowStartEncRsp) {
             connectionEncTxEnabled_ = true;
             connectionEncEnableTxOnNextEvent_ = false;
           }
-          if (encryptFollowEmptyAck &&
-              connectionEncPrecomputedEmptyValid_ &&
-              (connectionEncPrecomputedCounter_ == followTxCounter)) {
-            encryptedLength = kBleMicLen;
-            memcpy(connectionLastTxEncryptedPayload_, connectionEncPrecomputedPayload_,
-                   kBleMicLen);
-            encryptFollowTx = true;
-          } else {
-            encryptFollowTx =
-                bleCcmEncryptPayload(connectionEncSessionKey_, connectionEncIv_,
-                                     followTxCounter, connectionEncTxDirection_,
-                                     txPacket_[0], connectionTxPayload_,
-                                     txFollowLength,
-                                     connectionLastTxEncryptedPayload_,
-                                     &encryptedLength);
-          }
+          encryptFollowTx =
+              bleCcmEncryptPayload(connectionEncSessionKey_, connectionEncIv_,
+                                   followTxCounter, connectionEncTxDirection_,
+                                   txPacket_[0], connectionTxPayload_,
+                                   txFollowLength,
+                                   connectionLastTxEncryptedPayload_,
+                                   &encryptedLength);
           if (!encryptFollowTx) {
             if (encryptFollowStartEncRsp) {
               connectionEncTxEnabled_ = false;
@@ -1403,11 +1400,20 @@
           peerTerminateErrorCode = rxPacket_[3];
         }
 
-        if (packetIsNewFollow && !terminateInd &&
+        const bool followStartEncReq =
+            packetIsNewFollow && !terminateInd &&
             (llidFollow == kBlePduLlControl) &&
             (rxLengthFollow >= 1U) &&
-            (rxPacket_[2] == kBleLlCtrlStartEncReq)) {
-          ++encDebug_.followupStartEncReqSeen;
+            (rxPacket_[2] == kBleLlCtrlStartEncReq);
+        const bool followStartEncRsp =
+            packetIsNewFollow && !terminateInd &&
+            (llidFollow == kBlePduLlControl) &&
+            (rxLengthFollow >= 1U) &&
+            (rxPacket_[2] == kBleLlCtrlStartEncRsp);
+        if (followStartEncReq || followStartEncRsp) {
+          if (followStartEncReq) {
+            ++encDebug_.followupStartEncReqSeen;
+          }
           uint8_t responseLength = 0U;
           bool followTerminate = false;
           if (buildLlControlResponse(&rxPacket_[2], rxLengthFollow,
@@ -1423,7 +1429,8 @@
             }
           }
 
-          // We handled LL_START_ENC_REQ; don't keep listening in this event.
+          // We handled a start-encryption control PDU; don't keep listening in
+          // this event.
           break;
         }
 

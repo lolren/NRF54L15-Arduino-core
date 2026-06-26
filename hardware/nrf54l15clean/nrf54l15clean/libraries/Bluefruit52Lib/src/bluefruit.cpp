@@ -6722,6 +6722,14 @@ void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {
   out.print(c.fastEncReqSeen);
   out.print(" fastTxOk=");
   out.print(c.fastEncRspTxOk);
+  out.print(" firstTry=");
+  out.print(c.fastEncRspFirstTry);
+  out.print(" firstOk=");
+  out.print(c.fastEncRspFirstTxOk);
+  out.print(" retxTry=");
+  out.print(c.fastEncRspRetxTry);
+  out.print(" retxOk=");
+  out.print(c.fastEncRspRetxTxOk);
   out.print(" fastNoEnd=");
   out.print(c.fastEncRejectNoEnd);
   out.print(" fastBusy=");
@@ -6747,10 +6755,60 @@ void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {
   out.print(c.fastEncLastPacketNew);
   out.print(" fastSmpAck=");
   out.print(c.fastEncLastSmpProgressAck);
+  out.print(" firstHdr=0x");
+  if (c.fastEncFirstTxHdr < 16U) {
+    out.print('0');
+  }
+  out.print(c.fastEncFirstTxHdr, HEX);
+  out.print(" firstLag=");
+  out.print(c.fastEncFirstLagUs);
+  out.print(" firstComp=");
+  out.print(c.fastEncFirstCompUs);
+  out.print(" firstRxEnd=");
+  out.print(c.fastEncFirstRxEndUs);
+  out.print(" firstTarget=");
+  out.print(c.fastEncFirstTargetUs);
+  out.print(" firstArm=");
+  out.print(c.fastEncFirstArmUs);
+  out.print(" firstPeerAck=");
+  out.print(c.fastEncFirstPeerAcked);
+  out.print(" firstNew=");
+  out.print(c.fastEncFirstPacketNew);
+  out.print(" firstSmpAck=");
+  out.print(c.fastEncFirstSmpProgressAck);
   out.print(" startReq=");
   out.print(c.mainStartEncReqSeen);
   out.print(" startReqDec=");
   out.print(c.mainStartEncReqSeenDecrypted);
+  out.print(" startPendCtl=");
+  out.print(c.startPendingControlRxSeen);
+  out.print(" startPendEvt=");
+  out.print(c.startPendingLastEventCounter);
+  out.print(" startPendCh=");
+  out.print(c.startPendingLastDataChannel);
+  out.print(" startPendHdr=0x");
+  if (c.startPendingLastHdr < 16U) {
+    out.print('0');
+  }
+  out.print(c.startPendingLastHdr, HEX);
+  out.print(" startPendLen=");
+  out.print(c.startPendingLastLenRaw);
+  out.print(" startPendOp=0x");
+  if (c.startPendingLastByte0 < 16U) {
+    out.print('0');
+  }
+  out.print(c.startPendingLastByte0, HEX);
+  out.print(" startPendB1=0x");
+  if (c.startPendingLastByte1 < 16U) {
+    out.print('0');
+  }
+  out.print(c.startPendingLastByte1, HEX);
+  out.print(" startPendNew=");
+  out.print(c.startPendingLastPacketNew);
+  out.print(" startPendAck=");
+  out.print(c.startPendingLastPeerAcked);
+  out.print(" startPendDec=");
+  out.print(c.startPendingLastDecrypted);
   out.print(" followSeen=");
   out.print(c.followupEndSeen);
   out.print(" followTimeout=");
@@ -6783,6 +6841,26 @@ void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {
   out.print(c.encLastTxPlainLen);
   out.print(" txAirLen=");
   out.print(c.encLastTxAirLen);
+  out.print(" micFail=");
+  out.print(c.encRxMicFailCount);
+  out.print(" shortRx=");
+  out.print(c.encRxShortPduCount);
+  out.print(" clr=");
+  out.print(c.encClearCount);
+  out.print(" clrReason=0x");
+  if (c.encLastClearReason < 16U) {
+    out.print('0');
+  }
+  out.print(c.encLastClearReason, HEX);
+  out.print(" disc=0x");
+  if (c.connLastDisconnectReason < 16U) {
+    out.print('0');
+  }
+  out.print(c.connLastDisconnectReason, HEX);
+  out.print(" discRemote=");
+  out.print(c.connLastDisconnectRemote);
+  out.print(" discValid=");
+  out.print(c.connLastDisconnectValid);
   out.print(" prefetchUse=");
   out.print(c.encRandomPrefetchUseCount);
   out.print(" prefetchFill=");
@@ -6808,5 +6886,147 @@ void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {
   printHexBytes("skds", c.encLastSkds, sizeof(c.encLastSkds));
   printHexBytes("ivs", c.encLastIvs, sizeof(c.encLastIvs));
   printHexBytes("stk", c.encLastStk, sizeof(c.encLastStk));
+  out.println();
+}
+
+void AdafruitBluefruit::debugPrintDisconnectDebug(Stream& out) {
+  xiao_nrf54l15::BleDisconnectDebug d{};
+  if (!manager().radio().getDisconnectDebug(&d)) {
+    out.println("DISCDBG valid=0");
+    return;
+  }
+
+  auto printHex8 = [&](const char* label, uint8_t value) {
+    out.print(' ');
+    out.print(label);
+    out.print("=0x");
+    if (value < 16U) {
+      out.print('0');
+    }
+    out.print(value, HEX);
+  };
+
+  out.print("DISCDBG valid=");
+  out.print(d.valid);
+  out.print(" seq=");
+  out.print(d.sequence);
+  out.print(" reason=");
+  out.print(d.reason);
+  out.print(" role=");
+  out.print(d.role);
+  printHex8("err", d.errorCode);
+  out.print(" evt=");
+  out.print(d.eventCounter);
+  out.print(" missed=");
+  out.print(d.missedEventCount);
+  out.print(" nextUs=");
+  out.print(d.nextEventUs);
+  out.print(" expRxSn=");
+  out.print(d.expectedRxSn);
+  out.print(" txSn=");
+  out.print(d.txSn);
+  out.print(" fresh=");
+  out.print(d.freshTxAllowed);
+  out.print(" hist=");
+  out.print(d.txHistoryValid);
+  out.print(" pend=");
+  out.print(d.pendingTxValid);
+  out.print(" pendLlid=");
+  out.print(d.pendingTxLlid);
+  out.print(" pendLen=");
+  out.print(d.pendingTxLength);
+  out.print(" lastTxLlid=");
+  out.print(d.lastTxLlid);
+  out.print(" lastTxLen=");
+  out.print(d.lastTxLength);
+  printHex8("lastTxOp", d.lastTxOpcode);
+  out.print(" lastRxLlid=");
+  out.print(d.lastRxLlid);
+  out.print(" lastRxLen=");
+  out.print(d.lastRxLength);
+  printHex8("lastRxOp", d.lastRxOpcode);
+  out.print(" lastRxNesn=");
+  out.print(d.lastRxNesn);
+  out.print(" lastRxSn=");
+  out.print(d.lastRxSn);
+  out.print(" lastNew=");
+  out.print(d.lastPacketIsNew);
+  out.print(" lastAck=");
+  out.print(d.lastPeerAckedLastTx);
+  out.println();
+}
+
+void AdafruitBluefruit::debugPrintSecureConnectionsState(Stream& out) {
+  xiao_nrf54l15::BleSecureConnectionsDebugState s{};
+  manager().radio().getSecureConnectionsDebugState(&s);
+  out.print("SCDBG valid=");
+  out.print(s.valid);
+  out.print(" active=");
+  out.print(s.active);
+  out.print(" state=");
+  out.print(s.pairingState);
+  out.print(" init=");
+  out.print(s.localInitiator);
+  out.print(" wireBE=");
+  out.print(s.wireFormatBigEndian);
+  out.print(" peerPk=");
+  out.print(s.peerPublicKeyValid);
+  out.print(" pkSent=");
+  out.print(s.publicKeySent);
+  out.print(" confSent=");
+  out.print(s.confirmSent);
+  out.print(" randSent=");
+  out.print(s.randomSent);
+  out.print(" dhReady=");
+  out.print(s.dhKeyReady);
+  out.print(" chkReady=");
+  out.print(s.checkValuesReady);
+  out.print(" dhSent=");
+  out.print(s.dhKeyCheckSent);
+  out.print(" dhRx=");
+  out.print(s.receivedDhKeyCheckValid);
+  out.print(" defPk=");
+  out.print(s.deferredPublicKey);
+  out.print(" defConf=");
+  out.print(s.deferredConfirm);
+  out.print(" defRand=");
+  out.print(s.deferredRandom);
+  out.print(" defDh=");
+  out.print(s.deferredDhKeyCheck);
+  out.print(" pkFail=");
+  out.print(s.lastPublicKeyDecodeFailed);
+  out.print(" pkLen=");
+  out.print(s.lastPublicKeyDecodeLength);
+  out.print(" keyUs=");
+  out.print(s.localKeypairTimeUs);
+  out.print(" dhUs=");
+  out.print(s.dhKeyTimeUs);
+  out.print(" chkUs=");
+  out.print(s.checkValuesTimeUs);
+  out.print(" coop=");
+  out.print(s.cooperateHookCount);
+  out.print(" bg=");
+  out.print(s.backgroundServiceCount);
+  auto printHexBytes = [&](const char* label, const uint8_t* data,
+                           size_t len) {
+    out.print(' ');
+    out.print(label);
+    out.print('=');
+    for (size_t i = 0; i < len; ++i) {
+      if (data[i] < 16U) {
+        out.print('0');
+      }
+      out.print(data[i], HEX);
+    }
+  };
+  printHexBytes("localX", s.localPublicKeyX, sizeof(s.localPublicKeyX));
+  printHexBytes("peerX", s.peerPublicKeyX, sizeof(s.peerPublicKeyX));
+  size_t pkLen = s.lastPublicKeyDecodeLength;
+  if (pkLen > sizeof(s.lastPublicKeyWire)) {
+    pkLen = sizeof(s.lastPublicKeyWire);
+  }
+  if (pkLen > 0U) {
+    printHexBytes("lastPk", s.lastPublicKeyWire, pkLen);
+  }
   out.println();
 }

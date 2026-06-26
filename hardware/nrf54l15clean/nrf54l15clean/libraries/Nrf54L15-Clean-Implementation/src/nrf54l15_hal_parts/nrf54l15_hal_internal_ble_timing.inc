@@ -904,6 +904,11 @@ constexpr uint32_t kBleConnEventSpinFloor = 450000UL;
 // lands near the BLE 150 us inter-frame spacing on strict centrals too.
 constexpr uint32_t kBleConnTxenAfterRxUs = 100U;
 constexpr uint32_t kBleConnEncRspTxenAfterRxUs = 110U;
+#if !defined(NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US)
+#define NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US 0
+#endif
+constexpr uint32_t kBleConnEncRspRxEndTimestampCompUs =
+    static_cast<uint32_t>(NRF54L15_CLEAN_BLE_ENCRSP_RXEND_COMP_US);
 // SCAN_RSP T_IFS: advertising path has only a few microseconds of software
 // work between rxEndUs capture and the TXEN wait, so target 100 us here to
 // land the actual over-the-air preamble near the BLE 150 us inter-frame space

@@ -18,6 +18,10 @@ BLEHidAdafruit blehid;
 
 #define MOVE_STEP    10
 
+void connect_callback(uint16_t conn_handle);
+bool pairing_passkey_callback(uint16_t conn_handle, uint8_t const passkey[6],
+                              bool match_request);
+
 void setup() 
 {
   Serial.begin(115200);
@@ -37,8 +41,11 @@ void setup()
   Serial.println("- 'X'     to release mouse button(s)");
 
   Bluefruit.begin();
+  Bluefruit.Security.setIOCaps(true, true, false);
+  Bluefruit.Security.setPairPasskeyCallback(pairing_passkey_callback);
   // HID Device can have a min connection interval of 9*1.25 = 11.25 ms
   Bluefruit.Periph.setConnInterval(9, 16); // min = 9*1.25=11.25 ms, max = 16*1.25=20ms
+  Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
 
   // Configure and Start Device Information Service
@@ -143,6 +150,30 @@ void loop()
       default: break;
     }
   }
+}
+
+void connect_callback(uint16_t conn_handle)
+{
+  (void) conn_handle;
+  Bluefruit.Security.requestPairing();
+}
+
+bool pairing_passkey_callback(uint16_t conn_handle, uint8_t const passkey[6],
+                              bool match_request)
+{
+  (void) conn_handle;
+
+  Serial.print("Pairing passkey: ");
+  for (uint8_t i = 0; i < 6; ++i) {
+    Serial.write(passkey[i]);
+  }
+  if (match_request) {
+    Serial.println(" - confirm this value on the central");
+  } else {
+    Serial.println();
+  }
+
+  return true;
 }
 
 void set_protocol_mode(uint16_t conn_handle, uint8_t mode)

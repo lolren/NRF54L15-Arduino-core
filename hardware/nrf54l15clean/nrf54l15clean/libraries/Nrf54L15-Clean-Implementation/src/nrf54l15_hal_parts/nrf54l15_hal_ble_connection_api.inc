@@ -663,6 +663,12 @@ void BleRadio::captureSecureConnectionsDebugState(
          sizeof(out->localPublicKeyX));
   memcpy(out->peerPublicKeyX, &smpSecureConnectionsPeerPublicKey_[1],
          sizeof(out->peerPublicKeyX));
+  out->lastPublicKeyDecodeFailed =
+      smpSecureConnectionsLastPublicKeyDecodeFailed_ ? 1U : 0U;
+  out->lastPublicKeyDecodeLength =
+      smpSecureConnectionsLastPublicKeyDecodeLength_;
+  memcpy(out->lastPublicKeyWire, smpSecureConnectionsLastPublicKeyWire_,
+         sizeof(out->lastPublicKeyWire));
   out->localKeypairTimeUs = smpSecureConnectionsLocalKeypairTimeUs_;
   out->dhKeyTimeUs = smpSecureConnectionsDhKeyTimeUs_;
   out->checkValuesTimeUs = smpSecureConnectionsCheckValuesTimeUs_;
@@ -696,6 +702,7 @@ void BleRadio::getSecureConnectionsDebugState(
       smpSecureConnectionsLocalConfirmReady_ ||
       smpSecureConnectionsConfirmSent_ ||
       smpSecureConnectionsRandomSent_ ||
+      smpSecureConnectionsLastPublicKeyDecodeFailed_ ||
       (smpPairingState_ != 0U);
   *out = useCurrent ? current : lastSecureConnectionsDebugState_;
   bleExitCritical(irqState);

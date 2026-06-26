@@ -2170,6 +2170,10 @@ struct BleEncryptionDebugCounters {
   uint32_t mainStartEncRspTxOk;
   uint32_t fastEncReqSeen;
   uint32_t fastEncRspTxOk;
+  uint32_t fastEncRspFirstTry;
+  uint32_t fastEncRspFirstTxOk;
+  uint32_t fastEncRspRetxTry;
+  uint32_t fastEncRspRetxTxOk;
   uint32_t fastEncRejectNoEnd;
   uint32_t fastEncRejectBusy;
   uint32_t fastEncRejectAck;
@@ -2182,12 +2186,26 @@ struct BleEncryptionDebugCounters {
   uint8_t fastEncLastPacketNew;
   uint8_t fastEncLastSmpProgressAck;
   uint8_t reservedFastEnc0;
+  uint32_t fastEncFirstRxEndUs;
+  uint32_t fastEncFirstTargetUs;
+  uint32_t fastEncFirstArmUs;
+  uint32_t fastEncFirstLagUs;
+  uint32_t fastEncFirstCompUs;
+  uint8_t fastEncFirstTxHdr;
+  uint8_t fastEncFirstPeerAcked;
+  uint8_t fastEncFirstPacketNew;
+  uint8_t fastEncFirstSmpProgressAck;
   // While awaiting LL_START_ENC_REQ, track any LL control PDU observed so we can
   // see what the peer is sending (plain vs encrypted) without spamming Serial.
   uint32_t startPendingControlRxSeen;
+  uint16_t startPendingLastEventCounter;
+  uint8_t startPendingLastDataChannel;
+  uint8_t startPendingLastPacketNew;
+  uint8_t startPendingLastPeerAcked;
   uint8_t startPendingLastHdr;
   uint8_t startPendingLastLenRaw;
   uint8_t startPendingLastByte0;
+  uint8_t startPendingLastByte1;
   uint8_t startPendingLastDecrypted;
   // TXEN scheduling lag (relative to the intended target) for LL_ENC_RSP.
   uint32_t encRspTxenLagLastUs;
@@ -2337,6 +2355,10 @@ struct BleSecureConnectionsDebugState {
   uint8_t receivedDhKeyCheck[16];
   uint8_t localPublicKeyX[32];
   uint8_t peerPublicKeyX[32];
+  uint8_t lastPublicKeyDecodeFailed;
+  uint8_t lastPublicKeyDecodeLength;
+  uint8_t reserved1[2];
+  uint8_t lastPublicKeyWire[65];
   uint32_t localKeypairTimeUs;
   uint32_t dhKeyTimeUs;
   uint32_t checkValuesTimeUs;
@@ -3539,6 +3561,9 @@ class BleRadio {
   uint8_t smpSecureConnectionsPrivateKey_[32];
   uint8_t smpSecureConnectionsPublicKey_[65];
   uint8_t smpSecureConnectionsPeerPublicKey_[65];
+  bool smpSecureConnectionsLastPublicKeyDecodeFailed_;
+  uint8_t smpSecureConnectionsLastPublicKeyDecodeLength_;
+  uint8_t smpSecureConnectionsLastPublicKeyWire_[65];
   uint8_t smpSecureConnectionsDhKey_[32];
   uint8_t smpSecureConnectionsMacKey_[16];
   uint8_t smpSecureConnectionsLocalDhKeyCheck_[16];

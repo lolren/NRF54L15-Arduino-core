@@ -83,13 +83,25 @@ bool BleRadio::assembleIncomingL2capPayload(uint8_t llid,
       return false;
     }
 
-    if (connectionRxL2capReassemblyActive_) {
-      clearIncomingL2capReassembly();
-    }
-
     const uint16_t declaredLength = readLe16(&l2capPayload[0]);
     const uint16_t totalLength =
         static_cast<uint16_t>(kBleL2capHeaderLen + declaredLength);
+
+    if (connectionRxL2capReassemblyActive_) {
+      const uint16_t activeReceived =
+          connectionRxL2capReassemblyReceivedLength_;
+      const uint16_t activeExpected =
+          connectionRxL2capReassemblyExpectedLength_;
+      if (totalLength == activeExpected &&
+          activeReceived >= l2capPayloadLength &&
+          memcmp(connectionRxL2capReassemblyBuffer_, l2capPayload,
+                 l2capPayloadLength) == 0) {
+        emitBleTrace("L2CAP_FRAG_DUP_START");
+        return false;
+      }
+      clearIncomingL2capReassembly();
+    }
+
     if (totalLength <= l2capPayloadLength) {
       *outPayload = l2capPayload;
       *outPayloadLength = static_cast<uint8_t>(totalLength);
@@ -1903,10 +1915,20 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (!decodeSecureConnectionsPublicKeyToInternalLe(
               peerPublicKeyWire, peerPublicKeyInternalLe, &wireBigEndian,
               &peerPoint)) {
+        smpSecureConnectionsLastPublicKeyDecodeFailed_ = true;
+        smpSecureConnectionsLastPublicKeyDecodeLength_ =
+            sizeof(peerPublicKeyWire);
+        memcpy(smpSecureConnectionsLastPublicKeyWire_, peerPublicKeyWire,
+               sizeof(peerPublicKeyWire));
         emitBleTrace("SMP_SC_PUBKEY_INVALID");
         return buildSmpPairingFailed(kSmpReasonDhKeyCheckFailed);
       }
 
+      smpSecureConnectionsLastPublicKeyDecodeFailed_ = false;
+      smpSecureConnectionsLastPublicKeyDecodeLength_ =
+          sizeof(peerPublicKeyWire);
+      memcpy(smpSecureConnectionsLastPublicKeyWire_, peerPublicKeyWire,
+             sizeof(peerPublicKeyWire));
       memcpy(smpSecureConnectionsPeerPublicKey_, peerPublicKeyInternalLe,
              sizeof(smpSecureConnectionsPeerPublicKey_));
       smpSecureConnectionsWireFormatBigEndian_ = wireBigEndian;
