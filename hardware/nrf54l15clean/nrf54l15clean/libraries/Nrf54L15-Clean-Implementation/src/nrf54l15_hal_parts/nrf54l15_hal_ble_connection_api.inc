@@ -854,6 +854,9 @@ void BleRadio::recordDisconnectDebug(BleDisconnectReason reason, uint8_t errorCo
   disconnectDebug_.pendingTxValid = connectionPendingTxValid_ ? 1U : 0U;
   disconnectDebug_.pendingTxLlid = connectionPendingTxLlid_;
   disconnectDebug_.pendingTxLength = connectionPendingTxLength_;
+  disconnectDebug_.pendingTxOpcode = bleConnectionPayloadProtocolOpcode(
+      connectionPendingTxLlid_, &connectionPendingTxPayload_[0],
+      connectionPendingTxLength_);
   disconnectDebug_.lastTxLlid = connectionLastTxPlainLlid_;
   disconnectDebug_.lastTxLength = connectionLastTxPlainLength_;
   disconnectDebug_.lastTxOpcode = bleConnectionPayloadProtocolOpcode(
@@ -1411,6 +1414,24 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
       emitBleTrace("DISCONNECT_ERR_OTHER");
       break;
   }
+  emitBleTrace("DISCONNECT_DBG_LAST_RX_LLID");
+  emitBleTraceHexByte(disconnectDebug_.lastRxLlid);
+  emitBleTrace("DISCONNECT_DBG_LAST_RX_LEN");
+  emitBleTraceHexByte(disconnectDebug_.lastRxLength);
+  emitBleTrace("DISCONNECT_DBG_LAST_RX_OPCODE");
+  emitBleTraceHexByte(disconnectDebug_.lastRxOpcode);
+  emitBleTrace("DISCONNECT_DBG_LAST_TX_LLID");
+  emitBleTraceHexByte(disconnectDebug_.lastTxLlid);
+  emitBleTrace("DISCONNECT_DBG_LAST_TX_LEN");
+  emitBleTraceHexByte(disconnectDebug_.lastTxLength);
+  emitBleTrace("DISCONNECT_DBG_LAST_TX_OPCODE");
+  emitBleTraceHexByte(disconnectDebug_.lastTxOpcode);
+  emitBleTrace("DISCONNECT_DBG_PENDING_TX");
+  emitBleTraceHexByte(disconnectDebug_.pendingTxValid);
+  emitBleTrace("DISCONNECT_DBG_PENDING_OPCODE");
+  emitBleTraceHexByte(disconnectDebug_.pendingTxValid
+                          ? disconnectDebug_.pendingTxOpcode
+                          : 0U);
   emitBleTrace("DISCONNECT");
   return true;
 }

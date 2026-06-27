@@ -2251,6 +2251,163 @@ void BleRadio::emitBleTrace(const char* message) const {
 #endif
 }
 
+void BleRadio::emitBleTraceHexNibble(uint8_t value) const {
+#if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
+  switch (value & 0x0FU) {
+    case 0x0U:
+      emitBleTrace("HEX_0");
+      break;
+    case 0x1U:
+      emitBleTrace("HEX_1");
+      break;
+    case 0x2U:
+      emitBleTrace("HEX_2");
+      break;
+    case 0x3U:
+      emitBleTrace("HEX_3");
+      break;
+    case 0x4U:
+      emitBleTrace("HEX_4");
+      break;
+    case 0x5U:
+      emitBleTrace("HEX_5");
+      break;
+    case 0x6U:
+      emitBleTrace("HEX_6");
+      break;
+    case 0x7U:
+      emitBleTrace("HEX_7");
+      break;
+    case 0x8U:
+      emitBleTrace("HEX_8");
+      break;
+    case 0x9U:
+      emitBleTrace("HEX_9");
+      break;
+    case 0xAU:
+      emitBleTrace("HEX_A");
+      break;
+    case 0xBU:
+      emitBleTrace("HEX_B");
+      break;
+    case 0xCU:
+      emitBleTrace("HEX_C");
+      break;
+    case 0xDU:
+      emitBleTrace("HEX_D");
+      break;
+    case 0xEU:
+      emitBleTrace("HEX_E");
+      break;
+    default:
+      emitBleTrace("HEX_F");
+      break;
+  }
+#else
+  (void)value;
+#endif
+}
+
+void BleRadio::emitBleTraceHexByte(uint8_t value) const {
+#if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
+  emitBleTraceHexNibble(static_cast<uint8_t>(value >> 4U));
+  emitBleTraceHexNibble(value);
+#else
+  (void)value;
+#endif
+}
+
+void BleRadio::emitBleTraceHex16(uint16_t value) const {
+#if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
+  emitBleTraceHexByte(static_cast<uint8_t>((value >> 8U) & 0xFFU));
+  emitBleTraceHexByte(static_cast<uint8_t>(value & 0xFFU));
+#else
+  (void)value;
+#endif
+}
+
+void BleRadio::emitAttErrorTrace(uint8_t requestOpcode, uint16_t handle,
+                                 uint8_t errorCode) const {
+#if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
+  emitBleTrace("ATT_ERROR_RSP");
+  switch (requestOpcode) {
+    case kAttOpExchangeMtuReq:
+      emitBleTrace("ATT_ERROR_REQ_MTU");
+      break;
+    case kAttOpFindInfoReq:
+      emitBleTrace("ATT_ERROR_REQ_FIND_INFO");
+      break;
+    case kAttOpFindByTypeValueReq:
+      emitBleTrace("ATT_ERROR_REQ_FIND_TYPE");
+      break;
+    case kAttOpReadByTypeReq:
+      emitBleTrace("ATT_ERROR_REQ_READ_TYPE");
+      break;
+    case kAttOpReadReq:
+      emitBleTrace("ATT_ERROR_REQ_READ");
+      break;
+    case kAttOpReadBlobReq:
+      emitBleTrace("ATT_ERROR_REQ_READ_BLOB");
+      break;
+    case kAttOpReadByGroupTypeReq:
+      emitBleTrace("ATT_ERROR_REQ_READ_GROUP");
+      break;
+    case kAttOpPrepareWriteReq:
+      emitBleTrace("ATT_ERROR_REQ_PREP_WRITE");
+      break;
+    case kAttOpExecuteWriteReq:
+      emitBleTrace("ATT_ERROR_REQ_EXEC_WRITE");
+      break;
+    case kAttOpWriteReq:
+      emitBleTrace("ATT_ERROR_REQ_WRITE");
+      break;
+    default:
+      emitBleTrace("ATT_ERROR_REQ_OTHER");
+      emitBleTraceHexByte(requestOpcode);
+      break;
+  }
+  emitBleTrace("ATT_ERROR_HANDLE");
+  emitBleTraceHex16(handle);
+  switch (errorCode) {
+    case kAttErrInvalidHandle:
+      emitBleTrace("ATT_ERROR_INVALID_HANDLE");
+      break;
+    case kAttErrReadNotPermitted:
+      emitBleTrace("ATT_ERROR_READ_NOT_PERMITTED");
+      break;
+    case kAttErrWriteNotPermitted:
+      emitBleTrace("ATT_ERROR_WRITE_NOT_PERMITTED");
+      break;
+    case kAttErrInvalidPdu:
+      emitBleTrace("ATT_ERROR_INVALID_PDU");
+      break;
+    case kAttErrInsufficientAuthentication:
+      emitBleTrace("ATT_ERROR_INSUFF_AUTH");
+      break;
+    case kAttErrInvalidOffset:
+      emitBleTrace("ATT_ERROR_INVALID_OFFSET");
+      break;
+    case kAttErrAttributeNotFound:
+      emitBleTrace("ATT_ERROR_ATTR_NOT_FOUND");
+      break;
+    case kAttErrInvalidAttrValueLen:
+      emitBleTrace("ATT_ERROR_BAD_VALUE_LEN");
+      break;
+    case kAttErrInsufficientEncryption:
+      emitBleTrace("ATT_ERROR_INSUFF_ENC");
+      break;
+    default:
+      emitBleTrace("ATT_ERROR_OTHER");
+      emitBleTraceHexByte(errorCode);
+      break;
+  }
+#else
+  (void)requestOpcode;
+  (void)handle;
+  (void)errorCode;
+#endif
+}
+
 void BleRadio::updateNextConnectionEventTime() {
   const uint32_t intervalUs = static_cast<uint32_t>(connectionIntervalUnits_) * 1250UL;
   if (intervalUs == 0U) {

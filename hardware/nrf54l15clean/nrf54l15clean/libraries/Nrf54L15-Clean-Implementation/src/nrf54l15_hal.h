@@ -2131,6 +2131,7 @@ struct BleDisconnectDebug {
   uint8_t pendingTxValid;
   uint8_t pendingTxLlid;
   uint8_t pendingTxLength;
+  uint8_t pendingTxOpcode;
   uint8_t lastTxLlid;
   uint8_t lastTxLength;
   uint8_t lastTxOpcode;
@@ -3173,6 +3174,11 @@ class BleRadio {
                                                   bool withResponse,
                                                   void* context);
   void emitBleTrace(const char* message) const;
+  void emitBleTraceHexNibble(uint8_t value) const;
+  void emitBleTraceHexByte(uint8_t value) const;
+  void emitBleTraceHex16(uint16_t value) const;
+  void emitAttErrorTrace(uint8_t requestOpcode, uint16_t handle,
+                         uint8_t errorCode) const;
   void rememberDisconnectReason(uint8_t reason, bool remote);
   bool prepareBackgroundAdvertisingEvent();
   bool configureBackgroundAdvertisingHardware(bool enable);
@@ -3449,7 +3455,7 @@ class BleRadio {
   uint8_t consumedDeferredConnectionTxPayload_[255];
   BleConnectionEvent deferredConnectionEvents_[kDeferredConnectionEventDepth];
   BleDeferredGattWriteState deferredGattWrites_[4];
-  const char* deferredTraces_[8];
+  const char* deferredTraces_[32];
   uint8_t deferredGattWriteHead_;
   uint8_t deferredGattWriteTail_;
   uint8_t deferredGattWriteCount_;

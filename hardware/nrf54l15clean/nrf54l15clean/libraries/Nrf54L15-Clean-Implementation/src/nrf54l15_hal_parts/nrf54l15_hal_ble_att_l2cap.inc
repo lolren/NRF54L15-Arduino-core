@@ -5,6 +5,7 @@ bool BleRadio::buildAttErrorResponse(uint8_t requestOpcode, uint16_t handle,
     return false;
   }
 
+  emitAttErrorTrace(requestOpcode, handle, errorCode);
   outAttResponse[0] = kAttOpErrorRsp;
   outAttResponse[1] = requestOpcode;
   writeLe16(&outAttResponse[2], handle);
