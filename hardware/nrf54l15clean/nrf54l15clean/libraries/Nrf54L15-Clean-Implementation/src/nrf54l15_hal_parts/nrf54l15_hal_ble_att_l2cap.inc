@@ -2177,6 +2177,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         // stacks retry pairing after a clean disconnect; erasing the previous
         // keys here leaves both sides with mismatched bond state if the retry
         // is interrupted.
+        connectionServiceChangedIndicationsEnabled_ = false;
+        connectionServiceChangedIndicationPending_ = false;
+        connectionServiceChangedIndicationAwaitingConfirm_ = false;
+        connectionBatteryNotificationsEnabled_ = false;
+        connectionBatteryNotificationPending_ = false;
+        clearCustomGattConnectionState();
         emitBleTrace("BOND_REPLACE_PENDING");
       }
       memcpy(smpPairingReq_, smp, kSmpPairingRequestLen);
