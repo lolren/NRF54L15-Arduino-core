@@ -2478,6 +2478,7 @@ class BleRadio {
     uint8_t reportReferenceLength = 0U;
     uint8_t readPermission = kBleGattPermOpen;
     uint8_t writePermission = kBleGattPermOpen;
+    uint8_t reportReferenceReadPermission = 0U;  // 0 = inherit value read permission.
   };
 
   struct BleCustomGattDescriptorHandles {
@@ -2849,6 +2850,7 @@ class BleRadio {
     uint16_t cccdValue;
     uint8_t readPermission;
     uint8_t writePermission;
+    uint8_t reportReferenceReadPermission;
     uint8_t userDescriptionLength;
     uint8_t userDescription[kCustomGattMaxUserDescriptionLength];
     uint8_t presentationFormat[kCustomGattPresentationFormatLength];

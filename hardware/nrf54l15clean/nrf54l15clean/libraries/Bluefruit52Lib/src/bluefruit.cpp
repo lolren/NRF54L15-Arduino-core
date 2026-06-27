@@ -3692,6 +3692,8 @@ BLECharacteristic::BLECharacteristic()
       _usr_descriptor(nullptr),
       _report_ref_valid(false),
       _report_ref{0},
+      _report_ref_read_perm_valid(false),
+      _report_ref_read_perm(SECMODE_OPEN),
       _presentation_format_valid(false),
       _presentation_format{0},
       _wr_cb(nullptr),
@@ -3756,6 +3758,11 @@ void BLECharacteristic::setReportRefDescriptor(uint8_t id, uint8_t type) {
   _report_ref_valid = true;
 }
 
+void BLECharacteristic::setReportRefDescriptorPermission(SecureMode_t read_perm) {
+  _report_ref_read_perm = read_perm;
+  _report_ref_read_perm_valid = true;
+}
+
 void BLECharacteristic::setPresentationFormatDescriptor(uint8_t type, int8_t exponent,
                                                         uint16_t unit, uint8_t name_space,
                                                         uint16_t descriptor) {
@@ -3816,6 +3823,10 @@ err_t BLECharacteristic::begin() {
   if (_report_ref_valid) {
     descriptors.reportReference = _report_ref;
     descriptors.reportReferenceLength = BleRadio::kCustomGattReportReferenceLength;
+    if (_report_ref_read_perm_valid) {
+      descriptors.reportReferenceReadPermission =
+          static_cast<uint8_t>(_report_ref_read_perm);
+    }
   }
   const uint8_t initialLen = clampValueLen(_value_len);
   const uint8_t properties = mapProperties(_properties);
@@ -5606,6 +5617,7 @@ constexpr uint8_t kHidKeyboardReportId = 1U;
 constexpr uint8_t kHidConsumerReportId = 2U;
 constexpr uint8_t kHidMouseReportId = 3U;
 constexpr uint8_t kHidGamepadReportId = 1U;
+constexpr uint8_t kHidZephyrMouseReportId = 1U;
 constexpr uint8_t kHidProtocolModeBoot = 0U;
 constexpr uint8_t kHidProtocolModeReport = 1U;
 
@@ -5613,6 +5625,42 @@ const uint8_t kHidInfoValue[] = {
     0x11U, 0x01U,  // HID v1.11
     0x00U,         // country code: not localized
     0x02U,         // normally connectable
+};
+
+const uint8_t kHidZephyrInfoValue[] = {
+    0x00U, 0x00U,  // Zephyr peripheral_hids sample uses HID version 0.00.
+    0x00U,         // country code: not localized
+    0x02U,         // normally connectable
+};
+
+const uint8_t kHidZephyrMouseReportMap[] = {
+    0x05U, 0x01U,  // Usage Page (Generic Desktop)
+    0x09U, 0x02U,  // Usage (Mouse)
+    0xA1U, 0x01U,  // Collection (Application)
+    0x85U, kHidZephyrMouseReportId,
+    0x09U, 0x01U,  // Usage (Pointer)
+    0xA1U, 0x00U,  // Collection (Physical)
+    0x05U, 0x09U,  // Usage Page (Button)
+    0x19U, 0x01U,  // Usage Minimum (1)
+    0x29U, 0x03U,  // Usage Maximum (3)
+    0x15U, 0x00U,  // Logical Minimum (0)
+    0x25U, 0x01U,  // Logical Maximum (1)
+    0x95U, 0x03U,  // Report Count (3)
+    0x75U, 0x01U,  // Report Size (1)
+    0x81U, 0x02U,  // Input (Data,Var,Abs)
+    0x95U, 0x01U,  // Report Count (1)
+    0x75U, 0x05U,  // Report Size (5)
+    0x81U, 0x03U,  // Input (Const,Var,Abs)
+    0x05U, 0x01U,  // Usage Page (Generic Desktop)
+    0x09U, 0x30U,  // Usage (X)
+    0x09U, 0x31U,  // Usage (Y)
+    0x15U, 0x81U,  // Logical Minimum (-127)
+    0x25U, 0x7FU,  // Logical Maximum (127)
+    0x75U, 0x08U,  // Report Size (8)
+    0x95U, 0x02U,  // Report Count (2)
+    0x81U, 0x06U,  // Input (Data,Var,Rel)
+    0xC0U,         // End Collection
+    0xC0U,         // End Collection
 };
 
 const uint8_t kHidAdafruitReportMap[] = {
@@ -5675,6 +5723,7 @@ BLEHidAdafruit::BLEHidAdafruit()
       keyboard_led_callback_(nullptr),
       protocol_mode_callback_(nullptr),
       report_protocol_mode_(true),
+      zephyr_compatible_mouse_(false),
       protocol_mode_(UUID16_CHR_PROTOCOL_MODE),
       hid_info_(UUID16_CHR_HID_INFORMATION),
       report_map_(UUID16_CHR_REPORT_MAP),
@@ -5687,6 +5736,10 @@ BLEHidAdafruit::BLEHidAdafruit()
       boot_mouse_input_(UUID16_CHR_BOOT_MOUSE_INPUT_REPORT),
       consumer_input_(UUID16_CHR_REPORT) {}
 
+void BLEHidAdafruit::setZephyrCompatibleMouse(bool enabled) {
+  zephyr_compatible_mouse_ = enabled;
+}
+
 err_t BLEHidAdafruit::begin() {
   const err_t status = BLEService::begin();
   if (status != ERROR_NONE) {
@@ -5695,6 +5748,45 @@ err_t BLEHidAdafruit::begin() {
 
   report_protocol_mode_ = true;
   keyboard_led_state_ = 0U;
+
+  if (zephyr_compatible_mouse_) {
+    err_t result = beginFixedCharacteristic(
+        hid_info_, CHR_PROPS_READ, SECMODE_OPEN, SECMODE_NO_ACCESS,
+        kHidZephyrInfoValue, sizeof(kHidZephyrInfoValue));
+    if (result != ERROR_NONE) {
+      return result;
+    }
+
+    result = beginFixedCharacteristic(
+        report_map_, CHR_PROPS_READ, SECMODE_OPEN, SECMODE_NO_ACCESS,
+        kHidZephyrMouseReportMap, sizeof(kHidZephyrMouseReportMap));
+    if (result != ERROR_NONE) {
+      return result;
+    }
+
+    uint8_t emptyMouse[3] = {0U, 0U, 0U};
+    mouse_input_.setReportRefDescriptor(kHidZephyrMouseReportId,
+                                        kHidReportTypeInput);
+    mouse_input_.setReportRefDescriptorPermission(SECMODE_OPEN);
+    result = beginFixedCharacteristic(
+        mouse_input_, CHR_PROPS_READ | CHR_PROPS_NOTIFY, SECMODE_ENC_NO_MITM,
+        SECMODE_NO_ACCESS, emptyMouse, sizeof(emptyMouse));
+    if (result != ERROR_NONE) {
+      return result;
+    }
+
+    uint8_t control = 0U;
+    result = beginFixedCharacteristic(
+        hid_control_, CHR_PROPS_WRITE_WO_RESP, SECMODE_NO_ACCESS,
+        SECMODE_ENC_NO_MITM, &control, sizeof(control));
+    if (result != ERROR_NONE) {
+      return result;
+    }
+
+    Bluefruit.Periph.setConnInterval(24, 40);
+    return ERROR_NONE;
+  }
+
   const uint8_t protocol = kHidProtocolModeReport;
   protocol_mode_.setWriteCallback(protocolModeWriteThunk);
   err_t result =
@@ -5987,6 +6079,14 @@ bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, hid_mouse_report_t* report) 
   if (report == nullptr || !Bluefruit.connected()) {
     return false;
   }
+  if (zephyr_compatible_mouse_) {
+    const uint8_t compactReport[3] = {
+        static_cast<uint8_t>(report->buttons & 0x07U),
+        static_cast<uint8_t>(report->x),
+        static_cast<uint8_t>(report->y),
+    };
+    return mouse_input_.notify(conn_hdl, compactReport, sizeof(compactReport));
+  }
   BLECharacteristic& reportCharacteristic = report_protocol_mode_ ? mouse_input_ : boot_mouse_input_;
   return reportCharacteristic.notify(conn_hdl, report, sizeof(*report));
 }
@@ -5996,6 +6096,16 @@ bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, uint8_t buttons, int8_t x, i
   mouse_buttons_ = buttons;
   hid_mouse_report_t report{buttons, x, y, wheel, pan};
   return mouseReport(conn_hdl, &report);
+}
+
+bool BLEHidAdafruit::mouseNotifyEnabled() {
+  return mouseNotifyEnabled(BLE_CONN_HANDLE_INVALID);
+}
+
+bool BLEHidAdafruit::mouseNotifyEnabled(uint16_t conn_hdl) {
+  BLECharacteristic& reportCharacteristic =
+      report_protocol_mode_ ? mouse_input_ : boot_mouse_input_;
+  return reportCharacteristic.notifyEnabled(conn_hdl);
 }
 
 bool BLEHidAdafruit::mouseButtonPress(uint16_t conn_hdl, uint8_t buttons) {

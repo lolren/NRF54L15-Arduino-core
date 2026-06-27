@@ -127,6 +127,7 @@ class BLECharacteristic {
 
   void setUserDescriptor(const char* descriptor);
   void setReportRefDescriptor(uint8_t id, uint8_t type);
+  void setReportRefDescriptorPermission(SecureMode_t read_perm);
   void setPresentationFormatDescriptor(uint8_t type, int8_t exponent,
                                        uint16_t unit, uint8_t name_space = 1,
                                        uint16_t descriptor = 0);
@@ -213,6 +214,8 @@ class BLECharacteristic {
   const char* _usr_descriptor;
   bool _report_ref_valid;
   uint8_t _report_ref[2];
+  bool _report_ref_read_perm_valid;
+  SecureMode_t _report_ref_read_perm;
   bool _presentation_format_valid;
   uint8_t _presentation_format[7];
   write_cb_t _wr_cb;
@@ -955,6 +958,7 @@ class BLEHidAdafruit : public BLEService {
   BLEHidAdafruit();
 
   err_t begin() override;
+  void setZephyrCompatibleMouse(bool enabled = true);
   void setKeyboardLedCallback(kbd_led_cb_t fp);
   uint8_t keyboardLedState() const;
   void setProtocolModeCallback(protocol_mode_cb_t fp);
@@ -987,6 +991,8 @@ class BLEHidAdafruit : public BLEService {
   bool mouseReport(uint16_t conn_hdl, hid_mouse_report_t* report);
   bool mouseReport(uint16_t conn_hdl, uint8_t buttons, int8_t x, int8_t y,
                    int8_t wheel = 0, int8_t pan = 0);
+  bool mouseNotifyEnabled();
+  bool mouseNotifyEnabled(uint16_t conn_hdl);
   bool mouseButtonPress(uint16_t conn_hdl, uint8_t buttons);
   bool mouseButtonRelease(uint16_t conn_hdl);
   bool mouseMove(uint16_t conn_hdl, int8_t x, int8_t y);
@@ -999,6 +1005,7 @@ class BLEHidAdafruit : public BLEService {
   kbd_led_cb_t keyboard_led_callback_;
   protocol_mode_cb_t protocol_mode_callback_;
   bool report_protocol_mode_;
+  bool zephyr_compatible_mouse_;
   BLECharacteristic protocol_mode_;
   BLECharacteristic hid_info_;
   BLECharacteristic report_map_;

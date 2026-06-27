@@ -333,8 +333,9 @@ uint8_t BleRadio::readAttributeValue(uint16_t handle, uint16_t offset,
       findCustomCharacteristicByReportReferenceHandle(handle);
   if (directReportReference != nullptr) {
     uint8_t permissionError = kAttErrReadNotPermitted;
-    if (!customGattReadPermissionSatisfied(directReportReference,
-                                           &permissionError)) {
+    if (!customGattPermissionSatisfied(
+            directReportReference->reportReferenceReadPermission,
+            kAttErrReadNotPermitted, &permissionError)) {
       return attPermissionErrorToReadSentinel(permissionError);
     }
     if (offset > kCustomGattReportReferenceLength) {
@@ -1728,6 +1729,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
                                        outAttResponse, outAttResponseLength);
         } else {
           persistBondedCccdState();
+          armConnectionResyncWindow(kBleConnResyncExtraListenUs, 12U);
           clearPreparedWriteState();
         }
       }
@@ -1785,6 +1787,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
                                        outAttResponse, outAttResponseLength);
         }
         persistBondedCccdState();
+        armConnectionResyncWindow(kBleConnResyncExtraListenUs, 12U);
         if (connectionPreparedWriteActive_ &&
             connectionPreparedWriteHandle_ == handle) {
           clearPreparedWriteState();
@@ -1827,6 +1830,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
           const uint16_t cccd = readLe16(&attRequest[3]);
           if (applyCccdState(handle, cccd)) {
             persistBondedCccdState();
+            armConnectionResyncWindow(kBleConnResyncExtraListenUs, 12U);
             if (connectionPreparedWriteActive_ &&
                 connectionPreparedWriteHandle_ == handle) {
               clearPreparedWriteState();
@@ -2129,6 +2133,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpResponderIdInfoSent_ = false;
       smpResponderIdAddressSent_ = false;
       smpPairingState_ = kSmpPairingStateIdle;
+      armConnectionResyncWindow(kBleConnResyncExtraListenUs, 16U);
       emitBleTrace("SMP_KEY_DIST_DONE");
     }
   };
@@ -2183,6 +2188,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         connectionBatteryNotificationsEnabled_ = false;
         connectionBatteryNotificationPending_ = false;
         clearCustomGattConnectionState();
+        if (connectionPendingTxValid_ &&
+            connectionPendingTxLlid_ == kBlePduDataStartOrComplete &&
+            connectionPendingTxLength_ >= (kBleL2capHeaderLen + 1U) &&
+            readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidAtt &&
+            ((connectionPendingTxPayload_[4] == kAttOpHandleValueNtf) ||
+             (connectionPendingTxPayload_[4] == kAttOpHandleValueInd))) {
+          connectionPendingTxValid_ = false;
+          connectionPendingTxLlid_ = 0x01U;
+          connectionPendingTxLength_ = 0U;
+          memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
+          connectionCustomIndicationAwaitingHandle_ = 0U;
+          emitBleTrace("ATT_NOTIFY_DROP_PAIRING");
+        }
         emitBleTrace("BOND_REPLACE_PENDING");
       }
       memcpy(smpPairingReq_, smp, kSmpPairingRequestLen);

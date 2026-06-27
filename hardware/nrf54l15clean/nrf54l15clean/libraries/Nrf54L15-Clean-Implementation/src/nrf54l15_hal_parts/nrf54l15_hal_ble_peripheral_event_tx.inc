@@ -1847,6 +1847,17 @@
                   connectionCustomNotificationQueueCount_ == 0U) {
                 return;
               }
+              const bool securityProcedureActive =
+                  (smpPairingState_ != kSmpPairingStateIdle) ||
+                  connectionEncKeyDerivationPending_ ||
+                  connectionEncStartReqPending_ ||
+                  connectionEncStartReqTxPending_ ||
+                  connectionEncAwaitingStartRsp_ ||
+                  (connectionEncSessionValid_ &&
+                   (!connectionEncRxEnabled_ || !connectionEncTxEnabled_));
+              if (securityProcedureActive) {
+                return;
+              }
 
               BleQueuedCustomNotificationState queuedCustom{};
               uint8_t queueGuard = connectionCustomNotificationQueueCount_;

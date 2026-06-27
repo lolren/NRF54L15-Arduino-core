@@ -377,9 +377,15 @@
         !connectionEncStartReqTxPending_ &&
         !connectionEncAwaitingStartRsp_ &&
         !connectionEncStartReqPending_) {
+      const bool securityProcedureActive =
+          (smpPairingState_ != kSmpPairingStateIdle) ||
+          connectionEncKeyDerivationPending_ ||
+          (connectionEncSessionValid_ &&
+           (!connectionEncRxEnabled_ || !connectionEncTxEnabled_));
       BleQueuedCustomNotificationState queuedCustom{};
       uint8_t queueGuard = connectionCustomNotificationQueueCount_;
-      while ((deferredLength == 0U) && (queueGuard-- > 0U) &&
+      while (!securityProcedureActive &&
+             (deferredLength == 0U) && (queueGuard-- > 0U) &&
              peekCustomGattNotification(&queuedCustom)) {
         if (queuedCustom.characteristicIndex >= customGattCharacteristicCount_) {
           popCustomGattNotification();

@@ -14,9 +14,11 @@
 #include <bluefruit.h>
 
 BLEDis bledis;
+BLEBas blebas;
 BLEHidAdafruit blehid;
 
 #define MOVE_STEP    10
+#define IDLE_REPORT_INTERVAL_MS 100UL
 
 void connect_callback(uint16_t conn_handle);
 bool pairing_passkey_callback(uint16_t conn_handle, uint8_t const passkey[6],
@@ -41,14 +43,16 @@ void setup()
   Serial.println("- 'X'     to release mouse button(s)");
 
   Bluefruit.begin();
+  Bluefruit.setAppearance(BLE_APPEARANCE_HID_MOUSE);
   Bluefruit.Security.setIOCaps(true, true, false);
   Bluefruit.Security.setPairPasskeyCallback(pairing_passkey_callback);
 #if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
   // LM20A needs extra event budget for software P-256 during secure pairing.
   Bluefruit.Periph.setConnInterval(24, 40); // 30-50 ms
 #else
-  // HID Device can have a min connection interval of 9*1.25 = 11.25 ms
-  Bluefruit.Periph.setConnInterval(9, 16); // min = 9*1.25=11.25 ms, max = 16*1.25=20ms
+  // HID still feels instant at this range, and it gives Android enough event
+  // budget for LE Secure Connections on hosts with stricter pairing timing.
+  Bluefruit.Periph.setConnInterval(24, 40); // 30-50 ms
 #endif
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
@@ -57,10 +61,13 @@ void setup()
   bledis.setManufacturer("Adafruit Industries");
   bledis.setModel("Bluefruit Feather 52");
   bledis.begin();
+  blebas.begin();
+  blebas.write(100);
 
-  // BLE HID
+  // BLE HID. This example intentionally matches Zephyr's peripheral_hids
+  // mouse service shape for Android interoperability testing.
+  blehid.setZephyrCompatibleMouse(true);
   blehid.begin();
-  blehid.setProtocolModeCallback(set_protocol_mode);
 
   // Set up and start advertising
   startAdv();
@@ -70,14 +77,12 @@ void startAdv(void)
 {  
   // Advertising packet
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-  Bluefruit.Advertising.addTxPower();
-  Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE);
   
-  // Include BLE HID service
-  Bluefruit.Advertising.addService(blehid);
+  // Zephyr peripheral_hids advertises HIDS + BAS UUIDs and puts the name in
+  // scan response. Keep this shape for strict Android host comparisons.
+  Bluefruit.Advertising.addService(blehid, blebas);
 
-  // There is enough room for 'Name' in the advertising packet
-  Bluefruit.Advertising.addName();
+  Bluefruit.ScanResponse.addName();
   
   /* Start Advertising
    * - Enable auto advertising if disconnected
@@ -96,6 +101,21 @@ void startAdv(void)
 
 void loop() 
 {    
+  static uint32_t lastIdleReportMs = 0;
+  if (Bluefruit.connected() && blehid.mouseNotifyEnabled())
+  {
+    const uint32_t now = millis();
+    if ((now - lastIdleReportMs) >= IDLE_REPORT_INTERVAL_MS)
+    {
+      lastIdleReportMs = now;
+      blehid.mouseMove(0, 0);
+    }
+  }
+  else
+  {
+    lastIdleReportMs = millis();
+  }
+
   if (Serial.available())
   {
     char ch = (char) Serial.read();

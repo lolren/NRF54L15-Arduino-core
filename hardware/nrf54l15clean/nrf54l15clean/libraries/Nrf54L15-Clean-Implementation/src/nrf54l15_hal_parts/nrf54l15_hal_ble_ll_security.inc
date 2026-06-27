@@ -127,6 +127,17 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         const uint16_t instantDelta =
             static_cast<uint16_t>(instant - currentEventCounter);
         const bool instantInFuture = (instantDelta != 0U) && (instantDelta < 0x8000U);
+        const bool duplicatePendingMap =
+            connectionChannelMapPending_ &&
+            (connectionChannelMapInstant_ == instant) &&
+            (memcmp(connectionPendingChannelMap_, map,
+                    sizeof(connectionPendingChannelMap_)) == 0);
+        const bool duplicateAppliedMap =
+            !connectionChannelMapPending_ &&
+            (static_cast<uint16_t>(encDebug_.connLastChannelMapAppliedEventCounter) ==
+             instant) &&
+            (memcmp(connectionChannelMap_, map,
+                    sizeof(connectionChannelMap_)) == 0);
         if (count >= 2U && instantInFuture) {
           memcpy(connectionPendingChannelMap_, map, sizeof(connectionPendingChannelMap_));
           connectionPendingChannelCount_ = count;
@@ -141,6 +152,16 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
           encDebug_.connLastChannelMapRxEventCounter = currentEventCounter;
           encDebug_.connLastChannelMapInstant = instant;
           emitBleTrace("LL_CHANNEL_MAP_PENDING");
+        } else if (count >= 2U && duplicatePendingMap) {
+          ++encDebug_.connChannelMapDuplicateCount;
+          armConnectionResyncWindow(kBleConnResyncExtraListenUs,
+                                    kBleConnChannelMapPendingResyncEventsMax);
+          emitBleTrace("LL_CHANNEL_MAP_DUP_PENDING");
+        } else if (count >= 2U && duplicateAppliedMap) {
+          ++encDebug_.connChannelMapDuplicateCount;
+          armConnectionResyncWindow(kBleConnResyncExtraListenUs,
+                                    kBleConnChannelMapApplyResyncEvents);
+          emitBleTrace("LL_CHANNEL_MAP_DUP_APPLIED");
         } else {
           return rejectMalformedRequest();
         }
@@ -606,11 +627,6 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
           emitBleTrace("LL_PHY_UPDATE_BADPHY");
           return false;
         }
-        if (!instantInFuture) {
-          emitBleTrace("LL_PHY_UPDATE_PAST");
-          return false;
-        }
-
         // Peripheral view:
         // - central->peripheral PHY is our RX PHY
         // - peripheral->central PHY is our TX PHY
@@ -626,6 +642,18 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
                 : connectionCurrentTxPhy_;
         if (nextTxPhy == kBlePhyNone || nextRxPhy == kBlePhyNone) {
           emitBleTrace("LL_PHY_UPDATE_BADPHY");
+          return false;
+        }
+        if (!instantInFuture) {
+          if (nextTxPhy == connectionCurrentTxPhy_ &&
+              nextRxPhy == connectionCurrentRxPhy_) {
+            connectionPhyRequestPending_ = false;
+            connectionPhyRequestInFlight_ = false;
+            armConnectionResyncWindow(kBleConnResyncExtraListenUs, 8U);
+            emitBleTrace("LL_PHY_UPDATE_LATE_NOOP");
+            return false;
+          }
+          emitBleTrace("LL_PHY_UPDATE_PAST");
           return false;
         }
 
@@ -977,7 +1005,11 @@ bool BleRadio::computeSecureConnectionsLocalConfirm() {
 
 namespace {
 
-constexpr uint32_t kBleDeferredSmpResponseSpinLimit = 0UL;
+// SMP pairing is short-lived but latency-sensitive on some Android stacks.
+// When an SC response is queued from deferred work, actively service the next
+// event instead of only arming a later background wake. This avoids leaving
+// DHKey/key-distribution responses parked until a tighter central times out.
+constexpr uint32_t kBleDeferredSmpResponseSpinLimit = 120000UL;
 
 constexpr uint8_t kSmpScInitIoActions[5][5] = {
     {kSmpScIoActionNone, kSmpScIoActionNone, kSmpScIoActionInput,
@@ -1791,6 +1823,7 @@ void BleRadio::serviceSecureConnectionsWork() {
       }
     }
   }
+
 }
 
 void BleRadio::clearSmpPairingState() {

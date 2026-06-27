@@ -567,6 +567,10 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
       (descriptors != nullptr) ? descriptors->readPermission : kBleGattPermOpen;
   characteristic.writePermission =
       (descriptors != nullptr) ? descriptors->writePermission : kBleGattPermOpen;
+  characteristic.reportReferenceReadPermission =
+      (descriptors != nullptr && descriptors->reportReferenceReadPermission != 0U)
+          ? descriptors->reportReferenceReadPermission
+          : characteristic.readPermission;
   characteristic.declarationHandle = customGattNextHandle_++;
   characteristic.valueHandle = customGattNextHandle_++;
   characteristic.userDescriptionHandle =
@@ -808,6 +812,21 @@ bool BleRadio::notifyCustomGattCharacteristic(uint16_t valueHandle, bool indicat
       return false;
     }
   } else if (!notifyEnabled) {
+    bleExitCritical(irqState);
+    return false;
+  }
+
+  const bool securityProcedureActive =
+      (smpPairingState_ != kSmpPairingStateIdle) ||
+      connectionEncKeyDerivationPending_ ||
+      connectionEncStartReqPending_ ||
+      connectionEncStartReqTxPending_ ||
+      connectionEncAwaitingStartRsp_ ||
+      (connectionEncSessionValid_ &&
+       (!connectionEncRxEnabled_ || !connectionEncTxEnabled_));
+  if (securityProcedureActive) {
+    emitBleTrace(indicate ? "ATT_IND_HOLD_SECURITY"
+                          : "ATT_NOTIFY_HOLD_SECURITY");
     bleExitCritical(irqState);
     return false;
   }
