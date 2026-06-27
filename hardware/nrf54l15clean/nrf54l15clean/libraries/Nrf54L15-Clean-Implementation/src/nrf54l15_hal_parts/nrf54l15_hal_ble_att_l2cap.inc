@@ -2215,12 +2215,14 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (peerRequestedSecureConnections) {
         smpSecureConnectionsActive_ = true;
         smpPairingRsp_[3] |= kSmpAuthReqSecureConnectionsMask;
-        // LE Secure Connections derives the link key from DHKey. Exchange
-        // identity keys when requested so Android/BlueZ can keep a usable bond.
+        // LE Secure Connections derives the link key from DHKey. Keep the
+        // central identity-key request so bonded phones using RPAs can be
+        // resolved after reset. Local responder ID distribution is disabled
+        // until its timing is fully validated; advertising it without sending
+        // promptly leaves Android waiting in the pairing procedure.
         initiatorKeyDist = static_cast<uint8_t>(
             smp[5] & kSmpKeyDistIdKeyMask);
-        responderKeyDist = static_cast<uint8_t>(
-            smp[6] & kSmpKeyDistIdKeyMask);
+        responderKeyDist = 0U;
       }
       smpPairingRsp_[5] = initiatorKeyDist;
       smpPairingRsp_[6] = responderKeyDist;
