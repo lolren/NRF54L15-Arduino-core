@@ -886,6 +886,19 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
             }
             ++recordCount;
           }
+          if (ch.cccdHandle != 0U &&
+              inHandleRange(ch.cccdHandle, start, end)) {
+            if (recordCount == 0U) {
+              outAttResponse[1] = 0x01U;
+            }
+            if (outAttResponse[1] != 0x01U || (used + 4U) > maxAttResponseLen) {
+              break;
+            }
+            writeLe16(&outAttResponse[used], ch.cccdHandle);
+            writeLe16(&outAttResponse[used + 2U], kUuidClientCharacteristicConfig);
+            used += 4U;
+            ++recordCount;
+          }
           if (ch.userDescriptionHandle != 0U &&
               inHandleRange(ch.userDescriptionHandle, start, end)) {
             if (recordCount == 0U) {
@@ -924,19 +937,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
             }
             writeLe16(&outAttResponse[used], ch.reportReferenceHandle);
             writeLe16(&outAttResponse[used + 2U], kUuidReportReference);
-            used += 4U;
-            ++recordCount;
-          }
-          if (ch.cccdHandle != 0U &&
-              inHandleRange(ch.cccdHandle, start, end)) {
-            if (recordCount == 0U) {
-              outAttResponse[1] = 0x01U;
-            }
-            if (outAttResponse[1] != 0x01U || (used + 4U) > maxAttResponseLen) {
-              break;
-            }
-            writeLe16(&outAttResponse[used], ch.cccdHandle);
-            writeLe16(&outAttResponse[used + 2U], kUuidClientCharacteristicConfig);
             used += 4U;
             ++recordCount;
           }

@@ -573,13 +573,13 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
           : characteristic.readPermission;
   characteristic.declarationHandle = customGattNextHandle_++;
   characteristic.valueHandle = customGattNextHandle_++;
+  characteristic.cccdHandle = hasCccd ? customGattNextHandle_++ : 0U;
   characteristic.userDescriptionHandle =
       hasUserDescription ? customGattNextHandle_++ : 0U;
   characteristic.presentationFormatHandle =
       hasPresentationFormat ? customGattNextHandle_++ : 0U;
   characteristic.reportReferenceHandle =
       hasReportReference ? customGattNextHandle_++ : 0U;
-  characteristic.cccdHandle = hasCccd ? customGattNextHandle_++ : 0U;
   characteristic.cccdValue = 0U;
   characteristic.userDescriptionLength = userDescriptionLength;
   if (userDescriptionLength > 0U) {
@@ -600,16 +600,7 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
   ++customGattCharacteristicCount_;
 
   BleCustomServiceState& service = customGattServices_[serviceIndex];
-  service.endHandle =
-      (characteristic.cccdHandle != 0U)
-          ? characteristic.cccdHandle
-          : ((characteristic.reportReferenceHandle != 0U)
-                 ? characteristic.reportReferenceHandle
-                 : ((characteristic.presentationFormatHandle != 0U)
-                        ? characteristic.presentationFormatHandle
-                        : ((characteristic.userDescriptionHandle != 0U)
-                               ? characteristic.userDescriptionHandle
-                               : characteristic.valueHandle)));
+  service.endHandle = static_cast<uint16_t>(customGattNextHandle_ - 1U);
 
   if (outValueHandle != nullptr) {
     *outValueHandle = characteristic.valueHandle;
