@@ -2106,6 +2106,32 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
     emitBleTrace("SMP_PAIRING_FAILED");
     return buildSmpResponse(failed, sizeof(failed));
   };
+  auto completeSmpKeyDistributionIfDone = [&]() {
+    if (smpPairingState_ == kSmpPairingStateIdle ||
+        !connectionEncSessionValid_ ||
+        !connectionEncRxEnabled_) {
+      return;
+    }
+
+    const bool initiatorEncDone =
+        !smpExpectInitiatorEncKey_ ||
+        (smpPeerLtkValid_ && !smpPeerLtkAwaitMasterId_);
+    const bool initiatorIdDone =
+        !smpExpectInitiatorIdKey_ ||
+        (smpPeerIrkValid_ && smpPeerIdentityAddressValid_);
+    const bool responderIdDone =
+        !smpDistributeResponderIdKey_ ||
+        (smpResponderIdInfoSent_ && smpResponderIdAddressSent_);
+    if (initiatorEncDone && initiatorIdDone && responderIdDone) {
+      smpExpectInitiatorEncKey_ = false;
+      smpExpectInitiatorIdKey_ = false;
+      smpDistributeResponderIdKey_ = false;
+      smpResponderIdInfoSent_ = false;
+      smpResponderIdAddressSent_ = false;
+      smpPairingState_ = kSmpPairingStateIdle;
+      emitBleTrace("SMP_KEY_DIST_DONE");
+    }
+  };
   if (smpCode == kSmpCodePairingFailed) {
     latchSecureConnectionsDebugState();
     smpPairingFailureReasonPending_ = true;
@@ -2147,10 +2173,11 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       const bool replacingPrimedBond = bondKeyPrimedForConnection_;
       clearConnectionSecurityState();
       if (replacingPrimedBond && bondRecordValid_) {
-        // Peer explicitly started a new pairing procedure; drop the prior
-        // bonded key so this connection re-establishes security state cleanly.
-        clearBondRecord(true);
-        emitBleTrace("BOND_REPLACED");
+        // Keep the old bond until replacement pairing succeeds. Some Android
+        // stacks retry pairing after a clean disconnect; erasing the previous
+        // keys here leaves both sides with mismatched bond state if the retry
+        // is interrupted.
+        emitBleTrace("BOND_REPLACE_PENDING");
       }
       memcpy(smpPairingReq_, smp, kSmpPairingRequestLen);
       smpLocalInitiator_ = false;
@@ -2188,13 +2215,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (peerRequestedSecureConnections) {
         smpSecureConnectionsActive_ = true;
         smpPairingRsp_[3] |= kSmpAuthReqSecureConnectionsMask;
-        // LE Secure Connections derives the link key from DHKey. Still request
-        // the peer identity key so bonded phones using RPAs can be resolved
-        // after a reset. Local SC key distribution remains disabled because this
-        // core does not send local ID/signing keys yet.
+        // LE Secure Connections derives the link key from DHKey. Exchange
+        // identity keys when requested so Android/BlueZ can keep a usable bond.
         initiatorKeyDist = static_cast<uint8_t>(
             smp[5] & kSmpKeyDistIdKeyMask);
-        responderKeyDist = 0U;
+        responderKeyDist = static_cast<uint8_t>(
+            smp[6] & kSmpKeyDistIdKeyMask);
       }
       smpPairingRsp_[5] = initiatorKeyDist;
       smpPairingRsp_[6] = responderKeyDist;
@@ -2203,6 +2229,10 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
                                       : ((smpPairingRsp_[5] &
                                           kSmpKeyDistEncKeyMask) != 0U);
       smpExpectInitiatorIdKey_ = ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
+      smpDistributeResponderIdKey_ =
+          ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
+      smpResponderIdInfoSent_ = false;
+      smpResponderIdAddressSent_ = false;
       smpKeySize_ = maxKeySize;
       if (peerRequestedSecureConnections) {
         const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
@@ -2674,6 +2704,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         }
       }
       emitBleTrace("SMP_MASTER_ID_RX");
+      completeSmpKeyDistributionIfDone();
       return false;
 
     case kSmpCodeIdentityInformation:
@@ -2693,6 +2724,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         }
       }
       emitBleTrace("SMP_ID_INFO_RX");
+      completeSmpKeyDistributionIfDone();
       return false;
 
     case kSmpCodeIdentityAddressInformation:
@@ -2716,6 +2748,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         }
       }
       emitBleTrace("SMP_ID_ADDR_RX");
+      completeSmpKeyDistributionIfDone();
       return false;
 
     case kSmpCodePairingResponse:

@@ -3517,6 +3517,9 @@ class BleRadio {
   bool smpLocalInitiator_;
   bool smpExpectInitiatorEncKey_;
   bool smpExpectInitiatorIdKey_;
+  bool smpDistributeResponderIdKey_;
+  bool smpResponderIdInfoSent_;
+  bool smpResponderIdAddressSent_;
   uint8_t smpLocalIoCapabilities_;
   bool smpPendingUserPasskey_;
   bool smpPendingUserPasskeyMatchRequest_;

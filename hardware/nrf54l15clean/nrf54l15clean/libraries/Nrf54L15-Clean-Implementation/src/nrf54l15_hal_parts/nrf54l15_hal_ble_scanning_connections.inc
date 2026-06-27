@@ -2022,7 +2022,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   quiesceBackgroundAdvertisingForConnectionHandoff();
   connected_ = true;
   endUnconnectedRadioActivity();
-  if (customGattHasSecureHidService()) {
+  if (customGattHasSecureHidService() && !bondKeyPrimedForConnection_) {
     connectionSmpSecurityRequestPending_ = true;
     emitBleTrace("SMP_HID_SEC_REQ_PENDING");
   }

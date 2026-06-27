@@ -890,12 +890,19 @@ bool BleRadio::notifyCustomGattCharacteristic(uint16_t valueHandle, bool indicat
 
 bool BleRadio::sendSmpSecurityRequest() {
   const uint32_t irqState = bleEnterCritical();
-  // Security Request is a peripheral-to-central hint. It is still valid when a
-  // bond is already loaded: the central should start link-layer encryption.
   if (!connected_ || connectionRole_ == BleConnectionRole::kCentral ||
       connectionEncSessionValid_ || smpPairingState_ != kSmpPairingStateIdle) {
     bleExitCritical(irqState);
     return false;
+  }
+  if (bondKeyPrimedForConnection_) {
+    // On bonded HID reconnects Android may treat a Security Request as "pair
+    // again", then remove the bond after service setup. Let the central prove
+    // the existing bond with LL_ENC_REQ when it accesses encrypted attributes.
+    connectionSmpSecurityRequestPending_ = false;
+    emitBleTrace("SMP_SEC_REQ_SKIP_BOND");
+    bleExitCritical(irqState);
+    return true;
   }
   connectionSmpSecurityRequestPending_ = true;
   bleExitCritical(irqState);

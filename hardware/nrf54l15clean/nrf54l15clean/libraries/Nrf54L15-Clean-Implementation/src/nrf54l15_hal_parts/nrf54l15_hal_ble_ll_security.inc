@@ -1159,6 +1159,12 @@ bool BleRadio::requestPairing() {
   smpLastPairingFailureReason_ = 0U;
 
   if (connectionRole_ == BleConnectionRole::kPeripheral) {
+    if (bondKeyPrimedForConnection_) {
+      connectionSmpSecurityRequestPending_ = false;
+      emitBleTrace("SMP_PAIR_REQ_SKIP_BOND");
+      bleExitCritical(irqState);
+      return true;
+    }
     connectionSmpSecurityRequestPending_ = true;
     bleExitCritical(irqState);
     return true;
@@ -1707,6 +1713,84 @@ void BleRadio::serviceSecureConnectionsWork() {
       }
     }
   }
+
+  if (!smpLocalInitiator_ &&
+      smpBondingRequested_ &&
+      smpDistributeResponderIdKey_ &&
+      smpSecureConnectionsDhKeyCheckSent_ &&
+      connectionEncSessionValid_ &&
+      connectionEncRxEnabled_) {
+    const bool initiatorEncDone =
+        !smpExpectInitiatorEncKey_ ||
+        (smpPeerLtkValid_ && !smpPeerLtkAwaitMasterId_);
+    const bool initiatorIdDone =
+        !smpExpectInitiatorIdKey_ ||
+        (smpPeerIrkValid_ && smpPeerIdentityAddressValid_);
+    if (initiatorEncDone && initiatorIdDone) {
+      if (!smpResponderIdInfoSent_) {
+        uint8_t identityInfo[kSmpIdentityInformationLen] = {0};
+        identityInfo[0] = kSmpCodeIdentityInformation;
+        Ficr::identityRoot(&identityInfo[1]);
+        if (queuePendingSmpL2capResponse(identityInfo,
+                                         sizeof(identityInfo))) {
+          smpResponderIdInfoSent_ = true;
+          emitBleTrace("SMP_LOCAL_ID_INFO_TX");
+          serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+        }
+        return;
+      }
+
+      if (!smpResponderIdAddressSent_) {
+        uint8_t identityAddress[kSmpIdentityAddressInformationLen] = {0};
+        identityAddress[0] = kSmpCodeIdentityAddressInformation;
+        uint8_t localIdentityType =
+            bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U;
+        uint8_t localIdentityAddress[6] = {0};
+        memcpy(localIdentityAddress, address_, sizeof(localIdentityAddress));
+
+        if ((addressType_ == BleAddressType::kRandomPrivateResolvable ||
+             addressType_ == BleAddressType::kRandomPrivateNonResolvable) &&
+            ficr_ != nullptr) {
+          const uint32_t lo = ficr_->DEVICEADDR[0];
+          const uint32_t hi = ficr_->DEVICEADDR[1];
+          localIdentityAddress[0] = static_cast<uint8_t>(lo & 0xFFU);
+          localIdentityAddress[1] = static_cast<uint8_t>((lo >> 8U) & 0xFFU);
+          localIdentityAddress[2] = static_cast<uint8_t>((lo >> 16U) & 0xFFU);
+          localIdentityAddress[3] = static_cast<uint8_t>((lo >> 24U) & 0xFFU);
+          localIdentityAddress[4] = static_cast<uint8_t>(hi & 0xFFU);
+          localIdentityAddress[5] = static_cast<uint8_t>((hi >> 8U) & 0xFFU);
+          const bool randomStaticIdentity =
+              ((ficr_->DEVICEADDRTYPE & 0x1UL) != 0U);
+          localIdentityType = randomStaticIdentity ? 0x01U : 0x00U;
+          if (randomStaticIdentity) {
+            localIdentityAddress[5] =
+                static_cast<uint8_t>((localIdentityAddress[5] & 0x3FU) |
+                                     0xC0U);
+          }
+        }
+
+        identityAddress[1] = localIdentityType;
+        memcpy(&identityAddress[2], localIdentityAddress,
+               sizeof(localIdentityAddress));
+        if (queuePendingSmpL2capResponse(identityAddress,
+                                         sizeof(identityAddress))) {
+          smpResponderIdAddressSent_ = true;
+          smpDistributeResponderIdKey_ = false;
+          smpExpectInitiatorEncKey_ = false;
+          smpExpectInitiatorIdKey_ = false;
+          smpPairingState_ = kSmpPairingStateIdle;
+          BleBondRecord record{};
+          if (buildCurrentBondRecord(&record)) {
+            persistBondRecord(record);
+          }
+          emitBleTrace("SMP_LOCAL_ID_ADDR_TX");
+          emitBleTrace("SMP_KEY_DIST_DONE");
+          serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+        }
+        return;
+      }
+    }
+  }
 }
 
 void BleRadio::clearSmpPairingState() {
@@ -1723,6 +1807,9 @@ void BleRadio::clearSmpPairingState() {
   smpLocalInitiator_ = false;
   smpExpectInitiatorEncKey_ = false;
   smpExpectInitiatorIdKey_ = false;
+  smpDistributeResponderIdKey_ = false;
+  smpResponderIdInfoSent_ = false;
+  smpResponderIdAddressSent_ = false;
   smpPendingUserPasskey_ = false;
   smpPendingUserPasskeyMatchRequest_ = false;
   smpDeferredPairingFailed_ = false;
@@ -2029,6 +2116,7 @@ bool BleRadio::primeBondForCurrentPeer() {
     loadBondRecordFromPersistence();
   }
   if (!bondRecordValid_) {
+    emitBleTrace("BOND_PRIME_NO_RECORD");
     return false;
   }
 
@@ -2041,14 +2129,17 @@ bool BleRadio::primeBondForCurrentPeer() {
   const bool bondPeerIsRandom = (bondRecord_.peerAddressRandom & 0x01U) != 0U;
   if (!bondPeerIsRandom) {
     if (connectionPeerAddressRandom_) {
+      emitBleTrace("BOND_PRIME_TYPE_MISMATCH");
       return false;
     }
     if (memcmp(bondRecord_.peerAddress, connectionPeerAddress_,
                sizeof(connectionPeerAddress_)) != 0) {
+      emitBleTrace("BOND_PRIME_PUBLIC_ADDR_MISMATCH");
       return false;
     }
   } else {
     if (!connectionPeerAddressRandom_) {
+      emitBleTrace("BOND_PRIME_TYPE_MISMATCH");
       return false;
     }
     const bool exactRandomAddressMatch =
@@ -2069,16 +2160,21 @@ bool BleRadio::primeBondForCurrentPeer() {
         emitBleTrace("BOND_AAR_RESOLVED");
       } else {
         ++encDebug_.connAarResolveFailureCount;
-        return false;
+        // Some Android stacks rotate to an address the local AAR path cannot
+        // resolve immediately. Still prime the stored LTK and let LL_ENC_REQ
+        // EDIV/Rand prove whether this is the bonded central.
+        emitBleTrace("BOND_AAR_FALLBACK");
       }
     }
   }
   if (memcmp(bondRecord_.localAddress, address_, sizeof(address_)) != 0) {
+    emitBleTrace("BOND_PRIME_LOCAL_ADDR_MISMATCH");
     return false;
   }
   const uint8_t localAddressRandom =
       bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U;
   if ((bondRecord_.localAddressRandom & 0x01U) != localAddressRandom) {
+    emitBleTrace("BOND_PRIME_LOCAL_TYPE_MISMATCH");
     return false;
   }
 

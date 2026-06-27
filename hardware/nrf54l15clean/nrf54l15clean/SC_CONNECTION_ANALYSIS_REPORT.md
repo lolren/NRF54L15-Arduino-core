@@ -1,5 +1,11 @@
 # BLE Secure Connections (SC) Connection Failure Analysis Report
 
+> Current status note, 2026-06-26: this report documents the first HID pairing
+> root cause that was found during LE Secure Connections work. That issue was
+> real, but it is no longer the whole current failure. For the active Pixel /
+> Snapdragon HID pairing state, test commands, traces, and remaining hypotheses,
+> start with `docs/BLE_SECURE_CONNECTIONS_HANDOVER_2026_06_26.md`.
+
 ## Summary
 
 The `blehid_mouse` sketch never connects to the phone because the **peripheral never initiates the pairing procedure**. The connection is established at the link layer, but the SMP (Security Manager Protocol) security request is never sent by the peripheral, so the phone has no trigger to start encryption/pairing. Without user-facing pairing, the phone silently refuses to connect or immediately disconnects.

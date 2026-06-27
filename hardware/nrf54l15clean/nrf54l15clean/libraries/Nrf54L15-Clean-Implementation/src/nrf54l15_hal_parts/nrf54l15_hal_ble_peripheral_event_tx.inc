@@ -846,7 +846,7 @@
       // Fresh encrypted non-empty data-channel PDUs consume one counter value.
       // Retransmissions reuse the cached ciphertext.
       uint64_t txCounterToUse = connectionEncTxCounter_;
-      if (txCanUseFreshPayload &&
+      if (txPayloadIsNewPlain &&
           txIsStartEncRspPlain &&
           connectionEncPrecomputedStartRspTxValid_ &&
           (connectionEncPrecomputedStartRspTxCounter_ == txCounterToUse)) {
@@ -880,7 +880,7 @@
         connectionLastTxEncryptedLength_ = encryptedLength;
         txCounterUsedForCurrentTx = txCounterToUse;
         txCounterUsedValid = true;
-        if (txCanUseFreshPayload) {
+        if (txPayloadIsNewPlain) {
           connectionEncTxCounter_ =
               (txCounterToUse + 1ULL) & kBleEncPacketCounterMask;
           if (connectionEncPrecomputedCounter_ != connectionEncTxCounter_) {
@@ -891,7 +891,7 @@
           }
         }
       }
-    } else if (txCanUseFreshPayload) {
+    } else if (txPayloadIsNewPlain) {
       connectionLastTxWasEncrypted_ = false;
       connectionLastTxEncryptedLength_ = 0U;
       memset(connectionLastTxEncryptedPayload_, 0, sizeof(connectionLastTxEncryptedPayload_));
@@ -901,7 +901,7 @@
   encDebug_.encLastTxHdr = txPacket_[0];
   encDebug_.encLastTxPlainLen = txLength;
   encDebug_.encLastTxAirLen = txLengthOnAir;
-  encDebug_.encLastTxWasFresh = txCanUseFreshPayload ? 1U : 0U;
+  encDebug_.encLastTxWasFresh = txPayloadIsNewPlain ? 1U : 0U;
   encDebug_.encLastTxWasEncrypted =
       (sessionEncryptionActive && connectionLastTxWasEncrypted_) ? 1U : 0U;
   if (encDebug_.encLastTxWasEncrypted != 0U) {
@@ -1089,7 +1089,7 @@
       encDebug_.encRspLastTxAirLen = txLengthOnAir;
       encDebug_.encRspLastTxWasFresh = txPayloadIsNewPlain ? 1U : 0U;
       emitBleTrace("LL_ENC_RSP_TX_OK");
-    } else if (opcode == kBleLlCtrlStartEncReq) {
+    } else if ((opcode == kBleLlCtrlStartEncReq) && txPayloadIsNewPlain) {
       connectionEncStartReqTxPending_ = false;
       connectionEncAwaitingStartRsp_ = true;
       connectionEncRxEnabled_ = true;
@@ -1127,7 +1127,7 @@
                                connectionEncPrecomputedStartRspTx_, &startRspTxLen) &&
           (startRspTxLen == (1U + kBleMicLen));
       emitBleTrace("LL_START_ENC_REQ_TX");
-    } else if (opcode == kBleLlCtrlStartEncRsp) {
+    } else if ((opcode == kBleLlCtrlStartEncRsp) && txPayloadIsNewPlain) {
       ++encDebug_.mainStartEncRspTxOk;
       // Peripheral just sent LL_START_ENC_RSP — encryption handshake is complete
       // from our side. Clear the fallback flag set after LL_ENC_RSP so that
