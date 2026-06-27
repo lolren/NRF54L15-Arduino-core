@@ -1369,6 +1369,48 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   }
   clearRadioCoreEvents(radio_);
   endUnconnectedRadioActivity();
+  switch (reason) {
+    case BleDisconnectReason::kApi:
+      emitBleTrace("DISCONNECT_API");
+      break;
+    case BleDisconnectReason::kSupervisionTimeout:
+      emitBleTrace("DISCONNECT_SUPERVISION_TIMEOUT");
+      break;
+    case BleDisconnectReason::kPeerTerminate:
+      emitBleTrace("DISCONNECT_PEER_TERMINATE");
+      break;
+    case BleDisconnectReason::kMicFailure:
+      emitBleTrace("DISCONNECT_MIC_FAILURE");
+      break;
+    case BleDisconnectReason::kInternalTerminate:
+      emitBleTrace("DISCONNECT_INTERNAL");
+      break;
+    default:
+      emitBleTrace("DISCONNECT_REASON_UNKNOWN");
+      break;
+  }
+  switch (errorCode) {
+    case 0x00U:
+      break;
+    case kBleLlErrorConnectionTimeout:
+      emitBleTrace("DISCONNECT_ERR_TIMEOUT_08");
+      break;
+    case 0x13U:
+      emitBleTrace("DISCONNECT_ERR_REMOTE_USER_13");
+      break;
+    case 0x16U:
+      emitBleTrace("DISCONNECT_ERR_LOCAL_HOST_16");
+      break;
+    case 0x21U:
+      emitBleTrace("DISCONNECT_ERR_LL_RESPONSE_TIMEOUT_21");
+      break;
+    case kBleLlErrorMicFailure:
+      emitBleTrace("DISCONNECT_ERR_MIC_3D");
+      break;
+    default:
+      emitBleTrace("DISCONNECT_ERR_OTHER");
+      break;
+  }
   emitBleTrace("DISCONNECT");
   return true;
 }
