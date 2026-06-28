@@ -5169,13 +5169,28 @@ static void execute_rf_timed_mode2_primitive(
   g_cs_last_timed_mode2_token = *out_token;
 }
 
-static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *payload,
-                                                                       size_t max_len) {
-  if (payload == NULL || max_len < 201U) {
+typedef struct {
+  uint8_t packet_s0;
+  uint8_t packet_cte_info;
+  uint16_t control_to_probe_delay_us;
+  uint16_t response_listen_window_us;
+} vpr_cs_measurement_execute_params_t;
+
+static size_t run_ble_cs_measurement_execute(
+    const vpr_cs_measurement_execute_params_t *params,
+    uint8_t *payload,
+    size_t max_len) {
+  if (params == NULL || payload == NULL || max_len < 201U) {
     g_vpr_transport->lastError = 0xF1U;
     return 0U;
   }
 
+  const uint8_t packet_s0 = params->packet_s0;
+  const uint8_t packet_cte_info = params->packet_cte_info & 0x1FU;
+  const uint16_t control_to_probe_delay_us =
+      params->control_to_probe_delay_us;
+  const uint16_t response_listen_window_us =
+      params->response_listen_window_us;
   uint8_t step_channels[6] = {0};
   const uint8_t active_subevent = g_cs_active_subevent_index;
   const uint8_t subevent_count = current_demo_subevent_count();
@@ -5237,21 +5252,7 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
                          step_channel_count != 0U)
                             ? 1U
                             : 0U;
-  uint8_t packet_s0 = 0xA5U;
-  uint8_t packet_cte_info = 10U & 0x1FU;
-  uint16_t control_to_probe_delay_us = 2400U;
-  uint16_t response_listen_window_us = 12000U;
   uint8_t status = BLE_CS_HCI_STATUS_SUCCESS;
-  if (g_host_transport->hostLen > 4U) {
-    packet_s0 = g_host_transport->hostData[4];
-  }
-  if (g_host_transport->hostLen > 5U) {
-    packet_cte_info = g_host_transport->hostData[5] & 0x1FU;
-  }
-  if (g_host_transport->hostLen > 9U && g_host_transport->hostData[3] >= 6U) {
-    control_to_probe_delay_us = read_le16(&g_host_transport->hostData[6]);
-    response_listen_window_us = read_le16(&g_host_transport->hostData[8]);
-  }
   uint8_t accepted = 0U;
   if (status == BLE_CS_HCI_STATUS_SUCCESS && ready == 0U) {
     status = BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
@@ -5506,6 +5507,43 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
                (accepted != 0U) ? g_cs_timed_mode2_result_tokens[i] : 0U);
   }
   return 201U;
+}
+
+static vpr_cs_measurement_execute_params_t
+default_ble_cs_measurement_execute_params(void) {
+  vpr_cs_measurement_execute_params_t params;
+  params.packet_s0 = 0xA5U;
+  params.packet_cte_info = 10U & 0x1FU;
+  params.control_to_probe_delay_us = 2400U;
+  params.response_listen_window_us = 12000U;
+  return params;
+}
+
+static vpr_cs_measurement_execute_params_t
+parse_ble_cs_measurement_execute_params_from_host_command(void) {
+  vpr_cs_measurement_execute_params_t params =
+      default_ble_cs_measurement_execute_params();
+  if (g_host_transport->hostLen > 4U) {
+    params.packet_s0 = g_host_transport->hostData[4];
+  }
+  if (g_host_transport->hostLen > 5U) {
+    params.packet_cte_info = g_host_transport->hostData[5] & 0x1FU;
+  }
+  if (g_host_transport->hostLen > 9U && g_host_transport->hostData[3] >= 6U) {
+    params.control_to_probe_delay_us =
+        read_le16(&g_host_transport->hostData[6]);
+    params.response_listen_window_us =
+        read_le16(&g_host_transport->hostData[8]);
+  }
+  return params;
+}
+
+static size_t build_vendor_ble_cs_measurement_execute_complete_payload(
+    uint8_t *payload,
+    size_t max_len) {
+  const vpr_cs_measurement_execute_params_t params =
+      parse_ble_cs_measurement_execute_params_from_host_command();
+  return run_ble_cs_measurement_execute(&params, payload, max_len);
 }
 
 static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payload,

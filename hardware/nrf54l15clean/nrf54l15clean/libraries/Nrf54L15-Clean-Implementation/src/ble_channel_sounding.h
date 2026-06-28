@@ -1144,6 +1144,13 @@ struct BleCsConfig {
   int16_t dfeSampleOffset16M = 0;
 };
 
+struct BleCsMeasurementExecuteParams {
+  uint8_t packetS0 = 0xA5U;
+  uint8_t packetCteInfo = 10U;
+  uint16_t controlToProbeDelayUs = 2400U;
+  uint16_t responseListenWindowUs = 12000U;
+};
+
 struct BleCsConnectedWindowPlan {
   bool valid = false;
   bool connected = false;
@@ -2490,6 +2497,9 @@ class BleCsControllerVprHost {
       BleCsVprPeerExchangeState* outState);
   bool directReadSchedulerStateForTest(BleCsVprSchedulerState* outState);
   bool directReadMeasurementWorkItemForTest(BleCsVprMeasurementWorkItem* outWork);
+  bool executeMeasurementWork(
+      BleCsVprMeasurementExecutionResult* outResult,
+      const BleCsMeasurementExecuteParams& params = BleCsMeasurementExecuteParams());
   bool directExecuteMeasurementWorkForTest(
       BleCsVprMeasurementExecutionResult* outResult,
       const BleCsConfig* radioConfig = nullptr);

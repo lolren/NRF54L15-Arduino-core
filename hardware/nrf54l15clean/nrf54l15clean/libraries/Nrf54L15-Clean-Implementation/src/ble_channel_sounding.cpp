@@ -6339,27 +6339,24 @@ bool BleCsControllerVprHost::directReadMeasurementWorkItemForTest(
   return true;
 }
 
-bool BleCsControllerVprHost::directExecuteMeasurementWorkForTest(
+bool BleCsControllerVprHost::executeMeasurementWork(
     BleCsVprMeasurementExecutionResult* outResult,
-    const BleCsConfig* radioConfig) {
+    const BleCsMeasurementExecuteParams& params) {
   if (outResult == nullptr) {
     return false;
   }
 
-  uint8_t params[6] = {0};
-  params[0] = (radioConfig != nullptr) ? radioConfig->s0Pattern : 0xA5U;
-  params[1] = (radioConfig != nullptr) ? radioConfig->cteTimeUnits : 10U;
-  writeLe16(&params[2], (radioConfig != nullptr)
-                             ? radioConfig->controlToProbeDelayUs
-                             : 2400U);
-  writeLe16(&params[4], (radioConfig != nullptr)
-                             ? radioConfig->responseListenWindowUs
-                             : 12000U);
+  uint8_t commandParams[6] = {0};
+  commandParams[0] = params.packetS0;
+  commandParams[1] = params.packetCteInfo;
+  writeLe16(&commandParams[2], params.controlToProbeDelayUs);
+  writeLe16(&commandParams[4], params.responseListenWindowUs);
 
   uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t responseLen = 0U;
-  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, params, sizeof(params),
-                            response, sizeof(response), &responseLen)) {
+  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, commandParams,
+                            sizeof(commandParams), response, sizeof(response),
+                            &responseLen)) {
     return false;
   }
   if (!parseVprMeasurementExecutionResponse(
@@ -6371,6 +6368,19 @@ bool BleCsControllerVprHost::directExecuteMeasurementWorkForTest(
     vprState_.linkProcedureCounter = outResult->procedureCounter;
   }
   return true;
+}
+
+bool BleCsControllerVprHost::directExecuteMeasurementWorkForTest(
+    BleCsVprMeasurementExecutionResult* outResult,
+    const BleCsConfig* radioConfig) {
+  BleCsMeasurementExecuteParams params{};
+  if (radioConfig != nullptr) {
+    params.packetS0 = radioConfig->s0Pattern;
+    params.packetCteInfo = radioConfig->cteTimeUnits;
+    params.controlToProbeDelayUs = radioConfig->controlToProbeDelayUs;
+    params.responseListenWindowUs = radioConfig->responseListenWindowUs;
+  }
+  return executeMeasurementWork(outResult, params);
 }
 
 bool BleCsControllerVprHost::directReadToneSnapshotForTest(
@@ -9526,9 +9536,15 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     result.workExecuteAttempted = true;
     BleCsVprMeasurementExecutionResult execution{};
     const BleCsControllerHostState workHostStateBefore = host->hostState();
+    BleCsMeasurementExecuteParams workExecuteParams{};
+    workExecuteParams.packetS0 = config.radioConfig.s0Pattern;
+    workExecuteParams.packetCteInfo = config.radioConfig.cteTimeUnits;
+    workExecuteParams.controlToProbeDelayUs =
+        config.radioConfig.controlToProbeDelayUs;
+    workExecuteParams.responseListenWindowUs =
+        config.radioConfig.responseListenWindowUs;
     const bool workExecuteDirectOk =
-        host->directExecuteMeasurementWorkForTest(&execution,
-                                                  &config.radioConfig);
+        host->executeMeasurementWork(&execution, workExecuteParams);
     const BleCsControllerVprDrainStats& workDrainStats = host->lastDrainStats();
     result.workDirectDrainPackets = workDrainStats.packetsRead;
     result.workDirectDrainConsumed = workDrainStats.packetsConsumed;
