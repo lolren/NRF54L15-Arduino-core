@@ -6217,6 +6217,7 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       opcode == kBleCsVprHciOpPendingLocalPduRead ||
       opcode == kBleCsVprHciOpSchedulerRead ||
       opcode == kBleCsVprHciOpMeasurementWorkRead ||
+      opcode == kBleCsVprHciOpMeasurementSnapshotRead ||
       opcode == kBleCsVprHciOpToneSnapshotRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
@@ -6260,12 +6261,14 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
              drainDirectControllerEvents(&directHost, response,
                                          (responseLen != nullptr) ? *responseLen : 0U,
                                          opcode != kBleCsHciOpProcedureEnable,
-                                         opcode == kBleCsVprHciOpMeasurementExecute));
+                                         opcode == kBleCsVprHciOpMeasurementExecute ||
+                                             opcode == kBleCsVprHciOpMeasurementSnapshotRead));
   if (ok && drained && resetRunStateAfter) {
     host_.resetProcedureRunState();
   }
   syncVprState();
-  if (opcode == kBleCsVprHciOpMeasurementExecute) {
+  if (opcode == kBleCsVprHciOpMeasurementExecute ||
+      opcode == kBleCsVprHciOpMeasurementSnapshotRead) {
     return ok;
   }
   return ok && drained;
@@ -6429,6 +6432,30 @@ bool BleCsControllerVprHost::directReadMeasurementWorkItemForTest(
   vprState_.measurementWork = *outWork;
   if (outWork->procedureCounter != 0U) {
     vprState_.linkProcedureCounter = outWork->procedureCounter;
+  }
+  return true;
+}
+
+bool BleCsControllerVprHost::readMeasurementExecutionSnapshot(
+    BleCsVprMeasurementExecutionResult* outResult) {
+  if (outResult == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementSnapshotRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  if (!parseVprMeasurementExecutionResponse(
+          response, responseLen, kBleCsVprHciOpMeasurementSnapshotRead,
+          outResult)) {
+    return false;
+  }
+  vprState_.measurementExecution = *outResult;
+  if (outResult->procedureCounter != 0U) {
+    vprState_.linkProcedureCounter = outResult->procedureCounter;
   }
   return true;
 }
@@ -8117,6 +8144,7 @@ bool BleCsControllerVprHost::consumeDirectAuxiliaryEvent(
       case kBleCsHciOpTestEnd:
       case kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2:
       case kBleCsVprHciOpMeasurementExecute:
+      case kBleCsVprHciOpMeasurementSnapshotRead:
         return true;
       default:
         return false;
@@ -9761,15 +9789,8 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     BleCsVprMeasurementExecutionResult execution{};
     workHostStateBefore = host->hostState();
     workHostStateBaselineValid = true;
-    BleCsMeasurementExecuteParams workExecuteParams{};
-    workExecuteParams.packetS0 = config.radioConfig.s0Pattern;
-    workExecuteParams.packetCteInfo = config.radioConfig.cteTimeUnits;
-    workExecuteParams.controlToProbeDelayUs =
-        config.radioConfig.controlToProbeDelayUs;
-    workExecuteParams.responseListenWindowUs =
-        config.radioConfig.responseListenWindowUs;
     const bool workExecuteDirectOk =
-        host->executeMeasurementWork(&execution, workExecuteParams);
+        host->readMeasurementExecutionSnapshot(&execution);
     captureWorkDrainStats();
     if (workExecuteDirectOk) {
       if (workHostLocalResultPacketDelta == 0U ||
@@ -10269,6 +10290,10 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   memset(measurements, 0,
          static_cast<size_t>(config.channelCount) * sizeof(measurements[0]));
 
+  if (workItemApplied) {
+    result.attempts = effectiveChannelCount;
+    result.validChannels = result.workExecutedChannelCount;
+  } else {
   for (uint8_t order = 0U; order < effectiveChannelCount; ++order) {
     BleCsConnectedMode2ChannelResult channelResult{};
     channelResult.channel = effectiveChannels[order];
@@ -10423,6 +10448,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   result.rawEstimateValid =
       BleChannelSoundingRadio::estimateDistancePhaseSlope(
           measurements, effectiveChannelCount, &result.rawEstimate);
+  }
 
   bool hostOk = true;
   if (host != nullptr) {
@@ -10615,10 +10641,12 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     result.hostEstimateValid = false;
   }
 
-  result.ok = (result.validChannels >= config.minValidChannels) &&
+  const bool enoughChannels = result.validChannels >= config.minValidChannels;
+  const bool rawToneProofRequired = host != nullptr && !workItemApplied;
+  result.ok = enoughChannels &&
               workExecutionOk &&
-              (host == nullptr || result.workToneSnapshotOk) &&
-              (host == nullptr || result.workToneTimedMode2Ok) &&
+              (!rawToneProofRequired || result.workToneSnapshotOk) &&
+              (!rawToneProofRequired || result.workToneTimedMode2Ok) &&
               (host == nullptr || result.workResultTimedMode2Ok) &&
               (host == nullptr || hostOk);
   *outResult = result;

@@ -48,6 +48,7 @@
 #define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_WORK_READ 0xFCECU
 #define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_EXECUTE 0xFCEDU
 #define VPR_HCI_OP_VENDOR_BLE_CS_TONE_SNAPSHOT_READ 0xFCEEU
+#define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_SNAPSHOT_READ 0xFCEFU
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -5721,6 +5722,17 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(
   return run_ble_cs_measurement_execute(&params, payload, max_len);
 }
 
+static size_t build_vendor_ble_cs_measurement_snapshot_read_complete_payload(
+    uint8_t *payload,
+    size_t max_len) {
+  if (!copy_ble_cs_measurement_execute_snapshot(payload, max_len)) {
+    g_vpr_transport->lastError = 0xF4U;
+    return 0U;
+  }
+
+  return VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN;
+}
+
 static bool controller_owned_measurement_execution_due(void) {
   uint16_t block_mask = 0U;
   if (g_cs_session_open == 0U) {
@@ -6406,6 +6418,27 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
           NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
       if (len == 0U) {
         g_vpr_transport->lastError = 0xF3U;
+        return false;
+      }
+      g_vpr_transport->lastError = 0U;
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_SNAPSHOT_READ: {
+      size_t len =
+          build_vendor_ble_cs_measurement_snapshot_read_complete_payload(
+              payload, sizeof(payload));
+      if (len == 0U) {
+        if (g_vpr_transport->lastError == 0U) {
+          g_vpr_transport->lastError = 0xF5U;
+        }
+        return false;
+      }
+      len = append_h4_command_complete_payload(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
+      if (len == 0U) {
+        g_vpr_transport->lastError = 0xF6U;
         return false;
       }
       g_vpr_transport->lastError = 0U;

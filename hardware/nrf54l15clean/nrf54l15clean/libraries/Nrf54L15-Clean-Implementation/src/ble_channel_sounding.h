@@ -56,6 +56,7 @@ constexpr uint16_t kBleCsVprHciOpSchedulerRead = 0xFCEBU;
 constexpr uint16_t kBleCsVprHciOpMeasurementWorkRead = 0xFCECU;
 constexpr uint16_t kBleCsVprHciOpMeasurementExecute = 0xFCEDU;
 constexpr uint16_t kBleCsVprHciOpToneSnapshotRead = 0xFCEEU;
+constexpr uint16_t kBleCsVprHciOpMeasurementSnapshotRead = 0xFCEFU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
@@ -1590,6 +1591,7 @@ struct BleCsConnectedMode2SweepResult {
   bool workChannelsUsed = false;
   bool workExecuteAttempted = false;
   bool workExecuteOk = false;
+  bool workExecuteCommandUsed = false;
   bool workAutoExecuted = false;
   bool workControllerOwnedSnapshot = false;
   bool workExecuteTokenOk = false;
@@ -2573,6 +2575,8 @@ class BleCsControllerVprHost {
       BleCsVprPeerExchangeState* outState);
   bool directReadSchedulerStateForTest(BleCsVprSchedulerState* outState);
   bool directReadMeasurementWorkItemForTest(BleCsVprMeasurementWorkItem* outWork);
+  bool readMeasurementExecutionSnapshot(
+      BleCsVprMeasurementExecutionResult* outResult);
   bool executeMeasurementWork(
       BleCsVprMeasurementExecutionResult* outResult,
       const BleCsMeasurementExecuteParams& params = BleCsMeasurementExecuteParams());

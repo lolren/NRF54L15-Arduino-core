@@ -503,9 +503,8 @@ static bool printAutoMeasurementProof() {
     return false;
   }
 
-  BleCsMeasurementExecuteParams params{};
   BleCsVprMeasurementExecutionResult exec{};
-  if (!g_csHost.executeMeasurementWork(&exec, params)) {
+  if (!g_csHost.readMeasurementExecutionSnapshot(&exec)) {
     failAutoMeasurementProof("snapshot_read", &work);
     return false;
   }
@@ -519,7 +518,7 @@ static bool printAutoMeasurementProof() {
   }
 
   BleCsVprMeasurementExecutionResult exec2{};
-  if (!g_csHost.executeMeasurementWork(&exec2, params)) {
+  if (!g_csHost.readMeasurementExecutionSnapshot(&exec2)) {
     failAutoMeasurementProof("snapshot_repeat_read", &work, &exec);
     return false;
   }
@@ -793,6 +792,8 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workAutoStatus, HEX);
   Serial.print(" work_exec_snap=");
   Serial.print(sweepResult.workControllerOwnedSnapshot ? 1 : 0);
+  Serial.print(" work_exec_cmd=");
+  Serial.print(sweepResult.workExecuteCommandUsed ? 1 : 0);
   Serial.print(" work_exec=");
   Serial.print(sweepResult.workExecuteAttempted ? (sweepResult.workExecuteOk ? 1 : 0) : 2);
   Serial.print(" work_exec_mismatch=0x");

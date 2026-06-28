@@ -362,7 +362,7 @@ host_proc=1
 Goal: the real RF sweep happens inside the negotiated connected CS procedure,
 not as a staged follow-up.
 
-Current issue:
+Previous issue:
 
 - Raw RF works.
 - Connected LL-control works.
@@ -381,27 +381,34 @@ Progress:
   native result publication. The auto block mask is reported but not required
   to be zero after execution, because `0x0800` means the current key already
   has an auto measurement.
+- [x] VPR now exposes a read-only measurement snapshot opcode (`0xFCEF`) so the
+  host can verify the controller-owned result without sending the measurement
+  execute command.
+- [x] Connected workflow PASS now requires `work_exec_cmd=0`, proving the
+  diagnostic execute hook was not used for the connected procedure result.
+- [x] The connected work-item path no longer runs the CPUAPP raw
+  `measureConnectedWindowChannel()` loop or `directReadToneSnapshotForTest()`;
+  raw physical follow-up is optional regression output only.
 
-Required work:
+Completed work:
 
-- Keep moving the raw Mode 2 measurement primitive under the connected
-  procedure execution path until the diagnostic readback command is no longer
-  needed as a proof bridge.
-- Consume connection timing snapshots in the controller path only as controller
-  state, not as a host/sketch-owned wait loop in the public runner.
-- Schedule CS subevents with guard-before and guard-after timing directly from
-  controller-owned state.
-- Keep BLE connection events stable while CS work is inserted.
-- Avoid long CPUAPP busy loops.
-- Use the negotiated channel plan/work item.
-- Keep per-channel evidence for all negotiated work channels.
-- Feed the resulting measurements into native result publication.
+- The connected procedure result is produced by VPR/controller-owned work.
+- CPUAPP consumes the negotiated work item and read-only execution snapshot as
+  controller state.
+- Guard/timing evidence is carried in RF timing-owner metadata.
+- BLE connection events remain active while CS work is inserted.
+- The negotiated channel plan/work item is used for result validation.
+- Per-channel timed Mode 2 evidence is required for all negotiated work
+  channels.
+- Measurements feed native local/peer result publication before the host
+  estimate is accepted.
 
 Verification:
 
-- Connected workflow PASS must prove real RF data is generated inside the
-  connected procedure.
-- Raw follow-up should become a regression baseline, not the only physical proof.
+- Connected workflow PASS proves real RF data is generated inside the connected
+  procedure with `work_auto=1`, `work_exec_cmd=0`, `work_exec_snap=1`,
+  `work_rf_timing=1`, `work_result_timed_all=1`, and native result publication.
+- Raw follow-up is a regression baseline, not the physical proof used by Slice 5.
 
 ### Slice 6: CS Security Material
 
