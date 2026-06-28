@@ -369,13 +369,28 @@ Current issue:
 - Host ingestion works.
 - But real RF execution is still effectively diagnostic/follow-up orchestration.
 
+Progress:
+
+- [x] Connected sweep now exposes the VPR/controller auto-execution proof:
+  `work_auto`, auto block/status/counter fields, and `work_exec_snap`.
+- [x] `work_exec=1` now requires the measurement execution response to be a
+  controller-owned snapshot (`params[1] & 0x10`) from the VPR auto path.
+- [x] Connected workflow regression now requires `work_auto=1`,
+  nonzero auto count/due-pass counters, `work_auto_status=0x0`,
+  `work_exec_snap=1`, RF timing-owner metadata, timed Mode 2 observations, and
+  native result publication. The auto block mask is reported but not required
+  to be zero after execution, because `0x0800` means the current key already
+  has an auto measurement.
+
 Required work:
 
-- Move the raw Mode 2 measurement primitive under the connected procedure
-  execution path.
+- Keep moving the raw Mode 2 measurement primitive under the connected
+  procedure execution path until the diagnostic readback command is no longer
+  needed as a proof bridge.
 - Consume connection timing snapshots in the controller path only as controller
-  state, not as a host/sketch-owned wait loop.
-- Schedule CS subevents with guard-before and guard-after timing.
+  state, not as a host/sketch-owned wait loop in the public runner.
+- Schedule CS subevents with guard-before and guard-after timing directly from
+  controller-owned state.
 - Keep BLE connection events stable while CS work is inserted.
 - Avoid long CPUAPP busy loops.
 - Use the negotiated channel plan/work item.

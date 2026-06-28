@@ -9645,6 +9645,14 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     result.workSubeventStepCount = work->subeventStepCount;
     result.workTotalSteps = work->totalSteps;
     result.workStepChannelCount = work->stepChannelCount;
+    result.workAutoExecuted = work->controllerAutoExecuted;
+    result.workAutoBlockMask = work->controllerAutoBlockMask;
+    result.workAutoCount = work->controllerAutoCount;
+    result.workAutoServiceCalls = work->controllerAutoServiceCalls;
+    result.workAutoDuePasses = work->controllerAutoDuePasses;
+    result.workAutoProcedureCounter = work->controllerAutoProcedureCounter;
+    result.workAutoSubevent = work->controllerAutoSubevent;
+    result.workAutoStatus = work->controllerAutoStatus;
     memcpy(result.workStepChannels, work->stepChannels,
            sizeof(result.workStepChannels));
     const uint8_t workChannelLimit =
@@ -9775,6 +9783,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     if (workExecuteDirectOk) {
       result.workExecutedChannelCount = execution.executedChannelCount;
       result.workExecutionToken = execution.executionToken;
+      result.workControllerOwnedSnapshot = execution.controllerOwnedSnapshot;
       bool executionChannelsMatchWork =
           execution.stepChannelCount == work->stepChannelCount &&
           execution.executedChannelCount == effectiveChannelCount;
@@ -10202,9 +10211,34 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       if (!result.workRfTimingOwnerOk) {
         executionMismatchMask |= (1UL << 19U);
       }
+      if (!result.workAutoExecuted) {
+        executionMismatchMask |= (1UL << 20U);
+      }
+      if (!execution.controllerOwnedSnapshot) {
+        executionMismatchMask |= (1UL << 21U);
+      }
+      if (result.workAutoStatus != 0U) {
+        executionMismatchMask |= (1UL << 22U);
+      }
+      if (result.workAutoProcedureCounter != work->procedureCounter ||
+          (result.workAutoSubevent != work->activeSubeventIndex &&
+           work->totalSubevents > 1U)) {
+        executionMismatchMask |= (1UL << 23U);
+      }
+      if (result.workAutoCount == 0U || result.workAutoDuePasses == 0U) {
+        executionMismatchMask |= (1UL << 24U);
+      }
       result.workExecuteMismatchMask = executionMismatchMask;
       const bool executionMatchesWork =
           execution.valid && execution.status == 0U && execution.accepted &&
+          result.workAutoExecuted &&
+          execution.controllerOwnedSnapshot &&
+          result.workAutoStatus == 0U &&
+          result.workAutoCount != 0U &&
+          result.workAutoDuePasses != 0U &&
+          result.workAutoProcedureCounter == work->procedureCounter &&
+          (result.workAutoSubevent == work->activeSubeventIndex ||
+           work->totalSubevents <= 1U) &&
           execution.procedureCounter == work->procedureCounter &&
           execution.configId == work->configId &&
           activeSubeventMatchesWork &&

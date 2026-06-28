@@ -1590,6 +1590,8 @@ struct BleCsConnectedMode2SweepResult {
   bool workChannelsUsed = false;
   bool workExecuteAttempted = false;
   bool workExecuteOk = false;
+  bool workAutoExecuted = false;
+  bool workControllerOwnedSnapshot = false;
   bool workExecuteTokenOk = false;
   bool workRfDescriptorOk = false;
   bool workRfHardwareOk = false;
@@ -1614,8 +1616,15 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t workExecutionStatus = 0xFFU;
   uint8_t workExecutionFlags = 0U;
   uint8_t workExecutedChannelCount = 0U;
+  uint8_t workAutoSubevent = 0xFFU;
+  uint8_t workAutoStatus = 0xFFU;
   uint32_t workExecuteMismatchMask = 0U;
   uint32_t workExecutionToken = 0U;
+  uint32_t workAutoCount = 0U;
+  uint32_t workAutoServiceCalls = 0U;
+  uint32_t workAutoDuePasses = 0U;
+  uint16_t workAutoBlockMask = 0U;
+  uint16_t workAutoProcedureCounter = 0U;
   uint32_t workRfDescriptorToken = 0U;
   uint32_t workRfHardwareToken = 0U;
   uint32_t workRfHardwareState = 0U;
