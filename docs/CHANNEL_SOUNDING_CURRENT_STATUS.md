@@ -145,12 +145,12 @@ even though many lower-level parts are already hardware-verified.
 
 ## Required Slices
 
-Estimated remaining work: 5 full slices after the Slice 3B VPR/RADIO packet and
-timed-execution ownership handoff.
+Estimated remaining work: 4 full slices after the Slice 4 native result
+publication pass.
 
-Realistic session count: 6 to 9 sessions. The risk is concentrated in slices
-4-5 because they touch native VPR result publication, production scheduler
-ownership, connection-event timing, and BLE coexistence.
+Realistic session count: 5 to 8 sessions. The risk is concentrated in Slice 5
+because it moves CS execution into production connection-event scheduling and
+therefore touches timing ownership and BLE coexistence directly.
 
 ### Slice 1: Refactor VPR Measurement Execute - Done
 
@@ -473,13 +473,12 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with Slice 4: native VPR CS result publication.
+Start with Slice 5: integrate real RF measurements into the connected procedure.
 
-Reason: Slice 3B now proves VPR/RADIO owns connected packet setup, packet
-buffer fields, timing state, and timed Mode 2 execution for the scheduled work
-item. The next meaningful gap is emitting native `CS Subevent Result` /
-`CS Subevent Result Continue` events from that controller-owned output, so the
-CPUAPP diagnostic runner stops being part of normal connected CS operation.
+Reason: Slice 4 now proves VPR/controller native result publication and host
+ingestion from VPR-owned output. The next meaningful gap is moving the staged
+physical RF work into the actual negotiated connection-event procedure with
+guard-before/guard-after scheduling and without CPUAPP busy-loop ownership.
 
 Do not mark CS fully complete until these are true:
 
