@@ -12,8 +12,8 @@
  *     - host->VPR TX window  (0x20020000 - 0x20020800)
  *   - The heap is capped below the first shared IPC window so the transport
  *     buffers are not overwritten by host-side allocations
- *   - 96 KB top-of-RAM window is reserved for VPR/FLPR execution and saved context
- *   - 20224 B reserved for a VPR helper image (0x2003B000 - 0x2003FF00)
+ *   - 104 KB top-of-RAM window is reserved for VPR/FLPR execution and saved context
+ *   - 28416 B reserved for a VPR helper image (0x20039000 - 0x2003FF00)
  *   - top 256 B reserved for VPR saved context (0x2003FF00 - 0x20040000)
  *   - 152 KB usable for CPUAPP runtime sections when VPR support is enabled
  *
@@ -241,7 +241,7 @@ SECTIONS
      * heap range. The transport uses the same CPUAPP SRAM windows that Nordic
      * reserves for CPUAPP<->FLPR IPC in Zephyr.
      */
-    PROVIDE(__vpr_image_start__ = 0x2003B000);
+    PROVIDE(__vpr_image_start__ = 0x20039000);
     PROVIDE(__vpr_image_end__ = 0x2003FF00);
     PROVIDE(__vpr_shared_start__ = 0x20018000);
     PROVIDE(__vpr_shared_end__ = 0x20020800);

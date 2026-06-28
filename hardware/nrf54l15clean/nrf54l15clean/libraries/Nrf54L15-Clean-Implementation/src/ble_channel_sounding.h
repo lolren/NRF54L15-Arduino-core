@@ -735,9 +735,23 @@ struct BleCsVprToneSnapshotResult {
   bool sampleNonZero = false;
   bool radioDisabled = false;
   bool toneConfigOk = false;
+  bool timedMode2Valid = false;
+  bool timedMode2TokenValid = false;
   uint8_t status = 0xFFU;
   uint8_t flags = 0U;
   uint8_t version = 0U;
+  uint8_t timedMode2Version = 0U;
+  uint8_t timedMode2Status = 0xFFU;
+  uint8_t timedMode2Channel = 0xFFU;
+  uint8_t timedMode2Flags = 0U;
+  uint8_t timedMode2PacketS0 = 0U;
+  uint8_t timedMode2PacketLength = 0U;
+  uint8_t timedMode2PacketType = 0U;
+  uint8_t timedMode2PacketSequence = 0U;
+  uint8_t timedMode2PacketChannel = 0xFFU;
+  uint8_t timedMode2RssiSample = 0U;
+  uint8_t timedMode2CrcStatus = 0U;
+  uint8_t timedMode2EventMask = 0U;
   uint32_t pct16 = 0U;
   uint32_t magPhase = 0U;
   uint32_t magStd = 0U;
@@ -745,6 +759,7 @@ struct BleCsVprToneSnapshotResult {
   uint32_t state = 0U;
   uint32_t cstonesEndEvent = 0U;
   uint32_t token = 0U;
+  uint32_t timedMode2Token = 0U;
 };
 
 class BleCsControllerVprHost;
@@ -1527,6 +1542,7 @@ struct BleCsConnectedMode2SweepResult {
   bool workRfPacketBufferOk = false;
   bool workRfTimedMode2Ok = false;
   bool workToneSnapshotOk = false;
+  bool workToneTimedMode2Ok = false;
   bool hostControllerResultIngress = false;
   uint8_t attempts = 0U;
   uint8_t validChannels = 0U;
@@ -1573,6 +1589,7 @@ struct BleCsConnectedMode2SweepResult {
   uint32_t workToneSnapshotFrequency = 0U;
   uint32_t workToneSnapshotState = 0U;
   uint32_t workToneSnapshotCstonesEndEvent = 0U;
+  uint32_t workToneTimedMode2Token = 0U;
   uint32_t workRfMaxSubeventLen = 0U;
   uint8_t workRfPrimitiveStatus = 0xFFU;
   uint8_t workRfPrimitiveFlags = 0U;
@@ -1589,6 +1606,12 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t workRfTimedMode2Channel = 0xFFU;
   uint8_t workToneSnapshotStatus = 0xFFU;
   uint8_t workToneSnapshotFlags = 0U;
+  uint8_t workToneTimedMode2Status = 0xFFU;
+  uint8_t workToneTimedMode2Flags = 0U;
+  uint8_t workToneTimedMode2Channel = 0xFFU;
+  uint8_t workToneTimedMode2PacketType = 0U;
+  uint8_t workToneTimedMode2PacketChannel = 0xFFU;
+  uint8_t workToneTimedMode2EventMask = 0U;
   uint8_t workRfPhy = 0U;
   int8_t workRfTxPowerDelta = 0;
   uint32_t hostLocalResultPacketDelta = 0U;

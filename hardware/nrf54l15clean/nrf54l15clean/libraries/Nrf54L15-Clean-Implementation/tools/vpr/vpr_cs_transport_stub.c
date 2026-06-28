@@ -4368,6 +4368,8 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET 0x208UL
 #define VPR_NRF_RADIO_EVENTS_END_OFFSET 0x218UL
 #define VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET 0x220UL
+#define VPR_NRF_RADIO_EVENTS_CRCOK_OFFSET 0x22CUL
+#define VPR_NRF_RADIO_EVENTS_CRCERROR_OFFSET 0x230UL
 #define VPR_NRF_RADIO_EVENTS_CSTONESEND_OFFSET 0x2C8UL
 #define VPR_NRF_RADIO_EVENTS_PLLREADY_OFFSET 0x2B0UL
 #define VPR_NRF_RADIO_SHORTS_OFFSET 0x400UL
@@ -4378,9 +4380,11 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_NRF_RADIO_STATE_OFFSET 0x520UL
 #define VPR_NRF_RADIO_DATAWHITE_OFFSET 0x540UL
 #define VPR_NRF_RADIO_FREQUENCY_OFFSET 0x708UL
+#define VPR_NRF_RADIO_RSSISAMPLE_OFFSET 0x718UL
 #define VPR_NRF_RADIO_DFEPACKET_PTR_OFFSET 0xD50UL
 #define VPR_NRF_RADIO_DFEPACKET_AMOUNT_OFFSET 0xD58UL
 #define VPR_NRF_RADIO_DFEPACKET_CURRENTAMOUNT_OFFSET 0xD5CUL
+#define VPR_NRF_RADIO_CRCSTATUS_OFFSET 0xE0CUL
 #define VPR_NRF_RADIO_PCNF0_OFFSET 0xE20UL
 #define VPR_NRF_RADIO_PCNF1_OFFSET 0xE28UL
 #define VPR_NRF_RADIO_PACKETPTR_OFFSET 0xED0UL
@@ -4447,6 +4451,14 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_RF_TIMED_MODE2_FLAG_DISABLED 0x20U
 #define VPR_RF_TIMED_MODE2_FLAG_TIMING_APPLIED 0x40U
 #define VPR_RF_TIMED_MODE2_FLAG_PACKETPTR_RESTORED 0x80U
+#define VPR_RF_TIMED_MODE2_OBS_VALID 0x01U
+#define VPR_RF_TIMED_MODE2_OBS_RX_END 0x02U
+#define VPR_RF_TIMED_MODE2_OBS_CRC_OK 0x04U
+#define VPR_RF_TIMED_MODE2_OBS_CRC_ERROR 0x08U
+#define VPR_RF_TIMED_MODE2_OBS_HEADER_PRESENT 0x10U
+#define VPR_RF_TIMED_MODE2_OBS_MAGIC_MATCH 0x20U
+#define VPR_RF_TIMED_MODE2_OBS_REPORT_TYPE 0x40U
+#define VPR_RF_TIMED_MODE2_OBS_CHANNEL_MATCH 0x80U
 #define VPR_RADIO_MODE_BLE_2MBIT 3UL
 #define VPR_RADIO_PACKET_MAX_PAYLOAD_DEFAULT 32U
 #define VPR_RADIO_PACKET_PCNF0_DEFAULT 0x01080108UL
@@ -4455,6 +4467,7 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_CS_PACKET_MAGIC0 0x43U
 #define VPR_CS_PACKET_MAGIC1 0x53U
 #define VPR_CS_PACKET_TYPE_PROBE 0x50U
+#define VPR_CS_PACKET_TYPE_REPORT 0x51U
 #define VPR_TONE_SNAPSHOT_FLAG_VALID 0x01U
 #define VPR_TONE_SNAPSHOT_FLAG_NONZERO_SAMPLE 0x02U
 #define VPR_TONE_SNAPSHOT_FLAG_RADIO_DISABLED 0x04U
@@ -4463,6 +4476,18 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 
 static uint8_t g_vpr_cs_packet_buffer[9]
     __attribute__((aligned(4)));
+static uint8_t g_cs_last_timed_mode2_status = VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
+static uint8_t g_cs_last_timed_mode2_channel = 0xFFU;
+static uint8_t g_cs_last_timed_mode2_observed_flags = 0U;
+static uint8_t g_cs_last_timed_mode2_packet_s0 = 0U;
+static uint8_t g_cs_last_timed_mode2_packet_len = 0U;
+static uint8_t g_cs_last_timed_mode2_packet_type = 0U;
+static uint8_t g_cs_last_timed_mode2_packet_sequence = 0U;
+static uint8_t g_cs_last_timed_mode2_packet_channel = 0xFFU;
+static uint8_t g_cs_last_timed_mode2_rssi_sample = 0U;
+static uint8_t g_cs_last_timed_mode2_crc_status = 0U;
+static uint8_t g_cs_last_timed_mode2_event_mask = 0U;
+static uint32_t g_cs_last_timed_mode2_token = 0U;
 
 static uint32_t read_radio_register(uint32_t offset) {
   const volatile uint32_t *reg =
@@ -4745,6 +4770,18 @@ static void execute_rf_timed_mode2_primitive(
   *out_disable_wait_loops = 0U;
   *out_state_after = *out_state_before;
   *out_token = 0U;
+  g_cs_last_timed_mode2_status = *out_status;
+  g_cs_last_timed_mode2_channel = channel;
+  g_cs_last_timed_mode2_observed_flags = 0U;
+  g_cs_last_timed_mode2_packet_s0 = 0U;
+  g_cs_last_timed_mode2_packet_len = 0U;
+  g_cs_last_timed_mode2_packet_type = 0U;
+  g_cs_last_timed_mode2_packet_sequence = 0U;
+  g_cs_last_timed_mode2_packet_channel = 0xFFU;
+  g_cs_last_timed_mode2_rssi_sample = 0U;
+  g_cs_last_timed_mode2_crc_status = 0U;
+  g_cs_last_timed_mode2_event_mask = 0U;
+  g_cs_last_timed_mode2_token = 0U;
 
   if (accepted == 0U) {
     return;
@@ -4758,6 +4795,9 @@ static void execute_rf_timed_mode2_primitive(
         control_to_probe_delay_us, response_listen_window_us,
         *out_tx_wait_loops, *out_gap_wait_loops, *out_rxready_wait_loops,
         *out_listen_wait_loops, *out_disable_wait_loops, *out_state_after);
+    g_cs_last_timed_mode2_status = *out_status;
+    g_cs_last_timed_mode2_observed_flags = VPR_RF_TIMED_MODE2_OBS_VALID;
+    g_cs_last_timed_mode2_token = *out_token;
     return;
   }
   if (*out_state_before != 0U) {
@@ -4767,6 +4807,9 @@ static void execute_rf_timed_mode2_primitive(
         control_to_probe_delay_us, response_listen_window_us,
         *out_tx_wait_loops, *out_gap_wait_loops, *out_rxready_wait_loops,
         *out_listen_wait_loops, *out_disable_wait_loops, *out_state_after);
+    g_cs_last_timed_mode2_status = *out_status;
+    g_cs_last_timed_mode2_observed_flags = VPR_RF_TIMED_MODE2_OBS_VALID;
+    g_cs_last_timed_mode2_token = *out_token;
     return;
   }
 
@@ -4803,6 +4846,8 @@ static void execute_rf_timed_mode2_primitive(
   write_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET, 0U);
   write_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET, 0U);
   write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_CRCOK_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_CRCERROR_OFFSET, 0U);
   write_radio_register(VPR_NRF_RADIO_TASKS_TXEN_OFFSET, 1U);
   while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
          *out_tx_wait_loops < VPR_RF_TIMED_MODE2_TX_WAIT_MAX_LOOPS) {
@@ -4835,6 +4880,8 @@ static void execute_rf_timed_mode2_primitive(
     write_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET, 0U);
     write_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET, 0U);
     write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+    write_radio_register(VPR_NRF_RADIO_EVENTS_CRCOK_OFFSET, 0U);
+    write_radio_register(VPR_NRF_RADIO_EVENTS_CRCERROR_OFFSET, 0U);
     write_radio_register(VPR_NRF_RADIO_TASKS_RXEN_OFFSET, 1U);
     while (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) == 0U &&
            *out_rxready_wait_loops <
@@ -4899,6 +4946,68 @@ static void execute_rf_timed_mode2_primitive(
       control_to_probe_delay_us, response_listen_window_us,
       *out_tx_wait_loops, *out_gap_wait_loops, *out_rxready_wait_loops,
       *out_listen_wait_loops, *out_disable_wait_loops, *out_state_after);
+
+  const uint8_t rx_end_seen =
+      ((*out_flags & VPR_RF_TIMED_MODE2_FLAG_RX_END) != 0U) ? 1U : 0U;
+  const uint8_t crc_ok_seen =
+      ((read_radio_register(VPR_NRF_RADIO_EVENTS_CRCOK_OFFSET) != 0U) ||
+       ((read_radio_register(VPR_NRF_RADIO_CRCSTATUS_OFFSET) & 0x1UL) != 0U))
+          ? 1U
+          : 0U;
+  const uint8_t crc_error_seen =
+      (read_radio_register(VPR_NRF_RADIO_EVENTS_CRCERROR_OFFSET) != 0U) ? 1U : 0U;
+  const uint8_t event_mask =
+      (((*out_flags & VPR_RF_TIMED_MODE2_FLAG_RX_READY) != 0U) ? 0x01U : 0x00U) |
+      (rx_end_seen ? 0x02U : 0x00U) |
+      (crc_ok_seen ? 0x04U : 0x00U) |
+      (crc_error_seen ? 0x08U : 0x00U);
+  uint8_t observed_flags = VPR_RF_TIMED_MODE2_OBS_VALID;
+  uint8_t observed_s0 = 0U;
+  uint8_t observed_len = 0U;
+  uint8_t observed_type = 0U;
+  uint8_t observed_sequence = 0U;
+  uint8_t observed_channel = 0xFFU;
+  if (rx_end_seen != 0U) {
+    observed_flags |= VPR_RF_TIMED_MODE2_OBS_RX_END;
+    observed_s0 = g_vpr_cs_packet_buffer[0];
+    observed_len = g_vpr_cs_packet_buffer[1];
+    observed_type = g_vpr_cs_packet_buffer[5];
+    observed_sequence = g_vpr_cs_packet_buffer[6];
+    observed_channel = g_vpr_cs_packet_buffer[7];
+    if (crc_ok_seen != 0U) {
+      observed_flags |= VPR_RF_TIMED_MODE2_OBS_CRC_OK;
+    }
+    if (crc_error_seen != 0U) {
+      observed_flags |= VPR_RF_TIMED_MODE2_OBS_CRC_ERROR;
+    }
+    if (observed_len <= VPR_RADIO_PACKET_MAX_PAYLOAD_DEFAULT) {
+      observed_flags |= VPR_RF_TIMED_MODE2_OBS_HEADER_PRESENT;
+    }
+    if (g_vpr_cs_packet_buffer[3] == VPR_CS_PACKET_MAGIC0 &&
+        g_vpr_cs_packet_buffer[4] == VPR_CS_PACKET_MAGIC1) {
+      observed_flags |= VPR_RF_TIMED_MODE2_OBS_MAGIC_MATCH;
+    }
+    if (observed_type == VPR_CS_PACKET_TYPE_REPORT) {
+      observed_flags |= VPR_RF_TIMED_MODE2_OBS_REPORT_TYPE;
+    }
+    if (observed_channel == channel) {
+      observed_flags |= VPR_RF_TIMED_MODE2_OBS_CHANNEL_MATCH;
+    }
+  }
+  g_cs_last_timed_mode2_status = *out_status;
+  g_cs_last_timed_mode2_channel = channel;
+  g_cs_last_timed_mode2_observed_flags = observed_flags;
+  g_cs_last_timed_mode2_packet_s0 = observed_s0;
+  g_cs_last_timed_mode2_packet_len = observed_len;
+  g_cs_last_timed_mode2_packet_type = observed_type;
+  g_cs_last_timed_mode2_packet_sequence = observed_sequence;
+  g_cs_last_timed_mode2_packet_channel = observed_channel;
+  g_cs_last_timed_mode2_rssi_sample =
+      (uint8_t)(read_radio_register(VPR_NRF_RADIO_RSSISAMPLE_OFFSET) & 0x7FUL);
+  g_cs_last_timed_mode2_crc_status =
+      (uint8_t)(read_radio_register(VPR_NRF_RADIO_CRCSTATUS_OFFSET) & 0x01UL);
+  g_cs_last_timed_mode2_event_mask = event_mask;
+  g_cs_last_timed_mode2_token = *out_token;
 }
 
 static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *payload,
@@ -5156,7 +5265,7 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
 
 static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payload,
                                                                  size_t max_len) {
-  if (payload == NULL || max_len < 32U) {
+  if (payload == NULL || max_len < 48U) {
     return 0U;
   }
 
@@ -5224,7 +5333,20 @@ static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payloa
   write_le32(&payload[20], state);
   write_le32(&payload[24], cstones_end_event);
   write_le32(&payload[28], token);
-  return 32U;
+  payload[32] = 1U;
+  payload[33] = g_cs_last_timed_mode2_status;
+  payload[34] = g_cs_last_timed_mode2_channel;
+  payload[35] = g_cs_last_timed_mode2_observed_flags;
+  write_le32(&payload[36], g_cs_last_timed_mode2_token);
+  payload[40] = g_cs_last_timed_mode2_packet_s0;
+  payload[41] = g_cs_last_timed_mode2_packet_len;
+  payload[42] = g_cs_last_timed_mode2_packet_type;
+  payload[43] = g_cs_last_timed_mode2_packet_sequence;
+  payload[44] = g_cs_last_timed_mode2_packet_channel;
+  payload[45] = g_cs_last_timed_mode2_rssi_sample;
+  payload[46] = g_cs_last_timed_mode2_crc_status;
+  payload[47] = g_cs_last_timed_mode2_event_mask;
+  return 48U;
 }
 
 #endif

@@ -4467,6 +4467,25 @@ bool parseVprToneSnapshotResponse(const uint8_t* packet,
                                             outResult->frequency,
                                             outResult->state,
                                             outResult->cstonesEndEvent);
+  if (completeEvent.returnParamsLen >= 48U) {
+    outResult->timedMode2Version = params[32];
+    outResult->timedMode2Status = params[33];
+    outResult->timedMode2Channel = params[34];
+    outResult->timedMode2Flags = params[35];
+    outResult->timedMode2Token = readLe32(params + 36U);
+    outResult->timedMode2PacketS0 = params[40];
+    outResult->timedMode2PacketLength = params[41];
+    outResult->timedMode2PacketType = params[42];
+    outResult->timedMode2PacketSequence = params[43];
+    outResult->timedMode2PacketChannel = params[44];
+    outResult->timedMode2RssiSample = params[45];
+    outResult->timedMode2CrcStatus = params[46];
+    outResult->timedMode2EventMask = params[47];
+    outResult->timedMode2Valid =
+        outResult->timedMode2Version == 1U &&
+        ((outResult->timedMode2Flags & 0x01U) != 0U);
+    outResult->timedMode2TokenValid = outResult->timedMode2Token != 0U;
+  }
   return true;
 }
 
@@ -9563,6 +9582,16 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
               snapshotResult.cstonesEndEvent;
           result.workToneSnapshotStatus = snapshotResult.status;
           result.workToneSnapshotFlags = snapshotResult.flags;
+          result.workToneTimedMode2Token = snapshotResult.timedMode2Token;
+          result.workToneTimedMode2Status = snapshotResult.timedMode2Status;
+          result.workToneTimedMode2Flags = snapshotResult.timedMode2Flags;
+          result.workToneTimedMode2Channel = snapshotResult.timedMode2Channel;
+          result.workToneTimedMode2PacketType =
+              snapshotResult.timedMode2PacketType;
+          result.workToneTimedMode2PacketChannel =
+              snapshotResult.timedMode2PacketChannel;
+          result.workToneTimedMode2EventMask =
+              snapshotResult.timedMode2EventMask;
           result.workToneSnapshotOk =
               snapshotResult.valid &&
               snapshotResult.status == 0U &&
@@ -9570,6 +9599,15 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
               snapshotResult.tokenValid &&
               snapshotResult.sampleNonZero &&
               snapshotResult.toneConfigOk;
+          result.workToneTimedMode2Ok =
+              snapshotResult.timedMode2Valid &&
+              snapshotResult.timedMode2TokenValid &&
+              snapshotResult.timedMode2Status ==
+                  result.workRfTimedMode2Status &&
+              snapshotResult.timedMode2Token ==
+                  result.workRfTimedMode2Token &&
+              snapshotResult.timedMode2Channel ==
+                  result.workRfTimedMode2Channel;
         }
       }
       radio.end();
@@ -9632,6 +9670,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   result.ok = (result.validChannels >= config.minValidChannels) &&
               workExecutionOk &&
               (host == nullptr || result.workToneSnapshotOk) &&
+              (host == nullptr || result.workToneTimedMode2Ok) &&
               (host == nullptr || hostOk);
   *outResult = result;
   return result.ok;

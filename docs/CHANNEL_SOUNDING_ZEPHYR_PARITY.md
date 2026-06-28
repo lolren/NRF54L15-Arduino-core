@@ -90,10 +90,9 @@ The following LE Meta subevents are also represented:
   `VprControllerServiceHost`, allowing command-following asynchronous events to
   be drained without routing them through the wrong state machine.
 - Expanded the dedicated VPR helper image window to
-  `0x2003B000-0x2003FF00`. The VPR image base stays at `0x2003B000`; testing
-  showed that moving the base broke VPR boot. The saved-context window is now
-  `0x2003FF00-0x20040000`, keeping the VPR/FLPR reservation within the same
-  RAM boundary and not reducing CPUAPP RAM.
+  `0x20039000-0x2003FF00` (0x6F00 bytes). The saved-context window remains
+  `0x2003FF00-0x20040000`, keeping the VPR/FLPR context at the top of RAM while
+  giving the VPR image more room for the connected-CS transport work.
 - Added:
   `File > Examples > Nrf54L15 Clean Implementation > BLE > ChannelSounding >
   BleChannelSoundingHciParity`
@@ -126,7 +125,7 @@ now emits the standalone CS Test result stream while `LE CS Test` mode is active
   `poll()`/`loopOnce()` which feed the connected session).
 - Added `File > Examples > ... > ChannelSounding > BleChannelSoundingVprCsTestResults`.
 - Both VPR images were regenerated and fit the current
-  `0x2003B000-0x2003FF00` image window.
+  `0x20039000-0x2003FF00` image window.
 
 These results are still **synthetic** (deterministic mode-2 step data, not real
 RF measurements), so this does not change the "do not mark CS fully complete"
@@ -1038,9 +1037,10 @@ disturb the connected packet path. The stable implementation keeps the existing
 - A separate 180-byte response with detailed PACKETPTR fields was tested and
   rejected because the generated VPR image overflowed the old
   `0x2003B000..0x2003FE80` image window. The accepted implementation keeps the
-  response fixed at 152 bytes, expands the VPR image window to the full safe
-  top-of-SRAM window `0x2003B000..0x20040000` (`0x5000` bytes), and folds the
-  PACKETPTR/timing proof into the existing packet-config token.
+  execute response fixed at 152 bytes and folds the PACKETPTR/timing proof into
+  the existing packet-config token. The current image reservation is
+  `0x20039000..0x2003FF00` with `0x2003FF00..0x20040000` reserved for VPR saved
+  context.
 
 Hardware regression on the same two XIAO nRF54L15 boards, with the LM20A probe
 attached but unused:
@@ -1094,6 +1094,58 @@ cs_ll_physical_followup=PASS sweeps=1 valid_channels=20 raw_est=1 host_est=1 hos
 This is still not full Zephyr parity. The next hard slice is making the peer
 response and tone result itself VPR-owned inside the connected event instead of
 using this timed RF proof beside the existing CPUAPP measurement result path.
+
+## Completed in This Pass — VPR Timed Mode 2 RX Observation Readback Gate
+
+The timed Mode 2 RF proof is now latched on the VPR side and read back through
+the existing `0xFCEE` tone snapshot path. This is still a diagnostic seam, but
+it closes an important ambiguity: CPUAPP now proves that the later tone snapshot
+belongs to the same VPR timed execute token instead of only trusting the
+immediate `0xFCED` response.
+
+- VPR records the last timed Mode 2 execute status, channel, token, event mask,
+  RSSI sample, CRC status, and any observed RX packet header bytes after the
+  timed TX/RX primitive finishes.
+- The tone snapshot response remains backward-compatible for the first 32
+  bytes, but now returns 48 bytes when the new timed observation tail is
+  present.
+- `BleCsVprToneSnapshotResult` parses the extra tail and
+  `BleCsConnectedMode2SweepRunner` now rejects the connected sweep unless the
+  snapshot tail token/status/channel match the accepted timed RF execute result.
+- The workflow central diagnostic prints `work_tone_timed`,
+  `work_tone_timed32`, `work_tone_timed_status`, `work_tone_timed_flags`,
+  `work_tone_timed_ch`, `work_tone_timed_type`,
+  `work_tone_timed_pkt_ch`, and `work_tone_timed_evt`.
+- The regression script now requires `work_tone_timed=1` and
+  `work_tone_timed_status=0`.
+- The VPR image reservation was increased to
+  `0x20039000..0x2003FF00` (0x6F00 bytes). The saved-context window remains
+  `0x2003FF00..0x20040000`.
+
+Latest hardware regression with two XIAO nRF54L15 boards and one LM20A attached
+but unused:
+
+```bash
+CS_CAPTURE_SECONDS=45 \
+CS_CENTRAL_UID=761FDE87 \
+CS_PERIPHERAL_UID=E91217E8 \
+CS_CENTRAL_PORT=/dev/ttyACM1 \
+CS_PERIPHERAL_PORT=/dev/ttyACM0 \
+./scripts/test_cs_ll_workflow_bridge.sh
+```
+
+Observed PASS summary:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=4 min_valid=3 requested_channels=6 host_est=1 ctrl_ing=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_exec=1 work_exec_mismatch=0x0 work_rf_pkt=1 work_rf_pkt_flags=0xFF work_rf_buf=1 work_rf_timed=1 work_rf_timed_status=0 work_tone_snap=1 work_tone_snap_flags=0x37 work_tone_timed=1 work_tone_timed_status=0 work_tone_timed_ch=2 host_cfg=1 host_proc=1 host_steps=4/4
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 host_est=1 host_steps=21/21 proc=2
+```
+
+This still does not make Channel Sounding complete. The next hard slice remains
+moving real peer response/tone capture and result publication into the VPR-owned
+connected-event path instead of using the CPUAPP connected sweep as the final
+physical measurement owner.
 
 ## Completed in This Pass — VPR Tone Configuration Readback Gate
 
@@ -1561,7 +1613,7 @@ python3 hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementa
 ```
 
 Both generated headers must fit the configured
-`0x2003B000-0x2003FF00` image window. The VPR saved-context area is
+`0x20039000-0x2003FF00` image window. The VPR saved-context area is
 `0x2003FF00-0x20040000`.
 
 ## Local Compile Pattern
