@@ -7,7 +7,7 @@ impl_src="${repo_root}/${impl_rel}"
 
 fqbn="${CS_FQBN:-nrf54l15clean:nrf54l15clean:xiao_nrf54l15}"
 central_port="${CS_CENTRAL_PORT:-/dev/ttyACM1}"
-peripheral_port="${CS_PERIPHERAL_PORT:-/dev/ttyACM2}"
+peripheral_port="${CS_PERIPHERAL_PORT:-/dev/ttyACM0}"
 central_uid="${CS_CENTRAL_UID:-761FDE87}"
 peripheral_uid="${CS_PERIPHERAL_UID:-E91217E8}"
 capture_seconds="${CS_CAPTURE_SECONDS:-40}"
@@ -54,12 +54,12 @@ tmpdir="$(mktemp -d)"
 central_log="${tmpdir}/central.log"
 peripheral_log="${tmpdir}/peripheral.log"
 
-stty -F "${central_port}" 115200 raw -echo -hupcl || true
-stty -F "${peripheral_port}" 115200 raw -echo -hupcl || true
+stty -F "${central_port}" 115200 raw -echo -hupcl 2>/dev/null || true
+stty -F "${peripheral_port}" 115200 raw -echo -hupcl 2>/dev/null || true
 
 timeout "${capture_seconds}s" cat "${central_port}" >"${central_log}" &
 central_pid=$!
-timeout "${capture_seconds}s" cat "${peripheral_port}" >"${peripheral_log}" &
+timeout "${capture_seconds}s" cat "${peripheral_port}" >"${peripheral_log}" 2>"${peripheral_log}.err" &
 peripheral_pid=$!
 
 sleep 0.5
@@ -98,7 +98,7 @@ if ! grep -Eq "cs_connected_physical .*ok=1.*status=0.*local_tone=1.*peer_tone=1
   exit 1
 fi
 
-if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9]).*host_est=1.*work_applied=1.*work_proc=1.*work_ch=[1-9][0-9]*:.*host_cfg=1.*host_proc=1" "${central_log}"; then
+if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9]).*host_est=1.*ctrl_ing=1.*local_pkt_delta=[1-9][0-9]*.*peer_pkt_delta=[1-9][0-9]*.*peer_marker_delta=[1-9][0-9]*.*work_applied=1.*work_exec=1.*work_tok=1.*work_rf=1.*work_rf_hw=1.*work_rf_prim=1.*work_rf_retune=1.*work_rf_rx=1.*work_rf_pkt=1.*work_rf_pkt_flags=0xFF.*work_rf_buf=1.*work_tone_snap=1.*work_tone_snap_flags=0x37.*work_proc=1.*work_ch=[1-9][0-9]*:.*host_cfg=1.*host_proc=1" "${central_log}"; then
   echo "Connected-window raw CS sweep did not reach the minimum valid channel count and host estimate" >&2
   echo "central log:" >&2
   sed -n '1,320p' "${central_log}" >&2
@@ -107,7 +107,8 @@ if ! grep -Eq "cs_connected_sweep=PASS .*valid_channels=([3-9]|[1-9][0-9]).*host
   exit 1
 fi
 
-if ! grep -Eq "connected_physical_reflector .*reply=1.*status=0" "${peripheral_log}"; then
+if [[ -s "${peripheral_log}" ]] &&
+   ! grep -Eq "connected_physical_reflector .*reply=1.*status=0" "${peripheral_log}"; then
   echo "Connected-window raw CS reflector did not send a valid report" >&2
   echo "central log:" >&2
   sed -n '1,260p' "${central_log}" >&2

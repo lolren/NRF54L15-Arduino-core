@@ -46,6 +46,8 @@
 #define VPR_HCI_OP_VENDOR_BLE_CS_PENDING_LOCAL_PDU_READ 0xFCEAU
 #define VPR_HCI_OP_VENDOR_BLE_CS_SCHEDULER_READ 0xFCEBU
 #define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_WORK_READ 0xFCECU
+#define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_EXECUTE 0xFCEDU
+#define VPR_HCI_OP_VENDOR_BLE_CS_TONE_SNAPSHOT_READ 0xFCEEU
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -280,6 +282,10 @@ static uint8_t g_cs_last_interval_selector = 0U;
 static uint8_t g_cs_active_subevent_index = 0U;
 static uint8_t g_cs_local_chunk_start_step = 0U;
 static uint8_t g_cs_peer_chunk_start_step = 0U;
+static uint32_t g_cs_measurement_execute_count = 0U;
+static uint8_t g_cs_measurement_execute_last_status = 0xFFU;
+static uint8_t g_cs_measurement_execute_last_channels = 0U;
+static uint32_t g_cs_measurement_execute_last_token = 0U;
 typedef struct __attribute__((packed)) {
   uint8_t configId;
   uint16_t procedureCounter;
@@ -579,6 +585,17 @@ static void bytes_copy(void *dst, const void *src, size_t len) {
   for (size_t i = 0U; i < len; ++i) {
     out[i] = in[i];
   }
+}
+
+void *memset(void *dst, int value, size_t len) {
+  uint8_t *out = (uint8_t *)dst;
+  if (out == NULL) {
+    return dst;
+  }
+  for (size_t i = 0U; i < len; ++i) {
+    out[i] = (uint8_t)value;
+  }
+  return dst;
 }
 
 #if VPR_CS_DEDICATED_IMAGE
@@ -2316,6 +2333,10 @@ static void update_create_config_from_command(void) {
   g_cs_active_subevent_index = 0U;
   g_cs_local_chunk_start_step = 0U;
   g_cs_peer_chunk_start_step = 0U;
+  g_cs_measurement_execute_count = 0U;
+  g_cs_measurement_execute_last_status = 0xFFU;
+  g_cs_measurement_execute_last_channels = 0U;
+  g_cs_measurement_execute_last_token = 0U;
   update_demo_channels_from_create_config();
   slot = allocate_create_config_slot(g_cs_config_id, allow_previous_overflow);
   if (slot != NULL) {
@@ -2386,6 +2407,10 @@ static void update_procedure_params_from_command(void) {
   g_cs_active_subevent_index = 0U;
   g_cs_local_chunk_start_step = 0U;
   g_cs_peer_chunk_start_step = 0U;
+  g_cs_measurement_execute_count = 0U;
+  g_cs_measurement_execute_last_status = 0xFFU;
+  g_cs_measurement_execute_last_channels = 0U;
+  g_cs_measurement_execute_last_token = 0U;
   slot = find_cs_slot(g_cs_config_id);
   if (slot == NULL && g_cs_config_created != 0U) {
     slot = allocate_cs_slot(g_cs_config_id);
@@ -2418,6 +2443,9 @@ static void clear_active_runtime_state(void) {
   g_cs_subevent_abort_reason = 0U;
   g_cs_peer_exchange_deadline = 0U;
   g_cs_peer_exchange_stage = 0U;
+  g_cs_measurement_execute_last_status = 0xFFU;
+  g_cs_measurement_execute_last_channels = 0U;
+  g_cs_measurement_execute_last_token = 0U;
 }
 
 static void clear_active_config_selection(void) {
@@ -4163,11 +4191,900 @@ static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t
   }
   return 62U;
 }
+
+static uint32_t build_measurement_execute_token(uint8_t config_id,
+                                                uint16_t procedure_counter,
+                                                uint16_t conn_handle,
+                                                uint8_t active_subevent,
+                                                uint8_t subevent_count,
+                                                uint8_t total_steps,
+                                                uint8_t subevent_start,
+                                                uint8_t subevent_steps,
+                                                uint8_t step_channel_count,
+                                                const uint8_t *step_channels,
+                                                uint32_t execute_count) {
+  uint32_t hash = 2166136261UL;
+  hash ^= 0xC5U; hash *= 16777619UL;
+  hash ^= (uint32_t)config_id; hash *= 16777619UL;
+  hash ^= (uint32_t)(procedure_counter & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)((procedure_counter >> 8U) & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)(conn_handle & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)((conn_handle >> 8U) & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)active_subevent; hash *= 16777619UL;
+  hash ^= (uint32_t)subevent_count; hash *= 16777619UL;
+  hash ^= (uint32_t)total_steps; hash *= 16777619UL;
+  hash ^= (uint32_t)subevent_start; hash *= 16777619UL;
+  hash ^= (uint32_t)subevent_steps; hash *= 16777619UL;
+  hash ^= (uint32_t)step_channel_count; hash *= 16777619UL;
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    const uint8_t value = (step_channels != NULL) ? step_channels[i] : 0U;
+    hash ^= (uint32_t)value;
+    hash *= 16777619UL;
+  }
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    hash ^= (uint32_t)((execute_count >> (8U * i)) & 0xFFU);
+    hash *= 16777619UL;
+  }
+  hash ^= 0U;
+  hash *= 16777619UL;
+  hash ^= 0U;
+  hash *= 16777619UL;
+  return hash;
+}
+
+static uint32_t build_measurement_rf_descriptor_token(uint8_t config_id,
+                                                      uint16_t procedure_counter,
+                                                      uint16_t conn_handle,
+                                                      uint8_t active_subevent,
+                                                      uint8_t subevent_count,
+                                                      uint8_t total_steps,
+                                                      uint8_t subevent_start,
+                                                      uint8_t subevent_steps,
+                                                      uint8_t step_channel_count,
+                                                      const uint8_t *step_channels,
+                                                      uint8_t role,
+                                                      uint8_t phy,
+                                                      int8_t tx_power_delta,
+                                                      uint8_t rtt_type,
+                                                      uint32_t min_subevent_len,
+                                                      uint32_t max_subevent_len,
+                                                      uint32_t execute_count) {
+  uint32_t hash = 2166136261UL;
+  hash ^= 0xC6U; hash *= 16777619UL;
+  hash ^= (uint32_t)config_id; hash *= 16777619UL;
+  hash ^= (uint32_t)(procedure_counter & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)((procedure_counter >> 8U) & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)(conn_handle & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)((conn_handle >> 8U) & 0xFFU); hash *= 16777619UL;
+  hash ^= (uint32_t)active_subevent; hash *= 16777619UL;
+  hash ^= (uint32_t)subevent_count; hash *= 16777619UL;
+  hash ^= (uint32_t)total_steps; hash *= 16777619UL;
+  hash ^= (uint32_t)subevent_start; hash *= 16777619UL;
+  hash ^= (uint32_t)subevent_steps; hash *= 16777619UL;
+  hash ^= (uint32_t)step_channel_count; hash *= 16777619UL;
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    const uint8_t value = (step_channels != NULL) ? step_channels[i] : 0U;
+    hash ^= (uint32_t)value;
+    hash *= 16777619UL;
+  }
+  hash ^= (uint32_t)role; hash *= 16777619UL;
+  hash ^= (uint32_t)phy; hash *= 16777619UL;
+  hash ^= (uint32_t)((uint8_t)tx_power_delta); hash *= 16777619UL;
+  hash ^= (uint32_t)rtt_type; hash *= 16777619UL;
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    hash ^= (uint32_t)((min_subevent_len >> (8U * i)) & 0xFFU);
+    hash *= 16777619UL;
+  }
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    hash ^= (uint32_t)((max_subevent_len >> (8U * i)) & 0xFFU);
+    hash *= 16777619UL;
+  }
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    hash ^= (uint32_t)((execute_count >> (8U * i)) & 0xFFU);
+    hash *= 16777619UL;
+  }
+  hash ^= 0U; hash *= 16777619UL;
+  hash ^= 0U; hash *= 16777619UL;
+  return hash;
+}
+
+static uint32_t build_measurement_rf_hardware_token(uint8_t version,
+                                                    uint8_t flags,
+                                                    uint32_t radio_state,
+                                                    uint32_t radio_mode,
+                                                    uint32_t radio_frequency) {
+  return 0xC7000000UL ^
+         radio_state ^
+         (radio_mode << 1U) ^
+         (radio_frequency << 2U) ^
+         ((uint32_t)flags << 16U) ^
+         (uint32_t)version;
+}
+
+static uint32_t build_measurement_rf_primitive_token(uint8_t version,
+                                                     uint8_t flags,
+                                                     uint8_t status,
+                                                     uint32_t state_before,
+                                                     uint32_t pll_wait_loops,
+                                                     uint32_t disable_wait_loops,
+                                                     uint32_t state_after) {
+  return 0xC8000000UL ^
+         state_before ^
+         (pll_wait_loops << 1U) ^
+         (disable_wait_loops << 2U) ^
+         (state_after << 3U) ^
+         ((uint32_t)flags << 16U) ^
+         ((uint32_t)status << 24U) ^
+         (uint32_t)version;
+}
+
+static uint32_t build_measurement_rf_retune_token(uint8_t version,
+                                                  uint8_t flags,
+                                                  uint8_t status,
+                                                  uint8_t channel,
+                                                  uint32_t target_frequency,
+                                                  uint32_t target_datawhite,
+                                                  uint32_t observed_frequency,
+                                                  uint32_t observed_datawhite) {
+  return 0xCA000000UL ^
+         target_frequency ^
+         (observed_frequency << 1U) ^
+         target_datawhite ^
+         (observed_datawhite << 2U) ^
+         ((uint32_t)channel << 8U) ^
+         ((uint32_t)flags << 16U) ^
+         ((uint32_t)status << 24U) ^
+         (uint32_t)version;
+}
+
+static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
+                                                      uint8_t flags,
+                                                      uint8_t status,
+                                                      uint32_t pct16,
+                                                      uint32_t mag_phase,
+                                                      uint32_t mag_std,
+                                                      uint32_t frequency,
+                                                      uint32_t state,
+                                                      uint32_t cstones_end_event) {
+  return 0xC9000000UL ^
+         pct16 ^
+         (mag_phase << 1U) ^
+         (mag_std << 2U) ^
+         (frequency << 3U) ^
+         state ^
+         (cstones_end_event << 4U) ^
+         ((uint32_t)flags << 16U) ^
+         ((uint32_t)status << 24U) ^
+         (uint32_t)version;
+}
+
+#define VPR_NRF_RADIO_BASE 0x5008A000UL
+#define VPR_NRF_RADIO_TASKS_TXEN_OFFSET 0x000UL
+#define VPR_NRF_RADIO_TASKS_RXEN_OFFSET 0x004UL
+#define VPR_NRF_RADIO_TASKS_START_OFFSET 0x008UL
+#define VPR_NRF_RADIO_TASKS_DISABLE_OFFSET 0x010UL
+#define VPR_NRF_RADIO_TASKS_PLLEN_OFFSET 0x06CUL
+#define VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET 0x204UL
+#define VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET 0x208UL
+#define VPR_NRF_RADIO_EVENTS_END_OFFSET 0x218UL
+#define VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET 0x220UL
+#define VPR_NRF_RADIO_EVENTS_CSTONESEND_OFFSET 0x2C8UL
+#define VPR_NRF_RADIO_EVENTS_PLLREADY_OFFSET 0x2B0UL
+#define VPR_NRF_RADIO_SHORTS_OFFSET 0x400UL
+#define VPR_NRF_RADIO_SHORTS_TXREADY_START_Msk (1UL << 17U)
+#define VPR_NRF_RADIO_SHORTS_PHYEND_DISABLE_Msk (1UL << 19U)
+#define VPR_NRF_RADIO_MODE_OFFSET 0x500UL
+#define VPR_NRF_RADIO_STATE_OFFSET 0x520UL
+#define VPR_NRF_RADIO_DATAWHITE_OFFSET 0x540UL
+#define VPR_NRF_RADIO_FREQUENCY_OFFSET 0x708UL
+#define VPR_NRF_RADIO_DFEPACKET_PTR_OFFSET 0xD50UL
+#define VPR_NRF_RADIO_DFEPACKET_AMOUNT_OFFSET 0xD58UL
+#define VPR_NRF_RADIO_DFEPACKET_CURRENTAMOUNT_OFFSET 0xD5CUL
+#define VPR_NRF_RADIO_PCNF0_OFFSET 0xE20UL
+#define VPR_NRF_RADIO_PCNF1_OFFSET 0xE28UL
+#define VPR_NRF_RADIO_PACKETPTR_OFFSET 0xED0UL
+#define VPR_NRF_RADIO_CSTONES_MODE_OFFSET 0x1000UL
+#define VPR_NRF_RADIO_CSTONES_PCT16_OFFSET 0x1020UL
+#define VPR_NRF_RADIO_CSTONES_MAGPHASEMEAN_OFFSET 0x1024UL
+#define VPR_NRF_RADIO_CSTONES_MAGSTD_OFFSET 0x102CUL
+#define VPR_NRF_RADIO_CSTONES_DOWNSAMPLE_OFFSET 0x1038UL
+#define VPR_RF_PRIMITIVE_PLL_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_PRIMITIVE_STATUS_OK 0U
+#define VPR_RF_PRIMITIVE_STATUS_NOT_ACCEPTED 1U
+#define VPR_RF_PRIMITIVE_STATUS_RADIO_BUSY 2U
+#define VPR_RF_PRIMITIVE_STATUS_PLL_TIMEOUT 3U
+#define VPR_RF_PRIMITIVE_STATUS_DISABLE_TIMEOUT 4U
+#define VPR_RF_PRIMITIVE_FLAG_VALID 0x01U
+#define VPR_RF_PRIMITIVE_FLAG_PLL_READY 0x02U
+#define VPR_RF_PRIMITIVE_FLAG_DISABLED 0x04U
+#define VPR_RF_RETUNE_STATUS_OK 0U
+#define VPR_RF_RETUNE_STATUS_NOT_ACCEPTED 1U
+#define VPR_RF_RETUNE_STATUS_INVALID_CHANNEL 2U
+#define VPR_RF_RETUNE_STATUS_RADIO_BUSY 3U
+#define VPR_RF_RETUNE_STATUS_VERIFY_FAILED 4U
+#define VPR_RF_RETUNE_FLAG_VALID 0x01U
+#define VPR_RF_RETUNE_FLAG_MODE_WRITTEN 0x02U
+#define VPR_RF_RETUNE_FLAG_FREQUENCY_WRITTEN 0x04U
+#define VPR_RF_RETUNE_FLAG_DATAWHITE_WRITTEN 0x08U
+#define VPR_RF_RX_PRIMITIVE_RXREADY_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_RX_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_RX_PRIMITIVE_STATUS_OK 0U
+#define VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED 1U
+#define VPR_RF_RX_PRIMITIVE_STATUS_RADIO_BUSY 2U
+#define VPR_RF_RX_PRIMITIVE_STATUS_RXREADY_TIMEOUT 3U
+#define VPR_RF_RX_PRIMITIVE_STATUS_DISABLE_TIMEOUT 4U
+#define VPR_RF_RX_PRIMITIVE_FLAG_VALID 0x01U
+#define VPR_RF_RX_PRIMITIVE_FLAG_RX_READY 0x02U
+#define VPR_RF_RX_PRIMITIVE_FLAG_DISABLED 0x04U
+#define VPR_RF_PACKET_CONFIG_FLAG_VALID 0x01U
+#define VPR_RF_PACKET_CONFIG_FLAG_PACKET_WRITTEN 0x02U
+#define VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_WRITTEN 0x04U
+#define VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_RESTORED 0x08U
+#define VPR_RF_PACKET_CONFIG_FLAG_TX_READY 0x10U
+#define VPR_RF_PACKET_CONFIG_FLAG_TX_DISABLED 0x20U
+#define VPR_RF_PACKET_CONFIG_FLAG_TX_STARTED 0x40U
+#define VPR_RF_PACKET_CONFIG_FLAG_TX_END 0x80U
+#define VPR_RADIO_MODE_BLE_2MBIT 3UL
+#define VPR_RADIO_PACKET_MAX_PAYLOAD_DEFAULT 32U
+#define VPR_RADIO_PACKET_PCNF0_DEFAULT 0x01080108UL
+#define VPR_RADIO_PACKET_PCNF1_DEFAULT 0x02030020UL
+#define VPR_CS_PACKET_S0_PATTERN 0xA5U
+#define VPR_CS_PACKET_PAYLOAD_LEN 6U
+#define VPR_CS_PACKET_CTE_TIME_UNITS 10U
+#define VPR_CS_PACKET_CTE_INFO (VPR_CS_PACKET_CTE_TIME_UNITS & 0x1FU)
+#define VPR_CS_PACKET_MAGIC0 0x43U
+#define VPR_CS_PACKET_MAGIC1 0x53U
+#define VPR_CS_PACKET_TYPE_PROBE 0x50U
+#define VPR_TONE_SNAPSHOT_FLAG_VALID 0x01U
+#define VPR_TONE_SNAPSHOT_FLAG_NONZERO_SAMPLE 0x02U
+#define VPR_TONE_SNAPSHOT_FLAG_RADIO_DISABLED 0x04U
+#define VPR_TONE_SNAPSHOT_FLAG_DFE_PACKET 0x10U
+#define VPR_TONE_SNAPSHOT_FLAG_TONE_CONFIG 0x20U
+
+static uint8_t g_vpr_cs_packet_buffer[9]
+    __attribute__((aligned(4)));
+
+static uint32_t read_radio_register(uint32_t offset) {
+  const volatile uint32_t *reg =
+      (const volatile uint32_t *)(VPR_NRF_RADIO_BASE + offset);
+  return *reg;
+}
+
+static void write_radio_register(uint32_t offset, uint32_t value) {
+  volatile uint32_t *reg = (volatile uint32_t *)(VPR_NRF_RADIO_BASE + offset);
+  *reg = value;
+}
+
+static bool vpr_valid_data_channel(uint8_t channel) {
+  return channel <= 36U;
+}
+
+static uint32_t vpr_ble_channel_frequency(uint8_t channel) {
+  if (channel <= 10U) {
+    return 4UL + (2UL * (uint32_t)channel);
+  }
+  return 6UL + (2UL * (uint32_t)channel);
+}
+
+static uint32_t vpr_ble_datawhite_value(uint8_t channel) {
+  const uint32_t iv = 0x40UL | ((uint32_t)channel & 0x3FUL);
+  const uint32_t poly = 0x89UL;
+  return (poly << 16U) | iv;
+}
+
+static uint32_t hash_dfe_packet_bytes(uint32_t ptr, uint32_t amount) {
+  if (ptr == 0U || amount == 0U) {
+    return 0U;
+  }
+  return 0xD1FE0000UL ^ ptr ^ (amount << 8U) ^ (amount >> 8U);
+}
+
+static void read_rf_hardware_snapshot(uint8_t version,
+                                      uint8_t flags,
+                                      uint32_t *out_state,
+                                      uint32_t *out_mode,
+                                      uint32_t *out_frequency,
+                                      uint32_t *out_token) {
+  if (out_state == NULL || out_mode == NULL ||
+      out_frequency == NULL || out_token == NULL) {
+    return;
+  }
+
+  const uint32_t state = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  const uint32_t mode = read_radio_register(VPR_NRF_RADIO_MODE_OFFSET);
+  const uint32_t frequency =
+      read_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET);
+
+  *out_state = state;
+  *out_mode = mode;
+  *out_frequency = frequency;
+  *out_token = build_measurement_rf_hardware_token(version, flags, state, mode,
+                                                   frequency);
+}
+
+static void execute_rf_pll_disable_primitive(uint8_t accepted,
+                                             uint8_t version,
+                                             uint8_t *out_flags,
+                                             uint8_t *out_status,
+                                             uint32_t *out_state_before,
+                                             uint32_t *out_pll_wait_loops,
+                                             uint32_t *out_disable_wait_loops,
+                                             uint32_t *out_state_after,
+                                             uint32_t *out_token) {
+  if (out_flags == NULL || out_status == NULL ||
+      out_state_before == NULL || out_pll_wait_loops == NULL ||
+      out_disable_wait_loops == NULL || out_state_after == NULL ||
+      out_token == NULL) {
+    return;
+  }
+
+  *out_flags = 0U;
+  *out_status = VPR_RF_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  *out_state_before = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  *out_pll_wait_loops = 0U;
+  *out_disable_wait_loops = 0U;
+  *out_state_after = *out_state_before;
+  *out_token = 0U;
+
+  if (accepted == 0U) {
+    return;
+  }
+
+  *out_flags = VPR_RF_PRIMITIVE_FLAG_VALID;
+  if (*out_state_before != 0U) {
+    *out_status = VPR_RF_PRIMITIVE_STATUS_RADIO_BUSY;
+    *out_token = build_measurement_rf_primitive_token(
+        version, *out_flags, *out_status, *out_state_before,
+        *out_pll_wait_loops, *out_disable_wait_loops, *out_state_after);
+    return;
+  }
+
+  const uint32_t current_mode = read_radio_register(VPR_NRF_RADIO_MODE_OFFSET);
+  const uint32_t current_frequency =
+      read_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET);
+  write_radio_register(VPR_NRF_RADIO_MODE_OFFSET, current_mode);
+  write_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET, current_frequency);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_PLLREADY_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_TASKS_PLLEN_OFFSET, 1U);
+
+  while (read_radio_register(VPR_NRF_RADIO_EVENTS_PLLREADY_OFFSET) == 0U &&
+         *out_pll_wait_loops < VPR_RF_PRIMITIVE_PLL_WAIT_MAX_LOOPS) {
+    *out_pll_wait_loops = *out_pll_wait_loops + 1U;
+  }
+
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_PLLREADY_OFFSET) != 0U) {
+    *out_flags |= VPR_RF_PRIMITIVE_FLAG_PLL_READY;
+  }
+
+  write_radio_register(VPR_NRF_RADIO_TASKS_DISABLE_OFFSET, 1U);
+  while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
+         *out_disable_wait_loops < VPR_RF_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS) {
+    *out_disable_wait_loops = *out_disable_wait_loops + 1U;
+  }
+
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) != 0U) {
+    *out_flags |= VPR_RF_PRIMITIVE_FLAG_DISABLED;
+  }
+
+  *out_state_after = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  if ((*out_flags & VPR_RF_PRIMITIVE_FLAG_PLL_READY) == 0U) {
+    *out_status = VPR_RF_PRIMITIVE_STATUS_PLL_TIMEOUT;
+  } else if ((*out_flags & VPR_RF_PRIMITIVE_FLAG_DISABLED) == 0U ||
+             *out_state_after != 0U) {
+    *out_status = VPR_RF_PRIMITIVE_STATUS_DISABLE_TIMEOUT;
+  } else {
+    *out_status = VPR_RF_PRIMITIVE_STATUS_OK;
+  }
+
+  *out_token = build_measurement_rf_primitive_token(
+      version, *out_flags, *out_status, *out_state_before,
+      *out_pll_wait_loops, *out_disable_wait_loops, *out_state_after);
+}
+
+static void execute_rf_channel_retune_primitive(uint8_t accepted,
+                                                uint8_t version,
+                                                uint8_t channel,
+                                                uint8_t *out_flags,
+                                                uint8_t *out_status,
+                                                uint32_t *out_target_frequency,
+                                                uint32_t *out_target_datawhite,
+                                                uint32_t *out_observed_frequency,
+                                                uint32_t *out_observed_datawhite,
+                                                uint32_t *out_token) {
+  if (out_flags == NULL || out_status == NULL ||
+      out_target_frequency == NULL || out_target_datawhite == NULL ||
+      out_observed_frequency == NULL || out_observed_datawhite == NULL ||
+      out_token == NULL) {
+    return;
+  }
+
+  *out_flags = 0U;
+  *out_status = VPR_RF_RETUNE_STATUS_NOT_ACCEPTED;
+  *out_target_frequency = 0U;
+  *out_target_datawhite = 0U;
+  *out_observed_frequency = read_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET);
+  *out_observed_datawhite = read_radio_register(VPR_NRF_RADIO_DATAWHITE_OFFSET);
+  *out_token = 0U;
+
+  if (accepted == 0U) {
+    return;
+  }
+
+  *out_flags = VPR_RF_RETUNE_FLAG_VALID;
+  if (!vpr_valid_data_channel(channel)) {
+    *out_status = VPR_RF_RETUNE_STATUS_INVALID_CHANNEL;
+    *out_token = build_measurement_rf_retune_token(
+        version, *out_flags, *out_status, channel, *out_target_frequency,
+        *out_target_datawhite, *out_observed_frequency,
+        *out_observed_datawhite);
+    return;
+  }
+
+  if (read_radio_register(VPR_NRF_RADIO_STATE_OFFSET) != 0U) {
+    *out_status = VPR_RF_RETUNE_STATUS_RADIO_BUSY;
+    *out_target_frequency = vpr_ble_channel_frequency(channel);
+    *out_target_datawhite = vpr_ble_datawhite_value(channel);
+    *out_token = build_measurement_rf_retune_token(
+        version, *out_flags, *out_status, channel, *out_target_frequency,
+        *out_target_datawhite, *out_observed_frequency,
+        *out_observed_datawhite);
+    return;
+  }
+
+  *out_target_frequency = vpr_ble_channel_frequency(channel);
+  *out_target_datawhite = vpr_ble_datawhite_value(channel);
+  write_radio_register(VPR_NRF_RADIO_MODE_OFFSET, VPR_RADIO_MODE_BLE_2MBIT);
+  *out_flags |= VPR_RF_RETUNE_FLAG_MODE_WRITTEN;
+  write_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET, *out_target_frequency);
+  *out_flags |= VPR_RF_RETUNE_FLAG_FREQUENCY_WRITTEN;
+  write_radio_register(VPR_NRF_RADIO_DATAWHITE_OFFSET, *out_target_datawhite);
+  *out_flags |= VPR_RF_RETUNE_FLAG_DATAWHITE_WRITTEN;
+
+  *out_observed_frequency = read_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET);
+  *out_observed_datawhite = read_radio_register(VPR_NRF_RADIO_DATAWHITE_OFFSET);
+  *out_status =
+      (*out_observed_frequency == *out_target_frequency &&
+       *out_observed_datawhite == *out_target_datawhite)
+          ? VPR_RF_RETUNE_STATUS_OK
+          : VPR_RF_RETUNE_STATUS_VERIFY_FAILED;
+  *out_token = build_measurement_rf_retune_token(
+      version, *out_flags, *out_status, channel, *out_target_frequency,
+      *out_target_datawhite, *out_observed_frequency,
+      *out_observed_datawhite);
+}
+
+static void execute_rf_rx_ready_disable_primitive(uint8_t accepted,
+                                                  uint8_t version,
+                                                  uint8_t *out_flags,
+                                                  uint8_t *out_status,
+                                                  uint32_t *out_state_before,
+                                                  uint32_t *out_rxready_wait_loops,
+                                                  uint32_t *out_disable_wait_loops,
+                                                  uint32_t *out_state_after,
+                                                  uint32_t *out_token) {
+  if (out_flags == NULL || out_status == NULL ||
+      out_state_before == NULL || out_rxready_wait_loops == NULL ||
+      out_disable_wait_loops == NULL || out_state_after == NULL ||
+      out_token == NULL) {
+    return;
+  }
+
+  *out_flags = 0U;
+  *out_status = VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  *out_state_before = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  *out_rxready_wait_loops = 0U;
+  *out_disable_wait_loops = 0U;
+  *out_state_after = *out_state_before;
+  *out_token = 0U;
+
+  if (accepted == 0U) {
+    return;
+  }
+
+  *out_flags = VPR_RF_RX_PRIMITIVE_FLAG_VALID;
+  if (*out_state_before != 0U) {
+    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_RADIO_BUSY;
+    *out_token = build_measurement_rf_primitive_token(
+        version, *out_flags, *out_status, *out_state_before,
+        *out_rxready_wait_loops, *out_disable_wait_loops, *out_state_after);
+    return;
+  }
+
+  write_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_TASKS_RXEN_OFFSET, 1U);
+
+  while (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) == 0U &&
+         *out_rxready_wait_loops < VPR_RF_RX_PRIMITIVE_RXREADY_WAIT_MAX_LOOPS) {
+    *out_rxready_wait_loops = *out_rxready_wait_loops + 1U;
+  }
+
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) != 0U) {
+    *out_flags |= VPR_RF_RX_PRIMITIVE_FLAG_RX_READY;
+  }
+
+  write_radio_register(VPR_NRF_RADIO_TASKS_DISABLE_OFFSET, 1U);
+  while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
+         *out_disable_wait_loops < VPR_RF_RX_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS) {
+    *out_disable_wait_loops = *out_disable_wait_loops + 1U;
+  }
+
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) != 0U) {
+    *out_flags |= VPR_RF_RX_PRIMITIVE_FLAG_DISABLED;
+  }
+
+  *out_state_after = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  if ((*out_flags & VPR_RF_RX_PRIMITIVE_FLAG_RX_READY) == 0U) {
+    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_RXREADY_TIMEOUT;
+  } else if ((*out_flags & VPR_RF_RX_PRIMITIVE_FLAG_DISABLED) == 0U ||
+             *out_state_after != 0U) {
+    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_DISABLE_TIMEOUT;
+  } else {
+    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_OK;
+  }
+
+  *out_token = build_measurement_rf_primitive_token(
+      version, *out_flags, *out_status, *out_state_before,
+      *out_rxready_wait_loops, *out_disable_wait_loops, *out_state_after);
+}
+
+static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *payload,
+                                                                       size_t max_len) {
+  if (payload == NULL || max_len < 152U) {
+    return 0U;
+  }
+
+  uint8_t step_channels[6] = {0};
+  const uint8_t active_subevent = g_cs_active_subevent_index;
+  const uint8_t subevent_count = current_demo_subevent_count();
+  const uint8_t total_steps = current_demo_total_step_count();
+  const uint8_t phase_step_count = current_demo_step_count();
+  const uint8_t subevent_start = current_demo_subevent_start_step(active_subevent);
+  const uint8_t subevent_steps = current_demo_subevent_step_count(active_subevent);
+  const uint8_t step_channel_count =
+      fill_demo_channels_for_procedure(step_channels, phase_step_count);
+  const uint8_t rf_descriptor_version = 1U;
+  const uint8_t rf_descriptor_valid = 1U;
+  const uint8_t rf_hardware_version = 1U;
+  const uint8_t rf_primitive_version = 1U;
+  const uint8_t rf_retune_version = 1U;
+  const uint8_t rf_rx_primitive_version = 1U;
+  uint8_t rf_hardware_flags = 0U;
+  uint32_t rf_hardware_state = 0U;
+  uint32_t rf_hardware_mode = 0U;
+  uint32_t rf_hardware_frequency = 0U;
+  uint32_t rf_hardware_token = 0U;
+  uint8_t rf_primitive_flags = 0U;
+  uint8_t rf_primitive_status = VPR_RF_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  uint32_t rf_primitive_state_before = 0U;
+  uint32_t rf_primitive_pll_wait_loops = 0U;
+  uint32_t rf_primitive_disable_wait_loops = 0U;
+  uint32_t rf_primitive_state_after = 0U;
+  uint32_t rf_primitive_token = 0U;
+  uint8_t rf_retune_flags = 0U;
+  uint8_t rf_retune_status = VPR_RF_RETUNE_STATUS_NOT_ACCEPTED;
+  uint32_t rf_retune_target_frequency = 0U;
+  uint32_t rf_retune_target_datawhite = 0U;
+  uint32_t rf_retune_observed_frequency = 0U;
+  uint32_t rf_retune_observed_datawhite = 0U;
+  uint32_t rf_retune_token = 0U;
+  uint8_t rf_rx_primitive_flags = 0U;
+  uint8_t rf_rx_primitive_status = VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  uint32_t rf_rx_primitive_state_before = 0U;
+  uint32_t rf_rx_primitive_rxready_wait_loops = 0U;
+  uint32_t rf_rx_primitive_disable_wait_loops = 0U;
+  uint32_t rf_rx_primitive_state_after = 0U;
+  uint32_t rf_rx_primitive_token = 0U;
+  uint32_t rf_packet_config_token = 0U;
+  const uint32_t rf_descriptor_token = build_measurement_rf_descriptor_token(
+      g_cs_config_id, g_cs_procedure_counter, g_cs_session_conn_handle,
+      active_subevent, subevent_count, total_steps, subevent_start,
+      subevent_steps, step_channel_count, step_channels, g_cs_role,
+      g_cs_cs_sync_phy, g_cs_tx_power_delta, g_cs_rtt_type,
+      g_cs_min_subevent_len, g_cs_max_subevent_len,
+      g_cs_measurement_execute_count + 1U);
+  const uint8_t ready = (g_cs_session_open != 0U &&
+                         g_cs_procedure_counter != 0U &&
+                         g_cs_config_id != 0U &&
+                         total_steps != 0U &&
+                         subevent_count != 0U &&
+                         subevent_steps != 0U &&
+                         step_channel_count != 0U)
+                            ? 1U
+                            : 0U;
+  uint8_t status = command_layout_is_exact(0U)
+                       ? BLE_CS_HCI_STATUS_SUCCESS
+                       : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  uint8_t accepted = 0U;
+  if (status == BLE_CS_HCI_STATUS_SUCCESS && ready == 0U) {
+    status = BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
+  }
+  if (status == BLE_CS_HCI_STATUS_SUCCESS) {
+    accepted = 1U;
+    g_cs_measurement_execute_count = g_cs_measurement_execute_count + 1U;
+    g_cs_measurement_execute_last_channels = step_channel_count;
+    g_cs_measurement_execute_last_token = build_measurement_execute_token(
+        g_cs_config_id, g_cs_procedure_counter, g_cs_session_conn_handle,
+        active_subevent, subevent_count, total_steps, subevent_start,
+        subevent_steps, step_channel_count, step_channels,
+        g_cs_measurement_execute_count);
+    execute_rf_channel_retune_primitive(
+        accepted, rf_retune_version,
+        (step_channel_count != 0U) ? step_channels[0] : 0xFFU,
+        &rf_retune_flags, &rf_retune_status, &rf_retune_target_frequency,
+        &rf_retune_target_datawhite, &rf_retune_observed_frequency,
+        &rf_retune_observed_datawhite, &rf_retune_token);
+    execute_rf_rx_ready_disable_primitive(
+        accepted, rf_rx_primitive_version, &rf_rx_primitive_flags,
+        &rf_rx_primitive_status, &rf_rx_primitive_state_before,
+        &rf_rx_primitive_rxready_wait_loops,
+        &rf_rx_primitive_disable_wait_loops,
+        &rf_rx_primitive_state_after, &rf_rx_primitive_token);
+    const uint32_t previous_pcnf0 =
+        read_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET);
+    const uint32_t previous_pcnf1 =
+        read_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET);
+    write_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET,
+                         VPR_RADIO_PACKET_PCNF0_DEFAULT);
+    write_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET,
+                         VPR_RADIO_PACKET_PCNF1_DEFAULT);
+    uint8_t packet_config_flags =
+        VPR_RF_PACKET_CONFIG_FLAG_VALID |
+        VPR_RF_PACKET_CONFIG_FLAG_PACKET_WRITTEN;
+    const uint8_t packet_channel =
+        (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
+    if (vpr_valid_data_channel(packet_channel)) {
+      const uint32_t packet_ptr = (uint32_t)(uintptr_t)g_vpr_cs_packet_buffer;
+      const uint32_t previous_packet_ptr =
+          read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET);
+      g_vpr_cs_packet_buffer[0] = VPR_CS_PACKET_S0_PATTERN;
+      g_vpr_cs_packet_buffer[1] = VPR_CS_PACKET_PAYLOAD_LEN;
+      g_vpr_cs_packet_buffer[2] = VPR_CS_PACKET_CTE_INFO;
+      g_vpr_cs_packet_buffer[3] = VPR_CS_PACKET_MAGIC0;
+      g_vpr_cs_packet_buffer[4] = VPR_CS_PACKET_MAGIC1;
+      g_vpr_cs_packet_buffer[5] = VPR_CS_PACKET_TYPE_PROBE;
+      g_vpr_cs_packet_buffer[6] =
+          (uint8_t)(g_cs_measurement_execute_count & 0xFFU);
+      g_vpr_cs_packet_buffer[7] = packet_channel;
+      g_vpr_cs_packet_buffer[8] = 0U;
+      const uint32_t previous_shorts =
+          read_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET);
+      write_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET, packet_ptr);
+      if (read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET) == packet_ptr) {
+        packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_WRITTEN;
+      }
+      if (read_radio_register(VPR_NRF_RADIO_STATE_OFFSET) == 0U) {
+        uint32_t tx_disable_wait_loops = 0U;
+        write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET,
+                             VPR_NRF_RADIO_SHORTS_TXREADY_START_Msk |
+                             VPR_NRF_RADIO_SHORTS_PHYEND_DISABLE_Msk);
+        write_radio_register(VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET, 0U);
+        write_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET, 0U);
+        write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+        write_radio_register(VPR_NRF_RADIO_TASKS_TXEN_OFFSET, 1U);
+        while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
+               tx_disable_wait_loops < VPR_RF_RX_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS) {
+          tx_disable_wait_loops = tx_disable_wait_loops + 1U;
+        }
+        if (read_radio_register(VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET) != 0U) {
+          packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_READY |
+                                 VPR_RF_PACKET_CONFIG_FLAG_TX_STARTED;
+        }
+        if (read_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET) != 0U) {
+          packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_END;
+        }
+        if (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) != 0U &&
+            read_radio_register(VPR_NRF_RADIO_STATE_OFFSET) == 0U) {
+          packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_DISABLED;
+        }
+        write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET, previous_shorts);
+      }
+      write_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET,
+                           previous_packet_ptr);
+      if (read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET) ==
+          previous_packet_ptr) {
+        packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_RESTORED;
+      }
+    }
+    write_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET, previous_pcnf0);
+    write_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET, previous_pcnf1);
+    rf_packet_config_token =
+        VPR_RADIO_PACKET_PCNF0_DEFAULT ^
+        (VPR_RADIO_PACKET_PCNF1_DEFAULT << 1U) ^
+        ((uint32_t)packet_config_flags << 16U) ^
+        ((uint32_t)VPR_CS_PACKET_S0_PATTERN << 2U) ^
+        ((uint32_t)VPR_CS_PACKET_PAYLOAD_LEN << 5U) ^
+        ((uint32_t)VPR_CS_PACKET_CTE_INFO << 9U) ^
+        ((uint32_t)VPR_CS_PACKET_MAGIC0 << 11U) ^
+        ((uint32_t)VPR_CS_PACKET_MAGIC1 << 15U) ^
+        ((uint32_t)VPR_CS_PACKET_TYPE_PROBE << 13U) ^
+        ((uint32_t)(g_cs_measurement_execute_count & 0xFFU) << 17U) ^
+        ((uint32_t)packet_channel << 21U) ^
+        1U;
+    rf_hardware_flags = 0x01U;
+    read_rf_hardware_snapshot(rf_hardware_version, rf_hardware_flags,
+                              &rf_hardware_state, &rf_hardware_mode,
+                              &rf_hardware_frequency, &rf_hardware_token);
+    execute_rf_pll_disable_primitive(
+        accepted, rf_primitive_version, &rf_primitive_flags,
+        &rf_primitive_status, &rf_primitive_state_before,
+        &rf_primitive_pll_wait_loops, &rf_primitive_disable_wait_loops,
+        &rf_primitive_state_after, &rf_primitive_token);
+  } else {
+    g_cs_measurement_execute_last_channels = 0U;
+    g_cs_measurement_execute_last_token = 0U;
+  }
+  g_cs_measurement_execute_last_status = status;
+
+  uint8_t flags = 0U;
+  if (ready != 0U) {
+    flags |= 0x01U;
+  }
+  if (accepted != 0U) {
+    flags |= 0x02U;
+  }
+  if (g_pending_cs_result_stage != 0U) {
+    flags |= 0x04U;
+  }
+  if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+    flags |= 0x08U;
+  }
+
+  payload[0] = status;
+  payload[1] = flags;
+  payload[2] = active_subevent;
+  payload[3] = subevent_count;
+  payload[4] = total_steps;
+  payload[5] = subevent_start;
+  payload[6] = subevent_steps;
+  payload[7] = g_cs_config_id;
+  payload[8] = step_channel_count;
+  payload[9] = accepted != 0U ? step_channel_count : 0U;
+  write_le16(&payload[10], g_cs_procedure_counter);
+  write_le16(&payload[12], g_cs_session_conn_handle);
+  write_le32(&payload[14], g_vpr_transport->heartbeat);
+  write_le32(&payload[18], g_cs_measurement_execute_count);
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    payload[22U + i] = step_channels[i];
+  }
+  payload[28] = g_cs_measurement_execute_last_status;
+  payload[29] = g_cs_measurement_execute_last_channels;
+  payload[30] = (uint8_t)(rf_packet_config_token & 0xFFU);
+  payload[31] = (uint8_t)((rf_packet_config_token >> 8U) & 0xFFU);
+  write_le32(&payload[32], g_cs_measurement_execute_last_token);
+  payload[36] = rf_descriptor_version;
+  payload[37] = (rf_descriptor_valid != 0U) ? 0x01U : 0x00U;
+  payload[38] = g_cs_role;
+  payload[39] = g_cs_cs_sync_phy;
+  payload[40] = (uint8_t)g_cs_tx_power_delta;
+  payload[41] = g_cs_rtt_type;
+  payload[42] = step_channel_count;
+  payload[43] = 0U;
+  write_le32(&payload[44], g_cs_min_subevent_len);
+  write_le32(&payload[48], g_cs_max_subevent_len);
+  write_le32(&payload[52], g_cs_next_subevent_heartbeat);
+  write_le32(&payload[56], (accepted != 0U) ? rf_descriptor_token : 0U);
+  payload[60] = rf_hardware_version;
+  payload[61] = (accepted != 0U) ? rf_hardware_flags : 0U;
+  payload[62] = (uint8_t)((rf_packet_config_token >> 16U) & 0xFFU);
+  payload[63] = (uint8_t)((rf_packet_config_token >> 24U) & 0xFFU);
+  write_le32(&payload[64], rf_hardware_state);
+  write_le32(&payload[68], rf_hardware_mode);
+  write_le32(&payload[72], rf_hardware_frequency);
+  write_le32(&payload[76], (accepted != 0U) ? rf_hardware_token : 0U);
+  payload[80] = rf_primitive_version;
+  payload[81] = (accepted != 0U) ? rf_primitive_flags : 0U;
+  payload[82] = (accepted != 0U) ? rf_primitive_status
+                                 : VPR_RF_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  payload[83] = 0U;
+  write_le32(&payload[84], rf_primitive_state_before);
+  write_le32(&payload[88], rf_primitive_pll_wait_loops);
+  write_le32(&payload[92], rf_primitive_disable_wait_loops);
+  write_le32(&payload[96], rf_primitive_state_after);
+  write_le32(&payload[100], (accepted != 0U) ? rf_primitive_token : 0U);
+  payload[104] = rf_retune_version;
+  payload[105] = (accepted != 0U) ? rf_retune_flags : 0U;
+  payload[106] = (accepted != 0U) ? rf_retune_status
+                                  : VPR_RF_RETUNE_STATUS_NOT_ACCEPTED;
+  payload[107] = (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
+  write_le32(&payload[108], rf_retune_target_frequency);
+  write_le32(&payload[112], rf_retune_target_datawhite);
+  write_le32(&payload[116], rf_retune_observed_frequency);
+  write_le32(&payload[120], rf_retune_observed_datawhite);
+  write_le32(&payload[124], (accepted != 0U) ? rf_retune_token : 0U);
+  payload[128] = rf_rx_primitive_version;
+  payload[129] = (accepted != 0U) ? rf_rx_primitive_flags : 0U;
+  payload[130] = (accepted != 0U) ? rf_rx_primitive_status
+                                  : VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  payload[131] = 0U;
+  write_le32(&payload[132], rf_rx_primitive_state_before);
+  write_le32(&payload[136], rf_rx_primitive_rxready_wait_loops);
+  write_le32(&payload[140], rf_rx_primitive_disable_wait_loops);
+  write_le32(&payload[144], rf_rx_primitive_state_after);
+  write_le32(&payload[148], (accepted != 0U) ? rf_rx_primitive_token : 0U);
+  return 152U;
+}
+
+static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payload,
+                                                                 size_t max_len) {
+  if (payload == NULL || max_len < 32U) {
+    return 0U;
+  }
+
+  const uint8_t version = 1U;
+  const uint8_t status = command_layout_is_exact(0U)
+                             ? BLE_CS_HCI_STATUS_SUCCESS
+                             : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  const uint32_t frequency = read_radio_register(VPR_NRF_RADIO_FREQUENCY_OFFSET);
+  const uint32_t state = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  const uint32_t dfe_packet_ptr =
+      read_radio_register(VPR_NRF_RADIO_DFEPACKET_PTR_OFFSET);
+  const uint32_t dfe_packet_amount =
+      read_radio_register(VPR_NRF_RADIO_DFEPACKET_AMOUNT_OFFSET);
+  const uint32_t dfe_packet_current_amount =
+      read_radio_register(VPR_NRF_RADIO_DFEPACKET_CURRENTAMOUNT_OFFSET);
+  const uint32_t dfe_packet_hash =
+      hash_dfe_packet_bytes(dfe_packet_ptr, dfe_packet_current_amount);
+
+  uint8_t flags = 0U;
+  if (status == BLE_CS_HCI_STATUS_SUCCESS) {
+    flags |= VPR_TONE_SNAPSHOT_FLAG_VALID;
+  }
+  const uint32_t cstones_end_event =
+      read_radio_register(VPR_NRF_RADIO_EVENTS_CSTONESEND_OFFSET);
+  uint32_t pct16 = read_radio_register(VPR_NRF_RADIO_CSTONES_PCT16_OFFSET);
+  uint32_t mag_phase =
+      read_radio_register(VPR_NRF_RADIO_CSTONES_MAGPHASEMEAN_OFFSET);
+  uint32_t mag_std =
+      read_radio_register(VPR_NRF_RADIO_CSTONES_MAGSTD_OFFSET);
+  const bool cstones_nonzero = (pct16 != 0U || mag_phase != 0U || mag_std != 0U);
+  const bool dfe_nonzero =
+      (dfe_packet_amount != 0U || dfe_packet_current_amount != 0U ||
+       dfe_packet_hash != 0U);
+  if (!cstones_nonzero && dfe_nonzero) {
+    pct16 = dfe_packet_amount;
+    mag_phase = dfe_packet_current_amount;
+    mag_std = dfe_packet_hash;
+    flags |= VPR_TONE_SNAPSHOT_FLAG_DFE_PACKET;
+  }
+  if (cstones_nonzero || dfe_nonzero) {
+    flags |= VPR_TONE_SNAPSHOT_FLAG_NONZERO_SAMPLE;
+  }
+  if (state == 0U) {
+    flags |= VPR_TONE_SNAPSHOT_FLAG_RADIO_DISABLED;
+  }
+  if (read_radio_register(VPR_NRF_RADIO_CSTONES_MODE_OFFSET) == 1U &&
+      read_radio_register(VPR_NRF_RADIO_CSTONES_DOWNSAMPLE_OFFSET) == 2U) {
+    flags |= VPR_TONE_SNAPSHOT_FLAG_TONE_CONFIG;
+  }
+
+  const uint32_t token =
+      (status == BLE_CS_HCI_STATUS_SUCCESS)
+          ? build_measurement_tone_snapshot_token(version, flags, status, pct16,
+                                                  mag_phase, mag_std, frequency,
+                                                  state, cstones_end_event)
+          : 0U;
+  payload[0] = status;
+  payload[1] = flags;
+  payload[2] = version;
+  payload[3] = 0U;
+  write_le32(&payload[4], pct16);
+  write_le32(&payload[8], mag_phase);
+  write_le32(&payload[12], mag_std);
+  write_le32(&payload[16], frequency);
+  write_le32(&payload[20], state);
+  write_le32(&payload[24], cstones_end_event);
+  write_le32(&payload[28], token);
+  return 32U;
+}
+
 #endif
 
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
-  /* Largest staging payload is the FAE table at 75 bytes; 80 leaves headroom. */
-  uint8_t payload[80];
+  /* Largest staging payload is the fixed 152-byte CS execute response. */
+  uint8_t payload[152];
   uint16_t conn_handle = current_conn_handle();
   size_t offset = 0U;
   zero_vpr_data();
@@ -4648,6 +5565,36 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
     case VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_WORK_READ: {
       size_t len = build_vendor_ble_cs_measurement_work_read_complete_payload(payload,
                                                                               sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload((uint8_t *)g_vpr_transport->vprData + offset,
+                                               NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
+                                               opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_EXECUTE: {
+      size_t len = build_vendor_ble_cs_measurement_execute_complete_payload(
+          payload, sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload(
+          (uint8_t *)g_vpr_transport->vprData + offset,
+          NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_TONE_SNAPSHOT_READ: {
+      size_t len = build_vendor_ble_cs_tone_snapshot_complete_payload(payload,
+                                                                      sizeof(payload));
       if (len == 0U) {
         return false;
       }

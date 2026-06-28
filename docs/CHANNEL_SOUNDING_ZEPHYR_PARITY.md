@@ -654,7 +654,7 @@ This still does not make CS fully Zephyr-parity. The RADIO window is still
 executed by the CPUAPP helper, but the result ingestion now follows the
 controller-owned scheduler identity.
 
-## Completed in This Pass — VPR Measurement Work Item Readback
+## Completed in This Pass — VPR Measurement Work Item + Execute Handshake
 
 The dedicated CS VPR image now exposes the next scheduled connected CS work
 unit through test/vendor HCI opcode `0xFCEC`.
@@ -680,20 +680,492 @@ unit through test/vendor HCI opcode `0xFCEC`.
 - The work-item payload now includes up to six VPR-selected phase-step
   channels from the controller's channel-selection helper. The workflow PASS
   and connected-sweep PASS lines print them as `work_ch=count:ch0,ch1,...`.
+- `BleCsConnectedMode2SweepRunner` now consumes those VPR-selected channels as
+  the effective physical sweep list. When the work item provides valid channels,
+  the fixed sketch channel list is only a fallback. The sweep output reports
+  `work_ch_used=1` and `requested_channels`/`host_steps` now match the executed
+  VPR work-item channel count.
+- The dedicated CS VPR image now also accepts test/vendor HCI opcode `0xFCED`
+  to claim the currently scheduled measurement work item for execution. This is
+  a command-complete handshake, not a native RF result event yet.
+- `BleCsVprMeasurementExecutionResult`,
+  `parseVprMeasurementExecutionResponse()`, and
+  `BleCsControllerVprHost::directExecuteMeasurementWorkForTest()` verify that
+  the VPR accepted the same config/procedure/subevent that was read from
+  `0xFCEC`.
+- `BleChannelSoundingLlControlWorkflowCentral` now requests a six-step Mode 2
+  workflow for this diagnostic, so the VPR-owned plan and channel list are
+  consistent (`work_plan=6/6`, `work_ch=6`) and the physical sweep has enough
+  RF margin to tolerate a bad channel.
 
 This is still not full Zephyr parity. The work item is now controller-owned,
-but the physical RADIO operation is still executed by the CPUAPP helper. The
-remaining high-value parity step is to have VPR consume this work item and run
-the RADIO/timer window directly, then emit native local/peer result events.
+its channel list now drives the physical sweep, and the VPR accepts the execute
+handshake, but the RADIO operation is still executed by the CPUAPP helper. The
+remaining high-value parity step is to have VPR run the RADIO/timer window
+directly and emit native local/peer result events.
 
 Hardware check:
 
 ```text
 scripts/test_cs_ll_workflow_bridge.sh
-cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=3 sched_chunk=3/3 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=3/3 work_chunk=3/3 work_ch=3:2,3,4
-cs_connected_sweep=PASS attempts=9 valid_channels=9 min_valid=3 requested_channels=9 raw_est=1 host_est=1 work_applied=1 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=3/3 work_ch=3:2,3,4 host_cfg=1 host_proc=1 host_steps=9/9
+cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channels=6 raw_est=0 used=0/6 raw_m=nan residual=0.000000 host_est=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=6/6 host_m=10.2646
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 raw_m=1.7721 host_est=1 host_steps=21/21 host_m=1.6149 proc=2
+```
+
+## Completed in This Pass — Measured Results Through Controller Event Ingress
+
+The connected physical Mode 2 sweep now publishes the real CPUAPP-measured
+local and peer results through the controller HCI event ingress path, not the
+older direct local/peer side-channel helper.
+
+- Added `BleCsControllerHost::consumeMode2ControllerEventsFromMeasurements()`.
+  It builds standard H4 LE Meta CS Subevent Result packets from real measured
+  Mode 2 data and feeds them through `BleCsControllerIngressSource::kController`.
+- Peer measured results are preceded by the existing VPR peer-result source
+  vendor marker (`0xB2`), so the controller ingress decoder routes the following
+  CS Subevent Result packet as the peer side. This matches the controller/VPR
+  publication shape that native VPR result events will use.
+- Added stream-host and VPR-host wrappers, including
+  `consumeConnectedMode2ControllerEventsFromMeasurements()`, so connected
+  diagnostics can use the controller ingress path directly.
+- `BleCsConnectedMode2SweepRunner` now requires proof that local result packets,
+  peer result packets, and peer-result marker counters increased during measured
+  result publication. The central diagnostic prints this as `ctrl_ing`,
+  `local_pkt_delta`, `peer_pkt_delta`, and `peer_marker_delta`.
+
+Hardware check on two XIAO nRF54L15 boards (`E91217E8` peripheral,
+`761FDE87` central):
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=5 min_valid=3 requested_channels=6 raw_est=0 used=0/5 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=5/5 host_m=3.1200
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 raw_m=0.0627 host_est=1 host_steps=21/21 host_m=0.2749 proc=2
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+physical reflector replies=22
+```
+
+This still is not full Zephyr parity. The measured results now traverse the
+same controller event parser that native VPR result publication will use, but
+CPUAPP still owns the RADIO/timer measurement window. The next hard slice is to
+move the event-counter scheduled RF window itself into VPR/controller ownership,
+then have VPR emit the same local/peer result packets directly.
+
+## Completed in This Pass — VPR Execute Token Bound to Scheduled Work
+
+The VPR `0xFCED` measurement execute handshake now returns a deterministic
+execution token for the exact work item it accepted. The token is generated from
+the config ID, procedure counter, connection handle, active subevent,
+subevent/step counts, selected phase-step channels, and VPR execute count.
+
+- The dedicated CS VPR image now includes `execution_token` in bytes 32..35 of
+  the `0xFCED` command-complete payload.
+- `BleCsVprMeasurementExecutionResult` parses the token and marks it valid only
+  when the new 36-byte payload is present.
+- `BleCsConnectedMode2SweepRunner` recomputes the token on CPUAPP and rejects
+  the sweep unless the VPR token, procedure/config/subevent fields, and selected
+  channel list match the scheduled work item.
+- The central diagnostic prints `work_tok=1` and `work_tok32=...`; the
+  regression script now requires `work_tok=1` in the connected sweep PASS line.
+
+Hardware check on the same two XIAO nRF54L15 boards:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=5 min_valid=3 requested_channels=6 raw_est=0 used=0/5 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=5/5 host_m=1.0335
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=22 raw_est=1 raw_m=7.3383 host_est=1 host_steps=22/22 host_m=0.3087 proc=2
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+physical reflector replies=22
+```
+
+This is still an execution-ownership seam, not native VPR RF ownership. CPUAPP
+still performs the actual RADIO/timer window after VPR has accepted and tokened
+the scheduled work. The next hard slice is to move at least one connected
+Mode 2 channel transaction into VPR-owned RADIO/timer execution and publish the
+result from VPR without the CPUAPP measurement helper.
+
+## Completed in This Pass — VPR RF Execution Descriptor
+
+The `0xFCED` measurement execute response now also carries an RF execution
+descriptor in bytes 36..59. This descriptor is generated by the dedicated CS
+VPR image and includes the CS PHY, CS role, TX power delta, RTT type,
+subevent timing bounds, selected step-channel count, next subevent heartbeat,
+and a second deterministic RF descriptor token.
+
+- The old 36-byte execute payload remains compatible: bytes 0..35 still contain
+  the status, work identity, selected channels, execute count, and execution
+  token.
+- New descriptor fields are accepted only when the payload is at least 60 bytes
+  and descriptor version is 1.
+- `BleCsConnectedMode2SweepRunner` recomputes the RF descriptor token on CPUAPP
+  and rejects the connected sweep unless `work_rf=1`.
+- The regression script now requires both `work_tok=1` and `work_rf=1`.
+
+Hardware check on the same two XIAO nRF54L15 boards, with the LM20A probe
+attached but unused:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channels=6 raw_est=0 used=0/6 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=6/6 host_m=9.3947
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=19 raw_est=1 raw_m=0.0983 host_est=1 host_steps=19/19 host_m=0.4546 proc=2
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+physical reflector replies=23
+```
+
+This makes the CPUAPP physical sweep depend on a VPR-owned RF plan and proves
+that the plan was accepted by the VPR controller image. It still is not final
+Zephyr parity: CPUAPP still writes the RADIO registers and waits for PHY/CRC
+events. The next hard slice is the first native VPR RF primitive, where VPR
+executes one connected Mode 2 TX/RX/tone-capture step and returns the measured
+step data directly.
+
+## Completed in This Pass — VPR RADIO Register Access Proof
+
+The `0xFCED` measurement execute response now carries a read-only VPR hardware
+snapshot in bytes 60..79. The dedicated CS VPR image reads RADIO `STATE`,
+`MODE`, and `FREQUENCY` directly through the secure RADIO aperture
+(`0x5008A000`) after accepting the scheduled work item, hashes those fields into
+a deterministic hardware token, and returns both the snapshot and token to
+CPUAPP.
+
+- The non-secure RADIO aperture (`0x4008A000`) caused the direct execute
+  response to time out in hardware testing. The secure aperture completes and
+  returns stable register data.
+- `BleCsVprMeasurementExecutionResult` parses the hardware snapshot only when
+  the execute payload is at least 80 bytes and version is 1.
+- `BleCsConnectedMode2SweepRunner` recomputes the VPR hardware token on CPUAPP
+  and rejects the connected sweep unless `work_rf_hw=1`.
+- The central diagnostic now prints `work_rf_hw`, `work_rf_hw32`,
+  `work_rf_state`, `work_rf_mode`, and `work_rf_freq`.
+- The regression script now requires `work_tok=1`, `work_rf=1`, and
+  `work_rf_hw=1`.
+
+Hardware check on the same two XIAO nRF54L15 boards, with the LM20A probe
+attached but unused:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=5 min_valid=3 requested_channels=6 raw_est=0 used=0/5 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0x1F64BAAF work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=5/5 host_m=12.8268
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 raw_m=1.0522 host_est=1 host_steps=21/21 host_m=0.0025 proc=2
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+physical reflector replies=22
+```
+
+This proves that the dedicated VPR image can directly access RADIO registers
+without CPUAPP proxying. It still is not final Zephyr parity: VPR currently
+proves access and owns the RF descriptor, while CPUAPP still executes the
+physical Mode 2 transaction.
+
+## Completed in This Pass — VPR RADIO Task Primitive Proof
+
+The `0xFCED` measurement execute response now extends to 104 bytes and carries
+a bounded VPR-owned RADIO primitive proof in bytes 80..103. After accepting a
+scheduled connected-CS work item, the dedicated VPR image now:
+
+- verifies RADIO `STATE` is disabled before touching task registers;
+- rewrites the current `MODE` and `FREQUENCY` values through the secure RADIO
+  aperture;
+- clears `EVENTS_PLLREADY` and `EVENTS_DISABLED`;
+- triggers `TASKS_PLLEN`;
+- waits with a fixed loop cap for `EVENTS_PLLREADY`;
+- triggers `TASKS_DISABLE`;
+- waits with a fixed loop cap for `EVENTS_DISABLED`;
+- returns status, flags, state-before/after, wait counts, and a deterministic
+  primitive token.
+
+CPUAPP parses and validates that primitive token independently. The connected
+sweep now rejects the work item unless `work_rf_prim=1`, meaning VPR completed
+the hardware task sequence and restored RADIO to disabled state before CPUAPP
+continues with its current physical Mode 2 sweep.
+
+Hardware check on the same two XIAO nRF54L15 boards, with the LM20A probe
+attached but unused:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=4 min_valid=3 requested_channels=6 raw_est=0 used=0/4 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0xDBEFCD5B work_rf_state=0 work_rf_mode=3 work_rf_freq=28 work_rf_prim=1 work_rf_prim32=0xCC7B48B7 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=106 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=4/4 host_m=1.3480
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 raw_m=0.2588 host_est=1 host_steps=21/21 host_m=0.4011 proc=2
+queued CS_PROC_RSP
+queued CS_START
+queued CS_ABORT
+physical reflector replies=23
+```
+
+This is still not full Zephyr parity. The important change is that VPR now
+proves it can safely drive a RADIO hardware task sequence in the connected-CS
+workflow. The next hard slice is moving the first real Mode 2 TX/RX/tone
+capture operation into VPR and returning measured step data from the VPR-owned
+path instead of using CPUAPP as the physical executor.
+
+## Completed in This Pass — VPR Channel Retune Primitive
+
+The `0xFCED` measurement execute response now extends to 128 bytes and carries
+a VPR-owned channel-retune proof in bytes 104..127. This moves another concrete
+piece of the connected measurement window from CPUAPP toward the controller:
+VPR now programs the RADIO for the first controller-selected Mode 2 work
+channel before the PLL primitive and before CPUAPP runs its current fallback
+physical sweep.
+
+What VPR now proves:
+
+- Takes the first selected work channel from the VPR-owned measurement work
+  item.
+- Computes the BLE data-channel frequency with the same mapping used by
+  CPUAPP (`channel 2 -> 8 MHz offset`, etc.).
+- Computes the BLE data whitening register value for that channel.
+- Verifies RADIO is disabled before touching the channel registers.
+- Writes RADIO `MODE = BLE_2Mbit`, `FREQUENCY`, and `DATAWHITE`.
+- Reads `FREQUENCY` and `DATAWHITE` back and returns a deterministic retune
+  token.
+- CPUAPP independently recomputes the token and rejects the connected sweep
+  unless `work_rf_retune=1`.
+
+This is still not a VPR-owned packet exchange. It is intentionally bounded:
+the next step after retune + PLL proof is to move the RX/TX ramp and then the
+first actual TX/RX/tone-capture transaction into VPR.
+
+Hardware check on the same two XIAO nRF54L15 boards, with the LM20A probe
+attached but unused:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=5 min_valid=3 requested_channels=6 raw_est=0 used=0/5 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0x1F64BAAF work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_prim=1 work_rf_prim32=0x92563B31 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=108 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_retune=1 work_rf_retune32=0x1C101941 work_rf_retune_status=0 work_rf_retune_flags=0xF work_rf_retune_ch=2 work_rf_retune_freq=8 work_rf_retune_freq_after=8 work_rf_retune_white=0x890042 work_rf_retune_white_after=0x890042 work_tone_snap=1 work_tone_snap32=0x8DAE8D3A work_tone_snap_status=0 work_tone_snap_flags=0x17 work_tone_pct16=0x150 work_tone_magphase=0x150 work_tone_magstd=0x635B49D7 work_tone_freq=8 work_tone_state=0 work_tone_event=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=5/5 host_m=5.5639
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=22 raw_est=1 raw_m=13.1107 host_est=1 host_steps=22/22 host_m=2.8312 proc=2
+```
+
+## Completed in This Pass — VPR RX Ready/Disable Primitive
+
+The `0xFCED` measurement execute response now extends to 152 bytes and carries
+a VPR-owned RX ramp proof in bytes 128..151. After retuning RADIO to the first
+controller-selected work channel, the VPR image now performs a bounded
+`TASKS_RXEN -> EVENTS_RXREADY -> TASKS_DISABLE -> EVENTS_DISABLED` sequence and
+returns the observed state, wait counts, flags, status, and token to CPUAPP.
+
+What VPR now proves:
+
+- RADIO is disabled before the primitive starts.
+- VPR triggers `TASKS_RXEN` through the secure RADIO aperture.
+- VPR waits for `EVENTS_RXREADY`, proving RX ramp-up on the selected BLE data
+  channel rather than only PLL standby.
+- VPR disables RADIO again and verifies `EVENTS_DISABLED`.
+- CPUAPP independently recomputes the token and rejects the connected sweep
+  unless `work_rf_rx=1`.
+
+This is still deliberately outside the live connected measurement window. A
+previous host-command-in-window attempt missed timing deadlines; this proof
+moves hardware ownership forward without disturbing the existing over-air CS
+packet exchange.
+
+Hardware check on the two XIAO nRF54L15 boards, with the LM20A probe attached
+but unused:
+
+```bash
+CS_CAPTURE_SECONDS=45 \
+CS_CENTRAL_UID=761FDE87 \
+CS_PERIPHERAL_UID=E91217E8 \
+CS_CENTRAL_PORT=/dev/ttyACM1 \
+CS_PERIPHERAL_PORT=/dev/ttyACM0 \
+./scripts/test_cs_ll_workflow_bridge.sh
+```
+
+Observed PASS summary:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channels=6 raw_est=0 used=0/6 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0x1F64BAAF work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_prim=1 work_rf_prim32=0x92563B31 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=108 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_retune=1 work_rf_retune32=0x1C101941 work_rf_retune_status=0 work_rf_retune_flags=0xF work_rf_retune_ch=2 work_rf_retune_freq=8 work_rf_retune_freq_after=8 work_rf_retune_white=0x890042 work_rf_retune_white_after=0x890042 work_rf_rx=1 work_rf_rx32=0xF69FC492 work_rf_rx_status=0 work_rf_rx_flags=0x7 work_rf_rx_before=0 work_rf_rx_ready=143 work_rf_rx_disable=0 work_rf_rx_after=0 work_tone_snap=1 work_tone_snap32=0x13CF99E8 work_tone_snap_status=0 work_tone_snap_flags=0x17 work_tone_pct16=0x150 work_tone_magphase=0x150 work_tone_magstd=0xDB5C783D work_tone_freq=8 work_tone_state=0 work_tone_event=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=6/6 host_m=5.9182
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=23 raw_est=1 raw_m=1.3752 host_est=1 host_steps=23/23 host_m=0.9182 proc=2
+```
+
+## Completed in This Pass — VPR Packet Configuration, PACKETPTR, and TX START/END Execute Token
+
+The `0xFCED` measurement execute response now also proves that VPR can program
+the BLE packet configuration registers used by the connected-CS packet path,
+can briefly own `RADIO.PACKETPTR` without leaving the packet path disturbed for
+CPUAPP, and can run a bounded VPR-owned TX start/end/disable sequence with that
+VPR-owned packet buffer armed.
+
+The first attempt used a separate vendor opcode for packet-config readback. That
+was rejected because it increased the VPR image enough to make startup fragile
+(`stage=255`, `status=0xFF`) and because leaving `PCNF0`/`PCNF1` altered could
+disturb the connected packet path. The stable implementation keeps the existing
+152-byte execute response and packs a compact proof token into reserved bytes:
+
+- VPR saves the previous `RADIO.PCNF0` / `RADIO.PCNF1`.
+- VPR writes the default BLE data packet config:
+  `PCNF0 = 0x01080108`, `PCNF1 = 0x02030020`.
+- VPR writes a 9-byte CS probe-format packet in VPR-owned RAM:
+  `S0=0xA5`, payload length `6`, CTE info `0x0A`, magic `CS`, packet type
+  `0x50` (`Probe`), execute-count sequence byte, first VPR data channel, and
+  flags `0`. It points `RADIO.PACKETPTR` at that packet, verifies the register
+  readback, then restores the previous `PACKETPTR` before returning to CPUAPP.
+- With that probe-format packet still armed, VPR temporarily enables the RADIO
+  `TXREADY_START` and `PHYEND_DISABLE` shortcuts, clears `EVENTS_TXREADY`,
+  `EVENTS_END`, and `EVENTS_DISABLED`, triggers `TASKS_TXEN`, and waits for the
+  RADIO to return to disabled state.
+- The compact proof flags now require `TXREADY`, TX start, `EVENTS_END`, and
+  `EVENTS_DISABLED` before CPUAPP accepts the work item.
+- VPR builds a compact proof token from the expected packet config constants,
+  the exact probe-frame bytes above, the execute-count sequence byte, the first
+  VPR data channel, and the observed flags, then restores `SHORTS`,
+  `PACKETPTR`, `PCNF0`, and `PCNF1` before returning to CPUAPP.
+- CPUAPP recomputes the token from the default VPR probe-frame bytes above, the
+  expected register values, execute count, and first VPR data channel, then
+  rejects the sweep unless `work_rf_pkt=1`.
+- CPUAPP also rejects the sweep unless the packet-buffer proof folds into that
+  token correctly (`work_rf_buf=1`, `work_rf_pkt_flags=0xFF`).
+- No new VPR HCI opcode is exposed for this proof; the abandoned `0xFCEF`
+  host hook was removed.
+- The VPR stack reserve is now `0x1D0` bytes. Earlier stack-usage output showed
+  the VPR main path at 184 bytes, so this still leaves a conservative margin
+  while keeping the generated image inside the fixed VPR window. The generated
+  dedicated CS image is now 18988 bytes.
+- A separate 180-byte response with detailed PACKETPTR fields was tested and
+  rejected because the generated VPR image overflowed the fixed
+  `0x2003B000..0x2003FE80` image window. The accepted implementation keeps the
+  response fixed at 152 bytes and folds the PACKETPTR proof into the existing
+  packet-config token.
+
+Hardware regression on the same two XIAO nRF54L15 boards, with the LM20A probe
+attached but unused:
+
+```bash
+CS_CAPTURE_SECONDS=45 \
+CS_CENTRAL_UID=761FDE87 \
+CS_PERIPHERAL_UID=E91217E8 \
+CS_CENTRAL_PORT=/dev/ttyACM1 \
+CS_PERIPHERAL_PORT=/dev/ttyACM0 \
+./scripts/test_cs_ll_workflow_bridge.sh
+```
+
+Observed PASS summary:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channels=6 raw_est=0 used=0/6 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_mismatch=0x0 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0xC7010027 work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_prim=1 work_rf_prim32=0xC80700D9 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=108 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_retune=1 work_rf_retune32=0xC8A20353 work_rf_retune_status=0 work_rf_retune_flags=0xF work_rf_retune_ch=2 work_rf_retune_freq=8 work_rf_retune_freq_after=8 work_rf_retune_white=0x890042 work_rf_retune_white_after=0x890042 work_rf_rx=1 work_rf_rx32=0xC807011D work_rf_rx_status=0 work_rf_rx_flags=0x7 work_rf_rx_before=0 work_rf_rx_ready=142 work_rf_rx_disable=0 work_rf_rx_after=0 work_rf_pkt=1 work_rf_pkt32=0x5928F1D work_rf_pkt_status=0 work_rf_pkt_flags=0xFF work_rf_pkt_max=32 work_rf_pkt_pcnf0=0x1080108 work_rf_pkt_pcnf1=0x2030020 work_rf_buf=1 work_tone_snap=1 work_tone_snap32=0xECA0995 work_tone_snap_status=0 work_tone_snap_flags=0x37 work_tone_pct16=0x150 work_tone_magphase=0x150 work_tone_magstd=0xF1FF4289 work_tone_freq=8 work_tone_state=0 work_tone_event=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=6/6 host_m=18.4923
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=22 raw_est=1 raw_m=6.0390 host_est=1 host_steps=22/22 host_m=2.2554 proc=2
+```
+
+This is still not full Zephyr parity. The next hard slice is passing the active
+CS packet format/timing into VPR and moving the actual Mode 2 packet
+TX/RX/tone-capture transaction into VPR-owned RADIO/timer execution instead of
+only proving each hardware primitive around the existing CPUAPP-driven
+measurement window.
+
+## Completed in This Pass — VPR Tone Configuration Readback Gate
+
+The VPR tone snapshot proof now has a stronger connected-sweep gate. In addition
+to proving a nonzero CSTONES/DFEPACKET result sample, VPR reads the tone setup
+registers that the CPUAPP Mode 2 path programmed and sets a new proof bit when
+the visible RADIO state matches the expected BLE 2M TPM setup:
+
+- `RADIO.CSTONES.MODE == 1` (`TPM` enabled, `TFM` disabled)
+- `RADIO.CSTONES.DOWNSAMPLE == 2` (BLE 2M downsample mode)
+
+The host parser exposes this as `BleCsVprToneSnapshotResult::toneConfigOk`, and
+`BleCsConnectedMode2SweepRunner` now rejects the connected sweep unless that
+bit is present. The regression script now requires
+`work_tone_snap_flags=0x37`:
+
+- `0x01`: snapshot valid
+- `0x02`: nonzero sample or DFEPACKET fallback
+- `0x04`: RADIO disabled after the sweep
+- `0x10`: DFEPACKET fallback was used
+- `0x20`: VPR read back the expected tone configuration
+
+Because the dedicated VPR image is now packed tightly, the CS VPR generator uses
+`-flto` in addition to `-Oz`; the hardware-tested generated image is 18988
+bytes with the `0x1D0` stack reserve.
+
+A post-window VPR `TASKS_CSTONESSTART` proof was also tested and rejected in
+this pass. It fit only after trimming diagnostic code, but on hardware the
+snapshot still returned `work_tone_snap_flags=0x37` and
+`EVENTS_CSTONESEND=0`, so it did not prove live CSTONES ownership. That gate is
+therefore intentionally not required; the accepted gate remains VPR readback of
+the configured tone path plus the existing DFEPACKET-backed sample proof.
+
+Latest hardware regression after the rejected CSTONES task gate was removed and
+the VPR packet proof was upgraded to a CS probe-format frame:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channels=6 host_est=1 ctrl_ing=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_exec=1 work_rf_pkt=1 work_rf_pkt_flags=0xFF work_tone_snap=1 work_tone_snap_flags=0x37 host_steps=6/6
 cs_ll_physical_followup=PASS sweeps=1 valid_channels=22 raw_est=1 host_est=1 host_steps=22/22 proc=2
 ```
+
+## Completed in This Pass — VPR Tone/DFE Hardware Snapshot Readback
+
+The dedicated CS VPR image now exposes a read-only RADIO tone/result snapshot
+through vendor HCI opcode `0xFCEE`. This closes the next diagnostics seam:
+after a connected Mode 2 sweep succeeds, CPUAPP can ask the VPR/controller side
+to read the hardware result path directly and return a tokened snapshot.
+
+What is implemented:
+
+- VPR reads RADIO through the secure RADIO aperture (`0x5008A000`).
+- If `CSTONES` has produced non-zero values, the response reports
+  `CSTONES.PCT16`, `MAGPHASEMEAN`, `MAGSTD`, and `EVENTS_CSTONESEND`.
+- If the current Zephyr-style path did not raise `EVENTS_CSTONESEND`, the VPR
+  reports the DFE EasyDMA result path instead:
+  `DFEPACKET.AMOUNT`, `DFEPACKET.CURRENTAMOUNT`, and an FNV hash of the first
+  DFE sample bytes.
+- CPUAPP parses the response into `BleCsVprToneSnapshotResult`, validates the
+  returned token, and mirrors the fields into
+  `BleCsConnectedMode2SweepResult`.
+- The central workflow diagnostic now prints `work_tone_snap`,
+  `work_tone_snap32`, `work_tone_snap_status`, `work_tone_snap_flags`,
+  `work_tone_pct16`, `work_tone_magphase`, `work_tone_magstd`,
+  `work_tone_freq`, `work_tone_state`, and `work_tone_event`.
+- `scripts/test_cs_ll_workflow_bridge.sh` now requires `work_tone_snap=1` in
+  the connected-sweep PASS line.
+
+Important finding:
+
+The current successful hardware path is DFE-backed, not CSTONES-backed. The
+verified run below reports `work_tone_snap_flags=0x17`:
+
+- `0x01`: snapshot payload valid.
+- `0x02`: non-zero hardware sample/counter/hash was observed.
+- `0x04`: RADIO was disabled when the late readback happened.
+- `0x10`: DFE packet fallback was used.
+
+The CSTONES fields remain supported by the VPR opcode, but this run returned
+`work_tone_event=0`, so the connected diagnostic should be interpreted as
+"VPR can read the active hardware result path" rather than "final CSTONES
+ranging is complete".
+
+Hardware check on the same two XIAO nRF54L15 boards, with the LM20A probe
+attached but unused:
+
+```bash
+CS_CAPTURE_SECONDS=45 \
+CS_CENTRAL_UID=761FDE87 \
+CS_PERIPHERAL_UID=E91217E8 \
+CS_CENTRAL_PORT=/dev/ttyACM1 \
+CS_PERIPHERAL_PORT=/dev/ttyACM0 \
+./scripts/test_cs_ll_workflow_bridge.sh
+```
+
+Observed PASS summary:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=5 min_valid=3 requested_channels=6 raw_est=0 used=0/5 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0x1F64BAAF work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_prim=1 work_rf_prim32=0x92563B31 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=108 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_retune=1 work_rf_retune32=0x1C101941 work_rf_retune_status=0 work_rf_retune_flags=0xF work_rf_retune_ch=2 work_rf_retune_freq=8 work_rf_retune_freq_after=8 work_rf_retune_white=0x890042 work_rf_retune_white_after=0x890042 work_tone_snap=1 work_tone_snap32=0x8DAE8D3A work_tone_snap_status=0 work_tone_snap_flags=0x17 work_tone_pct16=0x150 work_tone_magphase=0x150 work_tone_magstd=0x635B49D7 work_tone_freq=8 work_tone_state=0 work_tone_event=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=5/5 host_m=5.5639
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=22 raw_est=1 raw_m=13.1107 host_est=1 host_steps=22/22 host_m=2.8312 proc=2
+```
+
+This is still not final Zephyr parity. VPR can now prove access to the result
+path and return non-zero hardware-backed DFE data after the connected sweep,
+but CPUAPP still owns the actual Mode 2 TX/RX/tone-capture timing. The next
+hard slice remains moving the physical measurement transaction itself into
+VPR-owned RADIO/timer execution.
 
 Related cleanup regression check:
 
@@ -711,7 +1183,8 @@ Next required slice:
   are hardware-tested.
 - Keep the current CPUAPP BLE queue/dequeue as the transport seam until the
   RADIO/VPR scheduler owns the timing.
-- Then replace synthetic result data with real CS subevent capture.
+- Then replace the remaining CPUAPP physical executor with VPR-owned Mode 2
+  TX/RX/tone capture and real CS subevent data.
 
 ## Hardware Verification
 

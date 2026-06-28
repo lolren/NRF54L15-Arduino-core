@@ -54,6 +54,8 @@ constexpr uint16_t kBleCsVprHciOpPeerStageRead = 0xFCE9U;
 constexpr uint16_t kBleCsVprHciOpPendingLocalPduRead = 0xFCEAU;
 constexpr uint16_t kBleCsVprHciOpSchedulerRead = 0xFCEBU;
 constexpr uint16_t kBleCsVprHciOpMeasurementWorkRead = 0xFCECU;
+constexpr uint16_t kBleCsVprHciOpMeasurementExecute = 0xFCEDU;
+constexpr uint16_t kBleCsVprHciOpToneSnapshotRead = 0xFCEEU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
@@ -618,6 +620,111 @@ struct BleCsVprMeasurementWorkItem {
   uint32_t nextChunkStageHeartbeat = 0U;
   uint8_t stepChannelCount = 0U;
   uint8_t stepChannels[6] = {0};
+};
+
+struct BleCsVprMeasurementExecutionResult {
+  bool valid = false;
+  uint8_t status = 0xFFU;
+  uint8_t flags = 0U;
+  bool ready = false;
+  bool accepted = false;
+  bool resultPending = false;
+  bool peerProcedureActive = false;
+  uint8_t activeSubeventIndex = 0U;
+  uint8_t totalSubevents = 0U;
+  uint8_t totalSteps = 0U;
+  uint8_t subeventStartStep = 0U;
+  uint8_t subeventStepCount = 0U;
+  uint8_t configId = 0U;
+  uint8_t stepChannelCount = 0U;
+  uint8_t executedChannelCount = 0U;
+  uint16_t procedureCounter = 0U;
+  uint16_t connHandle = 0U;
+  uint32_t heartbeat = 0U;
+  uint32_t executeCount = 0U;
+  uint32_t executionToken = 0U;
+  bool executionTokenValid = false;
+  uint32_t rfDescriptorToken = 0U;
+  uint32_t rfMinSubeventLen = 0U;
+  uint32_t rfMaxSubeventLen = 0U;
+  uint32_t rfNextSubeventHeartbeat = 0U;
+  uint32_t rfHardwareToken = 0U;
+  uint32_t rfHardwareState = 0U;
+  uint32_t rfHardwareMode = 0U;
+  uint32_t rfHardwareFrequency = 0U;
+  uint32_t rfPrimitiveToken = 0U;
+  uint32_t rfPrimitiveStateBefore = 0U;
+  uint32_t rfPrimitivePllWaitLoops = 0U;
+  uint32_t rfPrimitiveDisableWaitLoops = 0U;
+  uint32_t rfPrimitiveStateAfter = 0U;
+  uint32_t rfRetuneTargetFrequency = 0U;
+  uint32_t rfRetuneTargetDatawhite = 0U;
+  uint32_t rfRetuneObservedFrequency = 0U;
+  uint32_t rfRetuneObservedDatawhite = 0U;
+  uint32_t rfRetuneToken = 0U;
+  uint32_t rfRxPrimitiveToken = 0U;
+  uint32_t rfPacketConfigToken = 0U;
+  uint32_t rfRxPrimitiveStateBefore = 0U;
+  uint32_t rfRxPrimitiveRxReadyWaitLoops = 0U;
+  uint32_t rfRxPrimitiveDisableWaitLoops = 0U;
+  uint32_t rfRxPrimitiveStateAfter = 0U;
+  bool rfDescriptorValid = false;
+  bool rfDescriptorTokenValid = false;
+  bool rfHardwareValid = false;
+  bool rfHardwareTokenValid = false;
+  bool rfPrimitiveValid = false;
+  bool rfPrimitiveTokenValid = false;
+  bool rfPrimitivePllReady = false;
+  bool rfPrimitiveDisabled = false;
+  bool rfRetuneValid = false;
+  bool rfRetuneTokenValid = false;
+  bool rfRetuneModeWritten = false;
+  bool rfRetuneFrequencyWritten = false;
+  bool rfRetuneDatawhiteWritten = false;
+  bool rfRxPrimitiveValid = false;
+  bool rfRxPrimitiveTokenValid = false;
+  bool rfPacketConfigTokenValid = false;
+  bool rfRxPrimitiveRxReady = false;
+  bool rfRxPrimitiveDisabled = false;
+  uint8_t rfDescriptorVersion = 0U;
+  uint8_t rfDescriptorFlags = 0U;
+  uint8_t rfHardwareVersion = 0U;
+  uint8_t rfHardwareFlags = 0U;
+  uint8_t rfPrimitiveVersion = 0U;
+  uint8_t rfPrimitiveFlags = 0U;
+  uint8_t rfPrimitiveStatus = 0xFFU;
+  uint8_t rfRetuneVersion = 0U;
+  uint8_t rfRetuneFlags = 0U;
+  uint8_t rfRetuneStatus = 0xFFU;
+  uint8_t rfRetuneChannel = 0xFFU;
+  uint8_t rfRxPrimitiveVersion = 0U;
+  uint8_t rfRxPrimitiveFlags = 0U;
+  uint8_t rfRxPrimitiveStatus = 0xFFU;
+  uint8_t rfRole = 0U;
+  uint8_t rfPhy = 0U;
+  int8_t rfTxPowerDelta = 0;
+  uint8_t rfRttType = 0U;
+  uint8_t rfStepChannelCount = 0U;
+  uint8_t stepChannels[6] = {0};
+};
+
+struct BleCsVprToneSnapshotResult {
+  bool valid = false;
+  bool snapshotValid = false;
+  bool tokenValid = false;
+  bool sampleNonZero = false;
+  bool radioDisabled = false;
+  bool toneConfigOk = false;
+  uint8_t status = 0xFFU;
+  uint8_t flags = 0U;
+  uint8_t version = 0U;
+  uint32_t pct16 = 0U;
+  uint32_t magPhase = 0U;
+  uint32_t magStd = 0U;
+  uint32_t frequency = 0U;
+  uint32_t state = 0U;
+  uint32_t cstonesEndEvent = 0U;
+  uint32_t token = 0U;
 };
 
 class BleCsControllerVprHost;
@@ -1387,8 +1494,74 @@ struct BleCsConnectedMode2SweepResult {
   bool rawEstimateValid = false;
   bool hostEstimateValid = false;
   bool workItemApplied = false;
+  bool workChannelsUsed = false;
+  bool workExecuteAttempted = false;
+  bool workExecuteOk = false;
+  bool workExecuteTokenOk = false;
+  bool workRfDescriptorOk = false;
+  bool workRfHardwareOk = false;
+  bool workRfPrimitiveOk = false;
+  bool workRfRetuneOk = false;
+  bool workRfRxPrimitiveOk = false;
+  bool workRfPacketConfigOk = false;
+  bool workRfPacketBufferOk = false;
+  bool workToneSnapshotOk = false;
+  bool hostControllerResultIngress = false;
   uint8_t attempts = 0U;
   uint8_t validChannels = 0U;
+  uint8_t sweepChannelCount = 0U;
+  uint8_t workExecutedChannelCount = 0U;
+  uint32_t workExecuteMismatchMask = 0U;
+  uint32_t workExecutionToken = 0U;
+  uint32_t workRfDescriptorToken = 0U;
+  uint32_t workRfHardwareToken = 0U;
+  uint32_t workRfHardwareState = 0U;
+  uint32_t workRfHardwareMode = 0U;
+  uint32_t workRfHardwareFrequency = 0U;
+  uint32_t workRfPrimitiveToken = 0U;
+  uint32_t workRfPrimitiveStateBefore = 0U;
+  uint32_t workRfPrimitivePllWaitLoops = 0U;
+  uint32_t workRfPrimitiveDisableWaitLoops = 0U;
+  uint32_t workRfPrimitiveStateAfter = 0U;
+  uint32_t workRfRetuneToken = 0U;
+  uint32_t workRfRetuneTargetFrequency = 0U;
+  uint32_t workRfRetuneTargetDatawhite = 0U;
+  uint32_t workRfRetuneObservedFrequency = 0U;
+  uint32_t workRfRetuneObservedDatawhite = 0U;
+  uint32_t workRfRxPrimitiveToken = 0U;
+  uint32_t workRfRxPrimitiveStateBefore = 0U;
+  uint32_t workRfRxPrimitiveRxReadyWaitLoops = 0U;
+  uint32_t workRfRxPrimitiveDisableWaitLoops = 0U;
+  uint32_t workRfRxPrimitiveStateAfter = 0U;
+  uint32_t workRfPacketConfigToken = 0U;
+  uint32_t workRfPacketConfigPcnf0 = 0U;
+  uint32_t workRfPacketConfigPcnf1 = 0U;
+  uint32_t workToneSnapshotToken = 0U;
+  uint32_t workToneSnapshotPct16 = 0U;
+  uint32_t workToneSnapshotMagPhase = 0U;
+  uint32_t workToneSnapshotMagStd = 0U;
+  uint32_t workToneSnapshotFrequency = 0U;
+  uint32_t workToneSnapshotState = 0U;
+  uint32_t workToneSnapshotCstonesEndEvent = 0U;
+  uint32_t workRfMaxSubeventLen = 0U;
+  uint8_t workRfPrimitiveStatus = 0xFFU;
+  uint8_t workRfPrimitiveFlags = 0U;
+  uint8_t workRfRetuneStatus = 0xFFU;
+  uint8_t workRfRetuneFlags = 0U;
+  uint8_t workRfRetuneChannel = 0xFFU;
+  uint8_t workRfRxPrimitiveStatus = 0xFFU;
+  uint8_t workRfRxPrimitiveFlags = 0U;
+  uint8_t workRfPacketConfigStatus = 0xFFU;
+  uint8_t workRfPacketConfigFlags = 0U;
+  uint8_t workRfPacketConfigMaxPayload = 0U;
+  uint8_t workToneSnapshotStatus = 0xFFU;
+  uint8_t workToneSnapshotFlags = 0U;
+  uint8_t workRfPhy = 0U;
+  int8_t workRfTxPowerDelta = 0;
+  uint32_t hostLocalResultPacketDelta = 0U;
+  uint32_t hostPeerResultPacketDelta = 0U;
+  uint32_t hostControllerEventPacketDelta = 0U;
+  uint32_t hostPeerResultMarkerDelta = 0U;
   uint8_t workConfigId = 0U;
   uint8_t workSubeventIndex = 0U;
   uint8_t workSubeventCount = 0U;
@@ -1687,6 +1860,14 @@ class BleCsControllerHost {
       size_t localMaxStepDataLen,
       uint8_t* peerStepData,
       size_t peerMaxStepDataLen);
+  bool consumeMode2ControllerEventsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
 
   bool ready() const;
   bool failed() const;
@@ -1761,6 +1942,14 @@ class BleCsControllerStreamHost {
       uint8_t* peerStepData,
       size_t peerMaxStepDataLen);
   bool consumeMode2ResultEventsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
+  bool consumeMode2ControllerEventsFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
       const BleCsSubeventResultHeader& headerTemplate,
@@ -1928,6 +2117,7 @@ struct BleCsControllerVprHostState {
   bool linkPreviousSlotProcedureParamsApplied = false;
   BleCsVprSchedulerState scheduler{};
   BleCsVprMeasurementWorkItem measurementWork{};
+  BleCsVprMeasurementExecutionResult measurementExecution{};
 
   bool retainedConfigMatchesSlots(uint8_t activeConfigId,
                                   uint8_t slot0ConfigId,
@@ -2154,6 +2344,9 @@ class BleCsControllerVprHost {
       BleCsVprPeerExchangeState* outState);
   bool directReadSchedulerStateForTest(BleCsVprSchedulerState* outState);
   bool directReadMeasurementWorkItemForTest(BleCsVprMeasurementWorkItem* outWork);
+  bool directExecuteMeasurementWorkForTest(
+      BleCsVprMeasurementExecutionResult* outResult);
+  bool directReadToneSnapshotForTest(BleCsVprToneSnapshotResult* outResult);
   bool buildPendingInitiatorLlControlPdu(
       BleCsLlControlPdu* outPdu,
       BleCsVprPeerExchangeState* outState = nullptr,
@@ -2299,6 +2492,14 @@ class BleCsControllerVprHost {
       size_t localMaxStepDataLen,
       uint8_t* peerStepData,
       size_t peerMaxStepDataLen);
+  bool consumeMode2ControllerEventsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      const BleCsSubeventResultHeader& headerTemplate,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen);
   bool consumeConnectedMode2ResultsFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
@@ -2309,6 +2510,15 @@ class BleCsControllerVprHost {
       size_t peerMaxStepDataLen,
       uint8_t numAntennaPaths = 1U);
   bool consumeConnectedMode2ResultEventsFromMeasurements(
+      const BleCsChannelMeasurement* measurements,
+      size_t count,
+      uint8_t configId,
+      uint8_t* localStepData,
+      size_t localMaxStepDataLen,
+      uint8_t* peerStepData,
+      size_t peerMaxStepDataLen,
+      uint8_t numAntennaPaths = 1U);
+  bool consumeConnectedMode2ControllerEventsFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
       uint8_t configId,

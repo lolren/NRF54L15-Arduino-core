@@ -53,7 +53,12 @@ constexpr size_t kBleCsHciConfigCompleteLen = 33U;
 constexpr size_t kBleCsHciProcedureEnableCompleteLen = 21U;
 constexpr uint8_t kBleCsVprVendorEvtPeerResultTrigger = 0xB1U;
 constexpr uint8_t kBleCsVprVendorEvtPeerResultSource = 0xB2U;
-
+constexpr uint8_t kBleCsVprPacketMaxPayloadDefault = 32U;
+constexpr uint32_t kBleCsVprPacketPcnf0Default = 0x01080108UL;
+constexpr uint32_t kBleCsVprPacketPcnf1Default = 0x02030020UL;
+constexpr uint8_t kBleCsVprPacketS0PatternDefault = 0xA5U;
+constexpr uint8_t kBleCsVprPacketCteTimeUnitsDefault = 10U;
+constexpr uint8_t kBleCsVprPacketTypeProbe = 0x50U;
 struct BleCsControllerPhasePair {
   bool failed = false;
   bool localPresent = false;
@@ -120,6 +125,185 @@ inline void writeLe32(uint8_t* data, uint32_t value) {
   data[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
   data[2] = static_cast<uint8_t>((value >> 16U) & 0xFFU);
   data[3] = static_cast<uint8_t>((value >> 24U) & 0xFFU);
+}
+
+uint32_t fnv1a32Bytes(const uint8_t* data, size_t len) {
+  uint32_t hash = 2166136261UL;
+  if (data == nullptr) {
+    return hash;
+  }
+  for (size_t i = 0U; i < len; ++i) {
+    hash ^= static_cast<uint32_t>(data[i]);
+    hash *= 16777619UL;
+  }
+  return hash;
+}
+
+uint32_t buildMeasurementExecuteToken(uint8_t configId,
+                                      uint16_t procedureCounter,
+                                      uint16_t connHandle,
+                                      uint8_t activeSubevent,
+                                      uint8_t subeventCount,
+                                      uint8_t totalSteps,
+                                      uint8_t subeventStart,
+                                      uint8_t subeventSteps,
+                                      uint8_t stepChannelCount,
+                                      const uint8_t* stepChannels,
+                                      uint32_t executeCount) {
+  uint8_t summary[24] = {0};
+  summary[0] = 0xC5U;
+  summary[1] = configId;
+  writeLe16(&summary[2], procedureCounter);
+  writeLe16(&summary[4], connHandle);
+  summary[6] = activeSubevent;
+  summary[7] = subeventCount;
+  summary[8] = totalSteps;
+  summary[9] = subeventStart;
+  summary[10] = subeventSteps;
+  summary[11] = stepChannelCount;
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    summary[12U + i] = (stepChannels != nullptr) ? stepChannels[i] : 0U;
+  }
+  writeLe32(&summary[18], executeCount);
+  return fnv1a32Bytes(summary, sizeof(summary));
+}
+
+uint32_t buildMeasurementRfDescriptorToken(uint8_t configId,
+                                           uint16_t procedureCounter,
+                                           uint16_t connHandle,
+                                           uint8_t activeSubevent,
+                                           uint8_t subeventCount,
+                                           uint8_t totalSteps,
+                                           uint8_t subeventStart,
+                                           uint8_t subeventSteps,
+                                           uint8_t stepChannelCount,
+                                           const uint8_t* stepChannels,
+                                           uint8_t role,
+                                           uint8_t phy,
+                                           int8_t txPowerDelta,
+                                           uint8_t rttType,
+                                           uint32_t minSubeventLen,
+                                           uint32_t maxSubeventLen,
+                                           uint32_t executeCount) {
+  uint8_t summary[36] = {0};
+  summary[0] = 0xC6U;
+  summary[1] = configId;
+  writeLe16(&summary[2], procedureCounter);
+  writeLe16(&summary[4], connHandle);
+  summary[6] = activeSubevent;
+  summary[7] = subeventCount;
+  summary[8] = totalSteps;
+  summary[9] = subeventStart;
+  summary[10] = subeventSteps;
+  summary[11] = stepChannelCount;
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    summary[12U + i] = (stepChannels != nullptr) ? stepChannels[i] : 0U;
+  }
+  summary[18] = role;
+  summary[19] = phy;
+  summary[20] = static_cast<uint8_t>(txPowerDelta);
+  summary[21] = rttType;
+  writeLe32(&summary[22], minSubeventLen);
+  writeLe32(&summary[26], maxSubeventLen);
+  writeLe32(&summary[30], executeCount);
+  return fnv1a32Bytes(summary, sizeof(summary));
+}
+
+uint32_t buildMeasurementRfHardwareToken(uint8_t version,
+                                         uint8_t flags,
+                                         uint32_t radioState,
+                                         uint32_t radioMode,
+                                         uint32_t radioFrequency) {
+  return 0xC7000000UL ^
+         radioState ^
+         (radioMode << 1U) ^
+         (radioFrequency << 2U) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         static_cast<uint32_t>(version);
+}
+
+uint32_t buildMeasurementRfPrimitiveToken(uint8_t version,
+                                          uint8_t flags,
+                                          uint8_t status,
+                                          uint32_t stateBefore,
+                                          uint32_t pllWaitLoops,
+                                          uint32_t disableWaitLoops,
+                                          uint32_t stateAfter) {
+  return 0xC8000000UL ^
+         stateBefore ^
+         (pllWaitLoops << 1U) ^
+         (disableWaitLoops << 2U) ^
+         (stateAfter << 3U) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         (static_cast<uint32_t>(status) << 24U) ^
+         static_cast<uint32_t>(version);
+}
+
+uint32_t buildMeasurementRfRetuneToken(uint8_t version,
+                                       uint8_t flags,
+                                       uint8_t status,
+                                       uint8_t channel,
+                                       uint32_t targetFrequency,
+                                       uint32_t targetDatawhite,
+                                       uint32_t observedFrequency,
+                                       uint32_t observedDatawhite) {
+  return 0xCA000000UL ^
+         targetFrequency ^
+         (observedFrequency << 1U) ^
+         targetDatawhite ^
+         (observedDatawhite << 2U) ^
+         (static_cast<uint32_t>(channel) << 8U) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         (static_cast<uint32_t>(status) << 24U) ^
+         static_cast<uint32_t>(version);
+}
+
+uint32_t buildMeasurementToneSnapshotToken(uint8_t version,
+                                           uint8_t flags,
+                                           uint8_t status,
+                                           uint32_t pct16,
+                                           uint32_t magPhase,
+                                           uint32_t magStd,
+                                           uint32_t frequency,
+                                           uint32_t state,
+                                           uint32_t cstonesEndEvent) {
+  return 0xC9000000UL ^
+         pct16 ^
+         (magPhase << 1U) ^
+         (magStd << 2U) ^
+         (frequency << 3U) ^
+         state ^
+         (cstonesEndEvent << 4U) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         (static_cast<uint32_t>(status) << 24U) ^
+         static_cast<uint32_t>(version);
+}
+
+uint32_t buildMeasurementRfPacketConfigToken(uint8_t version,
+                                             uint8_t flags,
+                                             uint8_t status,
+                                             uint32_t pcnf0,
+                                             uint32_t pcnf1,
+                                             uint8_t packetS0,
+                                             uint8_t packetPayloadLen,
+                                             uint8_t packetCteInfo,
+                                             uint8_t packetMagic0,
+                                             uint8_t packetMagic1,
+                                             uint8_t packetType,
+                                             uint8_t packetSequence,
+                                             uint8_t packetChannel) {
+  return pcnf0 ^ (pcnf1 << 1U) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         (static_cast<uint32_t>(status) << 24U) ^
+         (static_cast<uint32_t>(packetS0) << 2U) ^
+         (static_cast<uint32_t>(packetPayloadLen) << 5U) ^
+         (static_cast<uint32_t>(packetCteInfo) << 9U) ^
+         (static_cast<uint32_t>(packetMagic0) << 11U) ^
+         (static_cast<uint32_t>(packetMagic1) << 15U) ^
+         (static_cast<uint32_t>(packetType) << 13U) ^
+         (static_cast<uint32_t>(packetSequence) << 17U) ^
+         (static_cast<uint32_t>(packetChannel) << 21U) ^
+         static_cast<uint32_t>(version);
 }
 
 inline void writeVolatileLe16(volatile uint8_t* data, uint16_t value) {
@@ -331,6 +515,24 @@ bool buildH4LeMetaEvent(uint8_t* out,
   out[2U] = static_cast<uint8_t>(1U + payloadLen);
   out[3U] = subeventCode;
   memcpy(out + 4U, payload, payloadLen);
+  return true;
+}
+
+bool buildH4VendorPeerResultSourceEvent(uint8_t* out,
+                                        size_t maxLen,
+                                        uint8_t configId,
+                                        uint16_t procedureCounter,
+                                        size_t* outLen) {
+  if (out == nullptr || outLen == nullptr || maxLen < 7U) {
+    return false;
+  }
+  out[0U] = kBleHciPacketTypeEvent;
+  out[1U] = kBleHciEvtVendor;
+  out[2U] = 4U;
+  out[3U] = kBleCsVprVendorEvtPeerResultSource;
+  out[4U] = configId;
+  writeLe16(out + 5U, procedureCounter);
+  *outLen = 7U;
   return true;
 }
 
@@ -599,6 +801,25 @@ void clearRadioEvents(NRF_RADIO_Type* radio) {
   radio->EVENTS_CTEPRESENT = 0U;
   radio->EVENTS_AUXDATADMAEND = 0U;
   radio->EVENTS_CSTONESEND = 0U;
+}
+
+void clearRadioEventsPreserveCstones(NRF_RADIO_Type* radio) {
+  if (radio == nullptr) {
+    return;
+  }
+
+  radio->EVENTS_READY = 0U;
+  radio->EVENTS_TXREADY = 0U;
+  radio->EVENTS_RXREADY = 0U;
+  radio->EVENTS_ADDRESS = 0U;
+  radio->EVENTS_PAYLOAD = 0U;
+  radio->EVENTS_END = 0U;
+  radio->EVENTS_PHYEND = 0U;
+  radio->EVENTS_DISABLED = 0U;
+  radio->EVENTS_CRCOK = 0U;
+  radio->EVENTS_CRCERROR = 0U;
+  radio->EVENTS_CTEPRESENT = 0U;
+  radio->EVENTS_AUXDATADMAEND = 0U;
 }
 
 void detachRawRadioAutomation(NRF_RADIO_Type* radio) {
@@ -3984,6 +4205,197 @@ bool parseVprMeasurementWorkItemResponse(const uint8_t* packet,
   return true;
 }
 
+bool parseVprMeasurementExecutionResponse(
+    const uint8_t* packet,
+    size_t packetLen,
+    uint16_t expectedOpcode,
+    BleCsVprMeasurementExecutionResult* outResult) {
+  if (outResult == nullptr) {
+    return false;
+  }
+  *outResult = BleCsVprMeasurementExecutionResult{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 32U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outResult->valid = true;
+  outResult->status = params[0];
+  outResult->flags = params[1];
+  outResult->ready = (params[1] & 0x01U) != 0U;
+  outResult->accepted = (params[1] & 0x02U) != 0U;
+  outResult->resultPending = (params[1] & 0x04U) != 0U;
+  outResult->peerProcedureActive = (params[1] & 0x08U) != 0U;
+  outResult->activeSubeventIndex = params[2];
+  outResult->totalSubevents = params[3];
+  outResult->totalSteps = params[4];
+  outResult->subeventStartStep = params[5];
+  outResult->subeventStepCount = params[6];
+  outResult->configId = params[7];
+  outResult->stepChannelCount = params[8];
+  outResult->executedChannelCount = params[9];
+  outResult->procedureCounter = readLe16(params + 10U);
+  outResult->connHandle = readLe16(params + 12U);
+  outResult->heartbeat = readLe32(params + 14U);
+  outResult->executeCount = readLe32(params + 18U);
+  memcpy(outResult->stepChannels, params + 22U, sizeof(outResult->stepChannels));
+  if (completeEvent.returnParamsLen >= 36U) {
+    outResult->executionToken = readLe32(params + 32U);
+    outResult->executionTokenValid = outResult->executionToken != 0U;
+  }
+  if (completeEvent.returnParamsLen >= 60U) {
+    outResult->rfDescriptorVersion = params[36];
+    outResult->rfDescriptorFlags = params[37];
+    outResult->rfDescriptorValid =
+        outResult->rfDescriptorVersion == 1U &&
+        ((outResult->rfDescriptorFlags & 0x01U) != 0U);
+    outResult->rfRole = params[38];
+    outResult->rfPhy = params[39];
+    outResult->rfTxPowerDelta = static_cast<int8_t>(params[40]);
+    outResult->rfRttType = params[41];
+    outResult->rfStepChannelCount = params[42];
+    outResult->rfMinSubeventLen = readLe32(params + 44U);
+    outResult->rfMaxSubeventLen = readLe32(params + 48U);
+    outResult->rfNextSubeventHeartbeat = readLe32(params + 52U);
+    outResult->rfDescriptorToken = readLe32(params + 56U);
+    outResult->rfDescriptorTokenValid = outResult->rfDescriptorToken != 0U;
+  }
+  if (completeEvent.returnParamsLen >= 80U) {
+    outResult->rfPacketConfigToken =
+        static_cast<uint32_t>(params[30]) |
+        (static_cast<uint32_t>(params[31]) << 8U) |
+        (static_cast<uint32_t>(params[62]) << 16U) |
+        (static_cast<uint32_t>(params[63]) << 24U);
+    outResult->rfPacketConfigTokenValid =
+        outResult->rfPacketConfigToken != 0U;
+    outResult->rfHardwareVersion = params[60];
+    outResult->rfHardwareFlags = params[61];
+    outResult->rfHardwareValid =
+        outResult->rfHardwareVersion == 1U &&
+        ((outResult->rfHardwareFlags & 0x01U) != 0U);
+    outResult->rfHardwareState = readLe32(params + 64U);
+    outResult->rfHardwareMode = readLe32(params + 68U);
+    outResult->rfHardwareFrequency = readLe32(params + 72U);
+    outResult->rfHardwareToken = readLe32(params + 76U);
+    outResult->rfHardwareTokenValid = outResult->rfHardwareToken != 0U;
+  }
+  if (completeEvent.returnParamsLen >= 104U) {
+    outResult->rfPrimitiveVersion = params[80];
+    outResult->rfPrimitiveFlags = params[81];
+    outResult->rfPrimitiveStatus = params[82];
+    outResult->rfPrimitiveValid =
+        outResult->rfPrimitiveVersion == 1U &&
+        ((outResult->rfPrimitiveFlags & 0x01U) != 0U);
+    outResult->rfPrimitivePllReady =
+        (outResult->rfPrimitiveFlags & 0x02U) != 0U;
+    outResult->rfPrimitiveDisabled =
+        (outResult->rfPrimitiveFlags & 0x04U) != 0U;
+    outResult->rfPrimitiveStateBefore = readLe32(params + 84U);
+    outResult->rfPrimitivePllWaitLoops = readLe32(params + 88U);
+    outResult->rfPrimitiveDisableWaitLoops = readLe32(params + 92U);
+    outResult->rfPrimitiveStateAfter = readLe32(params + 96U);
+    outResult->rfPrimitiveToken = readLe32(params + 100U);
+    outResult->rfPrimitiveTokenValid = outResult->rfPrimitiveToken != 0U;
+  }
+  if (completeEvent.returnParamsLen >= 128U) {
+    outResult->rfRetuneVersion = params[104];
+    outResult->rfRetuneFlags = params[105];
+    outResult->rfRetuneStatus = params[106];
+    outResult->rfRetuneChannel = params[107];
+    outResult->rfRetuneValid =
+        outResult->rfRetuneVersion == 1U &&
+        ((outResult->rfRetuneFlags & 0x01U) != 0U);
+    outResult->rfRetuneModeWritten =
+        (outResult->rfRetuneFlags & 0x02U) != 0U;
+    outResult->rfRetuneFrequencyWritten =
+        (outResult->rfRetuneFlags & 0x04U) != 0U;
+    outResult->rfRetuneDatawhiteWritten =
+        (outResult->rfRetuneFlags & 0x08U) != 0U;
+    outResult->rfRetuneTargetFrequency = readLe32(params + 108U);
+    outResult->rfRetuneTargetDatawhite = readLe32(params + 112U);
+    outResult->rfRetuneObservedFrequency = readLe32(params + 116U);
+    outResult->rfRetuneObservedDatawhite = readLe32(params + 120U);
+    outResult->rfRetuneToken = readLe32(params + 124U);
+    outResult->rfRetuneTokenValid = outResult->rfRetuneToken != 0U;
+  }
+  if (completeEvent.returnParamsLen >= 152U) {
+    outResult->rfRxPrimitiveVersion = params[128];
+    outResult->rfRxPrimitiveFlags = params[129];
+    outResult->rfRxPrimitiveStatus = params[130];
+    outResult->rfRxPrimitiveValid =
+        outResult->rfRxPrimitiveVersion == 1U &&
+        ((outResult->rfRxPrimitiveFlags & 0x01U) != 0U);
+    outResult->rfRxPrimitiveRxReady =
+        (outResult->rfRxPrimitiveFlags & 0x02U) != 0U;
+    outResult->rfRxPrimitiveDisabled =
+        (outResult->rfRxPrimitiveFlags & 0x04U) != 0U;
+    outResult->rfRxPrimitiveStateBefore = readLe32(params + 132U);
+    outResult->rfRxPrimitiveRxReadyWaitLoops = readLe32(params + 136U);
+    outResult->rfRxPrimitiveDisableWaitLoops = readLe32(params + 140U);
+    outResult->rfRxPrimitiveStateAfter = readLe32(params + 144U);
+    outResult->rfRxPrimitiveToken = readLe32(params + 148U);
+    outResult->rfRxPrimitiveTokenValid =
+        outResult->rfRxPrimitiveToken != 0U;
+  }
+  return true;
+}
+
+bool parseVprToneSnapshotResponse(const uint8_t* packet,
+                                  size_t packetLen,
+                                  uint16_t expectedOpcode,
+                                  BleCsVprToneSnapshotResult* outResult) {
+  if (outResult == nullptr) {
+    return false;
+  }
+  *outResult = BleCsVprToneSnapshotResult{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 32U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outResult->valid = true;
+  outResult->status = params[0];
+  outResult->flags = params[1];
+  outResult->version = params[2];
+  outResult->snapshotValid =
+      outResult->version == 1U && ((outResult->flags & 0x01U) != 0U);
+  outResult->sampleNonZero = (outResult->flags & 0x02U) != 0U;
+  outResult->radioDisabled = (outResult->flags & 0x04U) != 0U;
+  outResult->toneConfigOk = (outResult->flags & 0x20U) != 0U;
+  outResult->pct16 = readLe32(params + 4U);
+  outResult->magPhase = readLe32(params + 8U);
+  outResult->magStd = readLe32(params + 12U);
+  outResult->frequency = readLe32(params + 16U);
+  outResult->state = readLe32(params + 20U);
+  outResult->cstonesEndEvent = readLe32(params + 24U);
+  outResult->token = readLe32(params + 28U);
+  outResult->tokenValid =
+      outResult->token != 0U &&
+      outResult->token ==
+          buildMeasurementToneSnapshotToken(outResult->version,
+                                            outResult->flags,
+                                            outResult->status,
+                                            outResult->pct16,
+                                            outResult->magPhase,
+                                            outResult->magStd,
+                                            outResult->frequency,
+                                            outResult->state,
+                                            outResult->cstonesEndEvent);
+  return true;
+}
+
 bool BleCsControllerSession::begin(uint16_t connHandle,
                                    const BleCsControllerSessionConfig& config) {
   reset();
@@ -4681,6 +5093,76 @@ bool BleCsControllerHost::consumeMode2ResultEventsFromMeasurements(
   return true;
 }
 
+bool BleCsControllerHost::consumeMode2ControllerEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  BleCsSubeventResult localResult{};
+  BleCsSubeventResult peerResult{};
+  if (!BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          measurements, count, false, headerTemplate, localStepData,
+          localMaxStepDataLen, &localResult) ||
+      !BleChannelSoundingRadio::buildMode2SubeventResultFromMeasurements(
+          measurements, count, true, headerTemplate, peerStepData,
+          peerMaxStepDataLen, &peerResult)) {
+    return false;
+  }
+
+  const auto emitResult = [this](BleCsControllerResultSource source,
+                                 const BleCsSubeventResult& result) -> bool {
+    if (!result.isComplete ||
+        (result.stepDataLen > 0U && result.stepData == nullptr)) {
+      return false;
+    }
+
+    uint8_t packet[260] = {0};
+    size_t packetLen = 0U;
+    if (source == BleCsControllerResultSource::kPeer) {
+      if (!buildH4VendorPeerResultSourceEvent(
+              packet, sizeof(packet), result.header.configId,
+              result.header.procedureCounter, &packetLen) ||
+          !consumeIngressPacket(BleCsControllerIngressSource::kController,
+                                packet, packetLen)) {
+        return false;
+      }
+    }
+
+    size_t offset = 0U;
+    bool emitted = false;
+    while (true) {
+      BleCsSubeventResultFragment fragment{};
+      if (!BleChannelSoundingRadio::buildH4LeMetaSubeventResultFragmentPacket(
+              result, offset, packet, sizeof(packet), &packetLen, &fragment) ||
+          !consumeIngressPacket(BleCsControllerIngressSource::kController,
+                                packet, packetLen)) {
+        return false;
+      }
+      emitted = true;
+      offset = fragment.nextStepDataOffset;
+      if (!fragment.more) {
+        break;
+      }
+      if (offset >= result.stepDataLen) {
+        return false;
+      }
+    }
+    return emitted;
+  };
+
+  if (!emitResult(BleCsControllerResultSource::kLocal, localResult)) {
+    return false;
+  }
+  if (!emitResult(BleCsControllerResultSource::kPeer, peerResult)) {
+    resetProcedureRunState();
+    return false;
+  }
+  return true;
+}
+
 bool BleCsControllerHost::consumeIngressBytes(BleCsControllerIngressSource source,
                                               const uint8_t* data,
                                               size_t len) {
@@ -4889,6 +5371,19 @@ bool BleCsControllerStreamHost::consumeMode2ResultEventsFromMeasurements(
     uint8_t* peerStepData,
     size_t peerMaxStepDataLen) {
   return host_.consumeMode2ResultEventsFromMeasurements(
+      measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
+bool BleCsControllerStreamHost::consumeMode2ControllerEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  return host_.consumeMode2ControllerEventsFromMeasurements(
       measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
       peerStepData, peerMaxStepDataLen);
 }
@@ -5436,7 +5931,9 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       opcode == kBleCsVprHciOpPeerStageRead ||
       opcode == kBleCsVprHciOpPendingLocalPduRead ||
       opcode == kBleCsVprHciOpSchedulerRead ||
-      opcode == kBleCsVprHciOpMeasurementWorkRead;
+      opcode == kBleCsVprHciOpMeasurementWorkRead ||
+      opcode == kBleCsVprHciOpMeasurementExecute ||
+      opcode == kBleCsVprHciOpToneSnapshotRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
     case kBleCsHciOpSetProcedureParameters:
@@ -5646,6 +6143,45 @@ bool BleCsControllerVprHost::directReadMeasurementWorkItemForTest(
     vprState_.linkProcedureCounter = outWork->procedureCounter;
   }
   return true;
+}
+
+bool BleCsControllerVprHost::directExecuteMeasurementWorkForTest(
+    BleCsVprMeasurementExecutionResult* outResult) {
+  if (outResult == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  if (!parseVprMeasurementExecutionResponse(
+          response, responseLen, kBleCsVprHciOpMeasurementExecute, outResult)) {
+    return false;
+  }
+  vprState_.measurementExecution = *outResult;
+  if (outResult->procedureCounter != 0U) {
+    vprState_.linkProcedureCounter = outResult->procedureCounter;
+  }
+  return true;
+}
+
+bool BleCsControllerVprHost::directReadToneSnapshotForTest(
+    BleCsVprToneSnapshotResult* outResult) {
+  if (outResult == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpToneSnapshotRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  return parseVprToneSnapshotResponse(
+      response, responseLen, kBleCsVprHciOpToneSnapshotRead, outResult);
 }
 
 bool BleCsControllerVprHost::buildPendingInitiatorLlControlPdu(
@@ -7002,6 +7538,19 @@ bool BleCsControllerVprHost::consumeMode2ResultEventsFromMeasurements(
       peerStepData, peerMaxStepDataLen);
 }
 
+bool BleCsControllerVprHost::consumeMode2ControllerEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    const BleCsSubeventResultHeader& headerTemplate,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen) {
+  return host_.consumeMode2ControllerEventsFromMeasurements(
+      measurements, count, headerTemplate, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
 bool BleCsControllerVprHost::consumeConnectedMode2ResultsFromMeasurements(
     const BleCsChannelMeasurement* measurements,
     size_t count,
@@ -7036,6 +7585,25 @@ bool BleCsControllerVprHost::consumeConnectedMode2ResultEventsFromMeasurements(
   }
 
   return consumeMode2ResultEventsFromMeasurements(
+      measurements, count, header, localStepData, localMaxStepDataLen,
+      peerStepData, peerMaxStepDataLen);
+}
+
+bool BleCsControllerVprHost::consumeConnectedMode2ControllerEventsFromMeasurements(
+    const BleCsChannelMeasurement* measurements,
+    size_t count,
+    uint8_t configId,
+    uint8_t* localStepData,
+    size_t localMaxStepDataLen,
+    uint8_t* peerStepData,
+    size_t peerMaxStepDataLen,
+    uint8_t numAntennaPaths) {
+  BleCsSubeventResultHeader header{};
+  if (!buildConnectedMode2ResultHeader(configId, numAntennaPaths, &header)) {
+    return false;
+  }
+
+  return consumeMode2ControllerEventsFromMeasurements(
       measurements, count, header, localStepData, localMaxStepDataLen,
       peerStepData, peerMaxStepDataLen);
 }
@@ -8185,7 +8753,11 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
     decoded = decodeFrame(rxPacket_, frameLen, rssiDbm, outFrame);
   }
 
-  clearEvents();
+  if (captureTone) {
+    clearRadioEventsPreserveCstones(radio_);
+  } else {
+    clearEvents();
+  }
   return crcOk && decoded;
 }
 
@@ -8440,9 +9012,6 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     return false;
   }
 
-  memset(measurements, 0,
-         static_cast<size_t>(config.channelCount) * sizeof(measurements[0]));
-
   uint8_t localSequence = 0U;
   uint8_t* sequence = (config.inOutSequence != nullptr)
                           ? config.inOutSequence
@@ -8454,6 +9023,8 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       work->subeventStepCount != 0U && work->totalSteps != 0U;
   const uint8_t effectiveConfigId =
       workItemApplied ? work->configId : config.configId;
+  uint8_t effectiveChannels[kMaxCsChannels] = {0};
+  uint8_t effectiveChannelCount = 0U;
   if (workItemApplied) {
     result.workItemApplied = true;
     result.workConfigId = work->configId;
@@ -8465,11 +9036,296 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     result.workStepChannelCount = work->stepChannelCount;
     memcpy(result.workStepChannels, work->stepChannels,
            sizeof(result.workStepChannels));
+    const uint8_t workChannelLimit =
+        (work->stepChannelCount < config.channelCount)
+            ? work->stepChannelCount
+            : config.channelCount;
+    for (uint8_t i = 0U; i < workChannelLimit; ++i) {
+      if (validDataChannel(work->stepChannels[i])) {
+        effectiveChannels[effectiveChannelCount++] = work->stepChannels[i];
+      }
+    }
+    result.workChannelsUsed = effectiveChannelCount > 0U;
+  }
+  if (effectiveChannelCount == 0U) {
+    for (uint8_t i = 0U; i < config.channelCount; ++i) {
+      effectiveChannels[effectiveChannelCount++] = config.channels[i];
+    }
+  }
+  result.sweepChannelCount = effectiveChannelCount;
+
+  bool workExecutionOk = true;
+  if (host != nullptr && workItemApplied) {
+    result.workExecuteAttempted = true;
+    BleCsVprMeasurementExecutionResult execution{};
+    if (host->directExecuteMeasurementWorkForTest(&execution)) {
+      result.workExecutedChannelCount = execution.executedChannelCount;
+      result.workExecutionToken = execution.executionToken;
+      bool executionChannelsMatchWork =
+          execution.stepChannelCount == work->stepChannelCount &&
+          execution.executedChannelCount == effectiveChannelCount;
+      for (uint8_t i = 0U;
+           i < sizeof(execution.stepChannels) && i < sizeof(work->stepChannels);
+           ++i) {
+        if (execution.stepChannels[i] != work->stepChannels[i]) {
+          executionChannelsMatchWork = false;
+          break;
+        }
+      }
+      const uint32_t expectedExecutionToken = buildMeasurementExecuteToken(
+          execution.configId, execution.procedureCounter, execution.connHandle,
+          execution.activeSubeventIndex, execution.totalSubevents,
+          execution.totalSteps, execution.subeventStartStep,
+          execution.subeventStepCount, execution.stepChannelCount,
+          execution.stepChannels, execution.executeCount);
+      result.workExecuteTokenOk =
+          execution.executionTokenValid &&
+          execution.executionToken == expectedExecutionToken;
+      const uint32_t expectedRfDescriptorToken =
+          buildMeasurementRfDescriptorToken(
+              execution.configId, execution.procedureCounter,
+              execution.connHandle, execution.activeSubeventIndex,
+              execution.totalSubevents, execution.totalSteps,
+              execution.subeventStartStep, execution.subeventStepCount,
+              execution.stepChannelCount, execution.stepChannels,
+              execution.rfRole, execution.rfPhy, execution.rfTxPowerDelta,
+              execution.rfRttType, execution.rfMinSubeventLen,
+              execution.rfMaxSubeventLen, execution.executeCount);
+      const uint32_t expectedRfHardwareToken =
+          buildMeasurementRfHardwareToken(
+              execution.rfHardwareVersion, execution.rfHardwareFlags,
+              execution.rfHardwareState, execution.rfHardwareMode,
+              execution.rfHardwareFrequency);
+      const uint32_t expectedRfPrimitiveToken =
+          buildMeasurementRfPrimitiveToken(
+              execution.rfPrimitiveVersion, execution.rfPrimitiveFlags,
+              execution.rfPrimitiveStatus, execution.rfPrimitiveStateBefore,
+              execution.rfPrimitivePllWaitLoops,
+              execution.rfPrimitiveDisableWaitLoops,
+              execution.rfPrimitiveStateAfter);
+      const uint8_t expectedRetuneChannel =
+          (effectiveChannelCount > 0U) ? effectiveChannels[0] : 0xFFU;
+      const uint32_t expectedRetuneFrequency =
+          validLogicalChannel(expectedRetuneChannel)
+              ? static_cast<uint32_t>(logicalChannelToFrequency(
+                    expectedRetuneChannel))
+              : 0xFFFFFFFFUL;
+      const uint32_t expectedRetuneDatawhite =
+          validLogicalChannel(expectedRetuneChannel)
+              ? bleDataWhiteValue(expectedRetuneChannel)
+              : 0U;
+      const uint32_t expectedRfRetuneToken =
+          buildMeasurementRfRetuneToken(
+              execution.rfRetuneVersion, execution.rfRetuneFlags,
+              execution.rfRetuneStatus, execution.rfRetuneChannel,
+              execution.rfRetuneTargetFrequency,
+              execution.rfRetuneTargetDatawhite,
+              execution.rfRetuneObservedFrequency,
+              execution.rfRetuneObservedDatawhite);
+      const uint32_t expectedRfRxPrimitiveToken =
+          buildMeasurementRfPrimitiveToken(
+              execution.rfRxPrimitiveVersion, execution.rfRxPrimitiveFlags,
+              execution.rfRxPrimitiveStatus,
+              execution.rfRxPrimitiveStateBefore,
+              execution.rfRxPrimitiveRxReadyWaitLoops,
+              execution.rfRxPrimitiveDisableWaitLoops,
+              execution.rfRxPrimitiveStateAfter);
+      const uint8_t expectedRfPacketConfigFlags = 0xFFU;
+      const uint8_t expectedRfPacketConfigStatus = 0U;
+      const uint8_t expectedRfPacketCteInfo =
+          static_cast<uint8_t>((kCteTypeAoA << 6U) |
+                               (kBleCsVprPacketCteTimeUnitsDefault & 0x1FU));
+      const uint8_t expectedRfPacketSequence =
+          static_cast<uint8_t>(execution.executeCount & 0xFFU);
+      result.workRfDescriptorToken = execution.rfDescriptorToken;
+      result.workRfHardwareToken = execution.rfHardwareToken;
+      result.workRfHardwareState = execution.rfHardwareState;
+      result.workRfHardwareMode = execution.rfHardwareMode;
+      result.workRfHardwareFrequency = execution.rfHardwareFrequency;
+      result.workRfPrimitiveToken = execution.rfPrimitiveToken;
+      result.workRfPrimitiveStatus = execution.rfPrimitiveStatus;
+      result.workRfPrimitiveFlags = execution.rfPrimitiveFlags;
+      result.workRfPrimitiveStateBefore = execution.rfPrimitiveStateBefore;
+      result.workRfPrimitivePllWaitLoops = execution.rfPrimitivePllWaitLoops;
+      result.workRfPrimitiveDisableWaitLoops =
+          execution.rfPrimitiveDisableWaitLoops;
+      result.workRfPrimitiveStateAfter = execution.rfPrimitiveStateAfter;
+      result.workRfRetuneToken = execution.rfRetuneToken;
+      result.workRfRetuneStatus = execution.rfRetuneStatus;
+      result.workRfRetuneFlags = execution.rfRetuneFlags;
+      result.workRfRetuneChannel = execution.rfRetuneChannel;
+      result.workRfRetuneTargetFrequency = execution.rfRetuneTargetFrequency;
+      result.workRfRetuneTargetDatawhite = execution.rfRetuneTargetDatawhite;
+      result.workRfRetuneObservedFrequency =
+          execution.rfRetuneObservedFrequency;
+      result.workRfRetuneObservedDatawhite =
+          execution.rfRetuneObservedDatawhite;
+      result.workRfRxPrimitiveToken = execution.rfRxPrimitiveToken;
+      result.workRfRxPrimitiveStatus = execution.rfRxPrimitiveStatus;
+      result.workRfRxPrimitiveFlags = execution.rfRxPrimitiveFlags;
+      result.workRfRxPrimitiveStateBefore =
+          execution.rfRxPrimitiveStateBefore;
+      result.workRfRxPrimitiveRxReadyWaitLoops =
+          execution.rfRxPrimitiveRxReadyWaitLoops;
+      result.workRfRxPrimitiveDisableWaitLoops =
+          execution.rfRxPrimitiveDisableWaitLoops;
+      result.workRfRxPrimitiveStateAfter = execution.rfRxPrimitiveStateAfter;
+      result.workRfPacketConfigToken = execution.rfPacketConfigToken;
+      result.workRfPacketConfigPcnf0 = kBleCsVprPacketPcnf0Default;
+      result.workRfPacketConfigPcnf1 = kBleCsVprPacketPcnf1Default;
+      result.workRfPacketConfigStatus = expectedRfPacketConfigStatus;
+      result.workRfPacketConfigFlags = expectedRfPacketConfigFlags;
+      result.workRfPacketConfigMaxPayload = kBleCsVprPacketMaxPayloadDefault;
+      result.workRfMaxSubeventLen = execution.rfMaxSubeventLen;
+      result.workRfPhy = execution.rfPhy;
+      result.workRfTxPowerDelta = execution.rfTxPowerDelta;
+      result.workRfDescriptorOk =
+          execution.rfDescriptorValid &&
+          execution.rfDescriptorTokenValid &&
+          execution.rfDescriptorToken == expectedRfDescriptorToken &&
+          execution.rfStepChannelCount == execution.stepChannelCount &&
+          execution.rfStepChannelCount == work->stepChannelCount;
+      result.workRfHardwareOk =
+          execution.rfHardwareValid &&
+          execution.rfHardwareTokenValid &&
+          execution.rfHardwareToken == expectedRfHardwareToken;
+      result.workRfPrimitiveOk =
+          execution.rfPrimitiveValid &&
+          execution.rfPrimitiveTokenValid &&
+          execution.rfPrimitiveToken == expectedRfPrimitiveToken &&
+          execution.rfPrimitiveStatus == 0U &&
+          execution.rfPrimitivePllReady &&
+          execution.rfPrimitiveDisabled &&
+          execution.rfPrimitiveStateBefore == 0U &&
+          execution.rfPrimitiveStateAfter == 0U;
+      result.workRfRetuneOk =
+          execution.rfRetuneValid &&
+          execution.rfRetuneTokenValid &&
+          execution.rfRetuneToken == expectedRfRetuneToken &&
+          execution.rfRetuneStatus == 0U &&
+          execution.rfRetuneModeWritten &&
+          execution.rfRetuneFrequencyWritten &&
+          execution.rfRetuneDatawhiteWritten &&
+          execution.rfRetuneChannel == expectedRetuneChannel &&
+          execution.rfRetuneTargetFrequency == expectedRetuneFrequency &&
+          execution.rfRetuneObservedFrequency == expectedRetuneFrequency &&
+          execution.rfRetuneTargetDatawhite == expectedRetuneDatawhite &&
+          execution.rfRetuneObservedDatawhite == expectedRetuneDatawhite;
+      result.workRfRxPrimitiveOk =
+          execution.rfRxPrimitiveValid &&
+          execution.rfRxPrimitiveTokenValid &&
+          execution.rfRxPrimitiveToken == expectedRfRxPrimitiveToken &&
+          execution.rfRxPrimitiveStatus == 0U &&
+          execution.rfRxPrimitiveRxReady &&
+          execution.rfRxPrimitiveDisabled &&
+          execution.rfRxPrimitiveStateBefore == 0U &&
+          execution.rfRxPrimitiveStateAfter == 0U;
+      result.workRfPacketConfigOk =
+          execution.rfPacketConfigTokenValid &&
+          execution.rfPacketConfigToken ==
+              buildMeasurementRfPacketConfigToken(
+                  1U, expectedRfPacketConfigFlags,
+                  expectedRfPacketConfigStatus,
+                  result.workRfPacketConfigPcnf0,
+                  result.workRfPacketConfigPcnf1,
+                  kBleCsVprPacketS0PatternDefault,
+                  kPayloadHeaderLen,
+                  expectedRfPacketCteInfo,
+                  kMagic0,
+                  kMagic1,
+                  kBleCsVprPacketTypeProbe,
+                  expectedRfPacketSequence,
+                  expectedRetuneChannel);
+      result.workRfPacketBufferOk = result.workRfPacketConfigOk;
+      const bool activeSubeventMatchesWork =
+          execution.activeSubeventIndex == work->activeSubeventIndex ||
+          execution.totalSubevents <= 1U ||
+          work->totalSubevents <= 1U;
+      uint32_t executionMismatchMask = 0U;
+      if (!(execution.valid && execution.status == 0U && execution.accepted)) {
+        executionMismatchMask |= (1UL << 0U);
+      }
+      if (execution.procedureCounter != work->procedureCounter) {
+        executionMismatchMask |= (1UL << 1U);
+      }
+      if (execution.configId != work->configId) {
+        executionMismatchMask |= (1UL << 2U);
+      }
+      if (!activeSubeventMatchesWork) {
+        executionMismatchMask |= (1UL << 3U);
+      }
+      if (execution.totalSubevents != work->totalSubevents) {
+        executionMismatchMask |= (1UL << 4U);
+      }
+      if (execution.totalSteps != work->totalSteps) {
+        executionMismatchMask |= (1UL << 5U);
+      }
+      if (execution.subeventStartStep != work->subeventStartStep) {
+        executionMismatchMask |= (1UL << 6U);
+      }
+      if (execution.subeventStepCount != work->subeventStepCount) {
+        executionMismatchMask |= (1UL << 7U);
+      }
+      if (!executionChannelsMatchWork) {
+        executionMismatchMask |= (1UL << 8U);
+      }
+      if (!result.workExecuteTokenOk) {
+        executionMismatchMask |= (1UL << 9U);
+      }
+      if (!result.workRfDescriptorOk) {
+        executionMismatchMask |= (1UL << 10U);
+      }
+      if (!result.workRfHardwareOk) {
+        executionMismatchMask |= (1UL << 11U);
+      }
+      if (!result.workRfPrimitiveOk) {
+        executionMismatchMask |= (1UL << 12U);
+      }
+      if (!result.workRfRetuneOk) {
+        executionMismatchMask |= (1UL << 13U);
+      }
+      if (!result.workRfRxPrimitiveOk) {
+        executionMismatchMask |= (1UL << 14U);
+      }
+      if (!result.workRfPacketConfigOk) {
+        executionMismatchMask |= (1UL << 15U);
+      }
+      if (!result.workRfPacketBufferOk) {
+        executionMismatchMask |= (1UL << 16U);
+      }
+      result.workExecuteMismatchMask = executionMismatchMask;
+      const bool executionMatchesWork =
+          execution.valid && execution.status == 0U && execution.accepted &&
+          execution.procedureCounter == work->procedureCounter &&
+          execution.configId == work->configId &&
+          activeSubeventMatchesWork &&
+          execution.totalSubevents == work->totalSubevents &&
+          execution.totalSteps == work->totalSteps &&
+          execution.subeventStartStep == work->subeventStartStep &&
+          execution.subeventStepCount == work->subeventStepCount &&
+          executionChannelsMatchWork &&
+          result.workExecuteTokenOk &&
+          result.workRfDescriptorOk &&
+          result.workRfHardwareOk &&
+          result.workRfPrimitiveOk &&
+          result.workRfRetuneOk &&
+          result.workRfRxPrimitiveOk &&
+          result.workRfPacketConfigOk &&
+          result.workRfPacketBufferOk;
+      workExecutionOk = executionMatchesWork;
+      result.workExecuteOk = executionMatchesWork;
+    } else {
+      workExecutionOk = false;
+      result.workExecuteOk = false;
+    }
   }
 
-  for (uint8_t order = 0U; order < config.channelCount; ++order) {
+  memset(measurements, 0,
+         static_cast<size_t>(config.channelCount) * sizeof(measurements[0]));
+
+  for (uint8_t order = 0U; order < effectiveChannelCount; ++order) {
     BleCsConnectedMode2ChannelResult channelResult{};
-    channelResult.channel = config.channels[order];
+    channelResult.channel = effectiveChannels[order];
     channelResult.order = order;
     ++result.attempts;
 
@@ -8553,6 +9409,29 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       }
 
       channelResult.dfeInfo = radio.lastDfeCaptureInfo();
+      if (channelResult.channelOk && host != nullptr &&
+          !result.workToneSnapshotOk) {
+        BleCsVprToneSnapshotResult snapshotResult{};
+        if (host->directReadToneSnapshotForTest(&snapshotResult)) {
+          result.workToneSnapshotToken = snapshotResult.token;
+          result.workToneSnapshotPct16 = snapshotResult.pct16;
+          result.workToneSnapshotMagPhase = snapshotResult.magPhase;
+          result.workToneSnapshotMagStd = snapshotResult.magStd;
+          result.workToneSnapshotFrequency = snapshotResult.frequency;
+          result.workToneSnapshotState = snapshotResult.state;
+          result.workToneSnapshotCstonesEndEvent =
+              snapshotResult.cstonesEndEvent;
+          result.workToneSnapshotStatus = snapshotResult.status;
+          result.workToneSnapshotFlags = snapshotResult.flags;
+          result.workToneSnapshotOk =
+              snapshotResult.valid &&
+              snapshotResult.status == 0U &&
+              snapshotResult.snapshotValid &&
+              snapshotResult.tokenValid &&
+              snapshotResult.sampleNonZero &&
+              snapshotResult.toneConfigOk;
+        }
+      }
       radio.end();
     }
 
@@ -8571,16 +9450,32 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
 
   result.rawEstimateValid =
       BleChannelSoundingRadio::estimateDistancePhaseSlope(
-          measurements, config.channelCount, &result.rawEstimate);
+          measurements, effectiveChannelCount, &result.rawEstimate);
 
   bool hostOk = true;
   if (host != nullptr) {
+    const BleCsControllerHostState hostStateBefore = host->hostState();
     hostOk =
-        host->consumeConnectedMode2ResultEventsFromMeasurements(
-            measurements, config.channelCount, effectiveConfigId, localStepData,
+        host->consumeConnectedMode2ControllerEventsFromMeasurements(
+            measurements, effectiveChannelCount, effectiveConfigId, localStepData,
             localMaxStepDataLen, peerStepData, peerMaxStepDataLen,
             config.numAntennaPaths) &&
         host->estimateValid();
+    const BleCsControllerHostState hostStateAfter = host->hostState();
+    result.hostLocalResultPacketDelta =
+        hostStateAfter.localResultPackets - hostStateBefore.localResultPackets;
+    result.hostPeerResultPacketDelta =
+        hostStateAfter.peerResultPackets - hostStateBefore.peerResultPackets;
+    result.hostControllerEventPacketDelta =
+        hostStateAfter.controllerEventPackets - hostStateBefore.controllerEventPackets;
+    result.hostPeerResultMarkerDelta =
+        hostStateAfter.controllerPeerResultMarkers -
+        hostStateBefore.controllerPeerResultMarkers;
+    result.hostControllerResultIngress =
+        result.hostLocalResultPacketDelta > 0U &&
+        result.hostPeerResultPacketDelta > 0U &&
+        result.hostPeerResultMarkerDelta > 0U;
+    hostOk = hostOk && result.hostControllerResultIngress;
     result.hostEstimateValid = hostOk;
     result.hostConfigId =
         hostOk ? host->completedLocalResult().header.configId : 0U;
@@ -8595,6 +9490,8 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   }
 
   result.ok = (result.validChannels >= config.minValidChannels) &&
+              workExecutionOk &&
+              (host == nullptr || result.workToneSnapshotOk) &&
               (host == nullptr || hostOk);
   *outResult = result;
   return result.ok;

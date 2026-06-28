@@ -34,6 +34,7 @@ def main() -> int:
                 "-march=rv32emc_zicsr",
                 "-mabi=ilp32e",
                 "-Oz",
+                "-flto",
                 "-ffreestanding",
                 "-ffunction-sections",
                 "-fdata-sections",
