@@ -1510,6 +1510,8 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t attempts = 0U;
   uint8_t validChannels = 0U;
   uint8_t sweepChannelCount = 0U;
+  uint8_t workExecutionStatus = 0xFFU;
+  uint8_t workExecutionFlags = 0U;
   uint8_t workExecutedChannelCount = 0U;
   uint32_t workExecuteMismatchMask = 0U;
   uint32_t workExecutionToken = 0U;

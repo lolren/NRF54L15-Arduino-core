@@ -4429,9 +4429,7 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_RADIO_PACKET_MAX_PAYLOAD_DEFAULT 32U
 #define VPR_RADIO_PACKET_PCNF0_DEFAULT 0x01080108UL
 #define VPR_RADIO_PACKET_PCNF1_DEFAULT 0x02030020UL
-#define VPR_CS_PACKET_S0_PATTERN 0xA5U
 #define VPR_CS_PACKET_PAYLOAD_LEN 6U
-#define VPR_CS_PACKET_CTE_TIME_UNITS 10U
 #define VPR_CS_PACKET_MAGIC0 0x43U
 #define VPR_CS_PACKET_MAGIC1 0x53U
 #define VPR_CS_PACKET_TYPE_PROBE 0x50U
@@ -4793,17 +4791,21 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
                          step_channel_count != 0U)
                             ? 1U
                             : 0U;
-  const bool default_packet_layout = command_layout_is_exact(0U);
-  const bool host_packet_layout = command_layout_is_exact(2U);
-  uint8_t packet_s0 = VPR_CS_PACKET_S0_PATTERN;
-  uint8_t packet_cte_info = VPR_CS_PACKET_CTE_TIME_UNITS & 0x1FU;
-  if (host_packet_layout) {
+  uint8_t packet_s0 = 0xA5U;
+  uint8_t packet_cte_info = 10U & 0x1FU;
+  uint16_t control_to_probe_delay_us = 2400U;
+  uint16_t response_listen_window_us = 12000U;
+  uint8_t status = BLE_CS_HCI_STATUS_SUCCESS;
+  if (g_host_transport->hostLen > 4U) {
     packet_s0 = g_host_transport->hostData[4];
+  }
+  if (g_host_transport->hostLen > 5U) {
     packet_cte_info = g_host_transport->hostData[5] & 0x1FU;
   }
-  uint8_t status = (default_packet_layout || host_packet_layout)
-                       ? BLE_CS_HCI_STATUS_SUCCESS
-                       : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  if (g_host_transport->hostLen > 9U && g_host_transport->hostData[3] >= 6U) {
+    control_to_probe_delay_us = read_le16(&g_host_transport->hostData[6]);
+    response_listen_window_us = read_le16(&g_host_transport->hostData[8]);
+  }
   uint8_t accepted = 0U;
   if (status == BLE_CS_HCI_STATUS_SUCCESS && ready == 0U) {
     status = BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
@@ -4901,6 +4903,8 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
         VPR_RADIO_PACKET_PCNF0_DEFAULT ^
         (VPR_RADIO_PACKET_PCNF1_DEFAULT << 1U) ^
         ((uint32_t)packet_config_flags << 16U) ^
+        ((uint32_t)control_to_probe_delay_us << 3U) ^
+        ((uint32_t)response_listen_window_us << 7U) ^
         ((uint32_t)packet_s0 << 2U) ^
         ((uint32_t)VPR_CS_PACKET_PAYLOAD_LEN << 5U) ^
         ((uint32_t)packet_cte_info << 9U) ^

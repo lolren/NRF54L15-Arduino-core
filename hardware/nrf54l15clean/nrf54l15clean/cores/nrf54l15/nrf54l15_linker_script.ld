@@ -13,8 +13,8 @@
  *   - The heap is capped below the first shared IPC window so the transport
  *     buffers are not overwritten by host-side allocations
  *   - 96 KB top-of-RAM window is reserved for VPR/FLPR execution and saved context
- *   - 13568 B reserved for a VPR helper image (0x2003C900 - 0x2003FE00)
- *   - top 512 B reserved for VPR saved context (0x2003FE00 - 0x20040000)
+ *   - 20224 B reserved for a VPR helper image (0x2003B000 - 0x2003FF00)
+ *   - top 256 B reserved for VPR saved context (0x2003FF00 - 0x20040000)
  *   - 152 KB usable for CPUAPP runtime sections when VPR support is enabled
  *
  * Licensed under the Apache License 2.0
@@ -241,8 +241,8 @@ SECTIONS
      * heap range. The transport uses the same CPUAPP SRAM windows that Nordic
      * reserves for CPUAPP<->FLPR IPC in Zephyr.
      */
-    PROVIDE(__vpr_image_start__ = 0x2003C900);
-    PROVIDE(__vpr_image_end__ = 0x2003FE00);
+    PROVIDE(__vpr_image_start__ = 0x2003B000);
+    PROVIDE(__vpr_image_end__ = 0x2003FF00);
     PROVIDE(__vpr_shared_start__ = 0x20018000);
     PROVIDE(__vpr_shared_end__ = 0x20020800);
     PROVIDE(__vpr_shared_host_start__ = 0x20020000);
@@ -250,7 +250,7 @@ SECTIONS
     PROVIDE(__vpr_shared_vpr_start__ = 0x20018000);
     PROVIDE(__vpr_shared_vpr_end__ = 0x20018800);
     PROVIDE(__heap_end__ = 0x20018000);
-    PROVIDE(__vpr_context_save_start__ = 0x2003FE00);
+    PROVIDE(__vpr_context_save_start__ = 0x2003FF00);
     PROVIDE(__vpr_context_save_end__ = 0x20040000);
 
     ASSERT(_enoinit <= 0x20018000, "CPUAPP RAM sections overlap VPR IPC window")

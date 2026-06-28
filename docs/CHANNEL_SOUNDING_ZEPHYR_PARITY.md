@@ -89,9 +89,11 @@ The following LE Meta subevents are also represented:
 - Added public access to the next raw H4 event from
   `VprControllerServiceHost`, allowing command-following asynchronous events to
   be drained without routing them through the wrong state machine.
-- Expanded the dedicated VPR helper image window by 1 KiB:
-  `0x2003C900-0x2003FE00`. The existing 96 KiB VPR/FLPR reservation and the
-  saved-context boundary remain unchanged, so this does not reduce CPUAPP RAM.
+- Expanded the dedicated VPR helper image window to
+  `0x2003B000-0x2003FF00`. The VPR image base stays at `0x2003B000`; testing
+  showed that moving the base broke VPR boot. The saved-context window is now
+  `0x2003FF00-0x20040000`, keeping the VPR/FLPR reservation within the same
+  RAM boundary and not reducing CPUAPP RAM.
 - Added:
   `File > Examples > Nrf54L15 Clean Implementation > BLE > ChannelSounding >
   BleChannelSoundingHciParity`
@@ -123,9 +125,8 @@ now emits the standalone CS Test result stream while `LE CS Test` mode is active
   point (test results live on the direct path, so use this rather than
   `poll()`/`loopOnce()` which feed the connected session).
 - Added `File > Examples > ... > ChannelSounding > BleChannelSoundingVprCsTestResults`.
-- Both VPR images were regenerated and fit the
-  `0x2003C900-0x2003FE00` window (controller/dedicated 12716 B, 852 B headroom;
-  transport 10324 B).
+- Both VPR images were regenerated and fit the current
+  `0x2003B000-0x2003FF00` image window.
 
 These results are still **synthetic** (deterministic mode-2 step data, not real
 RF measurements), so this does not change the "do not mark CS fully complete"
@@ -201,10 +202,10 @@ connection state.
   drops the workflow phase to `kIdle` so the next `beginFreshHost()` starts
   fresh.
 - **Stack reduction**: The VPR dedicated image `.stack` reservation was reduced
-  from 640 B to 256 B to accommodate the new code within the
-  `0x2003C900-0x2003FE00` window. (The new code added ~380 B of text + 7 B
-  of BSS; call depth analysis confirmed 256 B is adequate for the shallow
-  main-loop call chains with no interrupt nesting.)
+  from 640 B to 256 B to accommodate the new code within the VPR image window.
+  (The new code added ~380 B of text + 7 B of BSS; call depth analysis
+  confirmed 256 B is adequate for the shallow main-loop call chains with no
+  interrupt nesting.)
 
 Added:
 - `File > Examples > ... > ChannelSounding > \
@@ -1017,12 +1018,14 @@ disturb the connected packet path. The stable implementation keeps the existing
 - The compact proof flags now require `TXREADY`, TX start, `EVENTS_END`, and
   `EVENTS_DISABLED` before CPUAPP accepts the work item.
 - VPR builds a compact proof token from the expected packet config constants,
-  the active probe-frame bytes above, the execute-count sequence byte, the first
-  VPR data channel, and the observed flags, then restores `SHORTS`,
-  `PACKETPTR`, `PCNF0`, and `PCNF1` before returning to CPUAPP.
-- CPUAPP recomputes the token from the active `BleCsConfig` packet bytes, the
-  expected register values, execute count, and first VPR data channel, then
-  rejects the sweep unless `work_rf_pkt=1`.
+  the active probe-frame bytes above, the active CS timing values
+  (`controlToProbeDelayUs`, `responseListenWindowUs`), the execute-count
+  sequence byte, the first VPR data channel, and the observed flags, then
+  restores `SHORTS`, `PACKETPTR`, `PCNF0`, and `PCNF1` before returning to
+  CPUAPP.
+- CPUAPP recomputes the token from the active `BleCsConfig` packet bytes and
+  timing values, the expected register values, execute count, and first VPR
+  data channel, then rejects the sweep unless `work_rf_pkt=1`.
 - CPUAPP also rejects the sweep unless the packet-buffer proof folds into that
   token correctly (`work_rf_buf=1`, `work_rf_pkt_flags=0xFF`).
 - No new VPR HCI opcode is exposed for this proof; the abandoned `0xFCEF`
@@ -1030,12 +1033,13 @@ disturb the connected packet path. The stable implementation keeps the existing
 - The VPR stack reserve is now `0x1D0` bytes. Earlier stack-usage output showed
   the VPR main path at 184 bytes, so this still leaves a conservative margin
   while keeping the generated image inside the fixed VPR window. The generated
-  dedicated CS image is now 19052 bytes.
+  dedicated CS image is now 19108 bytes.
 - A separate 180-byte response with detailed PACKETPTR fields was tested and
-  rejected because the generated VPR image overflowed the fixed
+  rejected because the generated VPR image overflowed the old
   `0x2003B000..0x2003FE80` image window. The accepted implementation keeps the
-  response fixed at 152 bytes and folds the PACKETPTR proof into the existing
-  packet-config token.
+  response fixed at 152 bytes, expands the VPR image window to
+  `0x2003B000..0x2003FF00`, and folds the PACKETPTR/timing proof into the
+  existing packet-config token.
 
 Hardware regression on the same two XIAO nRF54L15 boards, with the LM20A probe
 attached but unused:
@@ -1053,8 +1057,8 @@ Observed PASS summary:
 
 ```text
 cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
-cs_connected_sweep=PASS attempts=6 valid_channels=5 min_valid=3 requested_channels=6 raw_est=0 used=0/5 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_mismatch=0x0 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0xC7010027 work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_prim=1 work_rf_prim32=0xC80700D9 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=108 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_retune=1 work_rf_retune32=0xC8A20353 work_rf_retune_status=0 work_rf_retune_flags=0xF work_rf_retune_ch=2 work_rf_retune_freq=8 work_rf_retune_freq_after=8 work_rf_retune_white=0x890042 work_rf_retune_white_after=0x890042 work_rf_rx=1 work_rf_rx32=0xC807011F work_rf_rx_status=0 work_rf_rx_flags=0x7 work_rf_rx_before=0 work_rf_rx_ready=143 work_rf_rx_disable=0 work_rf_rx_after=0 work_rf_pkt=1 work_rf_pkt32=0x5928F1D work_rf_pkt_status=0 work_rf_pkt_flags=0xFF work_rf_pkt_max=32 work_rf_pkt_pcnf0=0x1080108 work_rf_pkt_pcnf1=0x2030020 work_rf_buf=1 work_tone_snap=1 work_tone_snap32=0xECA0995 work_tone_snap_status=0 work_tone_snap_flags=0x37 work_tone_pct16=0x150 work_tone_magphase=0x150 work_tone_magstd=0xF1FF4289 work_tone_freq=8 work_tone_state=0 work_tone_event=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=5/5 host_m=2.9657
-cs_ll_physical_followup=PASS sweeps=1 valid_channels=23 raw_est=1 raw_m=3.7619 host_est=1 host_steps=23/23 host_m=3.1373 proc=2
+cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channels=6 raw_est=0 used=0/6 raw_m=nan residual=0.000000 host_est=1 ctrl_ing=1 ctrl_evt_delta=1 local_pkt_delta=1 peer_pkt_delta=1 peer_marker_delta=1 work_applied=1 work_ch_used=1 work_exec=1 work_exec_mismatch=0x0 work_exec_status=0x0 work_exec_flags=0x3 work_exec_ch=6 work_tok=1 work_tok32=0x17BD7524 work_rf=1 work_rf32=0xB838EF3F work_rf_hw=1 work_rf_hw32=0xC7010027 work_rf_state=0 work_rf_mode=3 work_rf_freq=8 work_rf_prim=1 work_rf_prim32=0xC80700D9 work_rf_prim_status=0 work_rf_prim_flags=0x7 work_rf_prim_before=0 work_rf_prim_pll=108 work_rf_prim_disable=0 work_rf_prim_after=0 work_rf_retune=1 work_rf_retune32=0xC8A20353 work_rf_retune_status=0 work_rf_retune_flags=0xF work_rf_retune_ch=2 work_rf_retune_freq=8 work_rf_retune_freq_after=8 work_rf_retune_white=0x890042 work_rf_retune_white_after=0x890042 work_rf_rx=1 work_rf_rx32=0xC807011F work_rf_rx_status=0 work_rf_rx_flags=0x7 work_rf_rx_before=0 work_rf_rx_ready=143 work_rf_rx_disable=0 work_rf_rx_after=0 work_rf_pkt=1 work_rf_pkt32=0x583875D work_rf_pkt_status=0 work_rf_pkt_flags=0xFF work_rf_pkt_max=32 work_rf_pkt_pcnf0=0x1080108 work_rf_pkt_pcnf1=0x2030020 work_rf_buf=1 work_tone_snap=1 work_tone_snap32=0xECA0995 work_tone_snap_status=0 work_tone_snap_flags=0x37 work_tone_pct16=0x150 work_tone_magphase=0x150 work_tone_magstd=0xF1FF4289 work_tone_freq=8 work_tone_state=0 work_tone_event=0 work_rf_phy=2 work_rf_tx=-6 work_rf_max=1656 work_cfg=1 work_proc=1 work_sub=0/1 work_plan=6/6 work_ch=6:2,3,4,5,6,7 host_cfg=1 host_proc=1 host_steps=6/6 host_m=19.5511
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 raw_m=1.3560 host_est=1 host_steps=21/21 host_m=1.7417 proc=2
 ```
 
 This is still not full Zephyr parity. The next hard slice is passing the active
@@ -1528,7 +1532,8 @@ python3 hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementa
 ```
 
 Both generated headers must fit the configured
-`0x2003C900-0x2003FE00` image window.
+`0x2003B000-0x2003FF00` image window. The VPR saved-context area is
+`0x2003FF00-0x20040000`.
 
 ## Local Compile Pattern
 

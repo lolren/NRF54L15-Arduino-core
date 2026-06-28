@@ -289,10 +289,14 @@ uint32_t buildMeasurementRfPacketConfigToken(uint8_t version,
                                              uint8_t packetMagic1,
                                              uint8_t packetType,
                                              uint8_t packetSequence,
-                                             uint8_t packetChannel) {
+                                             uint8_t packetChannel,
+                                             uint16_t controlToProbeDelayUs,
+                                             uint16_t responseListenWindowUs) {
   return pcnf0 ^ (pcnf1 << 1U) ^
          (static_cast<uint32_t>(flags) << 16U) ^
          (static_cast<uint32_t>(status) << 24U) ^
+         (static_cast<uint32_t>(controlToProbeDelayUs) << 3U) ^
+         (static_cast<uint32_t>(responseListenWindowUs) << 7U) ^
          (static_cast<uint32_t>(packetS0) << 2U) ^
          (static_cast<uint32_t>(packetPayloadLen) << 5U) ^
          (static_cast<uint32_t>(packetCteInfo) << 9U) ^
@@ -6150,19 +6154,19 @@ bool BleCsControllerVprHost::directExecuteMeasurementWorkForTest(
     return false;
   }
 
-  uint8_t params[2] = {0};
-  const uint8_t* paramsPtr = nullptr;
-  size_t paramsLen = 0U;
-  if (radioConfig != nullptr) {
-    params[0] = radioConfig->s0Pattern;
-    params[1] = radioConfig->cteTimeUnits;
-    paramsPtr = params;
-    paramsLen = sizeof(params);
-  }
+  uint8_t params[6] = {0};
+  params[0] = (radioConfig != nullptr) ? radioConfig->s0Pattern : 0xA5U;
+  params[1] = (radioConfig != nullptr) ? radioConfig->cteTimeUnits : 10U;
+  writeLe16(&params[2], (radioConfig != nullptr)
+                             ? radioConfig->controlToProbeDelayUs
+                             : 2400U);
+  writeLe16(&params[4], (radioConfig != nullptr)
+                             ? radioConfig->responseListenWindowUs
+                             : 12000U);
 
   uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t responseLen = 0U;
-  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, paramsPtr, paramsLen,
+  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, params, sizeof(params),
                             response, sizeof(response), &responseLen)) {
     return false;
   }
@@ -9147,7 +9151,13 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                                (config.radioConfig.cteTimeUnits & 0x1FU));
       const uint8_t expectedRfPacketSequence =
           static_cast<uint8_t>(execution.executeCount & 0xFFU);
+      const uint16_t expectedRfControlToProbeDelayUs =
+          config.radioConfig.controlToProbeDelayUs;
+      const uint16_t expectedRfResponseListenWindowUs =
+          config.radioConfig.responseListenWindowUs;
       result.workRfDescriptorToken = execution.rfDescriptorToken;
+      result.workExecutionStatus = execution.status;
+      result.workExecutionFlags = execution.flags;
       result.workRfHardwareToken = execution.rfHardwareToken;
       result.workRfHardwareState = execution.rfHardwareState;
       result.workRfHardwareMode = execution.rfHardwareMode;
@@ -9245,7 +9255,9 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   kMagic1,
                   kBleCsVprPacketTypeProbe,
                   expectedRfPacketSequence,
-                  expectedRetuneChannel);
+                  expectedRetuneChannel,
+                  expectedRfControlToProbeDelayUs,
+                  expectedRfResponseListenWindowUs);
       result.workRfPacketBufferOk = result.workRfPacketConfigOk;
       const bool activeSubeventMatchesWork =
           execution.activeSubeventIndex == work->activeSubeventIndex ||

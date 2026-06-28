@@ -566,6 +566,10 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workExecuteAttempted ? (sweepResult.workExecuteOk ? 1 : 0) : 2);
   Serial.print(" work_exec_mismatch=0x");
   Serial.print(sweepResult.workExecuteMismatchMask, HEX);
+  Serial.print(" work_exec_status=0x");
+  Serial.print(sweepResult.workExecutionStatus, HEX);
+  Serial.print(" work_exec_flags=0x");
+  Serial.print(sweepResult.workExecutionFlags, HEX);
   Serial.print(" work_exec_ch=");
   Serial.print(sweepResult.workExecutedChannelCount);
   Serial.print(" work_tok=");
