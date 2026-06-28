@@ -56,8 +56,6 @@ constexpr uint8_t kBleCsVprVendorEvtPeerResultSource = 0xB2U;
 constexpr uint8_t kBleCsVprPacketMaxPayloadDefault = 32U;
 constexpr uint32_t kBleCsVprPacketPcnf0Default = 0x01080108UL;
 constexpr uint32_t kBleCsVprPacketPcnf1Default = 0x02030020UL;
-constexpr uint8_t kBleCsVprPacketS0PatternDefault = 0xA5U;
-constexpr uint8_t kBleCsVprPacketCteTimeUnitsDefault = 10U;
 constexpr uint8_t kBleCsVprPacketTypeProbe = 0x50U;
 struct BleCsControllerPhasePair {
   bool failed = false;
@@ -6146,14 +6144,25 @@ bool BleCsControllerVprHost::directReadMeasurementWorkItemForTest(
 }
 
 bool BleCsControllerVprHost::directExecuteMeasurementWorkForTest(
-    BleCsVprMeasurementExecutionResult* outResult) {
+    BleCsVprMeasurementExecutionResult* outResult,
+    const BleCsConfig* radioConfig) {
   if (outResult == nullptr) {
     return false;
   }
 
+  uint8_t params[2] = {0};
+  const uint8_t* paramsPtr = nullptr;
+  size_t paramsLen = 0U;
+  if (radioConfig != nullptr) {
+    params[0] = radioConfig->s0Pattern;
+    params[1] = radioConfig->cteTimeUnits;
+    paramsPtr = params;
+    paramsLen = sizeof(params);
+  }
+
   uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t responseLen = 0U;
-  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, nullptr, 0U,
+  if (!sendDirectHciCommand(kBleCsVprHciOpMeasurementExecute, paramsPtr, paramsLen,
                             response, sizeof(response), &responseLen)) {
     return false;
   }
@@ -9058,7 +9067,8 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   if (host != nullptr && workItemApplied) {
     result.workExecuteAttempted = true;
     BleCsVprMeasurementExecutionResult execution{};
-    if (host->directExecuteMeasurementWorkForTest(&execution)) {
+    if (host->directExecuteMeasurementWorkForTest(&execution,
+                                                  &config.radioConfig)) {
       result.workExecutedChannelCount = execution.executedChannelCount;
       result.workExecutionToken = execution.executionToken;
       bool executionChannelsMatchWork =
@@ -9134,7 +9144,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       const uint8_t expectedRfPacketConfigStatus = 0U;
       const uint8_t expectedRfPacketCteInfo =
           static_cast<uint8_t>((kCteTypeAoA << 6U) |
-                               (kBleCsVprPacketCteTimeUnitsDefault & 0x1FU));
+                               (config.radioConfig.cteTimeUnits & 0x1FU));
       const uint8_t expectedRfPacketSequence =
           static_cast<uint8_t>(execution.executeCount & 0xFFU);
       result.workRfDescriptorToken = execution.rfDescriptorToken;
@@ -9228,7 +9238,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   expectedRfPacketConfigStatus,
                   result.workRfPacketConfigPcnf0,
                   result.workRfPacketConfigPcnf1,
-                  kBleCsVprPacketS0PatternDefault,
+                  config.radioConfig.s0Pattern,
                   kPayloadHeaderLen,
                   expectedRfPacketCteInfo,
                   kMagic0,

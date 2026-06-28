@@ -2345,7 +2345,8 @@ class BleCsControllerVprHost {
   bool directReadSchedulerStateForTest(BleCsVprSchedulerState* outState);
   bool directReadMeasurementWorkItemForTest(BleCsVprMeasurementWorkItem* outWork);
   bool directExecuteMeasurementWorkForTest(
-      BleCsVprMeasurementExecutionResult* outResult);
+      BleCsVprMeasurementExecutionResult* outResult,
+      const BleCsConfig* radioConfig = nullptr);
   bool directReadToneSnapshotForTest(BleCsVprToneSnapshotResult* outResult);
   bool buildPendingInitiatorLlControlPdu(
       BleCsLlControlPdu* outPdu,

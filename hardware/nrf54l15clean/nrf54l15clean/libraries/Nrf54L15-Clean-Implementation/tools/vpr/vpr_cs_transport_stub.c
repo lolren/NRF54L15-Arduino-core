@@ -4432,7 +4432,6 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_CS_PACKET_S0_PATTERN 0xA5U
 #define VPR_CS_PACKET_PAYLOAD_LEN 6U
 #define VPR_CS_PACKET_CTE_TIME_UNITS 10U
-#define VPR_CS_PACKET_CTE_INFO (VPR_CS_PACKET_CTE_TIME_UNITS & 0x1FU)
 #define VPR_CS_PACKET_MAGIC0 0x43U
 #define VPR_CS_PACKET_MAGIC1 0x53U
 #define VPR_CS_PACKET_TYPE_PROBE 0x50U
@@ -4794,7 +4793,15 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
                          step_channel_count != 0U)
                             ? 1U
                             : 0U;
-  uint8_t status = command_layout_is_exact(0U)
+  const bool default_packet_layout = command_layout_is_exact(0U);
+  const bool host_packet_layout = command_layout_is_exact(2U);
+  uint8_t packet_s0 = VPR_CS_PACKET_S0_PATTERN;
+  uint8_t packet_cte_info = VPR_CS_PACKET_CTE_TIME_UNITS & 0x1FU;
+  if (host_packet_layout) {
+    packet_s0 = g_host_transport->hostData[4];
+    packet_cte_info = g_host_transport->hostData[5] & 0x1FU;
+  }
+  uint8_t status = (default_packet_layout || host_packet_layout)
                        ? BLE_CS_HCI_STATUS_SUCCESS
                        : BLE_CS_HCI_STATUS_INVALID_PARAMS;
   uint8_t accepted = 0U;
@@ -4839,9 +4846,9 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
       const uint32_t packet_ptr = (uint32_t)(uintptr_t)g_vpr_cs_packet_buffer;
       const uint32_t previous_packet_ptr =
           read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET);
-      g_vpr_cs_packet_buffer[0] = VPR_CS_PACKET_S0_PATTERN;
+      g_vpr_cs_packet_buffer[0] = packet_s0;
       g_vpr_cs_packet_buffer[1] = VPR_CS_PACKET_PAYLOAD_LEN;
-      g_vpr_cs_packet_buffer[2] = VPR_CS_PACKET_CTE_INFO;
+      g_vpr_cs_packet_buffer[2] = packet_cte_info;
       g_vpr_cs_packet_buffer[3] = VPR_CS_PACKET_MAGIC0;
       g_vpr_cs_packet_buffer[4] = VPR_CS_PACKET_MAGIC1;
       g_vpr_cs_packet_buffer[5] = VPR_CS_PACKET_TYPE_PROBE;
@@ -4894,9 +4901,9 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
         VPR_RADIO_PACKET_PCNF0_DEFAULT ^
         (VPR_RADIO_PACKET_PCNF1_DEFAULT << 1U) ^
         ((uint32_t)packet_config_flags << 16U) ^
-        ((uint32_t)VPR_CS_PACKET_S0_PATTERN << 2U) ^
+        ((uint32_t)packet_s0 << 2U) ^
         ((uint32_t)VPR_CS_PACKET_PAYLOAD_LEN << 5U) ^
-        ((uint32_t)VPR_CS_PACKET_CTE_INFO << 9U) ^
+        ((uint32_t)packet_cte_info << 9U) ^
         ((uint32_t)VPR_CS_PACKET_MAGIC0 << 11U) ^
         ((uint32_t)VPR_CS_PACKET_MAGIC1 << 15U) ^
         ((uint32_t)VPR_CS_PACKET_TYPE_PROBE << 13U) ^
