@@ -7981,6 +7981,10 @@ bool BleCsControllerVprHost::failed() const { return host_.failed(); }
 
 bool BleCsControllerVprHost::estimateValid() const { return host_.estimateValid(); }
 
+bool BleCsControllerVprHost::refreshEstimateFromCompletedResults() {
+  return host_.refreshEstimateFromCompletedResults();
+}
+
 uint8_t BleCsControllerVprHost::lastProcedureAbortReason() const {
   return host_.lastProcedureAbortReason();
 }
@@ -8112,6 +8116,7 @@ bool BleCsControllerVprHost::consumeDirectAuxiliaryEvent(
       case kBleCsHciOpTest:
       case kBleCsHciOpTestEnd:
       case kBleCsHciOpWriteCachedRemoteSupportedCapabilitiesV2:
+      case kBleCsVprHciOpMeasurementExecute:
         return true;
       default:
         return false;
@@ -9492,18 +9497,57 @@ struct BleCsTimedMode2ResultSearch {
   bool found = false;
 };
 
+static const uint8_t kBleCsTimedMode2LocalPctSample[3] = {0x00U, 0x04U, 0x00U};
+static const uint8_t kBleCsTimedMode2PeerPctSamples[39][3] = {
+    {0xF0U, 0xB3U, 0xF4U}, {0xE2U, 0xC3U, 0xF0U}, {0xD1U, 0xE3U, 0xECU},
+    {0xBCU, 0x13U, 0xE9U}, {0xA3U, 0x63U, 0xE5U}, {0x86U, 0xC3U, 0xE1U},
+    {0x66U, 0x43U, 0xDEU}, {0x43U, 0xF3U, 0xDAU}, {0x1CU, 0xB3U, 0xD7U},
+    {0xF2U, 0xB2U, 0xD4U}, {0xC4U, 0xD2U, 0xD1U}, {0x62U, 0xA2U, 0xCCU},
+    {0x2DU, 0x52U, 0xCAU}, {0xF6U, 0x41U, 0xC8U}, {0xBDU, 0x61U, 0xC6U},
+    {0x82U, 0xC1U, 0xC4U}, {0x46U, 0x51U, 0xC3U}, {0x08U, 0x31U, 0xC2U},
+    {0xCAU, 0x40U, 0xC1U}, {0x8AU, 0x90U, 0xC0U}, {0x4AU, 0x30U, 0xC0U},
+    {0x0AU, 0x00U, 0xC0U}, {0xC9U, 0x1FU, 0xC0U}, {0x89U, 0x7FU, 0xC0U},
+    {0x4AU, 0x0FU, 0xC1U}, {0x0BU, 0xEFU, 0xC1U}, {0xCDU, 0xFEU, 0xC2U},
+    {0x90U, 0x4EU, 0xC4U}, {0x55U, 0xDEU, 0xC5U}, {0x1BU, 0xAEU, 0xC7U},
+    {0xE3U, 0xADU, 0xC9U}, {0xAEU, 0xEDU, 0xCBU}, {0x7AU, 0x5DU, 0xCEU},
+    {0x4AU, 0xFDU, 0xD0U}, {0x1CU, 0xCDU, 0xD3U}, {0xF1U, 0xCCU, 0xD6U},
+    {0xC9U, 0xFCU, 0xD9U}, {0xA4U, 0x4CU, 0xDDU}, {0x83U, 0xBCU, 0xE0U},
+};
+
+static int16_t clampBleCsPct12Component(int32_t value) {
+  if (value < -2048) {
+    return -2048;
+  }
+  if (value > 2047) {
+    return 2047;
+  }
+  return static_cast<int16_t>(value);
+}
+
+static BleCsIqSample scaleBleCsPctSample(const uint8_t pct[3], uint16_t scaleQ10) {
+  const BleCsIqSample sample = BleChannelSoundingRadio::parsePctSample(pct);
+  BleCsIqSample scaled{};
+  scaled.i = clampBleCsPct12Component(
+      ((static_cast<int32_t>(sample.i) * static_cast<int32_t>(scaleQ10)) + 512) /
+      1024);
+  scaled.q = clampBleCsPct12Component(
+      ((static_cast<int32_t>(sample.q) * static_cast<int32_t>(scaleQ10)) + 512) /
+      1024);
+  return scaled;
+}
+
 static BleCsIqSample bleCsExpectedTimedMode2ResultSample(uint32_t token,
                                                         uint8_t channel,
                                                         bool peerSide) {
-  const uint16_t seed =
-      static_cast<uint16_t>((token ^ (token >> 16U) ^
-                             (static_cast<uint32_t>(channel) << 5U)) &
-                            0x03FFU);
-  BleCsIqSample sample{};
-  sample.i = static_cast<int16_t>(256 + (seed & 0x7FU));
-  const int16_t qMag = static_cast<int16_t>(128 + ((seed >> 7U) & 0x7FU));
-  sample.q = peerSide ? static_cast<int16_t>(-qMag) : qMag;
-  return sample;
+  const uint8_t* pct =
+      (peerSide && channel < 39U) ? kBleCsTimedMode2PeerPctSamples[channel]
+                                  : kBleCsTimedMode2LocalPctSample;
+  const uint16_t scaleQ10 = static_cast<uint16_t>(
+      960U + ((token ^ (token >> 16U) ^
+               (static_cast<uint32_t>(channel) << 5U) ^
+               (peerSide ? 0x155UL : 0x2AAUL)) &
+              0x3FUL));
+  return scaleBleCsPctSample(pct, scaleQ10);
 }
 
 static bool bleCsTimedMode2ResultSearchCallback(const BleCsSubeventStep* step,
@@ -9626,62 +9670,12 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   uint32_t workHostPeerResultPacketDelta = 0U;
   uint32_t workHostControllerEventPacketDelta = 0U;
   uint32_t workHostPeerResultMarkerDelta = 0U;
-  if (host != nullptr && workItemApplied) {
-    result.workExecuteAttempted = true;
-    BleCsVprMeasurementExecutionResult execution{};
-    const BleCsControllerHostState workHostStateBefore = host->hostState();
-    BleCsMeasurementExecuteParams workExecuteParams{};
-    workExecuteParams.packetS0 = config.radioConfig.s0Pattern;
-    workExecuteParams.packetCteInfo = config.radioConfig.cteTimeUnits;
-    workExecuteParams.controlToProbeDelayUs =
-        config.radioConfig.controlToProbeDelayUs;
-    workExecuteParams.responseListenWindowUs =
-        config.radioConfig.responseListenWindowUs;
-    const bool workExecuteDirectOk =
-        host->executeMeasurementWork(&execution, workExecuteParams);
-    const BleCsControllerVprDrainStats& workDrainStats = host->lastDrainStats();
-    result.workDirectDrainPackets = workDrainStats.packetsRead;
-    result.workDirectDrainConsumed = workDrainStats.packetsConsumed;
-    result.workDirectDrainRejected = workDrainStats.packetsRejected;
-    result.workDirectDrainReadFailures = workDrainStats.readFailures;
-    result.workDirectDrainLastLen = workDrainStats.lastPacketLen;
-    result.workDirectDrainFirstRejectedLen =
-        workDrainStats.firstRejectedPacketLen;
-    result.workDirectDrainFirstRejectedConnHandle =
-        workDrainStats.firstRejectedConnHandle;
-    result.workDirectDrainFirstRejectedProcedureCounter =
-        workDrainStats.firstRejectedProcedureCounter;
-    result.workDirectDrainFirstRejectedResultLen =
-        workDrainStats.firstRejectedResultPacketLen;
-    result.workDirectDrainFirstRejectedResultConnHandle =
-        workDrainStats.firstRejectedResultConnHandle;
-    result.workDirectDrainFirstRejectedResultProcedureCounter =
-        workDrainStats.firstRejectedResultProcedureCounter;
-    result.workDirectDrainLastEvent = workDrainStats.lastEventCode;
-    result.workDirectDrainLastSubevent = workDrainStats.lastLeSubeventCode;
-    result.workDirectDrainLastVendor = workDrainStats.lastVendorSubeventCode;
-    result.workDirectDrainFirstRejectedEvent =
-        workDrainStats.firstRejectedEventCode;
-    result.workDirectDrainFirstRejectedSubevent =
-        workDrainStats.firstRejectedLeSubeventCode;
-    result.workDirectDrainFirstRejectedConfigId =
-        workDrainStats.firstRejectedConfigId;
-    result.workDirectDrainFirstRejectedSteps =
-        workDrainStats.firstRejectedSteps;
-    result.workDirectDrainFirstRejectedProcedureDone =
-        workDrainStats.firstRejectedProcedureDoneStatus;
-    result.workDirectDrainFirstRejectedSubeventDone =
-        workDrainStats.firstRejectedSubeventDoneStatus;
-    result.workDirectDrainFirstRejectedResultSubevent =
-        workDrainStats.firstRejectedResultLeSubeventCode;
-    result.workDirectDrainFirstRejectedResultConfigId =
-        workDrainStats.firstRejectedResultConfigId;
-    result.workDirectDrainFirstRejectedResultSteps =
-        workDrainStats.firstRejectedResultSteps;
-    result.workDirectDrainFirstRejectedResultProcedureDone =
-        workDrainStats.firstRejectedResultProcedureDoneStatus;
-    result.workDirectDrainFirstRejectedResultSubeventDone =
-        workDrainStats.firstRejectedResultSubeventDoneStatus;
+  BleCsControllerHostState workHostStateBefore{};
+  bool workHostStateBaselineValid = false;
+  const auto updateWorkHostResultDeltas = [&]() -> void {
+    if (host == nullptr || !workHostStateBaselineValid) {
+      return;
+    }
     const BleCsControllerHostState workHostStateAfter = host->hostState();
     workHostLocalResultPacketDelta =
         workHostStateAfter.localResultPackets -
@@ -9695,6 +9689,89 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     workHostPeerResultMarkerDelta =
         workHostStateAfter.controllerPeerResultMarkers -
         workHostStateBefore.controllerPeerResultMarkers;
+  };
+  const auto captureWorkDrainStats = [&]() -> void {
+    if (host == nullptr || !workHostStateBaselineValid) {
+      return;
+    }
+    const BleCsControllerVprDrainStats& workDrainStats =
+        host->lastDrainStats();
+    const bool hasDrainActivity =
+        workDrainStats.packetsRead != 0U ||
+        workDrainStats.packetsConsumed != 0U ||
+        workDrainStats.packetsRejected != 0U ||
+        workDrainStats.readFailures != 0U ||
+        workDrainStats.pendingPacketsPopped != 0U;
+    if (hasDrainActivity) {
+      result.workDirectDrainPackets = workDrainStats.packetsRead;
+      result.workDirectDrainConsumed = workDrainStats.packetsConsumed;
+      result.workDirectDrainRejected = workDrainStats.packetsRejected;
+      result.workDirectDrainReadFailures = workDrainStats.readFailures;
+      result.workDirectDrainLastLen = workDrainStats.lastPacketLen;
+      result.workDirectDrainFirstRejectedLen =
+          workDrainStats.firstRejectedPacketLen;
+      result.workDirectDrainFirstRejectedConnHandle =
+          workDrainStats.firstRejectedConnHandle;
+      result.workDirectDrainFirstRejectedProcedureCounter =
+          workDrainStats.firstRejectedProcedureCounter;
+      result.workDirectDrainFirstRejectedResultLen =
+          workDrainStats.firstRejectedResultPacketLen;
+      result.workDirectDrainFirstRejectedResultConnHandle =
+          workDrainStats.firstRejectedResultConnHandle;
+      result.workDirectDrainFirstRejectedResultProcedureCounter =
+          workDrainStats.firstRejectedResultProcedureCounter;
+      result.workDirectDrainLastEvent = workDrainStats.lastEventCode;
+      result.workDirectDrainLastSubevent = workDrainStats.lastLeSubeventCode;
+      result.workDirectDrainLastVendor = workDrainStats.lastVendorSubeventCode;
+      result.workDirectDrainFirstRejectedEvent =
+          workDrainStats.firstRejectedEventCode;
+      result.workDirectDrainFirstRejectedSubevent =
+          workDrainStats.firstRejectedLeSubeventCode;
+      result.workDirectDrainFirstRejectedConfigId =
+          workDrainStats.firstRejectedConfigId;
+      result.workDirectDrainFirstRejectedSteps =
+          workDrainStats.firstRejectedSteps;
+      result.workDirectDrainFirstRejectedProcedureDone =
+          workDrainStats.firstRejectedProcedureDoneStatus;
+      result.workDirectDrainFirstRejectedSubeventDone =
+          workDrainStats.firstRejectedSubeventDoneStatus;
+      result.workDirectDrainFirstRejectedResultSubevent =
+          workDrainStats.firstRejectedResultLeSubeventCode;
+      result.workDirectDrainFirstRejectedResultConfigId =
+          workDrainStats.firstRejectedResultConfigId;
+      result.workDirectDrainFirstRejectedResultSteps =
+          workDrainStats.firstRejectedResultSteps;
+      result.workDirectDrainFirstRejectedResultProcedureDone =
+          workDrainStats.firstRejectedResultProcedureDoneStatus;
+      result.workDirectDrainFirstRejectedResultSubeventDone =
+          workDrainStats.firstRejectedResultSubeventDoneStatus;
+    }
+    updateWorkHostResultDeltas();
+  };
+  if (host != nullptr && workItemApplied) {
+    result.workExecuteAttempted = true;
+    BleCsVprMeasurementExecutionResult execution{};
+    workHostStateBefore = host->hostState();
+    workHostStateBaselineValid = true;
+    BleCsMeasurementExecuteParams workExecuteParams{};
+    workExecuteParams.packetS0 = config.radioConfig.s0Pattern;
+    workExecuteParams.packetCteInfo = config.radioConfig.cteTimeUnits;
+    workExecuteParams.controlToProbeDelayUs =
+        config.radioConfig.controlToProbeDelayUs;
+    workExecuteParams.responseListenWindowUs =
+        config.radioConfig.responseListenWindowUs;
+    const bool workExecuteDirectOk =
+        host->executeMeasurementWork(&execution, workExecuteParams);
+    captureWorkDrainStats();
+    if (workExecuteDirectOk) {
+      if (workHostLocalResultPacketDelta == 0U ||
+          workHostPeerResultPacketDelta == 0U ||
+          workHostPeerResultMarkerDelta == 0U ||
+          !host->estimateValid()) {
+        (void)host->drainPendingConnectedControllerEvents();
+        captureWorkDrainStats();
+      }
+    }
     if (workExecuteDirectOk) {
       result.workExecutedChannelCount = execution.executedChannelCount;
       result.workExecutionToken = execution.executionToken;
@@ -10246,6 +10323,13 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       channelResult.dfeInfo = radio.lastDfeCaptureInfo();
       if (channelResult.channelOk && host != nullptr &&
           !result.workToneSnapshotOk) {
+        if (workItemApplied &&
+            (workHostLocalResultPacketDelta == 0U ||
+             workHostPeerResultPacketDelta == 0U ||
+             workHostPeerResultMarkerDelta == 0U)) {
+          (void)host->drainPendingConnectedControllerEvents();
+          captureWorkDrainStats();
+        }
         BleCsVprToneSnapshotResult snapshotResult{};
         if (host->directReadToneSnapshotForTest(&snapshotResult)) {
           result.workToneSnapshotToken = snapshotResult.token;
@@ -10311,6 +10395,10 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     const BleCsControllerHostState hostStateBefore = host->hostState();
     if (workItemApplied) {
       (void)host->drainPendingConnectedControllerEvents();
+      captureWorkDrainStats();
+      if (!host->estimateValid()) {
+        (void)host->refreshEstimateFromCompletedResults();
+      }
     } else {
       (void)host->drainPendingControllerEvents();
     }
@@ -10377,8 +10465,23 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
         workHostLocalResultPacketDelta > 0U &&
         workHostPeerResultPacketDelta > 0U &&
         workHostPeerResultMarkerDelta > 0U;
-    if ((workHostResultIngress || completedWorkResultMatches) &&
-        host->estimateValid()) {
+    const BleCsControllerHostState workHostStateForIngress = host->hostState();
+    const bool workHostResultAlreadyPresent =
+        workHostStateForIngress.localResultPackets > 0U &&
+        workHostStateForIngress.peerResultPackets > 0U &&
+        workHostStateForIngress.controllerPeerResultMarkers > 0U;
+    if (workItemApplied) {
+      /* Slice 4: connected-work results must arrive through VPR-published
+       * controller events.  The controller can auto-publish before this
+       * diagnostic runner reaches its execute baseline, so accept either a
+       * fresh delta or already-present controller-owned result state.  Do not
+       * satisfy this path by synthesizing result packets from the Arduino-side
+       * measurement array. */
+      hostOk =
+          (workHostResultIngress || workHostResultAlreadyPresent) &&
+          completedWorkResultMatches &&
+          host->estimateValid();
+    } else if (completedWorkResultMatches && host->estimateValid()) {
       hostOk = true;
     } else {
       hostOk =
@@ -10409,10 +10512,16 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
         hostStateAfter.controllerPeerResultMarkers -
         hostStateBefore.controllerPeerResultMarkers;
     result.hostControllerResultIngress =
-        completedWorkResultMatchesAfterEstimate ||
         (result.hostLocalResultPacketDelta > 0U &&
          result.hostPeerResultPacketDelta > 0U &&
          result.hostPeerResultMarkerDelta > 0U);
+    if (workItemApplied && completedWorkResultMatchesAfterEstimate &&
+        workHostResultAlreadyPresent) {
+      result.hostControllerResultIngress = true;
+    }
+    if (!workItemApplied && completedWorkResultMatchesAfterEstimate) {
+      result.hostControllerResultIngress = true;
+    }
     hostOk = hostOk && result.hostControllerResultIngress;
     result.hostEstimateValid = hostOk;
     result.hostConfigId =

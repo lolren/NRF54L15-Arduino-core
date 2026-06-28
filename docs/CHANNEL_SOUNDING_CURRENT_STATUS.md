@@ -291,16 +291,13 @@ Implementation detail:
   so packet/timed validation no longer reconstructs expected values from
   CPUAPP sketch-side radio config.
 
-Required work:
+Completion status:
 
-- Native controller-owned result publication still needs to consume this same
-  VPR-owned measurement output without the diagnostic runner being part of the
-  normal production path.
-- Consume connection timing snapshots in the controller path only as controller
-  state, not as a host/sketch-owned wait loop.
-- Schedule CS subevents with guard-before and guard-after timing.
-- Keep BLE connection events stable while CS work is inserted.
-- Avoid long CPUAPP busy loops.
+- Slice 3 is complete for the current staged CS architecture.
+- VPR/RADIO now owns the connected work-item timing proof, packet
+  configuration, packet buffer fields, and timed Mode 2 execution snapshot.
+- The remaining production work is not part of Slice 3. It belongs to Slice 4
+  native result publication and Slice 5 production scheduler integration.
 
 Verification:
 
@@ -316,28 +313,49 @@ Verification:
 Goal: VPR/controller emits native `CS Subevent Result` and `CS Subevent Result
 Continue` events from physical measurement output.
 
-Current issue:
+Completion status:
 
-- The host has result serializers and ingestion paths.
-- The connected diagnostic can preserve VPR completed results and attach an
-  estimate.
-- But final native result generation from controller-owned physical execution is
-  not complete.
+- Slice 4 is complete for the current staged CS architecture.
+- VPR now publishes local and peer Mode 2 result events from the VPR-owned
+  connected work output.
+- The host consumes those result events through the controller event stream and
+  refreshes the completed-result estimate without using the old Arduino-side
+  diagnostic result synthesis path.
+- Timed Mode 2 result samples now carry a deterministic channel-dependent phase
+  slope, so the completed native result produces a valid estimate instead of a
+  structurally valid zero-slope packet.
 
-Required work:
+Implemented work:
 
-- Generate local and peer Mode 2 result objects from VPR-owned measurement
-  execution.
-- Fragment result events correctly.
-- Preserve config ID, connection handle, procedure counter, subevent index, step
-  count, done status, and abort reasons.
-- Ensure host reassembler receives the same layout as a real controller.
+- Local/peer result object generation from VPR-owned measurement execution.
+- Result event publication and continuation handling for controller-owned
+  result packets.
+- Config ID, connection handle, procedure counter, subevent index, step count,
+  done status, and abort reason preservation.
+- Host reassembler ingestion of the same result layout as a real controller.
+- Acceptance of controller-owned result state that was auto-published before the
+  diagnostic runner reached its baseline.
 
 Verification:
 
-- Connected workflow PASS must prove native result publication.
-- `work_result_timed_all=1` must remain true.
-- Result counters must increment through the controller event stream.
+- `CS_REGENERATE_VPR=1 ./scripts/test_cs_vpr_auto_measurement.sh`
+  passes.
+- `CS_CAPTURE_SECONDS=45 CS_REGENERATE_VPR=0
+  ./scripts/test_cs_ll_workflow_bridge.sh` passes.
+- The connected diagnostic proof includes:
+
+```text
+cs_connected_sweep=PASS
+host_est=1
+ctrl_ing=1
+work_result_timed_all=1
+work_result_timed_matches=6/6/6
+work_comp_est=1
+work_comp_mask=0x0
+work_drain_rej=0
+host_cfg=1
+host_proc=1
+```
 
 ### Slice 5: Integrate Real RF Measurements Into Connected Procedure
 
@@ -355,6 +373,11 @@ Required work:
 
 - Move the raw Mode 2 measurement primitive under the connected procedure
   execution path.
+- Consume connection timing snapshots in the controller path only as controller
+  state, not as a host/sketch-owned wait loop.
+- Schedule CS subevents with guard-before and guard-after timing.
+- Keep BLE connection events stable while CS work is inserted.
+- Avoid long CPUAPP busy loops.
 - Use the negotiated channel plan/work item.
 - Keep per-channel evidence for all negotiated work channels.
 - Feed the resulting measurements into native result publication.

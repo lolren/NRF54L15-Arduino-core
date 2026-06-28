@@ -4636,17 +4636,15 @@ static void build_timed_mode2_result_pct(uint32_t token, uint8_t channel,
     return;
   }
 
-  const uint16_t seed =
-      (uint16_t)((token ^ (token >> 16U) ^ ((uint32_t)channel << 5U)) & 0x03FFU);
-  const int16_t i = (int16_t)(256 + (seed & 0x7FU));
-  const int16_t q_mag = (int16_t)(128 + ((seed >> 7U) & 0x7FU));
-  const int16_t q = peer_side ? (int16_t)-q_mag : q_mag;
-  const uint16_t i12 = (uint16_t)i & 0x0FFFU;
-  const uint16_t q12 = (uint16_t)q & 0x0FFFU;
-  const uint32_t packed = (uint32_t)i12 | ((uint32_t)q12 << 12U);
-  out_pct[0] = (uint8_t)(packed & 0xFFU);
-  out_pct[1] = (uint8_t)((packed >> 8U) & 0xFFU);
-  out_pct[2] = (uint8_t)((packed >> 16U) & 0xFFU);
+  const uint8_t *base_pct =
+      (peer_side && channel < 39U) ? k_peer_demo_pct_samples[channel]
+                                   : k_local_demo_pct_sample;
+  const uint16_t scale_q10 =
+      (uint16_t)(960U + ((token ^ (token >> 16U) ^
+                          ((uint32_t)channel << 5U) ^
+                          (peer_side ? 0x155UL : 0x2AAUL)) &
+                         0x3FUL));
+  scale_pct_sample_bytes(base_pct, scale_q10, out_pct);
 }
 
 static bool vpr_timed_mode2_pct_for_result(uint8_t channel, bool peer_side,

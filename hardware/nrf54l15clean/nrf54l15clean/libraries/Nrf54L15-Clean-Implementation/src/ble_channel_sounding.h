@@ -2756,6 +2756,7 @@ class BleCsControllerVprHost {
   bool ready() const;
   bool failed() const;
   bool estimateValid() const;
+  bool refreshEstimateFromCompletedResults();
   const BleCsControllerVprHostState& vprState() const;
   const BleCsControllerStreamHostState& streamState() const;
   const BleCsControllerHostState& hostState() const;
