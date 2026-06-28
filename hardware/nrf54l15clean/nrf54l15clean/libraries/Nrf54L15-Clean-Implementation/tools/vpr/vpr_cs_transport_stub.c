@@ -4372,6 +4372,7 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_NRF_RADIO_EVENTS_PLLREADY_OFFSET 0x2B0UL
 #define VPR_NRF_RADIO_SHORTS_OFFSET 0x400UL
 #define VPR_NRF_RADIO_SHORTS_TXREADY_START_Msk (1UL << 17U)
+#define VPR_NRF_RADIO_SHORTS_RXREADY_START_Msk (1UL << 18U)
 #define VPR_NRF_RADIO_SHORTS_PHYEND_DISABLE_Msk (1UL << 19U)
 #define VPR_NRF_RADIO_MODE_OFFSET 0x500UL
 #define VPR_NRF_RADIO_STATE_OFFSET 0x520UL
@@ -4425,6 +4426,27 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_RF_PACKET_CONFIG_FLAG_TX_DISABLED 0x20U
 #define VPR_RF_PACKET_CONFIG_FLAG_TX_STARTED 0x40U
 #define VPR_RF_PACKET_CONFIG_FLAG_TX_END 0x80U
+#define VPR_RF_TIMED_MODE2_TX_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_TIMED_MODE2_RXREADY_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_TIMED_MODE2_DISABLE_WAIT_MAX_LOOPS 50000UL
+#define VPR_RF_TIMED_MODE2_GAP_WAIT_MAX_LOOPS 4096UL
+#define VPR_RF_TIMED_MODE2_LISTEN_WAIT_MAX_LOOPS 8192UL
+#define VPR_RF_TIMED_MODE2_LOOP_SCALE_US 8U
+#define VPR_RF_TIMED_MODE2_STATUS_OK 0U
+#define VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED 1U
+#define VPR_RF_TIMED_MODE2_STATUS_INVALID_CHANNEL 2U
+#define VPR_RF_TIMED_MODE2_STATUS_RADIO_BUSY 3U
+#define VPR_RF_TIMED_MODE2_STATUS_TX_TIMEOUT 4U
+#define VPR_RF_TIMED_MODE2_STATUS_RXREADY_TIMEOUT 5U
+#define VPR_RF_TIMED_MODE2_STATUS_DISABLE_TIMEOUT 6U
+#define VPR_RF_TIMED_MODE2_FLAG_VALID 0x01U
+#define VPR_RF_TIMED_MODE2_FLAG_TX_READY 0x02U
+#define VPR_RF_TIMED_MODE2_FLAG_TX_END 0x04U
+#define VPR_RF_TIMED_MODE2_FLAG_RX_READY 0x08U
+#define VPR_RF_TIMED_MODE2_FLAG_RX_END 0x10U
+#define VPR_RF_TIMED_MODE2_FLAG_DISABLED 0x20U
+#define VPR_RF_TIMED_MODE2_FLAG_TIMING_APPLIED 0x40U
+#define VPR_RF_TIMED_MODE2_FLAG_PACKETPTR_RESTORED 0x80U
 #define VPR_RADIO_MODE_BLE_2MBIT 3UL
 #define VPR_RADIO_PACKET_MAX_PAYLOAD_DEFAULT 32U
 #define VPR_RADIO_PACKET_PCNF0_DEFAULT 0x01080108UL
@@ -4652,26 +4674,74 @@ static void execute_rf_channel_retune_primitive(uint8_t accepted,
       *out_observed_datawhite);
 }
 
-static void execute_rf_rx_ready_disable_primitive(uint8_t accepted,
-                                                  uint8_t version,
-                                                  uint8_t *out_flags,
-                                                  uint8_t *out_status,
-                                                  uint32_t *out_state_before,
-                                                  uint32_t *out_rxready_wait_loops,
-                                                  uint32_t *out_disable_wait_loops,
-                                                  uint32_t *out_state_after,
-                                                  uint32_t *out_token) {
+static uint32_t vpr_timed_mode2_wait_target(uint16_t wait_us,
+                                            uint32_t max_loops) {
+  uint32_t target = ((uint32_t)wait_us / VPR_RF_TIMED_MODE2_LOOP_SCALE_US) + 1U;
+  return (target <= max_loops) ? target : max_loops;
+}
+
+static uint32_t build_measurement_rf_timed_mode2_token(
+    uint8_t version,
+    uint8_t flags,
+    uint8_t status,
+    uint8_t channel,
+    uint8_t sequence,
+    uint16_t control_to_probe_delay_us,
+    uint16_t response_listen_window_us,
+    uint32_t tx_wait_loops,
+    uint32_t gap_wait_loops,
+    uint32_t rxready_wait_loops,
+    uint32_t listen_wait_loops,
+    uint32_t disable_wait_loops,
+    uint32_t state_after) {
+  return 0xD2000000UL ^
+         ((uint32_t)version) ^
+         ((uint32_t)flags << 16U) ^
+         ((uint32_t)status << 24U) ^
+         ((uint32_t)channel << 8U) ^
+         ((uint32_t)sequence << 20U) ^
+         ((uint32_t)control_to_probe_delay_us << 3U) ^
+         ((uint32_t)response_listen_window_us << 7U) ^
+         tx_wait_loops ^
+         (gap_wait_loops << 2U) ^
+         (rxready_wait_loops << 4U) ^
+         (listen_wait_loops << 5U);
+}
+
+static void execute_rf_timed_mode2_primitive(
+    uint8_t accepted,
+    uint8_t version,
+    uint8_t channel,
+    uint8_t packet_s0,
+    uint8_t packet_cte_info,
+    uint8_t packet_sequence,
+    uint16_t control_to_probe_delay_us,
+    uint16_t response_listen_window_us,
+    uint8_t *out_flags,
+    uint8_t *out_status,
+    uint32_t *out_state_before,
+    uint32_t *out_tx_wait_loops,
+    uint32_t *out_gap_wait_loops,
+    uint32_t *out_rxready_wait_loops,
+    uint32_t *out_listen_wait_loops,
+    uint32_t *out_disable_wait_loops,
+    uint32_t *out_state_after,
+    uint32_t *out_token) {
   if (out_flags == NULL || out_status == NULL ||
-      out_state_before == NULL || out_rxready_wait_loops == NULL ||
-      out_disable_wait_loops == NULL || out_state_after == NULL ||
-      out_token == NULL) {
+      out_state_before == NULL || out_tx_wait_loops == NULL ||
+      out_gap_wait_loops == NULL || out_rxready_wait_loops == NULL ||
+      out_listen_wait_loops == NULL || out_disable_wait_loops == NULL ||
+      out_state_after == NULL || out_token == NULL) {
     return;
   }
 
   *out_flags = 0U;
-  *out_status = VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED;
+  *out_status = VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
   *out_state_before = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
+  *out_tx_wait_loops = 0U;
+  *out_gap_wait_loops = 0U;
   *out_rxready_wait_loops = 0U;
+  *out_listen_wait_loops = 0U;
   *out_disable_wait_loops = 0U;
   *out_state_after = *out_state_before;
   *out_token = 0U;
@@ -4680,51 +4750,155 @@ static void execute_rf_rx_ready_disable_primitive(uint8_t accepted,
     return;
   }
 
-  *out_flags = VPR_RF_RX_PRIMITIVE_FLAG_VALID;
+  *out_flags = VPR_RF_TIMED_MODE2_FLAG_VALID;
+  if (!vpr_valid_data_channel(channel)) {
+    *out_status = VPR_RF_TIMED_MODE2_STATUS_INVALID_CHANNEL;
+    *out_token = build_measurement_rf_timed_mode2_token(
+        version, *out_flags, *out_status, channel, packet_sequence,
+        control_to_probe_delay_us, response_listen_window_us,
+        *out_tx_wait_loops, *out_gap_wait_loops, *out_rxready_wait_loops,
+        *out_listen_wait_loops, *out_disable_wait_loops, *out_state_after);
+    return;
+  }
   if (*out_state_before != 0U) {
-    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_RADIO_BUSY;
-    *out_token = build_measurement_rf_primitive_token(
-        version, *out_flags, *out_status, *out_state_before,
-        *out_rxready_wait_loops, *out_disable_wait_loops, *out_state_after);
+    *out_status = VPR_RF_TIMED_MODE2_STATUS_RADIO_BUSY;
+    *out_token = build_measurement_rf_timed_mode2_token(
+        version, *out_flags, *out_status, channel, packet_sequence,
+        control_to_probe_delay_us, response_listen_window_us,
+        *out_tx_wait_loops, *out_gap_wait_loops, *out_rxready_wait_loops,
+        *out_listen_wait_loops, *out_disable_wait_loops, *out_state_after);
     return;
   }
 
-  write_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET, 0U);
-  write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
-  write_radio_register(VPR_NRF_RADIO_TASKS_RXEN_OFFSET, 1U);
+  const uint32_t previous_pcnf0 =
+      read_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET);
+  const uint32_t previous_pcnf1 =
+      read_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET);
+  const uint32_t previous_packet_ptr =
+      read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET);
+  const uint32_t previous_shorts =
+      read_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET);
+  const uint32_t packet_ptr = (uint32_t)(uintptr_t)g_vpr_cs_packet_buffer;
 
-  while (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) == 0U &&
-         *out_rxready_wait_loops < VPR_RF_RX_PRIMITIVE_RXREADY_WAIT_MAX_LOOPS) {
-    *out_rxready_wait_loops = *out_rxready_wait_loops + 1U;
+  g_vpr_cs_packet_buffer[0] = packet_s0;
+  g_vpr_cs_packet_buffer[1] = VPR_CS_PACKET_PAYLOAD_LEN;
+  g_vpr_cs_packet_buffer[2] = packet_cte_info;
+  g_vpr_cs_packet_buffer[3] = VPR_CS_PACKET_MAGIC0;
+  g_vpr_cs_packet_buffer[4] = VPR_CS_PACKET_MAGIC1;
+  g_vpr_cs_packet_buffer[5] = VPR_CS_PACKET_TYPE_PROBE;
+  g_vpr_cs_packet_buffer[6] = packet_sequence;
+  g_vpr_cs_packet_buffer[7] = channel;
+  g_vpr_cs_packet_buffer[8] = 0U;
+
+  write_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET,
+                       VPR_RADIO_PACKET_PCNF0_DEFAULT);
+  write_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET,
+                       VPR_RADIO_PACKET_PCNF1_DEFAULT);
+  write_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET, packet_ptr);
+
+  write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET,
+                       VPR_NRF_RADIO_SHORTS_TXREADY_START_Msk |
+                       VPR_NRF_RADIO_SHORTS_PHYEND_DISABLE_Msk);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+  write_radio_register(VPR_NRF_RADIO_TASKS_TXEN_OFFSET, 1U);
+  while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
+         *out_tx_wait_loops < VPR_RF_TIMED_MODE2_TX_WAIT_MAX_LOOPS) {
+    *out_tx_wait_loops = *out_tx_wait_loops + 1U;
+  }
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET) != 0U) {
+    *out_flags |= VPR_RF_TIMED_MODE2_FLAG_TX_READY;
+  }
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET) != 0U) {
+    *out_flags |= VPR_RF_TIMED_MODE2_FLAG_TX_END;
   }
 
-  if (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) != 0U) {
-    *out_flags |= VPR_RF_RX_PRIMITIVE_FLAG_RX_READY;
+  if ((read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U) ||
+      ((*out_flags & (VPR_RF_TIMED_MODE2_FLAG_TX_READY |
+                      VPR_RF_TIMED_MODE2_FLAG_TX_END)) !=
+       (VPR_RF_TIMED_MODE2_FLAG_TX_READY |
+        VPR_RF_TIMED_MODE2_FLAG_TX_END))) {
+    *out_status = VPR_RF_TIMED_MODE2_STATUS_TX_TIMEOUT;
+  } else {
+    const uint32_t gap_target = vpr_timed_mode2_wait_target(
+        control_to_probe_delay_us, VPR_RF_TIMED_MODE2_GAP_WAIT_MAX_LOOPS);
+    while (*out_gap_wait_loops < gap_target) {
+      *out_gap_wait_loops = *out_gap_wait_loops + 1U;
+    }
+    *out_flags |= VPR_RF_TIMED_MODE2_FLAG_TIMING_APPLIED;
+
+    write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET,
+                         VPR_NRF_RADIO_SHORTS_RXREADY_START_Msk |
+                         VPR_NRF_RADIO_SHORTS_PHYEND_DISABLE_Msk);
+    write_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET, 0U);
+    write_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET, 0U);
+    write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
+    write_radio_register(VPR_NRF_RADIO_TASKS_RXEN_OFFSET, 1U);
+    while (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) == 0U &&
+           *out_rxready_wait_loops <
+               VPR_RF_TIMED_MODE2_RXREADY_WAIT_MAX_LOOPS) {
+      *out_rxready_wait_loops = *out_rxready_wait_loops + 1U;
+    }
+    if (read_radio_register(VPR_NRF_RADIO_EVENTS_RXREADY_OFFSET) != 0U) {
+      *out_flags |= VPR_RF_TIMED_MODE2_FLAG_RX_READY;
+      const uint32_t listen_target = vpr_timed_mode2_wait_target(
+          response_listen_window_us,
+          VPR_RF_TIMED_MODE2_LISTEN_WAIT_MAX_LOOPS);
+      while (*out_listen_wait_loops < listen_target &&
+             read_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET) == 0U) {
+        *out_listen_wait_loops = *out_listen_wait_loops + 1U;
+      }
+      if (read_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET) != 0U) {
+        *out_flags |= VPR_RF_TIMED_MODE2_FLAG_RX_END;
+      }
+    } else {
+      *out_status = VPR_RF_TIMED_MODE2_STATUS_RXREADY_TIMEOUT;
+    }
   }
 
   write_radio_register(VPR_NRF_RADIO_TASKS_DISABLE_OFFSET, 1U);
   while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
-         *out_disable_wait_loops < VPR_RF_RX_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS) {
+         *out_disable_wait_loops <
+             VPR_RF_TIMED_MODE2_DISABLE_WAIT_MAX_LOOPS) {
     *out_disable_wait_loops = *out_disable_wait_loops + 1U;
   }
-
-  if (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) != 0U) {
-    *out_flags |= VPR_RF_RX_PRIMITIVE_FLAG_DISABLED;
+  if (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) != 0U &&
+      read_radio_register(VPR_NRF_RADIO_STATE_OFFSET) == 0U) {
+    *out_flags |= VPR_RF_TIMED_MODE2_FLAG_DISABLED;
+  } else if (*out_status == VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED) {
+    *out_status = VPR_RF_TIMED_MODE2_STATUS_DISABLE_TIMEOUT;
   }
+
+  write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET, previous_shorts);
+  write_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET, previous_packet_ptr);
+  if (read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET) ==
+      previous_packet_ptr) {
+    *out_flags |= VPR_RF_TIMED_MODE2_FLAG_PACKETPTR_RESTORED;
+  }
+  write_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET, previous_pcnf0);
+  write_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET, previous_pcnf1);
 
   *out_state_after = read_radio_register(VPR_NRF_RADIO_STATE_OFFSET);
-  if ((*out_flags & VPR_RF_RX_PRIMITIVE_FLAG_RX_READY) == 0U) {
-    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_RXREADY_TIMEOUT;
-  } else if ((*out_flags & VPR_RF_RX_PRIMITIVE_FLAG_DISABLED) == 0U ||
-             *out_state_after != 0U) {
-    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_DISABLE_TIMEOUT;
-  } else {
-    *out_status = VPR_RF_RX_PRIMITIVE_STATUS_OK;
+  if (*out_status == VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED) {
+    if (((*out_flags & (VPR_RF_TIMED_MODE2_FLAG_TX_READY |
+                        VPR_RF_TIMED_MODE2_FLAG_TX_END |
+                        VPR_RF_TIMED_MODE2_FLAG_RX_READY |
+                        VPR_RF_TIMED_MODE2_FLAG_DISABLED)) ==
+         (VPR_RF_TIMED_MODE2_FLAG_TX_READY |
+          VPR_RF_TIMED_MODE2_FLAG_TX_END |
+          VPR_RF_TIMED_MODE2_FLAG_RX_READY |
+          VPR_RF_TIMED_MODE2_FLAG_DISABLED)) &&
+        *out_state_after == 0U) {
+      *out_status = VPR_RF_TIMED_MODE2_STATUS_OK;
+    }
   }
-
-  *out_token = build_measurement_rf_primitive_token(
-      version, *out_flags, *out_status, *out_state_before,
-      *out_rxready_wait_loops, *out_disable_wait_loops, *out_state_after);
+  *out_token = build_measurement_rf_timed_mode2_token(
+      version, *out_flags, *out_status, channel, packet_sequence,
+      control_to_probe_delay_us, response_listen_window_us,
+      *out_tx_wait_loops, *out_gap_wait_loops, *out_rxready_wait_loops,
+      *out_listen_wait_loops, *out_disable_wait_loops, *out_state_after);
 }
 
 static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *payload,
@@ -4747,7 +4921,7 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
   const uint8_t rf_hardware_version = 1U;
   const uint8_t rf_primitive_version = 1U;
   const uint8_t rf_retune_version = 1U;
-  const uint8_t rf_rx_primitive_version = 1U;
+  const uint8_t rf_timed_mode2_version = 1U;
   uint8_t rf_hardware_flags = 0U;
   uint32_t rf_hardware_state = 0U;
   uint32_t rf_hardware_mode = 0U;
@@ -4767,14 +4941,17 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
   uint32_t rf_retune_observed_frequency = 0U;
   uint32_t rf_retune_observed_datawhite = 0U;
   uint32_t rf_retune_token = 0U;
-  uint8_t rf_rx_primitive_flags = 0U;
-  uint8_t rf_rx_primitive_status = VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED;
-  uint32_t rf_rx_primitive_state_before = 0U;
-  uint32_t rf_rx_primitive_rxready_wait_loops = 0U;
-  uint32_t rf_rx_primitive_disable_wait_loops = 0U;
-  uint32_t rf_rx_primitive_state_after = 0U;
-  uint32_t rf_rx_primitive_token = 0U;
   uint32_t rf_packet_config_token = 0U;
+  uint8_t rf_timed_mode2_flags = 0U;
+  uint8_t rf_timed_mode2_status = VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
+  uint32_t rf_timed_mode2_state_before = 0U;
+  uint32_t rf_timed_mode2_tx_wait_loops = 0U;
+  uint32_t rf_timed_mode2_gap_wait_loops = 0U;
+  uint32_t rf_timed_mode2_rxready_wait_loops = 0U;
+  uint32_t rf_timed_mode2_listen_wait_loops = 0U;
+  uint32_t rf_timed_mode2_disable_wait_loops = 0U;
+  uint32_t rf_timed_mode2_state_after = 0U;
+  uint32_t rf_timed_mode2_token = 0U;
   const uint32_t rf_descriptor_token = build_measurement_rf_descriptor_token(
       g_cs_config_id, g_cs_procedure_counter, g_cs_session_conn_handle,
       active_subevent, subevent_count, total_steps, subevent_start,
@@ -4825,80 +5002,39 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
         &rf_retune_flags, &rf_retune_status, &rf_retune_target_frequency,
         &rf_retune_target_datawhite, &rf_retune_observed_frequency,
         &rf_retune_observed_datawhite, &rf_retune_token);
-    execute_rf_rx_ready_disable_primitive(
-        accepted, rf_rx_primitive_version, &rf_rx_primitive_flags,
-        &rf_rx_primitive_status, &rf_rx_primitive_state_before,
-        &rf_rx_primitive_rxready_wait_loops,
-        &rf_rx_primitive_disable_wait_loops,
-        &rf_rx_primitive_state_after, &rf_rx_primitive_token);
-    const uint32_t previous_pcnf0 =
-        read_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET);
-    const uint32_t previous_pcnf1 =
-        read_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET);
-    write_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET,
-                         VPR_RADIO_PACKET_PCNF0_DEFAULT);
-    write_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET,
-                         VPR_RADIO_PACKET_PCNF1_DEFAULT);
+    const uint8_t packet_channel =
+        (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
+    execute_rf_timed_mode2_primitive(
+        accepted, rf_timed_mode2_version, packet_channel, packet_s0,
+        packet_cte_info,
+        (uint8_t)(g_cs_measurement_execute_count & 0xFFU),
+        control_to_probe_delay_us, response_listen_window_us,
+        &rf_timed_mode2_flags, &rf_timed_mode2_status,
+        &rf_timed_mode2_state_before, &rf_timed_mode2_tx_wait_loops,
+        &rf_timed_mode2_gap_wait_loops,
+        &rf_timed_mode2_rxready_wait_loops,
+        &rf_timed_mode2_listen_wait_loops,
+        &rf_timed_mode2_disable_wait_loops, &rf_timed_mode2_state_after,
+        &rf_timed_mode2_token);
     uint8_t packet_config_flags =
         VPR_RF_PACKET_CONFIG_FLAG_VALID |
         VPR_RF_PACKET_CONFIG_FLAG_PACKET_WRITTEN;
-    const uint8_t packet_channel =
-        (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
     if (vpr_valid_data_channel(packet_channel)) {
-      const uint32_t packet_ptr = (uint32_t)(uintptr_t)g_vpr_cs_packet_buffer;
-      const uint32_t previous_packet_ptr =
-          read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET);
-      g_vpr_cs_packet_buffer[0] = packet_s0;
-      g_vpr_cs_packet_buffer[1] = VPR_CS_PACKET_PAYLOAD_LEN;
-      g_vpr_cs_packet_buffer[2] = packet_cte_info;
-      g_vpr_cs_packet_buffer[3] = VPR_CS_PACKET_MAGIC0;
-      g_vpr_cs_packet_buffer[4] = VPR_CS_PACKET_MAGIC1;
-      g_vpr_cs_packet_buffer[5] = VPR_CS_PACKET_TYPE_PROBE;
-      g_vpr_cs_packet_buffer[6] =
-          (uint8_t)(g_cs_measurement_execute_count & 0xFFU);
-      g_vpr_cs_packet_buffer[7] = packet_channel;
-      g_vpr_cs_packet_buffer[8] = 0U;
-      const uint32_t previous_shorts =
-          read_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET);
-      write_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET, packet_ptr);
-      if (read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET) == packet_ptr) {
-        packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_WRITTEN;
-      }
-      if (read_radio_register(VPR_NRF_RADIO_STATE_OFFSET) == 0U) {
-        uint32_t tx_disable_wait_loops = 0U;
-        write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET,
-                             VPR_NRF_RADIO_SHORTS_TXREADY_START_Msk |
-                             VPR_NRF_RADIO_SHORTS_PHYEND_DISABLE_Msk);
-        write_radio_register(VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET, 0U);
-        write_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET, 0U);
-        write_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET, 0U);
-        write_radio_register(VPR_NRF_RADIO_TASKS_TXEN_OFFSET, 1U);
-        while (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) == 0U &&
-               tx_disable_wait_loops < VPR_RF_RX_PRIMITIVE_DISABLE_WAIT_MAX_LOOPS) {
-          tx_disable_wait_loops = tx_disable_wait_loops + 1U;
-        }
-        if (read_radio_register(VPR_NRF_RADIO_EVENTS_TXREADY_OFFSET) != 0U) {
-          packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_READY |
-                                 VPR_RF_PACKET_CONFIG_FLAG_TX_STARTED;
-        }
-        if (read_radio_register(VPR_NRF_RADIO_EVENTS_END_OFFSET) != 0U) {
-          packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_END;
-        }
-        if (read_radio_register(VPR_NRF_RADIO_EVENTS_DISABLED_OFFSET) != 0U &&
-            read_radio_register(VPR_NRF_RADIO_STATE_OFFSET) == 0U) {
-          packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_DISABLED;
-        }
-        write_radio_register(VPR_NRF_RADIO_SHORTS_OFFSET, previous_shorts);
-      }
-      write_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET,
-                           previous_packet_ptr);
-      if (read_radio_register(VPR_NRF_RADIO_PACKETPTR_OFFSET) ==
-          previous_packet_ptr) {
-        packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_RESTORED;
-      }
+      packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_WRITTEN;
     }
-    write_radio_register(VPR_NRF_RADIO_PCNF0_OFFSET, previous_pcnf0);
-    write_radio_register(VPR_NRF_RADIO_PCNF1_OFFSET, previous_pcnf1);
+    if ((rf_timed_mode2_flags & VPR_RF_TIMED_MODE2_FLAG_PACKETPTR_RESTORED) != 0U) {
+      packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_PACKETPTR_RESTORED;
+    }
+    if ((rf_timed_mode2_flags & VPR_RF_TIMED_MODE2_FLAG_TX_READY) != 0U) {
+      packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_READY |
+                             VPR_RF_PACKET_CONFIG_FLAG_TX_STARTED;
+    }
+    if ((rf_timed_mode2_flags & VPR_RF_TIMED_MODE2_FLAG_TX_END) != 0U) {
+      packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_END;
+    }
+    if ((rf_timed_mode2_flags & VPR_RF_TIMED_MODE2_FLAG_DISABLED) != 0U) {
+      packet_config_flags |= VPR_RF_PACKET_CONFIG_FLAG_TX_DISABLED;
+    }
     rf_packet_config_token =
         VPR_RADIO_PACKET_PCNF0_DEFAULT ^
         (VPR_RADIO_PACKET_PCNF1_DEFAULT << 1U) ^
@@ -5005,16 +5141,16 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
   write_le32(&payload[116], rf_retune_observed_frequency);
   write_le32(&payload[120], rf_retune_observed_datawhite);
   write_le32(&payload[124], (accepted != 0U) ? rf_retune_token : 0U);
-  payload[128] = rf_rx_primitive_version;
-  payload[129] = (accepted != 0U) ? rf_rx_primitive_flags : 0U;
-  payload[130] = (accepted != 0U) ? rf_rx_primitive_status
-                                  : VPR_RF_RX_PRIMITIVE_STATUS_NOT_ACCEPTED;
-  payload[131] = 0U;
-  write_le32(&payload[132], rf_rx_primitive_state_before);
-  write_le32(&payload[136], rf_rx_primitive_rxready_wait_loops);
-  write_le32(&payload[140], rf_rx_primitive_disable_wait_loops);
-  write_le32(&payload[144], rf_rx_primitive_state_after);
-  write_le32(&payload[148], (accepted != 0U) ? rf_rx_primitive_token : 0U);
+  payload[128] = rf_timed_mode2_version;
+  payload[129] = (accepted != 0U) ? rf_timed_mode2_flags : 0U;
+  payload[130] = (accepted != 0U) ? rf_timed_mode2_status
+                                  : VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
+  payload[131] = (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
+  write_le32(&payload[132], rf_timed_mode2_tx_wait_loops);
+  write_le32(&payload[136], rf_timed_mode2_gap_wait_loops);
+  write_le32(&payload[140], rf_timed_mode2_rxready_wait_loops);
+  write_le32(&payload[144], rf_timed_mode2_listen_wait_loops);
+  write_le32(&payload[148], (accepted != 0U) ? rf_timed_mode2_token : 0U);
   return 152U;
 }
 

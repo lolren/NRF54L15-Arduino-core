@@ -1033,13 +1033,14 @@ disturb the connected packet path. The stable implementation keeps the existing
 - The VPR stack reserve is now `0x1D0` bytes. Earlier stack-usage output showed
   the VPR main path at 184 bytes, so this still leaves a conservative margin
   while keeping the generated image inside the fixed VPR window. The generated
-  dedicated CS image is now 19108 bytes.
+  dedicated CS controller image is now 19416 bytes and the transport image is
+  10340 bytes.
 - A separate 180-byte response with detailed PACKETPTR fields was tested and
   rejected because the generated VPR image overflowed the old
   `0x2003B000..0x2003FE80` image window. The accepted implementation keeps the
-  response fixed at 152 bytes, expands the VPR image window to
-  `0x2003B000..0x2003FF00`, and folds the PACKETPTR/timing proof into the
-  existing packet-config token.
+  response fixed at 152 bytes, expands the VPR image window to the full safe
+  top-of-SRAM window `0x2003B000..0x20040000` (`0x5000` bytes), and folds the
+  PACKETPTR/timing proof into the existing packet-config token.
 
 Hardware regression on the same two XIAO nRF54L15 boards, with the LM20A probe
 attached but unused:
@@ -1061,10 +1062,38 @@ cs_connected_sweep=PASS attempts=6 valid_channels=6 min_valid=3 requested_channe
 cs_ll_physical_followup=PASS sweeps=1 valid_channels=21 raw_est=1 raw_m=1.3560 host_est=1 host_steps=21/21 host_m=1.7417 proc=2
 ```
 
-This is still not full Zephyr parity. The next hard slice is passing the active
-CS timing into VPR and moving the actual Mode 2 packet TX/RX/tone-capture
-transaction into VPR-owned RADIO/timer execution instead of only proving each
-hardware primitive around the existing CPUAPP-driven measurement window.
+## Completed in This Pass — VPR Timed Mode 2 TX/RX Proof
+
+The previous next hard slice is now partially complete. The `0xFCED`
+measurement execute response still stays at 152 bytes, but bytes `128..151`
+now carry a compact VPR-owned timed Mode 2 RF proof instead of the old standalone
+RX-ready proof.
+
+- VPR writes the active CS probe-format packet into VPR-owned RAM.
+- VPR temporarily owns `PACKETPTR`, `PCNF0`, `PCNF1`, and `SHORTS`.
+- VPR runs `TXREADY_START | PHYEND_DISABLE`, waits for TX completion, applies
+  the active `controlToProbeDelayUs`, then runs `RXREADY_START | PHYEND_DISABLE`
+  for the active `responseListenWindowUs`.
+- CPUAPP recomputes the compact token from the active CS config, timing values,
+  selected channel, VPR loop counters, and proof flags. The connected sweep now
+  fails unless `work_rf_timed=1`, `work_rf_timed_status=0`,
+  `work_rf_timed_flags & 0xEF == 0xEF`, the timed channel matches the retuned
+  channel, the timing loops are nonzero, and the token matches.
+- The legacy `work_rf_rx` parser fields are derived from this timed proof so
+  older diagnostics still show RX-ready coverage, but the actual acceptance gate
+  is now `work_rf_timed`.
+
+Latest hardware regression on the same two XIAO nRF54L15 boards:
+
+```text
+cs_ll_workflow_bridge=PASS wf=0x7F tx=0x7 rx=0x3F vpr_pdu=3 injected=6 direct=3 local=1 peer=1 proc=1 est=1 sched=1 sched_flags=0x1 sched_stage=0 sched_proc=1 sched_sub=0/1 sched_steps=6 sched_chunk=6/6 work=1 work_flags=0x41 work_proc=1 work_sub=0/1 work_steps=6/6 work_chunk=6/6 work_ch=6:2,3,4,5,6,7
+cs_connected_sweep=PASS attempts=6 valid_channels=3 min_valid=3 requested_channels=6 work_exec=1 work_exec_mismatch=0x0 work_rf_pkt=1 work_rf_pkt_flags=0xFF work_rf_buf=1 work_rf_timed=1 work_rf_timed_status=0 work_rf_timed_flags=0xEF work_rf_timed_ch=2 work_rf_timed_gap=626 work_rf_timed_rxready=143 work_rf_timed_listen=1126 work_tone_snap=1 work_tone_snap_flags=0x37 host_est=1 host_steps=3/3
+cs_ll_physical_followup=PASS sweeps=1 valid_channels=20 raw_est=1 host_est=1 host_steps=20/20 proc=2
+```
+
+This is still not full Zephyr parity. The next hard slice is making the peer
+response and tone result itself VPR-owned inside the connected event instead of
+using this timed RF proof beside the existing CPUAPP measurement result path.
 
 ## Completed in This Pass — VPR Tone Configuration Readback Gate
 

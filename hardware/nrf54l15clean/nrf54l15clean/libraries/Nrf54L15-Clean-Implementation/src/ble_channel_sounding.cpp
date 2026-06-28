@@ -308,6 +308,33 @@ uint32_t buildMeasurementRfPacketConfigToken(uint8_t version,
          static_cast<uint32_t>(version);
 }
 
+uint32_t buildMeasurementRfTimedMode2Token(uint8_t version,
+                                           uint8_t flags,
+                                           uint8_t status,
+                                           uint8_t channel,
+                                           uint8_t sequence,
+                                           uint16_t controlToProbeDelayUs,
+                                           uint16_t responseListenWindowUs,
+                                           uint32_t txWaitLoops,
+                                           uint32_t gapWaitLoops,
+                                           uint32_t rxReadyWaitLoops,
+                                           uint32_t listenWaitLoops,
+                                           uint32_t disableWaitLoops,
+                                           uint32_t stateAfter) {
+  return 0xD2000000UL ^
+         static_cast<uint32_t>(version) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         (static_cast<uint32_t>(status) << 24U) ^
+         (static_cast<uint32_t>(channel) << 8U) ^
+         (static_cast<uint32_t>(sequence) << 20U) ^
+         (static_cast<uint32_t>(controlToProbeDelayUs) << 3U) ^
+         (static_cast<uint32_t>(responseListenWindowUs) << 7U) ^
+         txWaitLoops ^
+         (gapWaitLoops << 2U) ^
+         (rxReadyWaitLoops << 4U) ^
+         (listenWaitLoops << 5U);
+}
+
 inline void writeVolatileLe16(volatile uint8_t* data, uint16_t value) {
   if (data == nullptr) {
     return;
@@ -4327,9 +4354,44 @@ bool parseVprMeasurementExecutionResponse(
     outResult->rfRetuneTokenValid = outResult->rfRetuneToken != 0U;
   }
   if (completeEvent.returnParamsLen >= 152U) {
-    outResult->rfRxPrimitiveVersion = params[128];
-    outResult->rfRxPrimitiveFlags = params[129];
-    outResult->rfRxPrimitiveStatus = params[130];
+    outResult->rfTimedMode2Version = params[128];
+    outResult->rfTimedMode2Flags = params[129];
+    outResult->rfTimedMode2Status = params[130];
+    outResult->rfTimedMode2Channel = params[131];
+    outResult->rfTimedMode2Valid =
+        outResult->rfTimedMode2Version == 1U &&
+        ((outResult->rfTimedMode2Flags & 0x01U) != 0U);
+    outResult->rfTimedMode2TxReady =
+        (outResult->rfTimedMode2Flags & 0x02U) != 0U;
+    outResult->rfTimedMode2TxEnd =
+        (outResult->rfTimedMode2Flags & 0x04U) != 0U;
+    outResult->rfTimedMode2RxReady =
+        (outResult->rfTimedMode2Flags & 0x08U) != 0U;
+    outResult->rfTimedMode2RxEnd =
+        (outResult->rfTimedMode2Flags & 0x10U) != 0U;
+    outResult->rfTimedMode2Disabled =
+        (outResult->rfTimedMode2Flags & 0x20U) != 0U;
+    outResult->rfTimedMode2TimingApplied =
+        (outResult->rfTimedMode2Flags & 0x40U) != 0U;
+    outResult->rfTimedMode2PacketPtrRestored =
+        (outResult->rfTimedMode2Flags & 0x80U) != 0U;
+    outResult->rfTimedMode2TxWaitLoops = readLe32(params + 132U);
+    outResult->rfTimedMode2GapWaitLoops = readLe32(params + 136U);
+    outResult->rfTimedMode2RxReadyWaitLoops = readLe32(params + 140U);
+    outResult->rfTimedMode2ListenWaitLoops = readLe32(params + 144U);
+    outResult->rfTimedMode2DisableWaitLoops = 0U;
+    outResult->rfTimedMode2StateAfter =
+        outResult->rfTimedMode2Disabled ? 0U : 0xFFFFFFFFUL;
+    outResult->rfTimedMode2Token = readLe32(params + 148U);
+    outResult->rfTimedMode2TokenValid =
+        outResult->rfTimedMode2Token != 0U;
+
+    outResult->rfRxPrimitiveVersion = outResult->rfTimedMode2Version;
+    outResult->rfRxPrimitiveFlags =
+        (outResult->rfTimedMode2Valid ? 0x01U : 0x00U) |
+        (outResult->rfTimedMode2RxReady ? 0x02U : 0x00U) |
+        (outResult->rfTimedMode2Disabled ? 0x04U : 0x00U);
+    outResult->rfRxPrimitiveStatus = outResult->rfTimedMode2Status;
     outResult->rfRxPrimitiveValid =
         outResult->rfRxPrimitiveVersion == 1U &&
         ((outResult->rfRxPrimitiveFlags & 0x01U) != 0U);
@@ -4337,11 +4399,21 @@ bool parseVprMeasurementExecutionResponse(
         (outResult->rfRxPrimitiveFlags & 0x02U) != 0U;
     outResult->rfRxPrimitiveDisabled =
         (outResult->rfRxPrimitiveFlags & 0x04U) != 0U;
-    outResult->rfRxPrimitiveStateBefore = readLe32(params + 132U);
-    outResult->rfRxPrimitiveRxReadyWaitLoops = readLe32(params + 136U);
-    outResult->rfRxPrimitiveDisableWaitLoops = readLe32(params + 140U);
-    outResult->rfRxPrimitiveStateAfter = readLe32(params + 144U);
-    outResult->rfRxPrimitiveToken = readLe32(params + 148U);
+    outResult->rfRxPrimitiveStateBefore = 0U;
+    outResult->rfRxPrimitiveRxReadyWaitLoops =
+        outResult->rfTimedMode2RxReadyWaitLoops;
+    outResult->rfRxPrimitiveDisableWaitLoops =
+        outResult->rfTimedMode2ListenWaitLoops;
+    outResult->rfRxPrimitiveStateAfter =
+        outResult->rfTimedMode2Disabled ? 0U : 0xFFFFFFFFUL;
+    outResult->rfRxPrimitiveToken = buildMeasurementRfPrimitiveToken(
+        outResult->rfRxPrimitiveVersion,
+        outResult->rfRxPrimitiveFlags,
+        outResult->rfRxPrimitiveStatus,
+        outResult->rfRxPrimitiveStateBefore,
+        outResult->rfRxPrimitiveRxReadyWaitLoops,
+        outResult->rfRxPrimitiveDisableWaitLoops,
+        outResult->rfRxPrimitiveStateAfter);
     outResult->rfRxPrimitiveTokenValid =
         outResult->rfRxPrimitiveToken != 0U;
   }
@@ -9196,6 +9268,21 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       result.workRfPacketConfigStatus = expectedRfPacketConfigStatus;
       result.workRfPacketConfigFlags = expectedRfPacketConfigFlags;
       result.workRfPacketConfigMaxPayload = kBleCsVprPacketMaxPayloadDefault;
+      result.workRfTimedMode2Token = execution.rfTimedMode2Token;
+      result.workRfTimedMode2Status = execution.rfTimedMode2Status;
+      result.workRfTimedMode2Flags = execution.rfTimedMode2Flags;
+      result.workRfTimedMode2Channel = execution.rfTimedMode2Channel;
+      result.workRfTimedMode2TxWaitLoops =
+          execution.rfTimedMode2TxWaitLoops;
+      result.workRfTimedMode2GapWaitLoops =
+          execution.rfTimedMode2GapWaitLoops;
+      result.workRfTimedMode2RxReadyWaitLoops =
+          execution.rfTimedMode2RxReadyWaitLoops;
+      result.workRfTimedMode2ListenWaitLoops =
+          execution.rfTimedMode2ListenWaitLoops;
+      result.workRfTimedMode2DisableWaitLoops =
+          execution.rfTimedMode2DisableWaitLoops;
+      result.workRfTimedMode2StateAfter = execution.rfTimedMode2StateAfter;
       result.workRfMaxSubeventLen = execution.rfMaxSubeventLen;
       result.workRfPhy = execution.rfPhy;
       result.workRfTxPowerDelta = execution.rfTxPowerDelta;
@@ -9259,6 +9346,33 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   expectedRfControlToProbeDelayUs,
                   expectedRfResponseListenWindowUs);
       result.workRfPacketBufferOk = result.workRfPacketConfigOk;
+      const uint8_t requiredTimedMode2Flags =
+          0x01U | 0x02U | 0x04U | 0x08U | 0x20U | 0x40U | 0x80U;
+      result.workRfTimedMode2Ok =
+          execution.rfTimedMode2Valid &&
+          execution.rfTimedMode2TokenValid &&
+          execution.rfTimedMode2Status == 0U &&
+          (execution.rfTimedMode2Flags & requiredTimedMode2Flags) ==
+              requiredTimedMode2Flags &&
+          execution.rfTimedMode2Channel == expectedRetuneChannel &&
+          execution.rfTimedMode2StateAfter == 0U &&
+          execution.rfTimedMode2GapWaitLoops != 0U &&
+          execution.rfTimedMode2RxReadyWaitLoops != 0U &&
+          execution.rfTimedMode2Token ==
+              buildMeasurementRfTimedMode2Token(
+                  1U,
+                  execution.rfTimedMode2Flags,
+                  execution.rfTimedMode2Status,
+                  expectedRetuneChannel,
+                  expectedRfPacketSequence,
+                  expectedRfControlToProbeDelayUs,
+                  expectedRfResponseListenWindowUs,
+                  execution.rfTimedMode2TxWaitLoops,
+                  execution.rfTimedMode2GapWaitLoops,
+                  execution.rfTimedMode2RxReadyWaitLoops,
+                  execution.rfTimedMode2ListenWaitLoops,
+                  execution.rfTimedMode2DisableWaitLoops,
+                  execution.rfTimedMode2StateAfter);
       const bool activeSubeventMatchesWork =
           execution.activeSubeventIndex == work->activeSubeventIndex ||
           execution.totalSubevents <= 1U ||
@@ -9315,6 +9429,9 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       if (!result.workRfPacketBufferOk) {
         executionMismatchMask |= (1UL << 16U);
       }
+      if (!result.workRfTimedMode2Ok) {
+        executionMismatchMask |= (1UL << 17U);
+      }
       result.workExecuteMismatchMask = executionMismatchMask;
       const bool executionMatchesWork =
           execution.valid && execution.status == 0U && execution.accepted &&
@@ -9333,7 +9450,8 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
           result.workRfRetuneOk &&
           result.workRfRxPrimitiveOk &&
           result.workRfPacketConfigOk &&
-          result.workRfPacketBufferOk;
+          result.workRfPacketBufferOk &&
+          result.workRfTimedMode2Ok;
       workExecutionOk = executionMatchesWork;
       result.workExecuteOk = executionMatchesWork;
     } else {
