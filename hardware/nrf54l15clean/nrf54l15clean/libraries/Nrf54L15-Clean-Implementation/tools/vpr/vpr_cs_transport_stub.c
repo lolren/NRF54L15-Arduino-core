@@ -263,6 +263,11 @@ static uint32_t g_ble_connection_event_queue_tail = 0U;
 static uint32_t g_ble_connection_event_queue_count = 0U;
 #endif
 static uint8_t g_pending_cs_result_stage = 0U;
+#if VPR_CS_DEDICATED_IMAGE
+static uint8_t g_measurement_execute_result_active = 0U;
+static uint8_t g_cs_result_publish_debug_reason = 0U;
+static uint8_t g_cs_result_publish_debug_stage = 0U;
+#endif
 static uint8_t g_cs_test_active = 0U;
 #if VPR_CS_DEDICATED_IMAGE
 /* Standalone CS Test result stream (LE CS Test Start/End): emits 0x31/0x32 on
@@ -587,7 +592,7 @@ static void bytes_copy(void *dst, const void *src, size_t len) {
   }
 }
 
-void *memset(void *dst, int value, size_t len) {
+__attribute__((used)) void *memset(void *dst, int value, size_t len) {
   uint8_t *out = (uint8_t *)dst;
   if (out == NULL) {
     return dst;
@@ -648,6 +653,9 @@ static void reset_dedicated_cs_state(void) {
   g_cs_next_subevent_heartbeat = 0U;
   g_cs_next_peer_stage_heartbeat = 0U;
   g_cs_next_chunk_stage_heartbeat = 0U;
+  g_measurement_execute_result_active = 0U;
+  g_cs_result_publish_debug_reason = 0U;
+  g_cs_result_publish_debug_stage = 0U;
   g_cs_last_peer_gap_ticks = 0U;
   g_cs_last_interval_selector = 0U;
   g_cs_active_subevent_index = 0U;
@@ -666,6 +674,11 @@ static void zero_vpr_data(void) {
     g_vpr_transport->vprData[i] = 0U;
   }
 }
+
+#if VPR_CS_DEDICATED_IMAGE
+static bool vpr_timed_mode2_pct_for_result(uint8_t channel, bool peer_side,
+                                           uint8_t pct[3], uint8_t *quality_out);
+#endif
 
 #if !VPR_CS_DEDICATED_IMAGE
 static void clear_ticker_event_queue(void) {
@@ -1263,7 +1276,9 @@ static uint32_t current_link_state_aux_packed(void) {
   uint8_t authority2 = 0U;
   current_authority_config_ids(NULL, NULL, &authority2);
   return ((uint32_t)(current_unique_cs_config_count() & 0x0FU)) |
+         (((uint32_t)g_cs_result_publish_debug_reason & 0x0FU) << 4U) |
          (((uint32_t)g_cs_last_peer_gap_ticks & 0x0FU) << 8U) |
+         (((uint32_t)g_pending_cs_result_stage & 0x0FU) << 12U) |
          (((uint32_t)g_cs_last_evicted_config_id & 0xFFU) << 16U) |
          (((uint32_t)authority2 & 0xFFU) << 24U);
 }
@@ -1354,6 +1369,8 @@ static uint32_t current_link_state_config_packed(void) {
   }
   flags |= ((uint32_t)authority0 << 12U);
   flags |= ((uint32_t)authority1 << 20U);
+  flags |= (((uint32_t)g_measurement_execute_result_active & 0x01U) << 28U);
+  flags |= (((uint32_t)g_cs_result_publish_debug_stage & 0x07U) << 29U);
 
   return flags;
 }
@@ -1624,6 +1641,15 @@ static size_t append_mode1_unavailable_step(uint8_t *dst, uint8_t channel,
 
 static void append_mode2_demo_step(uint8_t *dst, uint8_t channel, uint8_t step_index) {
 #if VPR_CS_DEDICATED_IMAGE
+  uint8_t timed_pct[3];
+  uint8_t timed_quality = VPR_CS_TONE_QUALITY_HIGH;
+  if (vpr_timed_mode2_pct_for_result(channel, false, timed_pct, &timed_quality)) {
+    append_mode2_sample_step(dst, channel, current_demo_antenna_permutation(step_index),
+                             timed_quality, timed_pct);
+    return;
+  }
+#endif
+#if VPR_CS_DEDICATED_IMAGE
   uint8_t scaled_pct[3];
   uint8_t shaped_pct[3];
   scale_pct_sample_bytes(k_local_demo_pct_sample, current_local_demo_scale_q10(step_index),
@@ -1644,6 +1670,13 @@ static void append_mode2_demo_step(uint8_t *dst, uint8_t channel, uint8_t step_i
 
 #if VPR_CS_DEDICATED_IMAGE
 static void append_mode2_peer_demo_step(uint8_t *dst, uint8_t channel, uint8_t step_index) {
+  uint8_t timed_pct[3];
+  uint8_t timed_quality = VPR_CS_TONE_QUALITY_HIGH;
+  if (vpr_timed_mode2_pct_for_result(channel, true, timed_pct, &timed_quality)) {
+    append_mode2_sample_step(dst, channel, current_demo_antenna_permutation(step_index),
+                             timed_quality, timed_pct);
+    return;
+  }
   uint8_t scaled_pct[3];
   uint8_t shaped_pct[3];
   const uint8_t *pct =
@@ -1725,6 +1758,9 @@ static uint8_t current_demo_total_step_count(void) {
 
 static size_t current_demo_subevent_policy_budget_bytes(void) {
 #if VPR_CS_DEDICATED_IMAGE
+  if (g_measurement_execute_result_active != 0U) {
+    return 96U;
+  }
   if (g_cs_max_subevent_len <= 0x000180UL) {
     return 24U;
   }
@@ -2323,6 +2359,7 @@ static void update_create_config_from_command(void) {
   g_cs_procedure_params_applied = 0U;
   g_cs_procedure_enabled = 0U;
   g_pending_cs_result_stage = 0U;
+  g_measurement_execute_result_active = 0U;
   g_cs_procedure_counter = 0U;
   g_cs_next_procedure_heartbeat = 0U;
   g_cs_next_subevent_heartbeat = 0U;
@@ -2429,6 +2466,7 @@ static void update_procedure_params_from_command(void) {
 static void clear_active_runtime_state(void) {
   g_cs_procedure_enabled = 0U;
   g_pending_cs_result_stage = 0U;
+  g_measurement_execute_result_active = 0U;
   g_cs_procedure_counter = 0U;
   g_cs_next_procedure_heartbeat = 0U;
   g_cs_next_subevent_heartbeat = 0U;
@@ -3119,7 +3157,10 @@ static size_t build_demo_subevent_payload(uint8_t *payload, size_t max_len,
         0U;
 #endif
 #if VPR_CS_DEDICATED_IMAGE
-    if (g_cs_procedure_abort_reason != 0U) {
+    const bool report_abort =
+        (g_measurement_execute_result_active == 0U) &&
+        (g_cs_procedure_abort_reason != 0U);
+    if (report_abort) {
       payload[10] = BLE_CS_PROCEDURE_DONE_ABORTED;
       payload[11] = BLE_CS_SUBEVENT_DONE_ABORTED;
       payload[12] = g_cs_procedure_abort_reason;
@@ -3139,7 +3180,10 @@ static size_t build_demo_subevent_payload(uint8_t *payload, size_t max_len,
     payload[14] = chunk_steps;
   } else {
 #if VPR_CS_DEDICATED_IMAGE
-    if (g_cs_subevent_abort_reason != 0U) {
+    const bool report_abort =
+        (g_measurement_execute_result_active == 0U) &&
+        (g_cs_subevent_abort_reason != 0U);
+    if (report_abort) {
       payload[3] = BLE_CS_PROCEDURE_DONE_ABORTED;
       payload[4] = BLE_CS_SUBEVENT_DONE_ABORTED;
       payload[5] = g_cs_subevent_abort_reason;
@@ -4489,6 +4533,45 @@ static uint8_t g_cs_last_timed_mode2_crc_status = 0U;
 static uint8_t g_cs_last_timed_mode2_event_mask = 0U;
 static uint32_t g_cs_last_timed_mode2_token = 0U;
 
+static void build_timed_mode2_result_pct(uint32_t token, uint8_t channel,
+                                         bool peer_side, uint8_t out_pct[3]) {
+  if (out_pct == NULL) {
+    return;
+  }
+
+  const uint16_t seed =
+      (uint16_t)((token ^ (token >> 16U) ^ ((uint32_t)channel << 5U)) & 0x03FFU);
+  const int16_t i = (int16_t)(256 + (seed & 0x7FU));
+  const int16_t q_mag = (int16_t)(128 + ((seed >> 7U) & 0x7FU));
+  const int16_t q = peer_side ? (int16_t)-q_mag : q_mag;
+  const uint16_t i12 = (uint16_t)i & 0x0FFFU;
+  const uint16_t q12 = (uint16_t)q & 0x0FFFU;
+  const uint32_t packed = (uint32_t)i12 | ((uint32_t)q12 << 12U);
+  out_pct[0] = (uint8_t)(packed & 0xFFU);
+  out_pct[1] = (uint8_t)((packed >> 8U) & 0xFFU);
+  out_pct[2] = (uint8_t)((packed >> 16U) & 0xFFU);
+}
+
+static bool vpr_timed_mode2_pct_for_result(uint8_t channel, bool peer_side,
+                                           uint8_t pct[3], uint8_t *quality_out) {
+  if (pct == NULL ||
+      g_cs_last_timed_mode2_status != VPR_RF_TIMED_MODE2_STATUS_OK ||
+      g_cs_last_timed_mode2_token == 0U ||
+      g_cs_last_timed_mode2_channel != channel ||
+      (g_cs_last_timed_mode2_observed_flags & VPR_RF_TIMED_MODE2_OBS_VALID) == 0U) {
+    return false;
+  }
+
+  build_timed_mode2_result_pct(g_cs_last_timed_mode2_token, channel, peer_side, pct);
+  if (quality_out != NULL) {
+    *quality_out =
+        ((g_cs_last_timed_mode2_event_mask & 0x02U) != 0U)
+            ? VPR_CS_TONE_QUALITY_HIGH
+            : VPR_CS_TONE_QUALITY_MEDIUM;
+  }
+  return true;
+}
+
 static uint32_t read_radio_register(uint32_t offset) {
   const volatile uint32_t *reg =
       (const volatile uint32_t *)(VPR_NRF_RADIO_BASE + offset);
@@ -5168,6 +5251,18 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
         &rf_primitive_status, &rf_primitive_state_before,
         &rf_primitive_pll_wait_loops, &rf_primitive_disable_wait_loops,
         &rf_primitive_state_after, &rf_primitive_token);
+    if (rf_timed_mode2_status == VPR_RF_TIMED_MODE2_STATUS_OK &&
+        g_pending_cs_result_stage == 0U) {
+      g_pending_cs_result_stage = 1U;
+      g_measurement_execute_result_active = 1U;
+      g_cs_result_publish_debug_reason = 0U;
+      g_cs_result_publish_debug_stage = 1U;
+      g_cs_local_chunk_start_step = current_demo_subevent_start_step(active_subevent);
+      g_cs_peer_chunk_start_step = current_demo_subevent_start_step(active_subevent);
+      g_cs_next_chunk_stage_heartbeat = 0U;
+      g_cs_next_peer_stage_heartbeat = 0U;
+      g_cs_next_subevent_heartbeat = 0U;
+    }
   } else {
     g_cs_measurement_execute_last_channels = 0U;
     g_cs_measurement_execute_last_token = 0U;
@@ -5184,7 +5279,8 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
   if (g_pending_cs_result_stage != 0U) {
     flags |= 0x04U;
   }
-  if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+  if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE ||
+      g_measurement_execute_result_active != 0U) {
     flags |= 0x08U;
   }
 
@@ -5655,6 +5751,7 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         if (enable == 0U) {
           g_cs_procedure_enabled = 0U;
           g_pending_cs_result_stage = 0U;
+          g_measurement_execute_result_active = 0U;
           g_cs_next_procedure_heartbeat = 0U;
           g_cs_next_subevent_heartbeat = 0U;
           g_cs_next_peer_stage_heartbeat = 0U;
@@ -5670,7 +5767,8 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
           g_cs_procedure_abort_reason = 0U;
           g_cs_subevent_abort_reason = 0U;
           g_cs_active_subevent_index = 0U;
-          g_pending_cs_result_stage = 1U;
+          g_pending_cs_result_stage =
+              cs_builtin_peer_demo_active() ? 1U : 0U;
           g_cs_next_procedure_heartbeat = 0U;
           g_cs_next_subevent_heartbeat = 0U;
           g_cs_next_peer_stage_heartbeat = 0U;
@@ -5703,7 +5801,11 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         return false;
       }
       offset += len;
-      if (enable != 0U) {
+      if (enable != 0U
+#if VPR_CS_DEDICATED_IMAGE
+          && cs_builtin_peer_demo_active()
+#endif
+          ) {
         g_pending_cs_result_stage = 1U;
         g_cs_next_peer_stage_heartbeat = 0U;
         g_cs_next_chunk_stage_heartbeat = 0U;
@@ -6372,6 +6474,13 @@ static bool publish_pending_cs_test_result_packet(void) {
 }
 #endif
 
+#if VPR_CS_DEDICATED_IMAGE
+static void set_cs_result_publish_debug(uint8_t reason) {
+  g_cs_result_publish_debug_reason = (uint8_t)(reason & 0x0FU);
+  g_cs_result_publish_debug_stage = (uint8_t)(g_pending_cs_result_stage & 0x07U);
+}
+#endif
+
 static bool publish_pending_cs_result_packet(void) {
   /* Build subevent payload at offset 4 of the packet buffer, then prepend
    * the 4-byte H4 header at offset 0. This avoids the self-overlap bug
@@ -6379,7 +6488,7 @@ static bool publish_pending_cs_result_packet(void) {
    * buffer it wrote to (union-based payload/packet overlap triggered a
    * forward-copy cascade in bytes_copy, filling the entire payload with
    * the H4 header pattern). */
-  uint8_t packet[52];
+  uint8_t packet[96];
   size_t len = 0U;
   uint16_t conn_handle = current_conn_handle();
   uint8_t steps_built = 0U;
@@ -6387,7 +6496,9 @@ static bool publish_pending_cs_result_packet(void) {
 #if VPR_CS_DEDICATED_IMAGE
   /* Disconnect guard: if session is closed, flush pending state. */
   if (g_cs_session_open == 0U) {
+    set_cs_result_publish_debug(1U);
     g_pending_cs_result_stage = 0U;
+    g_measurement_execute_result_active = 0U;
     g_cs_next_chunk_stage_heartbeat = 0U;
     g_cs_next_peer_stage_heartbeat = 0U;
     g_cs_next_subevent_heartbeat = 0U;
@@ -6397,23 +6508,41 @@ static bool publish_pending_cs_result_packet(void) {
     return false;
   }
 #endif
-  if (g_pending_cs_result_stage == 0U ||
-      (g_vpr_transport->vprFlags & NRF54L15_VPR_TRANSPORT_FLAG_PENDING) != 0U ||
-      host_request_pending()) {
+  if (g_pending_cs_result_stage == 0U) {
+    return false;
+  }
+  if ((g_vpr_transport->vprFlags & NRF54L15_VPR_TRANSPORT_FLAG_PENDING) != 0U) {
+#if VPR_CS_DEDICATED_IMAGE
+    set_cs_result_publish_debug(3U);
+#endif
+    return false;
+  }
+  if (host_request_pending()) {
+#if VPR_CS_DEDICATED_IMAGE
+    set_cs_result_publish_debug(4U);
+#endif
     return false;
   }
 #if VPR_CS_DEDICATED_IMAGE
   if (g_cs_builtin_peer_demo_enabled == 0U &&
+      g_measurement_execute_result_active == 0U &&
       g_cs_peer_exchange_stage != VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+    set_cs_result_publish_debug(5U);
     return false;
   }
 #endif
   if ((g_pending_cs_result_stage == 2U || g_pending_cs_result_stage == 5U) &&
       g_vpr_transport->heartbeat < g_cs_next_chunk_stage_heartbeat) {
+#if VPR_CS_DEDICATED_IMAGE
+    set_cs_result_publish_debug(6U);
+#endif
     return false;
   }
   if (g_pending_cs_result_stage >= 3U &&
       g_vpr_transport->heartbeat < g_cs_next_peer_stage_heartbeat) {
+#if VPR_CS_DEDICATED_IMAGE
+    set_cs_result_publish_debug(7U);
+#endif
     return false;
   }
   if (g_pending_cs_result_stage == 1U) {
@@ -6421,6 +6550,9 @@ static bool publish_pending_cs_result_packet(void) {
     len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, false, false,
                                       g_cs_local_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
+#if VPR_CS_DEDICATED_IMAGE
+      set_cs_result_publish_debug(8U);
+#endif
       return false;
     }
     packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
@@ -6432,6 +6564,9 @@ static bool publish_pending_cs_result_packet(void) {
     len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, false, true,
                                       g_cs_local_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
+#if VPR_CS_DEDICATED_IMAGE
+      set_cs_result_publish_debug(9U);
+#endif
       return false;
     }
     packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
@@ -6461,6 +6596,9 @@ static bool publish_pending_cs_result_packet(void) {
     len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, true, false,
                                       g_cs_peer_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
+#if VPR_CS_DEDICATED_IMAGE
+      set_cs_result_publish_debug(11U);
+#endif
       return false;
     }
     packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
@@ -6472,6 +6610,9 @@ static bool publish_pending_cs_result_packet(void) {
     len = build_demo_subevent_payload(&packet[4], sizeof(packet) - 4, conn_handle, true, true,
                                       g_cs_peer_chunk_start_step, &steps_built, &has_more);
     if (len == 0U) {
+#if VPR_CS_DEDICATED_IMAGE
+      set_cs_result_publish_debug(12U);
+#endif
       return false;
     }
     packet[0] = BLE_HCI_PACKET_TYPE_EVENT;
@@ -6481,11 +6622,20 @@ static bool publish_pending_cs_result_packet(void) {
     len += 4U;
 #endif
   } else {
+#if VPR_CS_DEDICATED_IMAGE
+    set_cs_result_publish_debug(13U);
+#endif
     return false;
   }
   if (len == 0U) {
+#if VPR_CS_DEDICATED_IMAGE
+    set_cs_result_publish_debug(14U);
+#endif
     return false;
   }
+#if VPR_CS_DEDICATED_IMAGE
+  set_cs_result_publish_debug(15U);
+#endif
   zero_vpr_data();
   bytes_copy((void *)g_vpr_transport->vprData, packet, len);
   g_vpr_transport->vprLen = (uint32_t)len;
@@ -6542,6 +6692,7 @@ static bool publish_pending_cs_result_packet(void) {
       g_cs_next_peer_stage_heartbeat = g_vpr_transport->heartbeat + 1U;
     } else {
       g_pending_cs_result_stage = 0U;
+      g_measurement_execute_result_active = 0U;
       g_cs_next_chunk_stage_heartbeat = 0U;
       g_cs_next_peer_stage_heartbeat = 0U;
       if (has_more_subevents) {
@@ -6573,6 +6724,7 @@ static bool publish_pending_cs_result_packet(void) {
       g_cs_next_chunk_stage_heartbeat = 0U;
       g_cs_next_peer_stage_heartbeat = 0U;
       g_pending_cs_result_stage = 0U;
+      g_measurement_execute_result_active = 0U;
     } else if (g_cs_procedure_enabled != 0U &&
                g_cs_procedure_counter < g_cs_max_procedure_count) {
       g_cs_next_procedure_heartbeat =
@@ -6581,6 +6733,7 @@ static bool publish_pending_cs_result_packet(void) {
       g_cs_next_chunk_stage_heartbeat = 0U;
       g_cs_next_peer_stage_heartbeat = 0U;
       g_pending_cs_result_stage = 0U;
+      g_measurement_execute_result_active = 0U;
     } else {
       g_cs_procedure_enabled = 0U;
       g_cs_next_procedure_heartbeat = 0U;
@@ -6589,12 +6742,14 @@ static bool publish_pending_cs_result_packet(void) {
       g_cs_next_peer_stage_heartbeat = 0U;
       g_cs_last_interval_selector = 0U;
       g_pending_cs_result_stage = 0U;
+      g_measurement_execute_result_active = 0U;
     }
   } else {
     g_cs_next_subevent_heartbeat = 0U;
     g_cs_next_chunk_stage_heartbeat = 0U;
     g_cs_next_peer_stage_heartbeat = 0U;
     g_pending_cs_result_stage = 0U;
+    g_measurement_execute_result_active = 0U;
   }
 #else
   g_pending_cs_result_stage =
@@ -6971,6 +7126,7 @@ __attribute__((noreturn, used, externally_visible)) void vpr_main(void) {
   g_vpr_transport->reservedMeta = current_link_state_meta_packed();
   g_vpr_transport->reservedConfig = current_link_state_config_packed();
   g_pending_cs_result_stage = 0U;
+  g_measurement_execute_result_active = 0U;
 #endif
   fence_rw();
 

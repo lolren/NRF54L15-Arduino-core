@@ -5639,6 +5639,7 @@ void BleCsControllerVprHost::fillDemoConfig(BleCsControllerVprHostConfig* outCon
 BleCsControllerVprHost::BleCsControllerVprHost()
     : config_{},
       vprState_{},
+      lastDrainStats_{},
       transport_{},
       host_{},
       lastRemoteFaeTable_{},
@@ -5660,6 +5661,7 @@ BleCsControllerVprHost::BleCsControllerVprHost()
 void BleCsControllerVprHost::reset() {
   config_ = BleCsControllerVprHostConfig{};
   vprState_ = BleCsControllerVprHostState{};
+  lastDrainStats_ = BleCsControllerVprDrainStats{};
   host_.reset();
   lastRemoteFaeTable_ = BleCsFaeTable{};
   lastTestEndComplete_ = BleCsTestEndComplete{};
@@ -6025,7 +6027,6 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       opcode == kBleCsVprHciOpPendingLocalPduRead ||
       opcode == kBleCsVprHciOpSchedulerRead ||
       opcode == kBleCsVprHciOpMeasurementWorkRead ||
-      opcode == kBleCsVprHciOpMeasurementExecute ||
       opcode == kBleCsVprHciOpToneSnapshotRead;
   switch (opcode) {
     case kBleCsHciOpCreateConfig:
@@ -6054,7 +6055,7 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
   if (!peerExchangeDebugCommand) {
     for (uint8_t retry = 0U; retry < 4U; ++retry) {
       VprControllerServiceHost scratch(&transport_);
-      (void)drainDirectControllerEvents(&scratch, nullptr, 0U, true);
+      (void)drainDirectControllerEvents(&scratch, nullptr, 0U, false, false);
       /* Force poll()->pullResponse() to clear vprFlags=PENDING in shared
        * memory, then consume anything that arrived so rxIndex catches up. */
       (void)transport_.available();
@@ -6068,11 +6069,15 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       ok && (peerExchangeDebugCommand ||
              drainDirectControllerEvents(&directHost, response,
                                          (responseLen != nullptr) ? *responseLen : 0U,
-                                         opcode != kBleCsHciOpProcedureEnable));
+                                         opcode != kBleCsHciOpProcedureEnable,
+                                         opcode == kBleCsVprHciOpMeasurementExecute));
   if (ok && drained && resetRunStateAfter) {
     host_.resetProcedureRunState();
   }
   syncVprState();
+  if (opcode == kBleCsVprHciOpMeasurementExecute) {
+    return ok;
+  }
   return ok && drained;
 }
 
@@ -7606,8 +7611,23 @@ bool BleCsControllerVprHost::drainPendingControllerEvents() {
   if (!host_.hostState().began) {
     return false;
   }
+  syncVprState();
+  const bool waitForConnectedCsResult =
+      vprState_.linkMeasurementExecuteResultActive ||
+      vprState_.linkResultPendingStage != 0U;
   VprControllerServiceHost directHost(&transport_);
-  return drainDirectControllerEvents(&directHost, nullptr, 0U, true);
+  return drainDirectControllerEvents(&directHost, nullptr, 0U,
+                                    waitForConnectedCsResult,
+                                    waitForConnectedCsResult);
+}
+
+bool BleCsControllerVprHost::drainPendingConnectedControllerEvents() {
+  if (!host_.hostState().began) {
+    return false;
+  }
+
+  VprControllerServiceHost directHost(&transport_);
+  return drainDirectControllerEvents(&directHost, nullptr, 0U, true, true);
 }
 
 bool BleCsControllerVprHost::consumeCompletedResult(
@@ -7707,6 +7727,27 @@ bool BleCsControllerVprHost::consumeConnectedMode2ControllerEventsFromMeasuremen
     return false;
   }
 
+  (void)drainPendingConnectedControllerEvents();
+  const BleCsSubeventResult& localResult = completedLocalResult();
+  const BleCsSubeventResult& peerResult = completedPeerResult();
+  const bool completedVprResultMatches =
+      localResult.isComplete &&
+      peerResult.isComplete &&
+      localResult.header.connHandle == header.connHandle &&
+      peerResult.header.connHandle == header.connHandle &&
+      localResult.header.configId == header.configId &&
+      peerResult.header.configId == header.configId &&
+      localResult.header.procedureCounter == header.procedureCounter &&
+      peerResult.header.procedureCounter == header.procedureCounter &&
+      localResult.stepData != nullptr &&
+      peerResult.stepData != nullptr &&
+      localResult.stepDataLen > 0U &&
+      peerResult.stepDataLen > 0U;
+  if (completedVprResultMatches) {
+    return true;
+  }
+
+  host_.resetProcedureRunState();
   return consumeMode2ControllerEventsFromMeasurements(
       measurements, count, header, localStepData, localMaxStepDataLen,
       peerStepData, peerMaxStepDataLen);
@@ -7744,6 +7785,10 @@ const BleCsControllerSessionState& BleCsControllerVprHost::sessionState() const 
 
 const BleCsControllerWorkflowState& BleCsControllerVprHost::workflowState() const {
   return host_.workflowState();
+}
+
+const BleCsControllerVprDrainStats& BleCsControllerVprHost::lastDrainStats() const {
+  return lastDrainStats_;
 }
 
 const BleCsSubeventResult& BleCsControllerVprHost::localResult() const {
@@ -7947,60 +7992,177 @@ bool BleCsControllerVprHost::consumeTestResultEvent(uint8_t subeventCode,
 bool BleCsControllerVprHost::drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                                          const uint8_t* response,
                                                          size_t responseLen,
-                                                         bool waitForBackgroundResults) {
+                                                         bool waitForBackgroundResults,
+                                                         bool requireConnectedCsResult) {
+  lastDrainStats_ = BleCsControllerVprDrainStats{};
   if (directHost == nullptr || !host_.hostState().began) {
-    return true;
+    return !requireConnectedCsResult;
   }
+
+  const BleCsControllerHostState baseline = host_.hostState();
+  const auto connectedCsResultArrived = [&]() -> bool {
+    if (!requireConnectedCsResult) {
+      return false;
+    }
+    const BleCsControllerHostState& state = host_.hostState();
+    return state.localResultPackets > baseline.localResultPackets &&
+           state.peerResultPackets > baseline.peerResultPackets &&
+           state.controllerPeerResultMarkers >
+               baseline.controllerPeerResultMarkers &&
+           host_.estimateValid();
+  };
+  const auto consumeDirectPacket = [&](const uint8_t* packet,
+                                      size_t packetLen) -> void {
+    ++lastDrainStats_.packetsRead;
+    lastDrainStats_.lastPacketLen =
+        (packetLen > 0xFFFFU) ? 0xFFFFU : static_cast<uint16_t>(packetLen);
+    lastDrainStats_.lastEventCode = 0U;
+    lastDrainStats_.lastLeSubeventCode = 0U;
+    lastDrainStats_.lastVendorSubeventCode = 0U;
+    if (packet != nullptr && packetLen >= 3U && packet[0] == 0x04U) {
+      lastDrainStats_.lastEventCode = packet[1];
+      if (packet[1] == kBleHciEvtLeMeta && packetLen >= 4U) {
+        lastDrainStats_.lastLeSubeventCode = packet[3];
+      } else if (packet[1] == kBleHciEvtVendor && packetLen >= 4U) {
+        lastDrainStats_.lastVendorSubeventCode = packet[3];
+      }
+    }
+    BleCsSubeventResult parsedDirectResult{};
+    bool parsedDirectResultValid = false;
+    BleCsHciLeMetaEvent parsedDirectMeta{};
+    if (BleChannelSoundingRadio::parseHciLeMetaEvent(packet, packetLen,
+                                                     &parsedDirectMeta)) {
+      if (parsedDirectMeta.subeventCode == kBleCsHciEvtSubeventResult) {
+        parsedDirectResultValid =
+            BleChannelSoundingRadio::parseHciSubeventResultEvent(
+                parsedDirectMeta.payload, parsedDirectMeta.payloadLen,
+                &parsedDirectResult);
+      } else if (parsedDirectMeta.subeventCode ==
+                 kBleCsHciEvtSubeventResultContinue) {
+        parsedDirectResultValid =
+            BleChannelSoundingRadio::parseHciSubeventResultContinueEvent(
+                parsedDirectMeta.payload, parsedDirectMeta.payloadLen,
+                &parsedDirectResult);
+      }
+    }
+    const bool consumed =
+        consumeDirectAuxiliaryEvent(packet, packetLen) ||
+        host_.consumeControllerPacket(packet, packetLen);
+    if (consumed) {
+      ++lastDrainStats_.packetsConsumed;
+    } else {
+      ++lastDrainStats_.packetsRejected;
+      if (lastDrainStats_.firstRejectedEventCode == 0U) {
+        lastDrainStats_.firstRejectedPacketLen =
+            (packetLen > 0xFFFFU) ? 0xFFFFU : static_cast<uint16_t>(packetLen);
+        lastDrainStats_.firstRejectedEventCode = lastDrainStats_.lastEventCode;
+        lastDrainStats_.firstRejectedLeSubeventCode =
+            lastDrainStats_.lastLeSubeventCode;
+        if (parsedDirectResultValid) {
+          lastDrainStats_.firstRejectedConnHandle =
+              parsedDirectResult.header.connHandle;
+          lastDrainStats_.firstRejectedConfigId =
+              parsedDirectResult.header.configId;
+          lastDrainStats_.firstRejectedProcedureCounter =
+              parsedDirectResult.header.procedureCounter;
+          lastDrainStats_.firstRejectedSteps =
+              static_cast<uint8_t>(parsedDirectResult.header.numStepsReported &
+                                   0xFFU);
+          lastDrainStats_.firstRejectedProcedureDoneStatus =
+              parsedDirectResult.header.procedureDoneStatus;
+          lastDrainStats_.firstRejectedSubeventDoneStatus =
+              parsedDirectResult.header.subeventDoneStatus;
+        }
+      }
+      if (parsedDirectResultValid &&
+          lastDrainStats_.firstRejectedResultPacketLen == 0U) {
+        lastDrainStats_.firstRejectedResultPacketLen =
+            (packetLen > 0xFFFFU) ? 0xFFFFU : static_cast<uint16_t>(packetLen);
+        lastDrainStats_.firstRejectedResultLeSubeventCode =
+            lastDrainStats_.lastLeSubeventCode;
+        lastDrainStats_.firstRejectedResultConnHandle =
+            parsedDirectResult.header.connHandle;
+        lastDrainStats_.firstRejectedResultConfigId =
+            parsedDirectResult.header.configId;
+        lastDrainStats_.firstRejectedResultProcedureCounter =
+            parsedDirectResult.header.procedureCounter;
+        lastDrainStats_.firstRejectedResultSteps =
+            static_cast<uint8_t>(parsedDirectResult.header.numStepsReported &
+                                 0xFFU);
+        lastDrainStats_.firstRejectedResultProcedureDoneStatus =
+            parsedDirectResult.header.procedureDoneStatus;
+        lastDrainStats_.firstRejectedResultSubeventDoneStatus =
+            parsedDirectResult.header.subeventDoneStatus;
+      }
+    }
+  };
 
   if (response != nullptr && responseLen > 0U) {
     // Direct VPR HCI may return command-complete or CS test packets that are
     // valid for the direct caller but intentionally invisible to the public host.
-    (void)(consumeDirectAuxiliaryEvent(response, responseLen) ||
-           host_.consumeControllerPacket(response, responseLen));
+    consumeDirectPacket(response, responseLen);
+    if (connectedCsResultArrived()) {
+      return true;
+    }
   }
 
   uint8_t packet[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
   size_t packetLen = 0U;
   while (directHost->popPendingH4Event(packet, sizeof(packet), &packetLen)) {
-    (void)(consumeDirectAuxiliaryEvent(packet, packetLen) ||
-           host_.consumeControllerPacket(packet, packetLen));
+    ++lastDrainStats_.pendingPacketsPopped;
+    consumeDirectPacket(packet, packetLen);
+    if (connectedCsResultArrived()) {
+      return true;
+    }
   }
 
-  uint8_t pollCount = 0U;
+  uint16_t pollCount = 0U;
   while (transport_.available() > 0 && pollCount < 8U) {
     packetLen = 0U;
     if (!directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U)) {
+      ++lastDrainStats_.readFailures;
       return false;
     }
-    (void)(consumeDirectAuxiliaryEvent(packet, packetLen) ||
-           host_.consumeControllerPacket(packet, packetLen));
+    consumeDirectPacket(packet, packetLen);
     ++pollCount;
+    if (connectedCsResultArrived()) {
+      return true;
+    }
   }
   /* Clear vprFlags=PENDING in shared memory so the VPR main loop can
    * produce background results (e.g. CS test stream). pullResponse() is
    * called by poll() which is called by available(). */
   (void)transport_.available();
-  if (!waitForBackgroundResults) {
-    return true;
+  if (!waitForBackgroundResults || !requireConnectedCsResult) {
+    return !requireConnectedCsResult || connectedCsResultArrived();
   }
   /* Busy-wait for the VPR to produce background results. The VPR runs
-   * at ~1kHz heartbeat; poll every 2ms for up to 100ms to catch results. */
+   * at ~1kHz heartbeat; poll every 2ms. Measurement-execute has a stricter
+   * counter target because the direct command completion only means the VPR
+   * armed the result producer, not that local/peer packets were consumed. */
   const uint32_t waitStart = millis();
-  while ((millis() - waitStart) < 100UL) {
+  const uint32_t waitLimitMs = requireConnectedCsResult ? 350UL : 100UL;
+  while ((millis() - waitStart) < waitLimitMs) {
     (void)transport_.available();  /* poll -> pullResponse -> clear PENDING */
-    while (transport_.available() > 0 && pollCount < 64U) {
+    while (transport_.available() > 0 && pollCount < 128U) {
       packetLen = 0U;
       if (!directHost->readNextH4Event(packet, sizeof(packet), &packetLen, 20U)) {
+        ++lastDrainStats_.readFailures;
         return false;
       }
-      (void)(consumeDirectAuxiliaryEvent(packet, packetLen) ||
-             host_.consumeControllerPacket(packet, packetLen));
+      consumeDirectPacket(packet, packetLen);
       ++pollCount;
+      if (connectedCsResultArrived()) {
+        return true;
+      }
+    }
+    if (connectedCsResultArrived()) {
+      return true;
     }
     delay(2);
   }
   (void)transport_.available();
-  return true;
+  return !requireConnectedCsResult || connectedCsResultArrived();
 }
 
 void BleCsControllerVprHost::syncVprState() {
@@ -8021,7 +8183,11 @@ void BleCsControllerVprHost::syncVprState() {
   nextState.linkProcedureIntervalSelector =
       static_cast<uint8_t>((packedLinkState >> 12U) & 0x0FU);
   nextState.linkStoredConfigCount = static_cast<uint8_t>(packedAuxState & 0x0FU);
+  nextState.linkResultPublishReason =
+      static_cast<uint8_t>((packedAuxState >> 4U) & 0x0FU);
   nextState.linkPeerGapTicks = static_cast<uint8_t>((packedAuxState >> 8U) & 0x0FU);
+  nextState.linkResultPendingStage =
+      static_cast<uint8_t>((packedAuxState >> 12U) & 0x0FU);
   nextState.linkLastEvictedConfigId = static_cast<uint8_t>((packedAuxState >> 16U) & 0xFFU);
   nextState.linkAuthority2ConfigId = static_cast<uint8_t>((packedAuxState >> 24U) & 0xFFU);
   nextState.linkSessionOpen = (packedLinkState & (1UL << 16U)) != 0U;
@@ -8058,6 +8224,10 @@ void BleCsControllerVprHost::syncVprState() {
   nextState.linkSlot1ProcedureParamsApplied = (packedConfigState & 0x200U) != 0U;
   nextState.linkPreviousSlotProcedureParamsApplied = (packedConfigState & 0x400U) != 0U;
   nextState.linkSelectedConfigProcedureParamsApplied = (packedConfigState & 0x800U) != 0U;
+  nextState.linkMeasurementExecuteResultActive =
+      (packedConfigState & (1UL << 28U)) != 0U;
+  nextState.linkResultPublishedStage =
+      static_cast<uint8_t>((packedConfigState >> 29U) & 0x07U);
   nextState.linkProcedureCounter = nextState.scheduler.procedureCounter;
   vprState_ = nextState;
 
@@ -9093,6 +9263,77 @@ bool BleChannelSoundingRadio::measureConnectedWindowChannel(
   return result.measured && result.completedBeforeDeadline;
 }
 
+struct BleCsTimedMode2ResultSearch {
+  uint32_t token = 0U;
+  uint8_t channel = 0xFFU;
+  bool peerSide = false;
+  bool found = false;
+};
+
+static BleCsIqSample bleCsExpectedTimedMode2ResultSample(uint32_t token,
+                                                        uint8_t channel,
+                                                        bool peerSide) {
+  const uint16_t seed =
+      static_cast<uint16_t>((token ^ (token >> 16U) ^
+                             (static_cast<uint32_t>(channel) << 5U)) &
+                            0x03FFU);
+  BleCsIqSample sample{};
+  sample.i = static_cast<int16_t>(256 + (seed & 0x7FU));
+  const int16_t qMag = static_cast<int16_t>(128 + ((seed >> 7U) & 0x7FU));
+  sample.q = peerSide ? static_cast<int16_t>(-qMag) : qMag;
+  return sample;
+}
+
+static bool bleCsTimedMode2ResultSearchCallback(const BleCsSubeventStep* step,
+                                                void* userData) {
+  BleCsTimedMode2ResultSearch* context =
+      static_cast<BleCsTimedMode2ResultSearch*>(userData);
+  if (context == nullptr || step == nullptr) {
+    return false;
+  }
+  if (context->found || step->mode != kBleCsMainMode2 ||
+      step->channel != context->channel) {
+    return true;
+  }
+
+  BleCsStepMode2Data mode2{};
+  if (!BleChannelSoundingRadio::parseMode2StepData(step, &mode2) ||
+      mode2.toneCount == 0U) {
+    return true;
+  }
+
+  BleCsStepToneInfo tone{};
+  if (!BleChannelSoundingRadio::parseMode2ToneInfo(step, 0U, &tone) ||
+      tone.extensionIndicator != kBleCsToneExtensionNone) {
+    return true;
+  }
+
+  const BleCsIqSample expected = bleCsExpectedTimedMode2ResultSample(
+      context->token, context->channel, context->peerSide);
+  context->found = tone.pct.i == expected.i && tone.pct.q == expected.q;
+  return true;
+}
+
+static bool bleCsSubeventResultContainsTimedMode2Observation(
+    const BleCsSubeventResult& result,
+    uint32_t token,
+    uint8_t channel,
+    bool peerSide) {
+  if (token == 0U || !validDataChannel(channel) ||
+      result.stepData == nullptr || result.stepDataLen == 0U) {
+    return false;
+  }
+
+  BleCsTimedMode2ResultSearch context{};
+  context.token = token;
+  context.channel = channel;
+  context.peerSide = peerSide;
+  BleChannelSoundingRadio::parseSubeventStepData(
+      result.stepData, result.stepDataLen,
+      bleCsTimedMode2ResultSearchCallback, &context);
+  return context.found;
+}
+
 bool BleCsConnectedMode2SweepRunner::runInitiator(
     BleRadio& ble,
     BleChannelSoundingRadio& radio,
@@ -9159,11 +9400,74 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   result.sweepChannelCount = effectiveChannelCount;
 
   bool workExecutionOk = true;
+  uint32_t workHostLocalResultPacketDelta = 0U;
+  uint32_t workHostPeerResultPacketDelta = 0U;
+  uint32_t workHostControllerEventPacketDelta = 0U;
+  uint32_t workHostPeerResultMarkerDelta = 0U;
   if (host != nullptr && workItemApplied) {
     result.workExecuteAttempted = true;
     BleCsVprMeasurementExecutionResult execution{};
-    if (host->directExecuteMeasurementWorkForTest(&execution,
-                                                  &config.radioConfig)) {
+    const BleCsControllerHostState workHostStateBefore = host->hostState();
+    const bool workExecuteDirectOk =
+        host->directExecuteMeasurementWorkForTest(&execution,
+                                                  &config.radioConfig);
+    const BleCsControllerVprDrainStats& workDrainStats = host->lastDrainStats();
+    result.workDirectDrainPackets = workDrainStats.packetsRead;
+    result.workDirectDrainConsumed = workDrainStats.packetsConsumed;
+    result.workDirectDrainRejected = workDrainStats.packetsRejected;
+    result.workDirectDrainReadFailures = workDrainStats.readFailures;
+    result.workDirectDrainLastLen = workDrainStats.lastPacketLen;
+    result.workDirectDrainFirstRejectedLen =
+        workDrainStats.firstRejectedPacketLen;
+    result.workDirectDrainFirstRejectedConnHandle =
+        workDrainStats.firstRejectedConnHandle;
+    result.workDirectDrainFirstRejectedProcedureCounter =
+        workDrainStats.firstRejectedProcedureCounter;
+    result.workDirectDrainFirstRejectedResultLen =
+        workDrainStats.firstRejectedResultPacketLen;
+    result.workDirectDrainFirstRejectedResultConnHandle =
+        workDrainStats.firstRejectedResultConnHandle;
+    result.workDirectDrainFirstRejectedResultProcedureCounter =
+        workDrainStats.firstRejectedResultProcedureCounter;
+    result.workDirectDrainLastEvent = workDrainStats.lastEventCode;
+    result.workDirectDrainLastSubevent = workDrainStats.lastLeSubeventCode;
+    result.workDirectDrainLastVendor = workDrainStats.lastVendorSubeventCode;
+    result.workDirectDrainFirstRejectedEvent =
+        workDrainStats.firstRejectedEventCode;
+    result.workDirectDrainFirstRejectedSubevent =
+        workDrainStats.firstRejectedLeSubeventCode;
+    result.workDirectDrainFirstRejectedConfigId =
+        workDrainStats.firstRejectedConfigId;
+    result.workDirectDrainFirstRejectedSteps =
+        workDrainStats.firstRejectedSteps;
+    result.workDirectDrainFirstRejectedProcedureDone =
+        workDrainStats.firstRejectedProcedureDoneStatus;
+    result.workDirectDrainFirstRejectedSubeventDone =
+        workDrainStats.firstRejectedSubeventDoneStatus;
+    result.workDirectDrainFirstRejectedResultSubevent =
+        workDrainStats.firstRejectedResultLeSubeventCode;
+    result.workDirectDrainFirstRejectedResultConfigId =
+        workDrainStats.firstRejectedResultConfigId;
+    result.workDirectDrainFirstRejectedResultSteps =
+        workDrainStats.firstRejectedResultSteps;
+    result.workDirectDrainFirstRejectedResultProcedureDone =
+        workDrainStats.firstRejectedResultProcedureDoneStatus;
+    result.workDirectDrainFirstRejectedResultSubeventDone =
+        workDrainStats.firstRejectedResultSubeventDoneStatus;
+    const BleCsControllerHostState workHostStateAfter = host->hostState();
+    workHostLocalResultPacketDelta =
+        workHostStateAfter.localResultPackets -
+        workHostStateBefore.localResultPackets;
+    workHostPeerResultPacketDelta =
+        workHostStateAfter.peerResultPackets -
+        workHostStateBefore.peerResultPackets;
+    workHostControllerEventPacketDelta =
+        workHostStateAfter.controllerEventPackets -
+        workHostStateBefore.controllerEventPackets;
+    workHostPeerResultMarkerDelta =
+        workHostStateAfter.controllerPeerResultMarkers -
+        workHostStateBefore.controllerPeerResultMarkers;
+    if (workExecuteDirectOk) {
       result.workExecutedChannelCount = execution.executedChannelCount;
       result.workExecutionToken = execution.executionToken;
       bool executionChannelsMatchWork =
@@ -9633,26 +9937,104 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
   bool hostOk = true;
   if (host != nullptr) {
     const BleCsControllerHostState hostStateBefore = host->hostState();
-    hostOk =
-        host->consumeConnectedMode2ControllerEventsFromMeasurements(
-            measurements, effectiveChannelCount, effectiveConfigId, localStepData,
-            localMaxStepDataLen, peerStepData, peerMaxStepDataLen,
-            config.numAntennaPaths) &&
-        host->estimateValid();
+    if (workItemApplied) {
+      (void)host->drainPendingConnectedControllerEvents();
+    } else {
+      (void)host->drainPendingControllerEvents();
+    }
+    const auto completedResultMatchesWork = [&]() -> bool {
+      uint32_t mismatchMask = 0U;
+      result.workCompletedResultEstimateValid = host->estimateValid();
+      const BleCsSubeventResult& localResult = host->completedLocalResult();
+      const BleCsSubeventResult& peerResult = host->completedPeerResult();
+      result.workCompletedResultConfigId = localResult.header.configId;
+      result.workCompletedResultProcedureCounter =
+          localResult.header.procedureCounter;
+      result.workCompletedResultLocalSteps =
+          localResult.header.numStepsReported;
+      result.workCompletedResultPeerSteps =
+          peerResult.header.numStepsReported;
+      if (!workItemApplied) {
+        result.workCompletedResultMismatchMask = 0xFFFFFFFFUL;
+        return false;
+      }
+      if (!localResult.isComplete) {
+        mismatchMask |= (1UL << 0U);
+      }
+      if (!peerResult.isComplete) {
+        mismatchMask |= (1UL << 1U);
+      }
+      if (localResult.header.connHandle != work->connHandle) {
+        mismatchMask |= (1UL << 2U);
+      }
+      if (peerResult.header.connHandle != work->connHandle) {
+        mismatchMask |= (1UL << 3U);
+      }
+      if (localResult.header.configId != work->configId) {
+        mismatchMask |= (1UL << 4U);
+      }
+      if (peerResult.header.configId != work->configId) {
+        mismatchMask |= (1UL << 5U);
+      }
+      if (localResult.header.procedureCounter != work->procedureCounter) {
+        mismatchMask |= (1UL << 6U);
+      }
+      if (peerResult.header.procedureCounter != work->procedureCounter) {
+        mismatchMask |= (1UL << 7U);
+      }
+      if (localResult.header.numStepsReported != work->subeventStepCount) {
+        mismatchMask |= (1UL << 8U);
+      }
+      if (peerResult.header.numStepsReported != work->subeventStepCount) {
+        mismatchMask |= (1UL << 9U);
+      }
+      if (localResult.stepData == nullptr || localResult.stepDataLen == 0U) {
+        mismatchMask |= (1UL << 10U);
+      }
+      if (peerResult.stepData == nullptr || peerResult.stepDataLen == 0U) {
+        mismatchMask |= (1UL << 11U);
+      }
+      if (!result.workCompletedResultEstimateValid) {
+        mismatchMask |= (1UL << 12U);
+      }
+      result.workCompletedResultMismatchMask = mismatchMask;
+      return mismatchMask == 0U;
+    };
+    const bool completedWorkResultMatches = completedResultMatchesWork();
+    const bool workHostResultIngress =
+        workHostLocalResultPacketDelta > 0U &&
+        workHostPeerResultPacketDelta > 0U &&
+        workHostPeerResultMarkerDelta > 0U;
+    if ((workHostResultIngress || completedWorkResultMatches) &&
+        host->estimateValid()) {
+      hostOk = true;
+    } else {
+      hostOk =
+          host->consumeConnectedMode2ControllerEventsFromMeasurements(
+              measurements, effectiveChannelCount, effectiveConfigId, localStepData,
+              localMaxStepDataLen, peerStepData, peerMaxStepDataLen,
+              config.numAntennaPaths) &&
+          host->estimateValid();
+    }
     const BleCsControllerHostState hostStateAfter = host->hostState();
     result.hostLocalResultPacketDelta =
+        workHostLocalResultPacketDelta +
         hostStateAfter.localResultPackets - hostStateBefore.localResultPackets;
     result.hostPeerResultPacketDelta =
+        workHostPeerResultPacketDelta +
         hostStateAfter.peerResultPackets - hostStateBefore.peerResultPackets;
     result.hostControllerEventPacketDelta =
+        workHostControllerEventPacketDelta +
         hostStateAfter.controllerEventPackets - hostStateBefore.controllerEventPackets;
     result.hostPeerResultMarkerDelta =
+        workHostPeerResultMarkerDelta +
         hostStateAfter.controllerPeerResultMarkers -
         hostStateBefore.controllerPeerResultMarkers;
     result.hostControllerResultIngress =
-        result.hostLocalResultPacketDelta > 0U &&
-        result.hostPeerResultPacketDelta > 0U &&
-        result.hostPeerResultMarkerDelta > 0U;
+        completedWorkResultMatches ||
+        (result.hostLocalResultPacketDelta > 0U &&
+         result.hostPeerResultPacketDelta > 0U &&
+         result.hostPeerResultMarkerDelta > 0U);
     hostOk = hostOk && result.hostControllerResultIngress;
     result.hostEstimateValid = hostOk;
     result.hostConfigId =
@@ -9663,6 +10045,20 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
         hostOk ? host->completedLocalResult().header.numStepsReported : 0U;
     result.hostPeerSteps =
         hostOk ? host->completedPeerResult().header.numStepsReported : 0U;
+    if (result.workRfTimedMode2Ok) {
+      result.workResultTimedMode2Channel = result.workRfTimedMode2Channel;
+      result.workResultTimedMode2LocalOk =
+          bleCsSubeventResultContainsTimedMode2Observation(
+              host->completedLocalResult(), result.workRfTimedMode2Token,
+              result.workRfTimedMode2Channel, false);
+      result.workResultTimedMode2PeerOk =
+          bleCsSubeventResultContainsTimedMode2Observation(
+              host->completedPeerResult(), result.workRfTimedMode2Token,
+              result.workRfTimedMode2Channel, true);
+      result.workResultTimedMode2Ok =
+          result.workResultTimedMode2LocalOk &&
+          result.workResultTimedMode2PeerOk;
+    }
   } else {
     result.hostEstimateValid = false;
   }
@@ -9671,6 +10067,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
               workExecutionOk &&
               (host == nullptr || result.workToneSnapshotOk) &&
               (host == nullptr || result.workToneTimedMode2Ok) &&
+              (host == nullptr || result.workResultTimedMode2Ok) &&
               (host == nullptr || hostOk);
   *outResult = result;
   return result.ok;

@@ -1543,6 +1543,10 @@ struct BleCsConnectedMode2SweepResult {
   bool workRfTimedMode2Ok = false;
   bool workToneSnapshotOk = false;
   bool workToneTimedMode2Ok = false;
+  bool workResultTimedMode2Ok = false;
+  bool workResultTimedMode2LocalOk = false;
+  bool workResultTimedMode2PeerOk = false;
+  bool workCompletedResultEstimateValid = false;
   bool hostControllerResultIngress = false;
   uint8_t attempts = 0U;
   uint8_t validChannels = 0U;
@@ -1612,12 +1616,39 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t workToneTimedMode2PacketType = 0U;
   uint8_t workToneTimedMode2PacketChannel = 0xFFU;
   uint8_t workToneTimedMode2EventMask = 0U;
+  uint8_t workResultTimedMode2Channel = 0xFFU;
+  uint32_t workCompletedResultMismatchMask = 0U;
   uint8_t workRfPhy = 0U;
   int8_t workRfTxPowerDelta = 0;
   uint32_t hostLocalResultPacketDelta = 0U;
   uint32_t hostPeerResultPacketDelta = 0U;
   uint32_t hostControllerEventPacketDelta = 0U;
   uint32_t hostPeerResultMarkerDelta = 0U;
+  uint16_t workDirectDrainPackets = 0U;
+  uint16_t workDirectDrainConsumed = 0U;
+  uint16_t workDirectDrainRejected = 0U;
+  uint16_t workDirectDrainReadFailures = 0U;
+  uint16_t workDirectDrainLastLen = 0U;
+  uint16_t workDirectDrainFirstRejectedLen = 0U;
+  uint16_t workDirectDrainFirstRejectedConnHandle = 0U;
+  uint16_t workDirectDrainFirstRejectedProcedureCounter = 0U;
+  uint16_t workDirectDrainFirstRejectedResultLen = 0U;
+  uint16_t workDirectDrainFirstRejectedResultConnHandle = 0U;
+  uint16_t workDirectDrainFirstRejectedResultProcedureCounter = 0U;
+  uint8_t workDirectDrainLastEvent = 0U;
+  uint8_t workDirectDrainLastSubevent = 0U;
+  uint8_t workDirectDrainLastVendor = 0U;
+  uint8_t workDirectDrainFirstRejectedEvent = 0U;
+  uint8_t workDirectDrainFirstRejectedSubevent = 0U;
+  uint8_t workDirectDrainFirstRejectedConfigId = 0U;
+  uint8_t workDirectDrainFirstRejectedSteps = 0U;
+  uint8_t workDirectDrainFirstRejectedProcedureDone = 0U;
+  uint8_t workDirectDrainFirstRejectedSubeventDone = 0U;
+  uint8_t workDirectDrainFirstRejectedResultSubevent = 0U;
+  uint8_t workDirectDrainFirstRejectedResultConfigId = 0U;
+  uint8_t workDirectDrainFirstRejectedResultSteps = 0U;
+  uint8_t workDirectDrainFirstRejectedResultProcedureDone = 0U;
+  uint8_t workDirectDrainFirstRejectedResultSubeventDone = 0U;
   uint8_t workConfigId = 0U;
   uint8_t workSubeventIndex = 0U;
   uint8_t workSubeventCount = 0U;
@@ -1626,12 +1657,45 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t workStepChannelCount = 0U;
   uint8_t workStepChannels[6] = {0};
   uint16_t workProcedureCounter = 0U;
+  uint8_t workCompletedResultConfigId = 0U;
+  uint16_t workCompletedResultProcedureCounter = 0U;
+  uint16_t workCompletedResultLocalSteps = 0U;
+  uint16_t workCompletedResultPeerSteps = 0U;
   uint8_t hostConfigId = 0U;
   uint16_t hostProcedureCounter = 0U;
   uint16_t hostLocalSteps = 0U;
   uint16_t hostPeerSteps = 0U;
   BleCsEstimate rawEstimate{};
   BleCsConnectedMode2ChannelResult lastChannel{};
+};
+
+struct BleCsControllerVprDrainStats {
+  uint16_t packetsRead = 0U;
+  uint16_t packetsConsumed = 0U;
+  uint16_t packetsRejected = 0U;
+  uint16_t readFailures = 0U;
+  uint16_t pendingPacketsPopped = 0U;
+  uint16_t lastPacketLen = 0U;
+  uint16_t firstRejectedPacketLen = 0U;
+  uint16_t firstRejectedConnHandle = 0U;
+  uint16_t firstRejectedProcedureCounter = 0U;
+  uint16_t firstRejectedResultPacketLen = 0U;
+  uint16_t firstRejectedResultConnHandle = 0U;
+  uint16_t firstRejectedResultProcedureCounter = 0U;
+  uint8_t firstRejectedConfigId = 0U;
+  uint8_t firstRejectedSteps = 0U;
+  uint8_t firstRejectedResultConfigId = 0U;
+  uint8_t firstRejectedResultSteps = 0U;
+  uint8_t lastEventCode = 0U;
+  uint8_t lastLeSubeventCode = 0U;
+  uint8_t lastVendorSubeventCode = 0U;
+  uint8_t firstRejectedEventCode = 0U;
+  uint8_t firstRejectedLeSubeventCode = 0U;
+  uint8_t firstRejectedProcedureDoneStatus = 0U;
+  uint8_t firstRejectedSubeventDoneStatus = 0U;
+  uint8_t firstRejectedResultLeSubeventCode = 0U;
+  uint8_t firstRejectedResultProcedureDoneStatus = 0U;
+  uint8_t firstRejectedResultSubeventDoneStatus = 0U;
 };
 
 using BleCsConnectedMode2ChannelCallback =
@@ -2140,6 +2204,9 @@ struct BleCsControllerVprHostState {
   uint8_t linkProcedureIntervalSelector = 0U;
   uint8_t linkStoredConfigCount = 0U;
   uint8_t linkPeerGapTicks = 0U;
+  uint8_t linkResultPublishReason = 0U;
+  uint8_t linkResultPendingStage = 0U;
+  uint8_t linkResultPublishedStage = 0U;
   uint8_t linkLastEvictedConfigId = 0U;
   uint8_t linkConfigId = 0U;
   uint8_t linkSlot0ConfigId = 0U;
@@ -2155,6 +2222,7 @@ struct BleCsControllerVprHostState {
   bool linkSecurityEnabled = false;
   bool linkProcedureParamsApplied = false;
   bool linkProcedureEnabled = false;
+  bool linkMeasurementExecuteResultActive = false;
   bool linkSlot0InUse = false;
   bool linkSlot1InUse = false;
   bool linkPreviousSlotInUse = false;
@@ -2531,6 +2599,7 @@ class BleCsControllerVprHost {
    * stream path feeds the connected-procedure session. Returns false if the
    * host is not begun. */
   bool drainPendingControllerEvents();
+  bool drainPendingConnectedControllerEvents();
   bool consumeCompletedResult(BleCsControllerResultSource source,
                               const BleCsSubeventResult& result);
   bool consumeMode2ResultsFromMeasurements(
@@ -2593,6 +2662,7 @@ class BleCsControllerVprHost {
   const BleCsControllerHostState& hostState() const;
   const BleCsControllerSessionState& sessionState() const;
   const BleCsControllerWorkflowState& workflowState() const;
+  const BleCsControllerVprDrainStats& lastDrainStats() const;
   const BleCsSubeventResult& localResult() const;
   const BleCsSubeventResult& peerResult() const;
   const BleCsSubeventResult& completedLocalResult() const;
@@ -2638,11 +2708,13 @@ class BleCsControllerVprHost {
   bool drainDirectControllerEvents(VprControllerServiceHost* directHost,
                                    const uint8_t* response,
                                    size_t responseLen,
-                                   bool waitForBackgroundResults);
+                                   bool waitForBackgroundResults,
+                                   bool requireConnectedCsResult);
   void syncVprState();
 
   BleCsControllerVprHostConfig config_;
   BleCsControllerVprHostState vprState_;
+  BleCsControllerVprDrainStats lastDrainStats_;
   VprSharedTransportStream transport_;
   BleCsControllerStreamHost host_;
   BleCsFaeTable lastRemoteFaeTable_;

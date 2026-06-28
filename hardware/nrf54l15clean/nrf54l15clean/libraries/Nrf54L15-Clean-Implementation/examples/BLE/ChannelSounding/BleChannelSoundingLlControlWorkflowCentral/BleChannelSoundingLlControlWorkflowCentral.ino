@@ -525,6 +525,7 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
           &sweepResult,
           printConnectedPhysicalChannelResult,
           nullptr);
+  const BleCsControllerVprHostState& vprState = g_csHost.vprState();
   g_connectedPhysicalAttemptCount = sweepResult.attempts;
   g_connectedPhysicalValidChannels = sweepResult.validChannels;
   Serial.print("cs_connected_sweep=");
@@ -714,6 +715,84 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workToneTimedMode2PacketChannel);
   Serial.print(" work_tone_timed_evt=0x");
   Serial.print(sweepResult.workToneTimedMode2EventMask, HEX);
+  Serial.print(" work_result_timed=");
+  Serial.print(sweepResult.workResultTimedMode2Ok ? 1 : 0);
+  Serial.print(" work_result_timed_local=");
+  Serial.print(sweepResult.workResultTimedMode2LocalOk ? 1 : 0);
+  Serial.print(" work_result_timed_peer=");
+  Serial.print(sweepResult.workResultTimedMode2PeerOk ? 1 : 0);
+  Serial.print(" work_result_timed_ch=");
+  Serial.print(sweepResult.workResultTimedMode2Channel);
+  Serial.print(" work_comp_est=");
+  Serial.print(sweepResult.workCompletedResultEstimateValid ? 1 : 0);
+  Serial.print(" work_comp_mask=0x");
+  Serial.print(sweepResult.workCompletedResultMismatchMask, HEX);
+  Serial.print(" work_comp_cfg=");
+  Serial.print(sweepResult.workCompletedResultConfigId);
+  Serial.print(" work_comp_proc=");
+  Serial.print(sweepResult.workCompletedResultProcedureCounter);
+  Serial.print(" work_comp_steps=");
+  Serial.print(sweepResult.workCompletedResultLocalSteps);
+  Serial.print("/");
+  Serial.print(sweepResult.workCompletedResultPeerSteps);
+  Serial.print(" work_drain_pkts=");
+  Serial.print(sweepResult.workDirectDrainPackets);
+  Serial.print(" work_drain_cons=");
+  Serial.print(sweepResult.workDirectDrainConsumed);
+  Serial.print(" work_drain_rej=");
+  Serial.print(sweepResult.workDirectDrainRejected);
+  Serial.print(" work_drain_readfail=");
+  Serial.print(sweepResult.workDirectDrainReadFailures);
+  Serial.print(" work_drain_len=");
+  Serial.print(sweepResult.workDirectDrainLastLen);
+  Serial.print(" work_drain_evt=0x");
+  Serial.print(sweepResult.workDirectDrainLastEvent, HEX);
+  Serial.print(" work_drain_sub=0x");
+  Serial.print(sweepResult.workDirectDrainLastSubevent, HEX);
+  Serial.print(" work_drain_vendor=0x");
+  Serial.print(sweepResult.workDirectDrainLastVendor, HEX);
+  Serial.print(" work_drain_rej_len=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedLen);
+  Serial.print(" work_drain_rej_evt=0x");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedEvent, HEX);
+  Serial.print(" work_drain_rej_sub=0x");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedSubevent, HEX);
+  Serial.print(" work_drain_rej_conn=0x");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedConnHandle, HEX);
+  Serial.print(" work_drain_rej_cfg=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedConfigId);
+  Serial.print(" work_drain_rej_proc=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedProcedureCounter);
+  Serial.print(" work_drain_rej_steps=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedSteps);
+  Serial.print(" work_drain_rej_done=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedProcedureDone);
+  Serial.print("/");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedSubeventDone);
+  Serial.print(" work_drain_res_rej_len=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultLen);
+  Serial.print(" work_drain_res_rej_sub=0x");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultSubevent, HEX);
+  Serial.print(" work_drain_res_rej_conn=0x");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultConnHandle, HEX);
+  Serial.print(" work_drain_res_rej_cfg=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultConfigId);
+  Serial.print(" work_drain_res_rej_proc=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultProcedureCounter);
+  Serial.print(" work_drain_res_rej_steps=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultSteps);
+  Serial.print(" work_drain_res_rej_done=");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultProcedureDone);
+  Serial.print("/");
+  Serial.print(sweepResult.workDirectDrainFirstRejectedResultSubeventDone);
+  Serial.print(" vpr_result_reason=");
+  Serial.print(vprState.linkResultPublishReason);
+  Serial.print(" vpr_result_pending=");
+  Serial.print(vprState.linkResultPendingStage);
+  Serial.print(" vpr_result_pub_stage=");
+  Serial.print(vprState.linkResultPublishedStage);
+  Serial.print(" vpr_result_active=");
+  Serial.print(vprState.linkMeasurementExecuteResultActive ? 1 : 0);
   Serial.print(" work_rf_phy=");
   Serial.print(sweepResult.workRfPhy);
   Serial.print(" work_rf_tx=");
@@ -1027,7 +1106,10 @@ void loop() {
     }
     updateWorkflowMask();
 
-    if (!g_passPrinted && g_bridgeTracker.complete()) {
+    if (!g_passPrinted &&
+        g_bridgeTracker.workflowComplete() &&
+        g_bridgeTracker.txComplete() &&
+        g_bridgeTracker.rxComplete()) {
       g_passPrinted = true;
       BleCsVprSchedulerState scheduler{};
       const bool schedulerOk =
@@ -1038,6 +1120,8 @@ void loop() {
           g_csHost.directReadMeasurementWorkItemForTest(&work) &&
           work.valid && work.status == 0U && work.ready;
       (void)runConnectedPhysicalSweep(workOk ? &work : nullptr);
+      BleCsLlControlBridgePollResult trackerRefresh{};
+      g_bridgeTracker.update(g_csHost, trackerRefresh);
       Serial.print("cs_ll_workflow_bridge=PASS wf=0x");
       Serial.print(g_bridgeTracker.workflowMask, HEX);
       Serial.print(" tx=0x");
