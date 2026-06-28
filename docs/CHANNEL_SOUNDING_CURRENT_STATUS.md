@@ -13,15 +13,16 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-████████████████████████░░░░░░░░  72%
+██████████████████████████░░░░░░  78%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 The older `87%` tracker is too optimistic for "full working CS". It mostly
 counts support infrastructure. The current stricter estimate is approximately
-72% complete after the VPR measurement execution refactor and first
-controller-owned auto-execution pass.
+78% complete after the VPR measurement execution refactor, the focused
+controller-owned auto-execution proof, the VPR/RADIO connected timing ownership
+proof, and the connected packet/timed Mode 2 ownership handoff.
 
 ## Current Verified Baseline
 
@@ -30,7 +31,7 @@ Repository state used for this status:
 ```text
 base commit: 6007ac20 cs: refactor VPR measurement execution worker
 branch: main
-worktree: Slice 2 VPR controller-owned auto measurement execution applied
+worktree: Slice 3B connected packet/timed ownership proof applied
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -68,19 +69,26 @@ Observed result:
 ```text
 cs_ll_workflow_bridge=PASS
 vpr_pdu=3
-work_result_timed_all=1
-work_result_timed_matches=6/6/6
-work_timed_obs=6:2,3,4,5,6,7
+work=1 work_flags=0xC1 work_steps=6/6
 cs_connected_sweep=PASS
+work_exec_mismatch=0x0
+work_rf_pkt=1 work_rf_buf=1 work_rf_timed=1 work_rf_timing=1
+work_rf_pkt_cte=0x4A
+work_rf_pkt_ctrl_us=2400 work_rf_pkt_listen_us=12000
+work_rf_timing=1
+work_rf_timing_flags=0x2F
 cs_ll_physical_followup=PASS
-physical reflector replies=25
+physical follow-up valid_channels=22
 ```
 
 This proves the current implementation can move real-shaped CS LL-control PDUs
-over a real BLE link, select work from VPR state, execute real RF primitives,
-capture nonzero DFE data, and feed real Mode 2 measurements into the host result
-path. It does not yet prove full Zephyr parity because final ownership is still
-split between VPR/controller state and CPUAPP diagnostic orchestration.
+over a real BLE link, select work from VPR state, prove coherent VPR/RADIO
+timing state for the scheduled work item, execute VPR-owned packet setup and
+timed Mode 2 primitives for the connected work item, execute real RF primitives
+in the physical follow-up path, capture nonzero DFE data, and feed real Mode 2
+measurements into the host result path. It does not yet prove full Zephyr parity
+because final native controller result publication and production scheduler
+ownership still need to be completed.
 
 ## What Is Done
 
@@ -93,8 +101,8 @@ split between VPR/controller state and CPUAPP diagnostic orchestration.
 - VPR-selected initiator PDU/work-item readback.
 - Real raw RF Mode 2 measurements outside the final connected scheduler.
 - Host result ingestion from real measurements.
-- Connected diagnostic flow showing LL-control negotiation plus real RF
-  follow-up can work in one two-board run.
+- Connected diagnostic flow showing LL-control negotiation plus VPR/RADIO-owned
+  packet/timed work and real RF follow-up can work in one two-board run.
 
 ## Main Gap
 
@@ -137,11 +145,12 @@ even though many lower-level parts are already hardware-verified.
 
 ## Required Slices
 
-Estimated remaining work: 8 focused slices.
+Estimated remaining work: 5 full slices after the Slice 3B VPR/RADIO packet and
+timed-execution ownership handoff.
 
-Realistic session count: 8 to 13 sessions. The risk is concentrated in slices
-2-5 because they touch VPR firmware size, RADIO ownership, connection-event
-timing, and BLE coexistence.
+Realistic session count: 6 to 9 sessions. The risk is concentrated in slices
+4-5 because they touch native VPR result publication, production scheduler
+ownership, connection-event timing, and BLE coexistence.
 
 ### Slice 1: Refactor VPR Measurement Execute - Done
 
@@ -193,22 +202,29 @@ Implemented in this slice:
 - The measurement-execute response flags now use bit `0x10` to indicate the
   response is a controller-owned snapshot.
 
-Current caveat:
-
-- `scripts/test_cs_ll_workflow_bridge.sh` still uses the existing bridge
-  diagnostic sequence, which sends `CS_ABORT` before the later connected sweep.
-  That regression proves compatibility and RF execution still pass, but the next
-  test improvement should assert the new `0x80`/`0x10` flags before aborting.
-
 Verification:
 
 - `scripts/test_cs_ll_workflow_bridge.sh` passes with two boards after this
   change.
+- `scripts/test_cs_vpr_auto_measurement.sh` passes with two boards. It builds a
+  focused proof-only central sketch that stops immediately after peer
+  `CS_START`, reads the VPR measurement work item, and confirms:
+  - work-read flag `0x80` is set (`work_auto=1`)
+  - measurement execute response flag `0x10` is set (`exec_snap=1`)
+  - a second execute readback returns the same execute count/token
+    (`stable=1`)
+  - no host-side diagnostic execute reruns the RF work (`no_host_execute=1`)
 - `git diff --check` passes.
-- Remaining verification: add or run a focused no-host-execute workflow that
-  waits after `CS_START`, reads measurement work, and proves the `0x80` auto flag
-  plus `0x10` execution-snapshot flag without calling the diagnostic execute
-  hook first.
+
+Observed proof result:
+
+```text
+cs_vpr_auto_measurement=PASS
+work_flags=0xC9 work_auto=1 work_auto_count=1 work_auto_due=1
+exec_flags=0x1F exec_snap=1 exec_count=1
+exec2_flags=0x1F exec2_snap=1 exec2_count=1
+stable=1 no_host_execute=1
+```
 
 ### Slice 3: Move Connected Timing Ownership Into VPR/RADIO
 
@@ -221,9 +237,67 @@ Current issue:
 - This is useful for diagnostics, but it is not Zephyr-like controller
   behavior.
 
+Implemented in the first Slice 3 pass:
+
+- The VPR measurement-execute response was extended from 201 bytes to 236 bytes
+  with an append-only RF timing-owner proof block. Existing response fields are
+  unchanged.
+- The RF timing-owner block reports controller/VPR timing evidence:
+  - procedure active state
+  - connection handle and procedure counter
+  - active subevent
+  - VPR heartbeat
+  - next procedure and next subevent heartbeat
+  - computed procedure interval ticks
+  - computed subevent delay ticks
+  - peer gap ticks and interval selector
+  - an independent `0xD3......` token generated by both VPR and host code
+- The connected sweep runner now parses and validates this timing-owner block.
+  If the proof is missing or inconsistent, it sets mismatch bit `1 << 19`.
+- `BleChannelSoundingLlControlWorkflowCentral` now prints
+  `work_rf_timing=*` diagnostics so a run can prove whether the VPR/RADIO timing
+  state matched the connected work item.
+
+Verification from the timing-owner pass:
+
+- `scripts/test_cs_vpr_auto_measurement.sh` passes.
+- `scripts/test_cs_ll_workflow_bridge.sh` exits successfully after the Slice 3B
+  update and its physical follow-up still passes.
+- The connected diagnostic sweep now validates VPR/RADIO ownership for timing,
+  packet configuration, packet buffer setup, and timed Mode 2 execution:
+
+```text
+work_exec_mismatch=0x0
+work_rf_pkt=1
+work_rf_pkt_cte=0x4A
+work_rf_pkt_ctrl_us=2400
+work_rf_pkt_listen_us=12000
+work_rf_buf=1
+work_rf_timed=1
+work_rf_timing=1
+work_rf_timing_flags=0x2F
+work_rf_timing_proc_ticks=200
+work_rf_timing_sub_ticks=5
+```
+
+Implementation detail:
+
+- VPR execute snapshots now use a 250-byte return payload, staying within the
+  256-byte HCI event transport frame.
+- The appended packet-ownership block carries S0, full CTEInfo byte, payload
+  length, magic bytes, packet type, sequence, channel, control-to-probe delay,
+  and response listen window.
+- The host connected diagnostic consumes that VPR packet block when present,
+  so packet/timed validation no longer reconstructs expected values from
+  CPUAPP sketch-side radio config.
+
 Required work:
 
-- Consume connection timing snapshots in the controller path.
+- Native controller-owned result publication still needs to consume this same
+  VPR-owned measurement output without the diagnostic runner being part of the
+  normal production path.
+- Consume connection timing snapshots in the controller path only as controller
+  state, not as a host/sketch-owned wait loop.
 - Schedule CS subevents with guard-before and guard-after timing.
 - Keep BLE connection events stable while CS work is inserted.
 - Avoid long CPUAPP busy loops.
@@ -231,7 +305,10 @@ Required work:
 Verification:
 
 - Connected workflow still passes.
-- Debug output must prove VPR/controller-owned timing, not sketch-owned timing.
+- Debug output must prove VPR/controller-owned timing and execution, not
+  sketch-owned timing.
+- `work_exec_mismatch` no longer includes bits 15, 16, 17, or 19 in the
+  connected diagnostic sweep.
 - No BLE disconnect/regression during CS procedure.
 
 ### Slice 4: Native VPR CS Result Publication
@@ -373,11 +450,13 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with a focused Slice 2 verification follow-up, then move to Slice 3.
+Start with Slice 4: native VPR CS result publication.
 
-Reason: VPR now owns first-pass measurement execution, but the existing bridge
-regression aborts before it can prove the new debug flags. Lock that proof down
-before moving more timing ownership into VPR/RADIO.
+Reason: Slice 3B now proves VPR/RADIO owns connected packet setup, packet
+buffer fields, timing state, and timed Mode 2 execution for the scheduled work
+item. The next meaningful gap is emitting native `CS Subevent Result` /
+`CS Subevent Result Continue` events from that controller-owned output, so the
+CPUAPP diagnostic runner stops being part of normal connected CS operation.
 
 Do not mark CS fully complete until these are true:
 

@@ -22,6 +22,10 @@
 
 using namespace xiao_nrf54l15;
 
+#ifndef CS_AUTO_MEASUREMENT_PROOF_ONLY
+#define CS_AUTO_MEASUREMENT_PROOF_ONLY 0
+#endif
+
 namespace {
 
 static BleRadio g_ble;
@@ -56,11 +60,24 @@ static constexpr uint32_t kConnectedCsGuardAfterUs = 4500UL;
 static constexpr uint8_t kConnectedPhysicalTriggerReason = 0x7EU;
 static constexpr uint8_t kConnectedPhysicalAckReason = 0x7DU;
 static constexpr uint16_t kConnectedPhysicalWindowEventOffset = 4U;
+#if CS_AUTO_MEASUREMENT_PROOF_ONLY
+static constexpr bool kAutoMeasurementProofOnly = true;
+#else
+static constexpr bool kAutoMeasurementProofOnly = false;
+#endif
+static constexpr uint8_t kVprStageProcedureActive = 6U;
+static constexpr uint8_t kVprWorkFlagControllerAutoExecuted = 0x80U;
+static constexpr uint8_t kVprExecFlagControllerOwnedSnapshot = 0x10U;
+static constexpr uint32_t kAutoMeasurementProofTimeoutMs = 30000UL;
+static constexpr uint32_t kAutoMeasurementProofRetryDelayMs = 10UL;
+static constexpr uint8_t kAutoMeasurementProofReadRetries = 20U;
 
 static bool g_wasConnected = false;
 static bool g_bridgeStarted = false;
 static bool g_passPrinted = false;
 static bool g_failed = false;
+static bool g_autoProofPrinted = false;
+static uint32_t g_autoProofStartedMs = 0U;
 static bool g_physicalStarted = false;
 static bool g_physicalReady = false;
 static bool g_physicalDone = false;
@@ -346,6 +363,199 @@ static void failBridge(const char* reason,
   Serial.print("\r\n");
 }
 
+static void printAutoProofWork(const BleCsVprMeasurementWorkItem& work) {
+  Serial.print(" work_valid=");
+  Serial.print(work.valid ? 1 : 0);
+  Serial.print(" work_status=0x");
+  Serial.print(work.status, HEX);
+  Serial.print(" work_flags=0x");
+  Serial.print(work.flags, HEX);
+  Serial.print(" work_auto=");
+  Serial.print(work.controllerAutoExecuted ? 1 : 0);
+  Serial.print(" work_ready=");
+  Serial.print(work.ready ? 1 : 0);
+  Serial.print(" work_proc=");
+  Serial.print(work.procedureCounter);
+  Serial.print(" work_sub=");
+  Serial.print(work.activeSubeventIndex);
+  Serial.print('/');
+  Serial.print(work.totalSubevents);
+  Serial.print(" work_steps=");
+  Serial.print(work.subeventStepCount);
+  Serial.print('/');
+  Serial.print(work.totalSteps);
+  Serial.print(" work_auto_block=0x");
+  Serial.print(work.controllerAutoBlockMask, HEX);
+  Serial.print(" work_auto_count=");
+  Serial.print(work.controllerAutoCount);
+  Serial.print(" work_auto_calls=");
+  Serial.print(work.controllerAutoServiceCalls);
+  Serial.print(" work_auto_due=");
+  Serial.print(work.controllerAutoDuePasses);
+  Serial.print(" work_auto_key=");
+  Serial.print(work.controllerAutoProcedureCounter);
+  Serial.print('/');
+  Serial.print(work.controllerAutoSubevent);
+  Serial.print(" work_auto_status=0x");
+  Serial.print(work.controllerAutoStatus, HEX);
+  Serial.print(" work_ch=");
+  Serial.print(work.stepChannelCount);
+  Serial.print(':');
+  for (uint8_t i = 0U; i < work.stepChannelCount; ++i) {
+    if (i != 0U) {
+      Serial.print(',');
+    }
+    Serial.print(work.stepChannels[i]);
+  }
+}
+
+static void printAutoProofExec(const char* prefix,
+                               const BleCsVprMeasurementExecutionResult& exec) {
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_valid=");
+  Serial.print(exec.valid ? 1 : 0);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_status=0x");
+  Serial.print(exec.status, HEX);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_flags=0x");
+  Serial.print(exec.flags, HEX);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_snap=");
+  Serial.print(exec.controllerOwnedSnapshot ? 1 : 0);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_accepted=");
+  Serial.print(exec.accepted ? 1 : 0);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_count=");
+  Serial.print(exec.executeCount);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_token=");
+  Serial.print(exec.executionToken);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_proc=");
+  Serial.print(exec.procedureCounter);
+  Serial.print(' ');
+  Serial.print(prefix);
+  Serial.print("_sub=");
+  Serial.print(exec.activeSubeventIndex);
+  Serial.print('/');
+  Serial.print(exec.totalSubevents);
+}
+
+static void failAutoMeasurementProof(
+    const char* reason,
+    const BleCsVprMeasurementWorkItem* work = nullptr,
+    const BleCsVprMeasurementExecutionResult* exec = nullptr,
+    const BleCsVprMeasurementExecutionResult* exec2 = nullptr) {
+  g_failed = true;
+  g_autoProofPrinted = true;
+  Serial.print("cs_vpr_auto_measurement=FAIL reason=");
+  Serial.print(reason);
+  if (work != nullptr) {
+    printAutoProofWork(*work);
+  }
+  if (exec != nullptr) {
+    printAutoProofExec("exec", *exec);
+  }
+  if (exec2 != nullptr) {
+    printAutoProofExec("exec2", *exec2);
+  }
+  Serial.print("\r\n");
+}
+
+static bool printAutoMeasurementProof() {
+  if (g_autoProofPrinted) {
+    return !g_failed;
+  }
+
+  BleCsVprMeasurementWorkItem work{};
+  bool workReadOk = false;
+  for (uint8_t retry = 0U; retry < kAutoMeasurementProofReadRetries; ++retry) {
+    workReadOk = g_csHost.directReadMeasurementWorkItemForTest(&work);
+    if (workReadOk && work.valid && work.status == 0U && work.ready &&
+        work.controllerAutoExecuted &&
+        ((work.flags & kVprWorkFlagControllerAutoExecuted) != 0U)) {
+      break;
+    }
+    delay(kAutoMeasurementProofRetryDelayMs);
+  }
+
+  if (!workReadOk) {
+    failAutoMeasurementProof("work_read");
+    return false;
+  }
+  if (!work.valid || work.status != 0U || !work.ready) {
+    failAutoMeasurementProof("work_not_ready", &work);
+    return false;
+  }
+  if (!work.controllerAutoExecuted ||
+      ((work.flags & kVprWorkFlagControllerAutoExecuted) == 0U)) {
+    failAutoMeasurementProof("work_not_controller_auto", &work);
+    return false;
+  }
+
+  BleCsMeasurementExecuteParams params{};
+  BleCsVprMeasurementExecutionResult exec{};
+  if (!g_csHost.executeMeasurementWork(&exec, params)) {
+    failAutoMeasurementProof("snapshot_read", &work);
+    return false;
+  }
+  if (!exec.valid || exec.status != 0U || !exec.accepted ||
+      !exec.controllerOwnedSnapshot ||
+      ((exec.flags & kVprExecFlagControllerOwnedSnapshot) == 0U) ||
+      !exec.executionTokenValid || exec.executeCount == 0U ||
+      exec.procedureCounter != work.procedureCounter) {
+    failAutoMeasurementProof("snapshot_invalid", &work, &exec);
+    return false;
+  }
+
+  BleCsVprMeasurementExecutionResult exec2{};
+  if (!g_csHost.executeMeasurementWork(&exec2, params)) {
+    failAutoMeasurementProof("snapshot_repeat_read", &work, &exec);
+    return false;
+  }
+  const bool snapshotStable =
+      exec2.valid && exec2.status == 0U && exec2.accepted &&
+      exec2.controllerOwnedSnapshot &&
+      ((exec2.flags & kVprExecFlagControllerOwnedSnapshot) != 0U) &&
+      exec2.executeCount == exec.executeCount &&
+      exec2.executionToken == exec.executionToken &&
+      exec2.procedureCounter == exec.procedureCounter &&
+      exec2.activeSubeventIndex == exec.activeSubeventIndex;
+  if (!snapshotStable) {
+    failAutoMeasurementProof("snapshot_not_stable", &work, &exec, &exec2);
+    return false;
+  }
+
+  g_autoProofPrinted = true;
+  Serial.print("cs_vpr_auto_measurement=PASS");
+  printAutoProofWork(work);
+  printAutoProofExec("exec", exec);
+  printAutoProofExec("exec2", exec2);
+  Serial.print(" stable=1 no_host_execute=1\r\n");
+  return true;
+}
+
+static void maybeRunAutoMeasurementProof(
+    const BleCsLlControlBridgeServiceResult& result) {
+  if (!kAutoMeasurementProofOnly || g_autoProofPrinted ||
+      !result.peerPduConsumed || result.rxOpcode != kBleCsLlCtrlStart ||
+      result.peerState.currentStage != kVprStageProcedureActive) {
+    return;
+  }
+
+  (void)printAutoMeasurementProof();
+}
+
 static void resetBridgeState() {
   g_ble.clearChannelSoundingLlControlDebug();
   g_csHost.reset();
@@ -362,6 +572,8 @@ static void resetBridgeState() {
   g_bridgeTracker.reset();
   g_passPrinted = false;
   g_failed = false;
+  g_autoProofPrinted = false;
+  g_autoProofStartedMs = millis();
   g_connectedPhysicalAttempted = false;
   g_connectedPhysicalOk = false;
   g_connectedPhysicalAttemptCount = 0U;
@@ -655,6 +867,20 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workRfPacketConfigPcnf0, HEX);
   Serial.print(" work_rf_pkt_pcnf1=0x");
   Serial.print(sweepResult.workRfPacketConfigPcnf1, HEX);
+  Serial.print(" work_rf_pkt_s0=0x");
+  Serial.print(sweepResult.workRfPacketS0, HEX);
+  Serial.print(" work_rf_pkt_cte=0x");
+  Serial.print(sweepResult.workRfPacketCteInfo, HEX);
+  Serial.print(" work_rf_pkt_len=");
+  Serial.print(sweepResult.workRfPacketPayloadLen);
+  Serial.print(" work_rf_pkt_seq=");
+  Serial.print(sweepResult.workRfPacketSequence);
+  Serial.print(" work_rf_pkt_ch=");
+  Serial.print(sweepResult.workRfPacketChannel);
+  Serial.print(" work_rf_pkt_ctrl_us=");
+  Serial.print(sweepResult.workRfPacketControlToProbeDelayUs);
+  Serial.print(" work_rf_pkt_listen_us=");
+  Serial.print(sweepResult.workRfPacketResponseListenWindowUs);
   Serial.print(" work_rf_buf=");
   Serial.print(sweepResult.workRfPacketBufferOk ? 1 : 0);
   Serial.print(" work_rf_timed=");
@@ -679,6 +905,30 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workRfTimedMode2DisableWaitLoops);
   Serial.print(" work_rf_timed_after=");
   Serial.print(sweepResult.workRfTimedMode2StateAfter);
+  Serial.print(" work_rf_timing=");
+  Serial.print(sweepResult.workRfTimingOwnerOk ? 1 : 0);
+  Serial.print(" work_rf_timing32=0x");
+  Serial.print(sweepResult.workRfTimingOwnerToken, HEX);
+  Serial.print(" work_rf_timing_status=");
+  Serial.print(sweepResult.workRfTimingOwnerStatus);
+  Serial.print(" work_rf_timing_flags=0x");
+  Serial.print(sweepResult.workRfTimingOwnerFlags, HEX);
+  Serial.print(" work_rf_timing_sub=");
+  Serial.print(sweepResult.workRfTimingOwnerSubevent);
+  Serial.print(" work_rf_timing_hb=");
+  Serial.print(sweepResult.workRfTimingOwnerHeartbeat);
+  Serial.print(" work_rf_timing_next_proc=");
+  Serial.print(sweepResult.workRfTimingOwnerNextProcedureHeartbeat);
+  Serial.print(" work_rf_timing_next_sub=");
+  Serial.print(sweepResult.workRfTimingOwnerNextSubeventHeartbeat);
+  Serial.print(" work_rf_timing_proc_ticks=");
+  Serial.print(sweepResult.workRfTimingOwnerProcedureIntervalTicks);
+  Serial.print(" work_rf_timing_sub_ticks=");
+  Serial.print(sweepResult.workRfTimingOwnerSubeventDelayTicks);
+  Serial.print(" work_rf_timing_peer_gap=");
+  Serial.print(sweepResult.workRfTimingOwnerPeerGapTicks);
+  Serial.print(" work_rf_timing_sel=");
+  Serial.print(sweepResult.workRfTimingOwnerIntervalSelector);
   Serial.print(" work_tone_snap=");
   Serial.print(sweepResult.workToneSnapshotOk ? 1 : 0);
   Serial.print(" work_tone_snap32=0x");
@@ -1050,6 +1300,11 @@ void setup() {
 }
 
 void loop() {
+  if (kAutoMeasurementProofOnly && g_autoProofPrinted) {
+    delay(100);
+    return;
+  }
+
   if (g_physicalStarted) {
     runPhysicalFollowup();
     return;
@@ -1117,13 +1372,30 @@ void loop() {
 
     if (poll.preServiceCalled) {
       handleBridgeServiceResult(poll.preService);
+      maybeRunAutoMeasurementProof(poll.preService);
     }
     if (poll.eventServiceCalled) {
       handleBridgeServiceResult(poll.eventService);
+      maybeRunAutoMeasurementProof(poll.eventService);
     } else if (poll.serviceCalled && !poll.preServiceCalled) {
       handleBridgeServiceResult(poll.service);
+      maybeRunAutoMeasurementProof(poll.service);
     }
     updateWorkflowMask();
+
+    if (kAutoMeasurementProofOnly) {
+      if (!g_autoProofPrinted &&
+          (millis() - g_autoProofStartedMs) >= kAutoMeasurementProofTimeoutMs) {
+        BleCsVprMeasurementWorkItem work{};
+        if (g_csHost.directReadMeasurementWorkItemForTest(&work)) {
+          failAutoMeasurementProof("timeout", &work);
+        } else {
+          failAutoMeasurementProof("timeout_work_read");
+        }
+      }
+      delay(1);
+      return;
+    }
 
     if (!g_passPrinted &&
         g_bridgeTracker.workflowComplete() &&

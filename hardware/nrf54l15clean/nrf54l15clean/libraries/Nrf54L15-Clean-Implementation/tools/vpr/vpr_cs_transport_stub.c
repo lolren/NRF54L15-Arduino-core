@@ -262,6 +262,7 @@ static uint32_t g_ble_connection_event_queue_head = 0U;
 static uint32_t g_ble_connection_event_queue_tail = 0U;
 static uint32_t g_ble_connection_event_queue_count = 0U;
 #endif
+#define VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN 250U
 static uint8_t g_pending_cs_result_stage = 0U;
 #if VPR_CS_DEDICATED_IMAGE
 static uint8_t g_measurement_execute_result_active = 0U;
@@ -292,12 +293,14 @@ static uint32_t g_cs_measurement_execute_count = 0U;
 static uint8_t g_cs_measurement_execute_last_status = 0xFFU;
 static uint8_t g_cs_measurement_execute_last_channels = 0U;
 static uint32_t g_cs_measurement_execute_last_token = 0U;
-#define VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN 201U
 static uint16_t g_cs_auto_measurement_last_procedure_counter = 0U;
 static uint8_t g_cs_auto_measurement_last_subevent = 0xFFU;
 static uint8_t g_cs_auto_measurement_last_status = 0xFFU;
 static uint32_t g_cs_auto_measurement_count = 0U;
+static uint32_t g_cs_auto_measurement_service_calls = 0U;
+static uint32_t g_cs_auto_measurement_due_passes = 0U;
 static uint32_t g_cs_auto_measurement_last_token = 0U;
+static uint16_t g_cs_auto_measurement_block_mask = 0U;
 static uint8_t g_cs_measurement_execute_snapshot_valid = 0U;
 static uint8_t g_cs_measurement_execute_snapshot[VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN];
 
@@ -306,7 +309,10 @@ static void clear_controller_auto_measurement_state(void) {
   g_cs_auto_measurement_last_subevent = 0xFFU;
   g_cs_auto_measurement_last_status = 0xFFU;
   g_cs_auto_measurement_count = 0U;
+  g_cs_auto_measurement_service_calls = 0U;
+  g_cs_auto_measurement_due_passes = 0U;
   g_cs_auto_measurement_last_token = 0U;
+  g_cs_auto_measurement_block_mask = 0U;
   g_cs_measurement_execute_snapshot_valid = 0U;
 }
 static bool controller_auto_measurement_matches_current_key(void);
@@ -4185,7 +4191,7 @@ static size_t build_vendor_ble_cs_scheduler_read_complete_payload(uint8_t *paylo
 
 static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t *payload,
                                                                          size_t max_len) {
-  if (payload == NULL || max_len < 62U) {
+  if (payload == NULL || max_len < 80U) {
     return 0U;
   }
 
@@ -4268,7 +4274,14 @@ static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t
   for (uint8_t i = 0U; i < 6U; ++i) {
     payload[56U + i] = step_channels[i];
   }
-  return 62U;
+  write_le16(&payload[62], g_cs_auto_measurement_block_mask);
+  write_le32(&payload[64], g_cs_auto_measurement_count);
+  write_le32(&payload[68], g_cs_auto_measurement_service_calls);
+  write_le32(&payload[72], g_cs_auto_measurement_due_passes);
+  write_le16(&payload[76], g_cs_auto_measurement_last_procedure_counter);
+  payload[78] = g_cs_auto_measurement_last_subevent;
+  payload[79] = g_cs_auto_measurement_last_status;
+  return 80U;
 }
 
 static uint32_t build_measurement_execute_token(uint8_t config_id,
@@ -4547,6 +4560,7 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_CS_PACKET_MAGIC1 0x53U
 #define VPR_CS_PACKET_TYPE_PROBE 0x50U
 #define VPR_CS_PACKET_TYPE_REPORT 0x51U
+#define VPR_CS_PACKET_CTE_TYPE_AOA 0x01U
 #define VPR_TONE_SNAPSHOT_FLAG_VALID 0x01U
 #define VPR_TONE_SNAPSHOT_FLAG_NONZERO_SAMPLE 0x02U
 #define VPR_TONE_SNAPSHOT_FLAG_RADIO_DISABLED 0x04U
@@ -4925,6 +4939,36 @@ static uint32_t build_measurement_rf_timed_mode2_token(
          (listen_wait_loops << 5U);
 }
 
+static uint32_t build_measurement_rf_timing_owner_token(
+    uint8_t version,
+    uint8_t flags,
+    uint8_t status,
+    uint8_t active_subevent,
+    uint16_t procedure_counter,
+    uint16_t conn_handle,
+    uint32_t heartbeat,
+    uint32_t next_procedure_heartbeat,
+    uint32_t next_subevent_heartbeat,
+    uint32_t procedure_interval_ticks,
+    uint32_t subevent_delay_ticks,
+    uint8_t peer_gap_ticks,
+    uint8_t interval_selector) {
+  return 0xD3000000UL ^
+         ((uint32_t)version) ^
+         ((uint32_t)flags << 16U) ^
+         ((uint32_t)status << 24U) ^
+         ((uint32_t)active_subevent << 8U) ^
+         ((uint32_t)procedure_counter << 4U) ^
+         ((uint32_t)conn_handle << 5U) ^
+         heartbeat ^
+         (next_procedure_heartbeat << 1U) ^
+         (next_subevent_heartbeat << 2U) ^
+         (procedure_interval_ticks << 3U) ^
+         (subevent_delay_ticks << 6U) ^
+         ((uint32_t)peer_gap_ticks << 20U) ^
+         ((uint32_t)interval_selector << 12U);
+}
+
 static void execute_rf_timed_mode2_primitive(
     uint8_t accepted,
     uint8_t version,
@@ -5243,13 +5287,16 @@ static size_t run_ble_cs_measurement_execute(
     const vpr_cs_measurement_execute_params_t *params,
     uint8_t *payload,
     size_t max_len) {
-  if (params == NULL || payload == NULL || max_len < 201U) {
+  if (params == NULL || payload == NULL ||
+      max_len < VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN) {
     g_vpr_transport->lastError = 0xF1U;
     return 0U;
   }
 
   const uint8_t packet_s0 = params->packet_s0;
-  const uint8_t packet_cte_info = params->packet_cte_info & 0x1FU;
+  const uint8_t packet_cte_time = params->packet_cte_info & 0x1FU;
+  const uint8_t packet_cte_info =
+      (uint8_t)((VPR_CS_PACKET_CTE_TYPE_AOA << 6U) | packet_cte_time);
   const uint16_t control_to_probe_delay_us =
       params->control_to_probe_delay_us;
   const uint16_t response_listen_window_us =
@@ -5269,6 +5316,15 @@ static size_t run_ble_cs_measurement_execute(
   const uint8_t rf_primitive_version = 1U;
   const uint8_t rf_retune_version = 1U;
   const uint8_t rf_timed_mode2_version = 1U;
+  const uint8_t rf_timing_owner_version = 1U;
+  uint8_t rf_timing_owner_interval_selector = 0U;
+  const uint32_t rf_timing_owner_procedure_interval_ticks =
+      compute_procedure_interval_ticks(&rf_timing_owner_interval_selector);
+  const uint32_t rf_timing_owner_subevent_delay_ticks =
+      current_subevent_stage_delay_ticks();
+  uint8_t rf_timing_owner_flags = 0U;
+  uint8_t rf_timing_owner_status = BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
+  uint32_t rf_timing_owner_token = 0U;
   uint8_t rf_hardware_flags = 0U;
   uint32_t rf_hardware_state = 0U;
   uint32_t rf_hardware_mode = 0U;
@@ -5404,6 +5460,30 @@ static size_t run_ble_cs_measurement_execute(
         rf_timed_mode2_token = loop_timed_token;
       }
     }
+    rf_timing_owner_status = BLE_CS_HCI_STATUS_SUCCESS;
+    rf_timing_owner_flags = 0x01U;
+    if (g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE ||
+        g_measurement_execute_result_active != 0U) {
+      rf_timing_owner_flags |= 0x02U;
+    }
+    if (rf_timing_owner_procedure_interval_ticks != 0U) {
+      rf_timing_owner_flags |= 0x04U;
+    }
+    if (rf_timing_owner_subevent_delay_ticks != 0U) {
+      rf_timing_owner_flags |= 0x08U;
+    }
+    if (g_cs_session_open != 0U && g_cs_procedure_enabled != 0U &&
+        g_cs_session_conn_handle != 0U && g_cs_procedure_counter != 0U) {
+      rf_timing_owner_flags |= 0x20U;
+    }
+    rf_timing_owner_token = build_measurement_rf_timing_owner_token(
+        rf_timing_owner_version, rf_timing_owner_flags,
+        rf_timing_owner_status, active_subevent, g_cs_procedure_counter,
+        g_cs_session_conn_handle, g_vpr_transport->heartbeat,
+        g_cs_next_procedure_heartbeat, g_cs_next_subevent_heartbeat,
+        rf_timing_owner_procedure_interval_ticks,
+        rf_timing_owner_subevent_delay_ticks, g_cs_last_peer_gap_ticks,
+        rf_timing_owner_interval_selector);
     (void)restore_timed_mode2_result_observation(0U);
     uint8_t packet_config_flags =
         VPR_RF_PACKET_CONFIG_FLAG_VALID |
@@ -5569,6 +5649,34 @@ static size_t run_ble_cs_measurement_execute(
     write_le32(&payload[177U + (4U * i)],
                (accepted != 0U) ? g_cs_timed_mode2_result_tokens[i] : 0U);
   }
+  payload[201] = rf_timing_owner_version;
+  payload[202] = (accepted != 0U) ? rf_timing_owner_flags : 0U;
+  payload[203] = (accepted != 0U) ? rf_timing_owner_status
+                                  : BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
+  payload[204] = active_subevent;
+  write_le16(&payload[205], g_cs_procedure_counter);
+  write_le16(&payload[207], g_cs_session_conn_handle);
+  write_le32(&payload[209], g_vpr_transport->heartbeat);
+  write_le32(&payload[213], g_cs_next_procedure_heartbeat);
+  write_le32(&payload[217], g_cs_next_subevent_heartbeat);
+  write_le32(&payload[221], rf_timing_owner_procedure_interval_ticks);
+  write_le32(&payload[225], rf_timing_owner_subevent_delay_ticks);
+  write_le32(&payload[229], (accepted != 0U) ? rf_timing_owner_token : 0U);
+  payload[233] = g_cs_last_peer_gap_ticks;
+  payload[234] = rf_timing_owner_interval_selector;
+  payload[235] = 0U;
+  payload[236] = 1U;
+  payload[237] = 0x01U | 0x04U;
+  payload[238] = packet_s0;
+  payload[239] = packet_cte_info;
+  payload[240] = VPR_CS_PACKET_PAYLOAD_LEN;
+  payload[241] = VPR_CS_PACKET_MAGIC0;
+  payload[242] = VPR_CS_PACKET_MAGIC1;
+  payload[243] = VPR_CS_PACKET_TYPE_PROBE;
+  payload[244] = (uint8_t)(g_cs_measurement_execute_count & 0xFFU);
+  payload[245] = (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
+  write_le16(&payload[246], control_to_probe_delay_us);
+  write_le16(&payload[248], response_listen_window_us);
   store_ble_cs_measurement_execute_snapshot(
       payload, VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN);
   return VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN;
@@ -5616,20 +5724,47 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(
 }
 
 static bool controller_owned_measurement_execution_due(void) {
-  if (g_cs_session_open == 0U || g_cs_procedure_enabled == 0U ||
-      g_cs_peer_exchange_stage != VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE ||
-      g_cs_builtin_peer_demo_enabled != 0U ||
-      g_pending_cs_result_stage != 0U ||
-      g_measurement_execute_result_active != 0U ||
-      g_cs_procedure_counter == 0U || g_cs_config_id == 0U) {
-    return false;
+  uint16_t block_mask = 0U;
+  if (g_cs_session_open == 0U) {
+    block_mask |= 0x0001U;
+  }
+  if (g_cs_procedure_enabled == 0U) {
+    block_mask |= 0x0002U;
+  }
+  if (g_cs_peer_exchange_stage != VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+    block_mask |= 0x0004U;
+  }
+  if (g_cs_builtin_peer_demo_enabled != 0U) {
+    block_mask |= 0x0008U;
+  }
+  if (g_pending_cs_result_stage != 0U) {
+    block_mask |= 0x0010U;
+  }
+  if (g_measurement_execute_result_active != 0U) {
+    block_mask |= 0x0020U;
+  }
+  if (g_cs_procedure_counter == 0U) {
+    block_mask |= 0x0040U;
+  }
+  if (g_cs_config_id == 0U) {
+    block_mask |= 0x0080U;
+  }
+  const uint8_t active_subevent = g_cs_active_subevent_index;
+  if (current_demo_subevent_count() == 0U) {
+    block_mask |= 0x0100U;
+  }
+  if (current_demo_total_step_count() == 0U) {
+    block_mask |= 0x0200U;
+  }
+  if (current_demo_subevent_step_count(active_subevent) == 0U) {
+    block_mask |= 0x0400U;
+  }
+  if (controller_auto_measurement_matches_current_key()) {
+    block_mask |= 0x0800U;
   }
 
-  const uint8_t active_subevent = g_cs_active_subevent_index;
-  if (current_demo_subevent_count() == 0U ||
-      current_demo_total_step_count() == 0U ||
-      current_demo_subevent_step_count(active_subevent) == 0U ||
-      controller_auto_measurement_matches_current_key()) {
+  g_cs_auto_measurement_block_mask = block_mask;
+  if (block_mask != 0U) {
     return false;
   }
 
@@ -5637,10 +5772,13 @@ static bool controller_owned_measurement_execution_due(void) {
 }
 
 static bool service_controller_owned_measurement_execution(void) {
+  g_cs_auto_measurement_service_calls = g_cs_auto_measurement_service_calls + 1U;
   if (!controller_owned_measurement_execution_due()) {
     return false;
   }
 
+  g_cs_auto_measurement_block_mask = 0U;
+  g_cs_auto_measurement_due_passes = g_cs_auto_measurement_due_passes + 1U;
   g_cs_auto_measurement_last_procedure_counter = g_cs_procedure_counter;
   g_cs_auto_measurement_last_subevent = g_cs_active_subevent_index;
   g_cs_auto_measurement_count = g_cs_auto_measurement_count + 1U;
@@ -5658,6 +5796,7 @@ static bool service_controller_owned_measurement_execution(void) {
   }
 
   g_cs_measurement_execute_snapshot[1] |= 0x10U;
+  g_cs_measurement_execute_snapshot[237] |= 0x02U;
   g_cs_auto_measurement_last_status = g_cs_measurement_execute_snapshot[0];
   g_cs_auto_measurement_last_token = g_cs_measurement_execute_last_token;
   return g_cs_auto_measurement_last_status == BLE_CS_HCI_STATUS_SUCCESS &&
@@ -5754,7 +5893,7 @@ static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payloa
 
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
   /* Keep the extended CS execute response staging buffer off the VPR stack. */
-  static uint8_t payload[201];
+  static uint8_t payload[VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN];
   uint16_t conn_handle = current_conn_handle();
   size_t offset = 0U;
   zero_vpr_data();

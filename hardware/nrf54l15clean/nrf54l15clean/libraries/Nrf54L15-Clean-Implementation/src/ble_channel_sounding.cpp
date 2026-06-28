@@ -335,6 +335,35 @@ uint32_t buildMeasurementRfTimedMode2Token(uint8_t version,
          (listenWaitLoops << 5U);
 }
 
+uint32_t buildMeasurementRfTimingOwnerToken(uint8_t version,
+                                            uint8_t flags,
+                                            uint8_t status,
+                                            uint8_t activeSubevent,
+                                            uint16_t procedureCounter,
+                                            uint16_t connHandle,
+                                            uint32_t heartbeat,
+                                            uint32_t nextProcedureHeartbeat,
+                                            uint32_t nextSubeventHeartbeat,
+                                            uint32_t procedureIntervalTicks,
+                                            uint32_t subeventDelayTicks,
+                                            uint8_t peerGapTicks,
+                                            uint8_t intervalSelector) {
+  return 0xD3000000UL ^
+         static_cast<uint32_t>(version) ^
+         (static_cast<uint32_t>(flags) << 16U) ^
+         (static_cast<uint32_t>(status) << 24U) ^
+         (static_cast<uint32_t>(activeSubevent) << 8U) ^
+         (static_cast<uint32_t>(procedureCounter) << 4U) ^
+         (static_cast<uint32_t>(connHandle) << 5U) ^
+         heartbeat ^
+         (nextProcedureHeartbeat << 1U) ^
+         (nextSubeventHeartbeat << 2U) ^
+         (procedureIntervalTicks << 3U) ^
+         (subeventDelayTicks << 6U) ^
+         (static_cast<uint32_t>(peerGapTicks) << 20U) ^
+         (static_cast<uint32_t>(intervalSelector) << 12U);
+}
+
 inline void writeVolatileLe16(volatile uint8_t* data, uint16_t value) {
   if (data == nullptr) {
     return;
@@ -4232,6 +4261,17 @@ bool parseVprMeasurementWorkItemResponse(const uint8_t* packet,
                                     : sizeof(outWork->stepChannels);
     memcpy(outWork->stepChannels, params + 56U, sizeof(outWork->stepChannels));
   }
+  if (completeEvent.returnParamsLen >= 64U) {
+    outWork->controllerAutoBlockMask = readLe16(params + 62U);
+  }
+  if (completeEvent.returnParamsLen >= 80U) {
+    outWork->controllerAutoCount = readLe32(params + 64U);
+    outWork->controllerAutoServiceCalls = readLe32(params + 68U);
+    outWork->controllerAutoDuePasses = readLe32(params + 72U);
+    outWork->controllerAutoProcedureCounter = readLe16(params + 76U);
+    outWork->controllerAutoSubevent = params[78];
+    outWork->controllerAutoStatus = params[79];
+  }
   return true;
 }
 
@@ -4438,6 +4478,58 @@ bool parseVprMeasurementExecutionResponse(
       outResult->rfTimedMode2ObservedTokens[i] =
           readLe32(params + 177U + (4U * i));
     }
+  }
+  if (completeEvent.returnParamsLen >= 236U) {
+    outResult->rfTimingOwnerVersion = params[201];
+    outResult->rfTimingOwnerFlags = params[202];
+    outResult->rfTimingOwnerStatus = params[203];
+    outResult->rfTimingOwnerActiveSubevent = params[204];
+    outResult->rfTimingOwnerProcedureCounter = readLe16(params + 205U);
+    outResult->rfTimingOwnerConnHandle = readLe16(params + 207U);
+    outResult->rfTimingOwnerHeartbeat = readLe32(params + 209U);
+    outResult->rfTimingOwnerNextProcedureHeartbeat = readLe32(params + 213U);
+    outResult->rfTimingOwnerNextSubeventHeartbeat = readLe32(params + 217U);
+    outResult->rfTimingOwnerProcedureIntervalTicks = readLe32(params + 221U);
+    outResult->rfTimingOwnerSubeventDelayTicks = readLe32(params + 225U);
+    outResult->rfTimingOwnerToken = readLe32(params + 229U);
+    outResult->rfTimingOwnerPeerGapTicks = params[233];
+    outResult->rfTimingOwnerIntervalSelector = params[234];
+    outResult->rfTimingOwnerValid =
+        outResult->rfTimingOwnerVersion == 1U &&
+        ((outResult->rfTimingOwnerFlags & 0x01U) != 0U);
+    outResult->rfTimingOwnerProcedureActive =
+        (outResult->rfTimingOwnerFlags & 0x02U) != 0U;
+    outResult->rfTimingOwnerProcedureIntervalComputed =
+        (outResult->rfTimingOwnerFlags & 0x04U) != 0U;
+    outResult->rfTimingOwnerSubeventDelayComputed =
+        (outResult->rfTimingOwnerFlags & 0x08U) != 0U;
+    outResult->rfTimingOwnerControllerSnapshot =
+        (outResult->rfTimingOwnerFlags & 0x10U) != 0U;
+    outResult->rfTimingOwnerConnectedSchedule =
+        (outResult->rfTimingOwnerFlags & 0x20U) != 0U;
+    outResult->rfTimingOwnerTokenValid =
+        outResult->rfTimingOwnerToken != 0U;
+  }
+  if (completeEvent.returnParamsLen >= 250U) {
+    outResult->rfPacketParamsVersion = params[236];
+    outResult->rfPacketParamsFlags = params[237];
+    outResult->rfPacketS0 = params[238];
+    outResult->rfPacketCteInfo = params[239];
+    outResult->rfPacketPayloadLen = params[240];
+    outResult->rfPacketMagic0 = params[241];
+    outResult->rfPacketMagic1 = params[242];
+    outResult->rfPacketType = params[243];
+    outResult->rfPacketSequence = params[244];
+    outResult->rfPacketChannel = params[245];
+    outResult->rfPacketControlToProbeDelayUs = readLe16(params + 246U);
+    outResult->rfPacketResponseListenWindowUs = readLe16(params + 248U);
+    outResult->rfPacketParamsValid =
+        outResult->rfPacketParamsVersion == 1U &&
+        ((outResult->rfPacketParamsFlags & 0x01U) != 0U);
+    outResult->rfPacketParamsControllerOwned =
+        (outResult->rfPacketParamsFlags & 0x02U) != 0U;
+    outResult->rfPacketParamsCteInfoIncludesType =
+        (outResult->rfPacketParamsFlags & 0x04U) != 0U;
   }
   return true;
 }
@@ -9677,15 +9769,38 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
               execution.rfRxPrimitiveStateAfter);
       const uint8_t expectedRfPacketConfigFlags = 0xFFU;
       const uint8_t expectedRfPacketConfigStatus = 0U;
+      const bool rfPacketParamsValid = execution.rfPacketParamsValid;
+      const uint8_t expectedRfPacketS0 =
+          rfPacketParamsValid ? execution.rfPacketS0
+                              : config.radioConfig.s0Pattern;
       const uint8_t expectedRfPacketCteInfo =
-          static_cast<uint8_t>((kCteTypeAoA << 6U) |
-                               (config.radioConfig.cteTimeUnits & 0x1FU));
+          rfPacketParamsValid
+              ? execution.rfPacketCteInfo
+              : static_cast<uint8_t>((kCteTypeAoA << 6U) |
+                                     (config.radioConfig.cteTimeUnits & 0x1FU));
+      const uint8_t expectedRfPacketPayloadLen =
+          rfPacketParamsValid ? execution.rfPacketPayloadLen
+                              : kPayloadHeaderLen;
+      const uint8_t expectedRfPacketMagic0 =
+          rfPacketParamsValid ? execution.rfPacketMagic0 : kMagic0;
+      const uint8_t expectedRfPacketMagic1 =
+          rfPacketParamsValid ? execution.rfPacketMagic1 : kMagic1;
+      const uint8_t expectedRfPacketType =
+          rfPacketParamsValid ? execution.rfPacketType
+                              : kBleCsVprPacketTypeProbe;
       const uint8_t expectedRfPacketSequence =
-          static_cast<uint8_t>(execution.executeCount & 0xFFU);
+          rfPacketParamsValid
+              ? execution.rfPacketSequence
+              : static_cast<uint8_t>(execution.executeCount & 0xFFU);
+      const uint8_t expectedRfPacketChannel =
+          rfPacketParamsValid ? execution.rfPacketChannel
+                              : expectedRetuneChannel;
       const uint16_t expectedRfControlToProbeDelayUs =
-          config.radioConfig.controlToProbeDelayUs;
+          rfPacketParamsValid ? execution.rfPacketControlToProbeDelayUs
+                              : config.radioConfig.controlToProbeDelayUs;
       const uint16_t expectedRfResponseListenWindowUs =
-          config.radioConfig.responseListenWindowUs;
+          rfPacketParamsValid ? execution.rfPacketResponseListenWindowUs
+                              : config.radioConfig.responseListenWindowUs;
       result.workRfDescriptorToken = execution.rfDescriptorToken;
       result.workExecutionStatus = execution.status;
       result.workExecutionFlags = execution.flags;
@@ -9727,6 +9842,18 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       result.workRfPacketConfigStatus = expectedRfPacketConfigStatus;
       result.workRfPacketConfigFlags = expectedRfPacketConfigFlags;
       result.workRfPacketConfigMaxPayload = kBleCsVprPacketMaxPayloadDefault;
+      result.workRfPacketS0 = expectedRfPacketS0;
+      result.workRfPacketCteInfo = expectedRfPacketCteInfo;
+      result.workRfPacketPayloadLen = expectedRfPacketPayloadLen;
+      result.workRfPacketMagic0 = expectedRfPacketMagic0;
+      result.workRfPacketMagic1 = expectedRfPacketMagic1;
+      result.workRfPacketType = expectedRfPacketType;
+      result.workRfPacketSequence = expectedRfPacketSequence;
+      result.workRfPacketChannel = expectedRfPacketChannel;
+      result.workRfPacketControlToProbeDelayUs =
+          expectedRfControlToProbeDelayUs;
+      result.workRfPacketResponseListenWindowUs =
+          expectedRfResponseListenWindowUs;
       result.workRfTimedMode2Token = execution.rfTimedMode2Token;
       result.workRfTimedMode2Status = execution.rfTimedMode2Status;
       result.workRfTimedMode2Flags = execution.rfTimedMode2Flags;
@@ -9742,6 +9869,25 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       result.workRfTimedMode2DisableWaitLoops =
           execution.rfTimedMode2DisableWaitLoops;
       result.workRfTimedMode2StateAfter = execution.rfTimedMode2StateAfter;
+      result.workRfTimingOwnerToken = execution.rfTimingOwnerToken;
+      result.workRfTimingOwnerStatus = execution.rfTimingOwnerStatus;
+      result.workRfTimingOwnerFlags = execution.rfTimingOwnerFlags;
+      result.workRfTimingOwnerSubevent =
+          execution.rfTimingOwnerActiveSubevent;
+      result.workRfTimingOwnerHeartbeat =
+          execution.rfTimingOwnerHeartbeat;
+      result.workRfTimingOwnerNextProcedureHeartbeat =
+          execution.rfTimingOwnerNextProcedureHeartbeat;
+      result.workRfTimingOwnerNextSubeventHeartbeat =
+          execution.rfTimingOwnerNextSubeventHeartbeat;
+      result.workRfTimingOwnerProcedureIntervalTicks =
+          execution.rfTimingOwnerProcedureIntervalTicks;
+      result.workRfTimingOwnerSubeventDelayTicks =
+          execution.rfTimingOwnerSubeventDelayTicks;
+      result.workRfTimingOwnerPeerGapTicks =
+          execution.rfTimingOwnerPeerGapTicks;
+      result.workRfTimingOwnerIntervalSelector =
+          execution.rfTimingOwnerIntervalSelector;
       result.workRfTimedMode2ObservedCount =
           execution.rfTimedMode2ObservedCount;
       memcpy(result.workRfTimedMode2ObservedChannels,
@@ -9811,16 +9957,24 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   expectedRfPacketConfigStatus,
                   result.workRfPacketConfigPcnf0,
                   result.workRfPacketConfigPcnf1,
-                  config.radioConfig.s0Pattern,
-                  kPayloadHeaderLen,
+                  expectedRfPacketS0,
+                  expectedRfPacketPayloadLen,
                   expectedRfPacketCteInfo,
-                  kMagic0,
-                  kMagic1,
-                  kBleCsVprPacketTypeProbe,
+                  expectedRfPacketMagic0,
+                  expectedRfPacketMagic1,
+                  expectedRfPacketType,
                   expectedRfPacketSequence,
-                  expectedRetuneChannel,
+                  expectedRfPacketChannel,
                   expectedRfControlToProbeDelayUs,
-                  expectedRfResponseListenWindowUs);
+                  expectedRfResponseListenWindowUs) &&
+          (!rfPacketParamsValid ||
+           (!execution.controllerOwnedSnapshot ||
+            (execution.rfPacketParamsControllerOwned &&
+             expectedRfPacketPayloadLen == kPayloadHeaderLen &&
+             expectedRfPacketMagic0 == kMagic0 &&
+             expectedRfPacketMagic1 == kMagic1 &&
+             expectedRfPacketType == kBleCsVprPacketTypeProbe &&
+             expectedRfPacketChannel == expectedRetuneChannel)));
       result.workRfPacketBufferOk = result.workRfPacketConfigOk;
       const uint8_t requiredTimedMode2Flags =
           0x01U | 0x02U | 0x04U | 0x08U | 0x20U | 0x40U | 0x80U;
@@ -9830,7 +9984,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
           execution.rfTimedMode2Status == 0U &&
           (execution.rfTimedMode2Flags & requiredTimedMode2Flags) ==
               requiredTimedMode2Flags &&
-          execution.rfTimedMode2Channel == expectedRetuneChannel &&
+          execution.rfTimedMode2Channel == expectedRfPacketChannel &&
           execution.rfTimedMode2StateAfter == 0U &&
           execution.rfTimedMode2GapWaitLoops != 0U &&
           execution.rfTimedMode2RxReadyWaitLoops != 0U &&
@@ -9839,7 +9993,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   1U,
                   execution.rfTimedMode2Flags,
                   execution.rfTimedMode2Status,
-                  expectedRetuneChannel,
+                  expectedRfPacketChannel,
                   expectedRfPacketSequence,
                   expectedRfControlToProbeDelayUs,
                   expectedRfResponseListenWindowUs,
@@ -9849,6 +10003,38 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   execution.rfTimedMode2ListenWaitLoops,
           execution.rfTimedMode2DisableWaitLoops,
           execution.rfTimedMode2StateAfter);
+      const uint8_t requiredTimingOwnerFlags =
+          0x01U | 0x02U | 0x04U | 0x08U | 0x20U;
+      const bool timingOwnerSubeventMatchesWork =
+          execution.rfTimingOwnerActiveSubevent == work->activeSubeventIndex ||
+          execution.totalSubevents <= 1U ||
+          work->totalSubevents <= 1U;
+      result.workRfTimingOwnerOk =
+          execution.rfTimingOwnerValid &&
+          execution.rfTimingOwnerTokenValid &&
+          execution.rfTimingOwnerStatus == 0U &&
+          (execution.rfTimingOwnerFlags & requiredTimingOwnerFlags) ==
+              requiredTimingOwnerFlags &&
+          execution.rfTimingOwnerProcedureCounter == work->procedureCounter &&
+          execution.rfTimingOwnerConnHandle == work->connHandle &&
+          timingOwnerSubeventMatchesWork &&
+          execution.rfTimingOwnerProcedureIntervalTicks != 0U &&
+          execution.rfTimingOwnerSubeventDelayTicks != 0U &&
+          execution.rfTimingOwnerToken ==
+              buildMeasurementRfTimingOwnerToken(
+                  execution.rfTimingOwnerVersion,
+                  execution.rfTimingOwnerFlags,
+                  execution.rfTimingOwnerStatus,
+                  execution.rfTimingOwnerActiveSubevent,
+                  execution.rfTimingOwnerProcedureCounter,
+                  execution.rfTimingOwnerConnHandle,
+                  execution.rfTimingOwnerHeartbeat,
+                  execution.rfTimingOwnerNextProcedureHeartbeat,
+                  execution.rfTimingOwnerNextSubeventHeartbeat,
+                  execution.rfTimingOwnerProcedureIntervalTicks,
+                  execution.rfTimingOwnerSubeventDelayTicks,
+                  execution.rfTimingOwnerPeerGapTicks,
+                  execution.rfTimingOwnerIntervalSelector);
       bool observedAllChannelsOk =
           execution.rfTimedMode2ObservedCount == effectiveChannelCount;
       if (effectiveChannelCount >
@@ -9936,6 +10122,9 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       if (!observedAllChannelsOk) {
         executionMismatchMask |= (1UL << 18U);
       }
+      if (!result.workRfTimingOwnerOk) {
+        executionMismatchMask |= (1UL << 19U);
+      }
       result.workExecuteMismatchMask = executionMismatchMask;
       const bool executionMatchesWork =
           execution.valid && execution.status == 0U && execution.accepted &&
@@ -9956,6 +10145,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
           result.workRfPacketConfigOk &&
           result.workRfPacketBufferOk &&
           result.workRfTimedMode2Ok &&
+          result.workRfTimingOwnerOk &&
           observedAllChannelsOk;
       workExecutionOk = executionMatchesWork;
       result.workExecuteOk = executionMatchesWork;
