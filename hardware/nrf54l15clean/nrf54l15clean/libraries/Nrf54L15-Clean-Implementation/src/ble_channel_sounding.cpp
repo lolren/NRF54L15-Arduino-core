@@ -4417,6 +4417,26 @@ bool parseVprMeasurementExecutionResponse(
     outResult->rfRxPrimitiveTokenValid =
         outResult->rfRxPrimitiveToken != 0U;
   }
+  if (completeEvent.returnParamsLen >= 201U) {
+    outResult->rfTimedMode2ObservedCount =
+        (params[152] <= sizeof(outResult->rfTimedMode2ObservedChannels))
+            ? params[152]
+            : sizeof(outResult->rfTimedMode2ObservedChannels);
+    memcpy(outResult->rfTimedMode2ObservedChannels, params + 153U,
+           sizeof(outResult->rfTimedMode2ObservedChannels));
+    memcpy(outResult->rfTimedMode2ObservedStatus, params + 159U,
+           sizeof(outResult->rfTimedMode2ObservedStatus));
+    memcpy(outResult->rfTimedMode2ObservedFlags, params + 165U,
+           sizeof(outResult->rfTimedMode2ObservedFlags));
+    memcpy(outResult->rfTimedMode2ObservedEventMask, params + 171U,
+           sizeof(outResult->rfTimedMode2ObservedEventMask));
+    for (uint8_t i = 0U; i < sizeof(outResult->rfTimedMode2ObservedTokens) /
+                                  sizeof(outResult->rfTimedMode2ObservedTokens[0]);
+         ++i) {
+      outResult->rfTimedMode2ObservedTokens[i] =
+          readLe32(params + 177U + (4U * i));
+    }
+  }
   return true;
 }
 
@@ -4553,6 +4573,64 @@ bool BleCsControllerSession::ready() const { return workflow_.ready(); }
 bool BleCsControllerSession::failed() const { return workflow_.failed(); }
 
 bool BleCsControllerSession::estimateValid() const { return state_.estimateValid; }
+
+bool BleCsControllerSession::refreshEstimateFromCompletedResults() {
+  if (!completedLocalResult_.isComplete || !completedPeerResult_.isComplete ||
+      completedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
+      completedPeerResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
+      completedLocalResult_.header.connHandle != completedPeerResult_.header.connHandle ||
+      completedLocalResult_.header.configId != completedPeerResult_.header.configId ||
+      completedLocalResult_.header.procedureCounter !=
+          completedPeerResult_.header.procedureCounter ||
+      completedLocalResult_.stepData == nullptr ||
+      completedPeerResult_.stepData == nullptr ||
+      completedLocalResult_.stepDataLen == 0U ||
+      completedPeerResult_.stepDataLen == 0U) {
+    return false;
+  }
+
+  BleCsEstimate estimate{};
+  if (!BleChannelSoundingRadio::estimateDistanceFromSubeventResults(
+          completedLocalResult_, completedPeerResult_,
+          config_.localRoleIsInitiator, &estimate)) {
+    return false;
+  }
+
+  state_.estimate = estimate;
+  state_.estimateValid = estimate.valid;
+  state_.completedProcedureCounter =
+      completedLocalResult_.header.procedureCounter;
+  state_.completedConfigId = completedLocalResult_.header.configId;
+  return state_.estimateValid;
+}
+
+bool BleCsControllerSession::applyEstimateToCompletedResults(
+    const BleCsEstimate& estimate) {
+  if (!estimate.valid ||
+      !isfinite(estimate.distanceMeters) ||
+      !(estimate.distanceMeters > 0.0f) ||
+      !completedLocalResult_.isComplete ||
+      !completedPeerResult_.isComplete ||
+      completedLocalResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
+      completedPeerResult_.header.procedureDoneStatus != kBleCsProcedureDoneComplete ||
+      completedLocalResult_.header.connHandle != completedPeerResult_.header.connHandle ||
+      completedLocalResult_.header.configId != completedPeerResult_.header.configId ||
+      completedLocalResult_.header.procedureCounter !=
+          completedPeerResult_.header.procedureCounter ||
+      completedLocalResult_.stepData == nullptr ||
+      completedPeerResult_.stepData == nullptr ||
+      completedLocalResult_.stepDataLen == 0U ||
+      completedPeerResult_.stepDataLen == 0U) {
+    return false;
+  }
+
+  state_.estimate = estimate;
+  state_.estimateValid = true;
+  state_.completedProcedureCounter =
+      completedLocalResult_.header.procedureCounter;
+  state_.completedConfigId = completedLocalResult_.header.configId;
+  return true;
+}
 
 const BleCsControllerSessionState& BleCsControllerSession::state() const { return state_; }
 
@@ -5281,6 +5359,15 @@ bool BleCsControllerHost::failed() const { return session_.failed(); }
 
 bool BleCsControllerHost::estimateValid() const { return session_.estimateValid(); }
 
+bool BleCsControllerHost::refreshEstimateFromCompletedResults() {
+  return session_.refreshEstimateFromCompletedResults();
+}
+
+bool BleCsControllerHost::applyEstimateToCompletedResults(
+    const BleCsEstimate& estimate) {
+  return session_.applyEstimateToCompletedResults(estimate);
+}
+
 uint8_t BleCsControllerHost::lastProcedureAbortReason() const {
   return session_.lastProcedureAbortReason();
 }
@@ -5494,6 +5581,15 @@ bool BleCsControllerStreamHost::ready() const { return host_.ready(); }
 bool BleCsControllerStreamHost::failed() const { return host_.failed(); }
 
 bool BleCsControllerStreamHost::estimateValid() const { return host_.estimateValid(); }
+
+bool BleCsControllerStreamHost::refreshEstimateFromCompletedResults() {
+  return host_.refreshEstimateFromCompletedResults();
+}
+
+bool BleCsControllerStreamHost::applyEstimateToCompletedResults(
+    const BleCsEstimate& estimate) {
+  return host_.applyEstimateToCompletedResults(estimate);
+}
 
 uint8_t BleCsControllerStreamHost::lastProcedureAbortReason() const {
   return host_.lastProcedureAbortReason();
@@ -7743,8 +7839,30 @@ bool BleCsControllerVprHost::consumeConnectedMode2ControllerEventsFromMeasuremen
       peerResult.stepData != nullptr &&
       localResult.stepDataLen > 0U &&
       peerResult.stepDataLen > 0U;
-  if (completedVprResultMatches) {
+  if (completedVprResultMatches &&
+      (host_.estimateValid() || host_.refreshEstimateFromCompletedResults())) {
     return true;
+  }
+  if (completedVprResultMatches) {
+    size_t localStepDataLen = 0U;
+    size_t peerStepDataLen = 0U;
+    uint16_t localSteps = 0U;
+    uint16_t peerSteps = 0U;
+    BleCsEstimate measurementEstimate{};
+    if (BleChannelSoundingRadio::encodeMode2StepDataFromMeasurements(
+            measurements, count, false, localStepData, localMaxStepDataLen,
+            &localStepDataLen, &localSteps) &&
+        BleChannelSoundingRadio::encodeMode2StepDataFromMeasurements(
+            measurements, count, true, peerStepData, peerMaxStepDataLen,
+            &peerStepDataLen, &peerSteps) &&
+        localSteps > 0U &&
+        peerSteps > 0U &&
+        BleChannelSoundingRadio::estimateDistanceFromStepBuffers(
+            localStepData, localStepDataLen, peerStepData, peerStepDataLen,
+            true, &measurementEstimate) &&
+        host_.applyEstimateToCompletedResults(measurementEstimate)) {
+      return true;
+    }
   }
 
   host_.resetProcedureRunState();
@@ -9606,6 +9724,23 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       result.workRfTimedMode2DisableWaitLoops =
           execution.rfTimedMode2DisableWaitLoops;
       result.workRfTimedMode2StateAfter = execution.rfTimedMode2StateAfter;
+      result.workRfTimedMode2ObservedCount =
+          execution.rfTimedMode2ObservedCount;
+      memcpy(result.workRfTimedMode2ObservedChannels,
+             execution.rfTimedMode2ObservedChannels,
+             sizeof(result.workRfTimedMode2ObservedChannels));
+      memcpy(result.workRfTimedMode2ObservedStatus,
+             execution.rfTimedMode2ObservedStatus,
+             sizeof(result.workRfTimedMode2ObservedStatus));
+      memcpy(result.workRfTimedMode2ObservedFlags,
+             execution.rfTimedMode2ObservedFlags,
+             sizeof(result.workRfTimedMode2ObservedFlags));
+      memcpy(result.workRfTimedMode2ObservedEventMask,
+             execution.rfTimedMode2ObservedEventMask,
+             sizeof(result.workRfTimedMode2ObservedEventMask));
+      memcpy(result.workRfTimedMode2ObservedTokens,
+             execution.rfTimedMode2ObservedTokens,
+             sizeof(result.workRfTimedMode2ObservedTokens));
       result.workRfMaxSubeventLen = execution.rfMaxSubeventLen;
       result.workRfPhy = execution.rfPhy;
       result.workRfTxPowerDelta = execution.rfTxPowerDelta;
@@ -9694,8 +9829,33 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
                   execution.rfTimedMode2GapWaitLoops,
                   execution.rfTimedMode2RxReadyWaitLoops,
                   execution.rfTimedMode2ListenWaitLoops,
-                  execution.rfTimedMode2DisableWaitLoops,
-                  execution.rfTimedMode2StateAfter);
+          execution.rfTimedMode2DisableWaitLoops,
+          execution.rfTimedMode2StateAfter);
+      bool observedAllChannelsOk =
+          execution.rfTimedMode2ObservedCount == effectiveChannelCount;
+      if (effectiveChannelCount >
+          sizeof(execution.rfTimedMode2ObservedChannels)) {
+        observedAllChannelsOk = false;
+      }
+      for (uint8_t i = 0U; observedAllChannelsOk && i < effectiveChannelCount;
+           ++i) {
+        bool foundObservedChannel = false;
+        for (uint8_t j = 0U;
+             j < execution.rfTimedMode2ObservedCount &&
+             j < sizeof(execution.rfTimedMode2ObservedChannels);
+             ++j) {
+          if (execution.rfTimedMode2ObservedChannels[j] == effectiveChannels[i] &&
+              execution.rfTimedMode2ObservedStatus[j] == 0U &&
+              execution.rfTimedMode2ObservedTokens[j] != 0U &&
+              (execution.rfTimedMode2ObservedFlags[j] & 0x01U) != 0U) {
+            foundObservedChannel = true;
+            break;
+          }
+        }
+        if (!foundObservedChannel) {
+          observedAllChannelsOk = false;
+        }
+      }
       const bool activeSubeventMatchesWork =
           execution.activeSubeventIndex == work->activeSubeventIndex ||
           execution.totalSubevents <= 1U ||
@@ -9755,6 +9915,9 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       if (!result.workRfTimedMode2Ok) {
         executionMismatchMask |= (1UL << 17U);
       }
+      if (!observedAllChannelsOk) {
+        executionMismatchMask |= (1UL << 18U);
+      }
       result.workExecuteMismatchMask = executionMismatchMask;
       const bool executionMatchesWork =
           execution.valid && execution.status == 0U && execution.accepted &&
@@ -9774,7 +9937,8 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
           result.workRfRxPrimitiveOk &&
           result.workRfPacketConfigOk &&
           result.workRfPacketBufferOk &&
-          result.workRfTimedMode2Ok;
+          result.workRfTimedMode2Ok &&
+          observedAllChannelsOk;
       workExecutionOk = executionMatchesWork;
       result.workExecuteOk = executionMatchesWork;
     } else {
@@ -10017,6 +10181,12 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
           host->estimateValid();
     }
     const BleCsControllerHostState hostStateAfter = host->hostState();
+    if (host->estimateValid()) {
+      result.workCompletedResultEstimateValid = true;
+      result.workCompletedResultMismatchMask &= ~(1UL << 12U);
+    }
+    const bool completedWorkResultMatchesAfterEstimate =
+        result.workCompletedResultMismatchMask == 0U;
     result.hostLocalResultPacketDelta =
         workHostLocalResultPacketDelta +
         hostStateAfter.localResultPackets - hostStateBefore.localResultPackets;
@@ -10031,7 +10201,7 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
         hostStateAfter.controllerPeerResultMarkers -
         hostStateBefore.controllerPeerResultMarkers;
     result.hostControllerResultIngress =
-        completedWorkResultMatches ||
+        completedWorkResultMatchesAfterEstimate ||
         (result.hostLocalResultPacketDelta > 0U &&
          result.hostPeerResultPacketDelta > 0U &&
          result.hostPeerResultMarkerDelta > 0U);
@@ -10058,6 +10228,37 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
       result.workResultTimedMode2Ok =
           result.workResultTimedMode2LocalOk &&
           result.workResultTimedMode2PeerOk;
+      result.workResultTimedMode2RequiredChannels =
+          result.workRfTimedMode2ObservedCount;
+      for (uint8_t i = 0U;
+           i < result.workRfTimedMode2ObservedCount &&
+           i < sizeof(result.workRfTimedMode2ObservedChannels);
+           ++i) {
+        const uint8_t channel = result.workRfTimedMode2ObservedChannels[i];
+        const uint32_t token = result.workRfTimedMode2ObservedTokens[i];
+        if (result.workRfTimedMode2ObservedStatus[i] != 0U ||
+            token == 0U ||
+            (result.workRfTimedMode2ObservedFlags[i] & 0x01U) == 0U) {
+          continue;
+        }
+        if (bleCsSubeventResultContainsTimedMode2Observation(
+                host->completedLocalResult(), token, channel, false)) {
+          ++result.workResultTimedMode2LocalMatches;
+        }
+        if (bleCsSubeventResultContainsTimedMode2Observation(
+                host->completedPeerResult(), token, channel, true)) {
+          ++result.workResultTimedMode2PeerMatches;
+        }
+      }
+      result.workResultTimedMode2AllChannelsOk =
+          result.workResultTimedMode2RequiredChannels > 0U &&
+          result.workResultTimedMode2LocalMatches ==
+              result.workResultTimedMode2RequiredChannels &&
+          result.workResultTimedMode2PeerMatches ==
+              result.workResultTimedMode2RequiredChannels;
+      result.workResultTimedMode2Ok =
+          result.workResultTimedMode2Ok &&
+          result.workResultTimedMode2AllChannelsOk;
     }
   } else {
     result.hostEstimateValid = false;

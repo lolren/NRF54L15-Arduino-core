@@ -267,6 +267,7 @@ static uint8_t g_pending_cs_result_stage = 0U;
 static uint8_t g_measurement_execute_result_active = 0U;
 static uint8_t g_cs_result_publish_debug_reason = 0U;
 static uint8_t g_cs_result_publish_debug_stage = 0U;
+static void clear_timed_mode2_result_observations(void);
 #endif
 static uint8_t g_cs_test_active = 0U;
 #if VPR_CS_DEDICATED_IMAGE
@@ -654,6 +655,7 @@ static void reset_dedicated_cs_state(void) {
   g_cs_next_peer_stage_heartbeat = 0U;
   g_cs_next_chunk_stage_heartbeat = 0U;
   g_measurement_execute_result_active = 0U;
+  clear_timed_mode2_result_observations();
   g_cs_result_publish_debug_reason = 0U;
   g_cs_result_publish_debug_stage = 0U;
   g_cs_last_peer_gap_ticks = 0U;
@@ -4517,6 +4519,7 @@ static uint32_t build_measurement_tone_snapshot_token(uint8_t version,
 #define VPR_TONE_SNAPSHOT_FLAG_RADIO_DISABLED 0x04U
 #define VPR_TONE_SNAPSHOT_FLAG_DFE_PACKET 0x10U
 #define VPR_TONE_SNAPSHOT_FLAG_TONE_CONFIG 0x20U
+#define VPR_RF_TIMED_MODE2_RESULT_MAX 6U
 
 static uint8_t g_vpr_cs_packet_buffer[9]
     __attribute__((aligned(4)));
@@ -4532,6 +4535,53 @@ static uint8_t g_cs_last_timed_mode2_rssi_sample = 0U;
 static uint8_t g_cs_last_timed_mode2_crc_status = 0U;
 static uint8_t g_cs_last_timed_mode2_event_mask = 0U;
 static uint32_t g_cs_last_timed_mode2_token = 0U;
+static uint8_t g_cs_timed_mode2_result_count = 0U;
+static uint8_t g_cs_timed_mode2_result_channels[VPR_RF_TIMED_MODE2_RESULT_MAX];
+static uint8_t g_cs_timed_mode2_result_status[VPR_RF_TIMED_MODE2_RESULT_MAX];
+static uint8_t g_cs_timed_mode2_result_observed_flags[VPR_RF_TIMED_MODE2_RESULT_MAX];
+static uint8_t g_cs_timed_mode2_result_event_mask[VPR_RF_TIMED_MODE2_RESULT_MAX];
+static uint32_t g_cs_timed_mode2_result_tokens[VPR_RF_TIMED_MODE2_RESULT_MAX];
+
+static void clear_timed_mode2_result_observations(void) {
+  g_cs_timed_mode2_result_count = 0U;
+  for (uint8_t i = 0U; i < VPR_RF_TIMED_MODE2_RESULT_MAX; ++i) {
+    g_cs_timed_mode2_result_channels[i] = 0xFFU;
+    g_cs_timed_mode2_result_status[i] = VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
+    g_cs_timed_mode2_result_observed_flags[i] = 0U;
+    g_cs_timed_mode2_result_event_mask[i] = 0U;
+    g_cs_timed_mode2_result_tokens[i] = 0U;
+  }
+}
+
+static bool store_timed_mode2_result_observation(void) {
+  if (g_cs_timed_mode2_result_count >= VPR_RF_TIMED_MODE2_RESULT_MAX) {
+    return false;
+  }
+
+  const uint8_t index = g_cs_timed_mode2_result_count++;
+  g_cs_timed_mode2_result_channels[index] = g_cs_last_timed_mode2_channel;
+  g_cs_timed_mode2_result_status[index] = g_cs_last_timed_mode2_status;
+  g_cs_timed_mode2_result_observed_flags[index] =
+      g_cs_last_timed_mode2_observed_flags;
+  g_cs_timed_mode2_result_event_mask[index] = g_cs_last_timed_mode2_event_mask;
+  g_cs_timed_mode2_result_tokens[index] = g_cs_last_timed_mode2_token;
+  return true;
+}
+
+static bool restore_timed_mode2_result_observation(uint8_t index) {
+  if (index >= g_cs_timed_mode2_result_count ||
+      index >= VPR_RF_TIMED_MODE2_RESULT_MAX) {
+    return false;
+  }
+
+  g_cs_last_timed_mode2_channel = g_cs_timed_mode2_result_channels[index];
+  g_cs_last_timed_mode2_status = g_cs_timed_mode2_result_status[index];
+  g_cs_last_timed_mode2_observed_flags =
+      g_cs_timed_mode2_result_observed_flags[index];
+  g_cs_last_timed_mode2_event_mask = g_cs_timed_mode2_result_event_mask[index];
+  g_cs_last_timed_mode2_token = g_cs_timed_mode2_result_tokens[index];
+  return true;
+}
 
 static void build_timed_mode2_result_pct(uint32_t token, uint8_t channel,
                                          bool peer_side, uint8_t out_pct[3]) {
@@ -4554,18 +4604,44 @@ static void build_timed_mode2_result_pct(uint32_t token, uint8_t channel,
 
 static bool vpr_timed_mode2_pct_for_result(uint8_t channel, bool peer_side,
                                            uint8_t pct[3], uint8_t *quality_out) {
-  if (pct == NULL ||
-      g_cs_last_timed_mode2_status != VPR_RF_TIMED_MODE2_STATUS_OK ||
-      g_cs_last_timed_mode2_token == 0U ||
-      g_cs_last_timed_mode2_channel != channel ||
-      (g_cs_last_timed_mode2_observed_flags & VPR_RF_TIMED_MODE2_OBS_VALID) == 0U) {
+  if (pct == NULL) {
     return false;
   }
 
-  build_timed_mode2_result_pct(g_cs_last_timed_mode2_token, channel, peer_side, pct);
+  uint32_t token = 0U;
+  uint8_t event_mask = 0U;
+  for (uint8_t i = 0U; i < g_cs_timed_mode2_result_count &&
+                      i < VPR_RF_TIMED_MODE2_RESULT_MAX;
+       ++i) {
+    if (g_cs_timed_mode2_result_channels[i] == channel &&
+        g_cs_timed_mode2_result_status[i] == VPR_RF_TIMED_MODE2_STATUS_OK &&
+        g_cs_timed_mode2_result_tokens[i] != 0U &&
+        (g_cs_timed_mode2_result_observed_flags[i] &
+         VPR_RF_TIMED_MODE2_OBS_VALID) != 0U) {
+      token = g_cs_timed_mode2_result_tokens[i];
+      event_mask = g_cs_timed_mode2_result_event_mask[i];
+      break;
+    }
+  }
+
+  if (token == 0U &&
+      g_cs_last_timed_mode2_status == VPR_RF_TIMED_MODE2_STATUS_OK &&
+      g_cs_last_timed_mode2_token != 0U &&
+      g_cs_last_timed_mode2_channel == channel &&
+      (g_cs_last_timed_mode2_observed_flags &
+       VPR_RF_TIMED_MODE2_OBS_VALID) != 0U) {
+    token = g_cs_last_timed_mode2_token;
+    event_mask = g_cs_last_timed_mode2_event_mask;
+  }
+
+  if (token == 0U) {
+    return false;
+  }
+
+  build_timed_mode2_result_pct(token, channel, peer_side, pct);
   if (quality_out != NULL) {
     *quality_out =
-        ((g_cs_last_timed_mode2_event_mask & 0x02U) != 0U)
+        ((event_mask & 0x02U) != 0U)
             ? VPR_CS_TONE_QUALITY_HIGH
             : VPR_CS_TONE_QUALITY_MEDIUM;
   }
@@ -5095,7 +5171,8 @@ static void execute_rf_timed_mode2_primitive(
 
 static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *payload,
                                                                        size_t max_len) {
-  if (payload == NULL || max_len < 152U) {
+  if (payload == NULL || max_len < 201U) {
+    g_vpr_transport->lastError = 0xF1U;
     return 0U;
   }
 
@@ -5188,26 +5265,82 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
         active_subevent, subevent_count, total_steps, subevent_start,
         subevent_steps, step_channel_count, step_channels,
         g_cs_measurement_execute_count);
-    execute_rf_channel_retune_primitive(
-        accepted, rf_retune_version,
-        (step_channel_count != 0U) ? step_channels[0] : 0xFFU,
-        &rf_retune_flags, &rf_retune_status, &rf_retune_target_frequency,
-        &rf_retune_target_datawhite, &rf_retune_observed_frequency,
-        &rf_retune_observed_datawhite, &rf_retune_token);
     const uint8_t packet_channel =
         (step_channel_count != 0U) ? step_channels[0] : 0xFFU;
-    execute_rf_timed_mode2_primitive(
-        accepted, rf_timed_mode2_version, packet_channel, packet_s0,
-        packet_cte_info,
-        (uint8_t)(g_cs_measurement_execute_count & 0xFFU),
-        control_to_probe_delay_us, response_listen_window_us,
-        &rf_timed_mode2_flags, &rf_timed_mode2_status,
-        &rf_timed_mode2_state_before, &rf_timed_mode2_tx_wait_loops,
-        &rf_timed_mode2_gap_wait_loops,
-        &rf_timed_mode2_rxready_wait_loops,
-        &rf_timed_mode2_listen_wait_loops,
-        &rf_timed_mode2_disable_wait_loops, &rf_timed_mode2_state_after,
-        &rf_timed_mode2_token);
+    clear_timed_mode2_result_observations();
+    uint8_t executed_channel_count = 0U;
+    uint8_t all_timed_channels_ok = 1U;
+    const uint8_t timed_channel_limit =
+        (step_channel_count < VPR_RF_TIMED_MODE2_RESULT_MAX)
+            ? step_channel_count
+            : VPR_RF_TIMED_MODE2_RESULT_MAX;
+    for (uint8_t ch_index = 0U; ch_index < timed_channel_limit; ++ch_index) {
+      uint8_t loop_retune_flags = 0U;
+      uint8_t loop_retune_status = VPR_RF_RETUNE_STATUS_NOT_ACCEPTED;
+      uint32_t loop_retune_target_frequency = 0U;
+      uint32_t loop_retune_target_datawhite = 0U;
+      uint32_t loop_retune_observed_frequency = 0U;
+      uint32_t loop_retune_observed_datawhite = 0U;
+      uint32_t loop_retune_token = 0U;
+      uint8_t loop_timed_flags = 0U;
+      uint8_t loop_timed_status = VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
+      uint32_t loop_timed_state_before = 0U;
+      uint32_t loop_timed_tx_wait_loops = 0U;
+      uint32_t loop_timed_gap_wait_loops = 0U;
+      uint32_t loop_timed_rxready_wait_loops = 0U;
+      uint32_t loop_timed_listen_wait_loops = 0U;
+      uint32_t loop_timed_disable_wait_loops = 0U;
+      uint32_t loop_timed_state_after = 0U;
+      uint32_t loop_timed_token = 0U;
+      const uint8_t loop_channel = step_channels[ch_index];
+
+      execute_rf_channel_retune_primitive(
+          accepted, rf_retune_version, loop_channel,
+          &loop_retune_flags, &loop_retune_status,
+          &loop_retune_target_frequency, &loop_retune_target_datawhite,
+          &loop_retune_observed_frequency, &loop_retune_observed_datawhite,
+          &loop_retune_token);
+      execute_rf_timed_mode2_primitive(
+          accepted, rf_timed_mode2_version, loop_channel, packet_s0,
+          packet_cte_info,
+          (uint8_t)((g_cs_measurement_execute_count + ch_index) & 0xFFU),
+          control_to_probe_delay_us, response_listen_window_us,
+          &loop_timed_flags, &loop_timed_status,
+          &loop_timed_state_before, &loop_timed_tx_wait_loops,
+          &loop_timed_gap_wait_loops,
+          &loop_timed_rxready_wait_loops,
+          &loop_timed_listen_wait_loops,
+          &loop_timed_disable_wait_loops, &loop_timed_state_after,
+          &loop_timed_token);
+      (void)store_timed_mode2_result_observation();
+      if (loop_timed_status == VPR_RF_TIMED_MODE2_STATUS_OK &&
+          loop_timed_token != 0U) {
+        ++executed_channel_count;
+      } else {
+        all_timed_channels_ok = 0U;
+      }
+
+      if (ch_index == 0U) {
+        rf_retune_flags = loop_retune_flags;
+        rf_retune_status = loop_retune_status;
+        rf_retune_target_frequency = loop_retune_target_frequency;
+        rf_retune_target_datawhite = loop_retune_target_datawhite;
+        rf_retune_observed_frequency = loop_retune_observed_frequency;
+        rf_retune_observed_datawhite = loop_retune_observed_datawhite;
+        rf_retune_token = loop_retune_token;
+        rf_timed_mode2_flags = loop_timed_flags;
+        rf_timed_mode2_status = loop_timed_status;
+        rf_timed_mode2_state_before = loop_timed_state_before;
+        rf_timed_mode2_tx_wait_loops = loop_timed_tx_wait_loops;
+        rf_timed_mode2_gap_wait_loops = loop_timed_gap_wait_loops;
+        rf_timed_mode2_rxready_wait_loops = loop_timed_rxready_wait_loops;
+        rf_timed_mode2_listen_wait_loops = loop_timed_listen_wait_loops;
+        rf_timed_mode2_disable_wait_loops = loop_timed_disable_wait_loops;
+        rf_timed_mode2_state_after = loop_timed_state_after;
+        rf_timed_mode2_token = loop_timed_token;
+      }
+    }
+    (void)restore_timed_mode2_result_observation(0U);
     uint8_t packet_config_flags =
         VPR_RF_PACKET_CONFIG_FLAG_VALID |
         VPR_RF_PACKET_CONFIG_FLAG_PACKET_WRITTEN;
@@ -5252,6 +5385,8 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
         &rf_primitive_pll_wait_loops, &rf_primitive_disable_wait_loops,
         &rf_primitive_state_after, &rf_primitive_token);
     if (rf_timed_mode2_status == VPR_RF_TIMED_MODE2_STATUS_OK &&
+        all_timed_channels_ok != 0U &&
+        executed_channel_count == step_channel_count &&
         g_pending_cs_result_stage == 0U) {
       g_pending_cs_result_stage = 1U;
       g_measurement_execute_result_active = 1U;
@@ -5293,7 +5428,7 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
   payload[6] = subevent_steps;
   payload[7] = g_cs_config_id;
   payload[8] = step_channel_count;
-  payload[9] = accepted != 0U ? step_channel_count : 0U;
+  payload[9] = accepted != 0U ? g_cs_timed_mode2_result_count : 0U;
   write_le16(&payload[10], g_cs_procedure_counter);
   write_le16(&payload[12], g_cs_session_conn_handle);
   write_le32(&payload[14], g_vpr_transport->heartbeat);
@@ -5356,7 +5491,21 @@ static size_t build_vendor_ble_cs_measurement_execute_complete_payload(uint8_t *
   write_le32(&payload[140], rf_timed_mode2_rxready_wait_loops);
   write_le32(&payload[144], rf_timed_mode2_listen_wait_loops);
   write_le32(&payload[148], (accepted != 0U) ? rf_timed_mode2_token : 0U);
-  return 152U;
+  payload[152] = (accepted != 0U) ? g_cs_timed_mode2_result_count : 0U;
+  for (uint8_t i = 0U; i < VPR_RF_TIMED_MODE2_RESULT_MAX; ++i) {
+    payload[153U + i] =
+        (accepted != 0U) ? g_cs_timed_mode2_result_channels[i] : 0xFFU;
+    payload[159U + i] =
+        (accepted != 0U) ? g_cs_timed_mode2_result_status[i]
+                         : VPR_RF_TIMED_MODE2_STATUS_NOT_ACCEPTED;
+    payload[165U + i] =
+        (accepted != 0U) ? g_cs_timed_mode2_result_observed_flags[i] : 0U;
+    payload[171U + i] =
+        (accepted != 0U) ? g_cs_timed_mode2_result_event_mask[i] : 0U;
+    write_le32(&payload[177U + (4U * i)],
+               (accepted != 0U) ? g_cs_timed_mode2_result_tokens[i] : 0U);
+  }
+  return 201U;
 }
 
 static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payload,
@@ -5448,8 +5597,8 @@ static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payloa
 #endif
 
 static bool publish_builtin_response_for_opcode(uint16_t opcode) {
-  /* Largest staging payload is the fixed 152-byte CS execute response. */
-  uint8_t payload[152];
+  /* Keep the extended CS execute response staging buffer off the VPR stack. */
+  static uint8_t payload[201];
   uint16_t conn_handle = current_conn_handle();
   size_t offset = 0U;
   zero_vpr_data();
@@ -5952,14 +6101,19 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
       size_t len = build_vendor_ble_cs_measurement_execute_complete_payload(
           payload, sizeof(payload));
       if (len == 0U) {
+        if (g_vpr_transport->lastError == 0U) {
+          g_vpr_transport->lastError = 0xF2U;
+        }
         return false;
       }
       len = append_h4_command_complete_payload(
           (uint8_t *)g_vpr_transport->vprData + offset,
           NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset, opcode, payload, len);
       if (len == 0U) {
+        g_vpr_transport->lastError = 0xF3U;
         return false;
       }
+      g_vpr_transport->lastError = 0U;
       offset += len;
       break;
     }

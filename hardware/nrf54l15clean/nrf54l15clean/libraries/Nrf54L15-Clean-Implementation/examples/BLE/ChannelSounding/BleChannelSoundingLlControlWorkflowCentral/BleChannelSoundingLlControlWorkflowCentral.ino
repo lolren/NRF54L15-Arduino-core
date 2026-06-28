@@ -723,6 +723,25 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   Serial.print(sweepResult.workResultTimedMode2PeerOk ? 1 : 0);
   Serial.print(" work_result_timed_ch=");
   Serial.print(sweepResult.workResultTimedMode2Channel);
+  Serial.print(" work_result_timed_all=");
+  Serial.print(sweepResult.workResultTimedMode2AllChannelsOk ? 1 : 0);
+  Serial.print(" work_result_timed_matches=");
+  Serial.print(sweepResult.workResultTimedMode2LocalMatches);
+  Serial.print("/");
+  Serial.print(sweepResult.workResultTimedMode2PeerMatches);
+  Serial.print("/");
+  Serial.print(sweepResult.workResultTimedMode2RequiredChannels);
+  Serial.print(" work_timed_obs=");
+  Serial.print(sweepResult.workRfTimedMode2ObservedCount);
+  Serial.print(":");
+  for (uint8_t i = 0U; i < sweepResult.workRfTimedMode2ObservedCount &&
+                      i < sizeof(sweepResult.workRfTimedMode2ObservedChannels);
+       ++i) {
+    if (i != 0U) {
+      Serial.print(",");
+    }
+    Serial.print(sweepResult.workRfTimedMode2ObservedChannels[i]);
+  }
   Serial.print(" work_comp_est=");
   Serial.print(sweepResult.workCompletedResultEstimateValid ? 1 : 0);
   Serial.print(" work_comp_mask=0x");

@@ -720,6 +720,12 @@ struct BleCsVprMeasurementExecutionResult {
   uint8_t rfTimedMode2Flags = 0U;
   uint8_t rfTimedMode2Status = 0xFFU;
   uint8_t rfTimedMode2Channel = 0xFFU;
+  uint8_t rfTimedMode2ObservedCount = 0U;
+  uint8_t rfTimedMode2ObservedChannels[6] = {0};
+  uint8_t rfTimedMode2ObservedStatus[6] = {0};
+  uint8_t rfTimedMode2ObservedFlags[6] = {0};
+  uint8_t rfTimedMode2ObservedEventMask[6] = {0};
+  uint32_t rfTimedMode2ObservedTokens[6] = {0};
   uint8_t rfRole = 0U;
   uint8_t rfPhy = 0U;
   int8_t rfTxPowerDelta = 0;
@@ -1546,6 +1552,7 @@ struct BleCsConnectedMode2SweepResult {
   bool workResultTimedMode2Ok = false;
   bool workResultTimedMode2LocalOk = false;
   bool workResultTimedMode2PeerOk = false;
+  bool workResultTimedMode2AllChannelsOk = false;
   bool workCompletedResultEstimateValid = false;
   bool hostControllerResultIngress = false;
   uint8_t attempts = 0U;
@@ -1617,6 +1624,15 @@ struct BleCsConnectedMode2SweepResult {
   uint8_t workToneTimedMode2PacketChannel = 0xFFU;
   uint8_t workToneTimedMode2EventMask = 0U;
   uint8_t workResultTimedMode2Channel = 0xFFU;
+  uint8_t workResultTimedMode2RequiredChannels = 0U;
+  uint8_t workResultTimedMode2LocalMatches = 0U;
+  uint8_t workResultTimedMode2PeerMatches = 0U;
+  uint8_t workRfTimedMode2ObservedCount = 0U;
+  uint8_t workRfTimedMode2ObservedChannels[6] = {0};
+  uint8_t workRfTimedMode2ObservedStatus[6] = {0};
+  uint8_t workRfTimedMode2ObservedFlags[6] = {0};
+  uint8_t workRfTimedMode2ObservedEventMask[6] = {0};
+  uint32_t workRfTimedMode2ObservedTokens[6] = {0};
   uint32_t workCompletedResultMismatchMask = 0U;
   uint8_t workRfPhy = 0U;
   int8_t workRfTxPowerDelta = 0;
@@ -1863,6 +1879,8 @@ class BleCsControllerSession {
   bool ready() const;
   bool failed() const;
   bool estimateValid() const;
+  bool refreshEstimateFromCompletedResults();
+  bool applyEstimateToCompletedResults(const BleCsEstimate& estimate);
   const BleCsControllerSessionState& state() const;
   const BleCsControllerWorkflowState& workflowState() const;
   const BleCsSubeventResult& localResult() const;
@@ -1992,6 +2010,8 @@ class BleCsControllerHost {
   bool ready() const;
   bool failed() const;
   bool estimateValid() const;
+  bool refreshEstimateFromCompletedResults();
+  bool applyEstimateToCompletedResults(const BleCsEstimate& estimate);
   const BleCsControllerHostState& state() const;
   const BleCsControllerSessionState& sessionState() const;
   const BleCsControllerWorkflowState& workflowState() const;
@@ -2083,6 +2103,8 @@ class BleCsControllerStreamHost {
   bool ready() const;
   bool failed() const;
   bool estimateValid() const;
+  bool refreshEstimateFromCompletedResults();
+  bool applyEstimateToCompletedResults(const BleCsEstimate& estimate);
   const BleCsControllerStreamHostState& state() const;
   const BleCsControllerHostState& hostState() const;
   const BleCsControllerSessionState& sessionState() const;
