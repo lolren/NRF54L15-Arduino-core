@@ -4203,6 +4203,7 @@ bool parseVprMeasurementWorkItemResponse(const uint8_t* packet,
   outWork->builtInPeerDemoEnabled = (params[1] & 0x10U) != 0U;
   outWork->testActive = (params[1] & 0x20U) != 0U;
   outWork->ready = (params[1] & 0x40U) != 0U || params[54] != 0U;
+  outWork->controllerAutoExecuted = (params[1] & 0x80U) != 0U;
   outWork->activeSubeventIndex = params[2];
   outWork->totalSubevents = params[3];
   outWork->totalSteps = params[4];
@@ -4261,6 +4262,7 @@ bool parseVprMeasurementExecutionResponse(
   outResult->accepted = (params[1] & 0x02U) != 0U;
   outResult->resultPending = (params[1] & 0x04U) != 0U;
   outResult->peerProcedureActive = (params[1] & 0x08U) != 0U;
+  outResult->controllerOwnedSnapshot = (params[1] & 0x10U) != 0U;
   outResult->activeSubeventIndex = params[2];
   outResult->totalSubevents = params[3];
   outResult->totalSteps = params[4];

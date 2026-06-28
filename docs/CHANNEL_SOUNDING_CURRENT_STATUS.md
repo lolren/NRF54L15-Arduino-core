@@ -13,23 +13,24 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-███████████████████████░░░░░░░░░  70%
+████████████████████████░░░░░░░░  72%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 The older `87%` tracker is too optimistic for "full working CS". It mostly
 counts support infrastructure. The current stricter estimate is approximately
-70% complete after the VPR measurement execution refactor.
+72% complete after the VPR measurement execution refactor and first
+controller-owned auto-execution pass.
 
 ## Current Verified Baseline
 
 Repository state used for this status:
 
 ```text
-base commit: 6aad0eeb cs: preserve VPR multi-channel result proof
+base commit: 6007ac20 cs: refactor VPR measurement execution worker
 branch: main
-worktree: Slice 1 VPR measurement execution refactor applied
+worktree: Slice 2 VPR controller-owned auto measurement execution applied
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -175,26 +176,39 @@ Verification:
 Goal: after LL `CS_START` / `PROCEDURE_ACTIVE`, VPR executes the scheduled work
 item itself.
 
-Current issue:
+Implemented in this slice:
 
-- The connected runner still asks the host-visible command path to execute
-  measurement work.
-- That proves the RF primitive can run through the reusable worker, but not that
-  the controller owns scheduling and execution.
+- VPR now has a guarded auto-execute service keyed by procedure counter and
+  active subevent index.
+- When peer LL `CS_START` moves the dedicated CS image into
+  `PROCEDURE_ACTIVE`, VPR executes the scheduled work item through the same RF
+  measurement worker used by the diagnostic command.
+- The VPR idle loop also runs the auto-execute service after scheduling the next
+  subevent/procedure and before publishing result packets.
+- The host-visible `0xFCED` measurement-execute command is now idempotent for
+  the current controller-owned work item: if VPR already executed it, the command
+  returns the latched snapshot instead of running RF work again.
+- The measurement-work read flags now use bit `0x80` to indicate that the
+  current procedure/subevent has already been auto-executed by VPR.
+- The measurement-execute response flags now use bit `0x10` to indicate the
+  response is a controller-owned snapshot.
 
-Required work:
+Current caveat:
 
-- Add a guarded auto-execute path in the VPR main loop.
-- Track procedure/subevent execution so the same work is not repeated
-  endlessly.
-- Avoid races with the existing direct/test command path.
-- Expose enough debug state to prove whether auto execution happened.
+- `scripts/test_cs_ll_workflow_bridge.sh` still uses the existing bridge
+  diagnostic sequence, which sends `CS_ABORT` before the later connected sweep.
+  That regression proves compatibility and RF execution still pass, but the next
+  test improvement should assert the new `0x80`/`0x10` flags before aborting.
 
 Verification:
 
-- Connected workflow PASS must show execution occurred without requiring the
-  runner to issue the direct/test execute command.
-- Existing direct/test execute command must still work for diagnostics.
+- `scripts/test_cs_ll_workflow_bridge.sh` passes with two boards after this
+  change.
+- `git diff --check` passes.
+- Remaining verification: add or run a focused no-host-execute workflow that
+  waits after `CS_START`, reads measurement work, and proves the `0x80` auto flag
+  plus `0x10` execution-snapshot flag without calling the diagnostic execute
+  hook first.
 
 ### Slice 3: Move Connected Timing Ownership Into VPR/RADIO
 
@@ -359,11 +373,11 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with Slice 2.
+Start with a focused Slice 2 verification follow-up, then move to Slice 3.
 
-Reason: Slice 1 now gives VPR a reusable measurement execution worker. Slice 2
-is the architectural change that uses it from controller state instead of only
-when CPUAPP sends the host-visible measurement execute command.
+Reason: VPR now owns first-pass measurement execution, but the existing bridge
+regression aborts before it can prove the new debug flags. Lock that proof down
+before moving more timing ownership into VPR/RADIO.
 
 Do not mark CS fully complete until these are true:
 

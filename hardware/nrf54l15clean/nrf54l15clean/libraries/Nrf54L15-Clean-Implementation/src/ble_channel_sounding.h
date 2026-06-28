@@ -596,6 +596,7 @@ struct BleCsVprMeasurementWorkItem {
   bool builtInPeerDemoEnabled = false;
   bool testActive = false;
   bool ready = false;
+  bool controllerAutoExecuted = false;
   uint8_t activeSubeventIndex = 0U;
   uint8_t totalSubevents = 0U;
   uint8_t totalSteps = 0U;
@@ -630,6 +631,7 @@ struct BleCsVprMeasurementExecutionResult {
   bool accepted = false;
   bool resultPending = false;
   bool peerProcedureActive = false;
+  bool controllerOwnedSnapshot = false;
   uint8_t activeSubeventIndex = 0U;
   uint8_t totalSubevents = 0U;
   uint8_t totalSteps = 0U;

@@ -292,6 +292,25 @@ static uint32_t g_cs_measurement_execute_count = 0U;
 static uint8_t g_cs_measurement_execute_last_status = 0xFFU;
 static uint8_t g_cs_measurement_execute_last_channels = 0U;
 static uint32_t g_cs_measurement_execute_last_token = 0U;
+#define VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN 201U
+static uint16_t g_cs_auto_measurement_last_procedure_counter = 0U;
+static uint8_t g_cs_auto_measurement_last_subevent = 0xFFU;
+static uint8_t g_cs_auto_measurement_last_status = 0xFFU;
+static uint32_t g_cs_auto_measurement_count = 0U;
+static uint32_t g_cs_auto_measurement_last_token = 0U;
+static uint8_t g_cs_measurement_execute_snapshot_valid = 0U;
+static uint8_t g_cs_measurement_execute_snapshot[VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN];
+
+static void clear_controller_auto_measurement_state(void) {
+  g_cs_auto_measurement_last_procedure_counter = 0U;
+  g_cs_auto_measurement_last_subevent = 0xFFU;
+  g_cs_auto_measurement_last_status = 0xFFU;
+  g_cs_auto_measurement_count = 0U;
+  g_cs_auto_measurement_last_token = 0U;
+  g_cs_measurement_execute_snapshot_valid = 0U;
+}
+static bool controller_auto_measurement_matches_current_key(void);
+static bool service_controller_owned_measurement_execution(void);
 typedef struct __attribute__((packed)) {
   uint8_t configId;
   uint16_t procedureCounter;
@@ -655,6 +674,7 @@ static void reset_dedicated_cs_state(void) {
   g_cs_next_peer_stage_heartbeat = 0U;
   g_cs_next_chunk_stage_heartbeat = 0U;
   g_measurement_execute_result_active = 0U;
+  clear_controller_auto_measurement_state();
   clear_timed_mode2_result_observations();
   g_cs_result_publish_debug_reason = 0U;
   g_cs_result_publish_debug_stage = 0U;
@@ -2376,6 +2396,7 @@ static void update_create_config_from_command(void) {
   g_cs_measurement_execute_last_status = 0xFFU;
   g_cs_measurement_execute_last_channels = 0U;
   g_cs_measurement_execute_last_token = 0U;
+  clear_controller_auto_measurement_state();
   update_demo_channels_from_create_config();
   slot = allocate_create_config_slot(g_cs_config_id, allow_previous_overflow);
   if (slot != NULL) {
@@ -2450,6 +2471,7 @@ static void update_procedure_params_from_command(void) {
   g_cs_measurement_execute_last_status = 0xFFU;
   g_cs_measurement_execute_last_channels = 0U;
   g_cs_measurement_execute_last_token = 0U;
+  clear_controller_auto_measurement_state();
   slot = find_cs_slot(g_cs_config_id);
   if (slot == NULL && g_cs_config_created != 0U) {
     slot = allocate_cs_slot(g_cs_config_id);
@@ -2486,6 +2508,7 @@ static void clear_active_runtime_state(void) {
   g_cs_measurement_execute_last_status = 0xFFU;
   g_cs_measurement_execute_last_channels = 0U;
   g_cs_measurement_execute_last_token = 0U;
+  clear_controller_auto_measurement_state();
 }
 
 static void clear_active_config_selection(void) {
@@ -2744,7 +2767,8 @@ static bool schedule_next_cs_procedure(void) {
     g_cs_procedure_counter = 1U;
   }
   g_cs_active_subevent_index = 0U;
-  g_pending_cs_result_stage = 1U;
+  g_pending_cs_result_stage = cs_builtin_peer_demo_active() ? 1U : 0U;
+  g_measurement_execute_result_active = 0U;
   g_cs_local_chunk_start_step = current_demo_subevent_start_step(0U);
   g_cs_peer_chunk_start_step = current_demo_subevent_start_step(0U);
   g_cs_next_procedure_heartbeat = 0U;
@@ -2766,7 +2790,8 @@ static bool schedule_next_cs_subevent(void) {
     return false;
   }
   g_cs_active_subevent_index = (uint8_t)(g_cs_active_subevent_index + 1U);
-  g_pending_cs_result_stage = 1U;
+  g_pending_cs_result_stage = cs_builtin_peer_demo_active() ? 1U : 0U;
+  g_measurement_execute_result_active = 0U;
   g_cs_local_chunk_start_step = current_demo_subevent_start_step(g_cs_active_subevent_index);
   g_cs_peer_chunk_start_step = g_cs_local_chunk_start_step;
   g_cs_next_subevent_heartbeat = 0U;
@@ -4072,6 +4097,10 @@ static size_t build_vendor_ble_cs_peer_pdu_inject_complete_payload(uint8_t *payl
   uint8_t status = validate_peer_pdu_inject_command(&pdu_len);
   if (status == BLE_CS_HCI_STATUS_SUCCESS) {
     handle_peer_cs_pdu((const uint8_t *)&g_host_transport->hostData[4], pdu_len);
+    if (previous_stage != VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE &&
+        g_cs_peer_exchange_stage == VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE) {
+      (void)service_controller_owned_measurement_execution();
+    }
   }
   return build_vendor_ble_cs_peer_exchange_payload(payload, max_len, status, previous_stage);
 }
@@ -4204,6 +4233,10 @@ static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t
   }
   if (ready != 0U) {
     flags |= 0x40U;
+  }
+  if (g_cs_auto_measurement_count != 0U &&
+      controller_auto_measurement_matches_current_key()) {
+    flags |= 0x80U;
   }
 
   payload[0] = status;
@@ -5176,6 +5209,36 @@ typedef struct {
   uint16_t response_listen_window_us;
 } vpr_cs_measurement_execute_params_t;
 
+static bool controller_auto_measurement_matches_current_key(void) {
+  return g_cs_auto_measurement_last_procedure_counter == g_cs_procedure_counter &&
+         g_cs_auto_measurement_last_subevent == g_cs_active_subevent_index;
+}
+
+static void store_ble_cs_measurement_execute_snapshot(const uint8_t *payload,
+                                                      size_t len) {
+  if (payload == NULL || len != VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN) {
+    g_cs_measurement_execute_snapshot_valid = 0U;
+    return;
+  }
+
+  bytes_copy(g_cs_measurement_execute_snapshot, payload,
+             VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN);
+  g_cs_measurement_execute_snapshot_valid = 1U;
+}
+
+static bool copy_ble_cs_measurement_execute_snapshot(uint8_t *payload,
+                                                     size_t max_len) {
+  if (payload == NULL || max_len < VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN ||
+      g_cs_measurement_execute_snapshot_valid == 0U ||
+      !controller_auto_measurement_matches_current_key()) {
+    return false;
+  }
+
+  bytes_copy(payload, g_cs_measurement_execute_snapshot,
+             VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN);
+  return true;
+}
+
 static size_t run_ble_cs_measurement_execute(
     const vpr_cs_measurement_execute_params_t *params,
     uint8_t *payload,
@@ -5506,7 +5569,9 @@ static size_t run_ble_cs_measurement_execute(
     write_le32(&payload[177U + (4U * i)],
                (accepted != 0U) ? g_cs_timed_mode2_result_tokens[i] : 0U);
   }
-  return 201U;
+  store_ble_cs_measurement_execute_snapshot(
+      payload, VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN);
+  return VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN;
 }
 
 static vpr_cs_measurement_execute_params_t
@@ -5541,9 +5606,62 @@ parse_ble_cs_measurement_execute_params_from_host_command(void) {
 static size_t build_vendor_ble_cs_measurement_execute_complete_payload(
     uint8_t *payload,
     size_t max_len) {
+  if (copy_ble_cs_measurement_execute_snapshot(payload, max_len)) {
+    return VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN;
+  }
+
   const vpr_cs_measurement_execute_params_t params =
       parse_ble_cs_measurement_execute_params_from_host_command();
   return run_ble_cs_measurement_execute(&params, payload, max_len);
+}
+
+static bool controller_owned_measurement_execution_due(void) {
+  if (g_cs_session_open == 0U || g_cs_procedure_enabled == 0U ||
+      g_cs_peer_exchange_stage != VPR_CS_PEER_STAGE_PROCEDURE_ACTIVE ||
+      g_cs_builtin_peer_demo_enabled != 0U ||
+      g_pending_cs_result_stage != 0U ||
+      g_measurement_execute_result_active != 0U ||
+      g_cs_procedure_counter == 0U || g_cs_config_id == 0U) {
+    return false;
+  }
+
+  const uint8_t active_subevent = g_cs_active_subevent_index;
+  if (current_demo_subevent_count() == 0U ||
+      current_demo_total_step_count() == 0U ||
+      current_demo_subevent_step_count(active_subevent) == 0U ||
+      controller_auto_measurement_matches_current_key()) {
+    return false;
+  }
+
+  return true;
+}
+
+static bool service_controller_owned_measurement_execution(void) {
+  if (!controller_owned_measurement_execution_due()) {
+    return false;
+  }
+
+  g_cs_auto_measurement_last_procedure_counter = g_cs_procedure_counter;
+  g_cs_auto_measurement_last_subevent = g_cs_active_subevent_index;
+  g_cs_auto_measurement_count = g_cs_auto_measurement_count + 1U;
+
+  const vpr_cs_measurement_execute_params_t params =
+      default_ble_cs_measurement_execute_params();
+  const size_t len = run_ble_cs_measurement_execute(
+      &params, g_cs_measurement_execute_snapshot,
+      VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN);
+  if (len != VPR_CS_MEASUREMENT_EXECUTE_PAYLOAD_LEN) {
+    g_cs_auto_measurement_last_status = 0xFEU;
+    g_cs_auto_measurement_last_token = 0U;
+    g_cs_measurement_execute_snapshot_valid = 0U;
+    return false;
+  }
+
+  g_cs_measurement_execute_snapshot[1] |= 0x10U;
+  g_cs_auto_measurement_last_status = g_cs_measurement_execute_snapshot[0];
+  g_cs_auto_measurement_last_token = g_cs_measurement_execute_last_token;
+  return g_cs_auto_measurement_last_status == BLE_CS_HCI_STATUS_SUCCESS &&
+         g_measurement_execute_result_active != 0U;
 }
 
 static size_t build_vendor_ble_cs_tone_snapshot_complete_payload(uint8_t *payload,
@@ -5948,6 +6066,7 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
           g_cs_active_subevent_index = 0U;
           g_cs_local_chunk_start_step = 0U;
           g_cs_peer_chunk_start_step = 0U;
+          clear_controller_auto_measurement_state();
         } else if (status == 0U) {
           g_cs_procedure_enabled = 1U;
           g_cs_procedure_counter = 1U;
@@ -5964,6 +6083,7 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
           g_cs_last_peer_gap_ticks = 0U;
           g_cs_local_chunk_start_step = current_demo_subevent_start_step(0U);
           g_cs_peer_chunk_start_step = current_demo_subevent_start_step(0U);
+          clear_controller_auto_measurement_state();
         }
       }
 #endif
@@ -7401,6 +7521,7 @@ __attribute__((noreturn, used, externally_visible)) void vpr_main(void) {
       if (!schedule_next_cs_subevent()) {
         (void)schedule_next_cs_procedure();
       }
+      (void)service_controller_owned_measurement_execution();
       (void)publish_pending_cs_result_packet();
 #endif
     }
