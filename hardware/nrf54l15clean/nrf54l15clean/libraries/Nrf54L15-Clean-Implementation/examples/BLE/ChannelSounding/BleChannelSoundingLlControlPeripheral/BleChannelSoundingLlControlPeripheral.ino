@@ -2,11 +2,17 @@
  * BleChannelSoundingLlControlPeripheral
  *
  * Peripheral-side diagnostic for real over-air Channel Sounding LL-control
- * transport. Use with BleChannelSoundingLlControlCentral on a second board.
+ * transport. Use with BleChannelSoundingLlControlWorkflowCentral on a second
+ * board for the Arduino Serial Monitor distance test.
  *
  * This does not run an RF ranging procedure. It responds to the central with
  * real-shaped CS LL-control PDUs so the central can inject those peer PDUs into
  * the VPR CS peer-exchange state machine.
+ *
+ * Expected terminal output:
+ *   cs_serial_reflector=READY ...
+ *   connected
+ *   connected_physical_reflector ... reply=1 ...
  */
 
 #include <Arduino.h>
@@ -390,6 +396,8 @@ void setup() {
   Serial.begin(115200);
   delay(350);
   Serial.print("\r\nBleChannelSoundingLlControlPeripheral start\r\n");
+  Serial.print("Arduino CS serial test reflector: leave this board powered ");
+  Serial.print("and watch the central board for cs_distance_m lines.\r\n");
 
   Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
   Gpio::write(kPinUserLed, true);
@@ -411,6 +419,11 @@ void setup() {
   Serial.print(ok ? "OK" : "FAIL");
   Serial.print("\r\naddr=");
   Serial.print(kAddressText);
+  Serial.print("\r\n");
+  Serial.print("cs_serial_reflector=READY baud=115200 addr=");
+  Serial.print(kAddressText);
+  Serial.print(" name=");
+  Serial.print(kName);
   Serial.print("\r\n");
 }
 

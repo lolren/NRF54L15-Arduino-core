@@ -13,6 +13,7 @@
  *
  * Expected terminal output:
  *   cs_ll_workflow_bridge=PASS ...
+ *   cs_distance_m=0.75 raw_m=0.75 confidence=high channels=3/3
  */
 
 #include <Arduino.h>
@@ -233,6 +234,23 @@ static void printOpcode(uint8_t opcode) {
   Serial.print(opcode, HEX);
 }
 
+static void printAddress(const uint8_t* address) {
+  if (address == nullptr) {
+    Serial.print("null");
+    return;
+  }
+
+  for (int8_t i = 5; i >= 0; --i) {
+    if (i != 5) {
+      Serial.print(':');
+    }
+    if (address[i] < 16U) {
+      Serial.print('0');
+    }
+    Serial.print(address[i], HEX);
+  }
+}
+
 static void printDistanceField(const char* label, float value) {
   Serial.print(label);
   if (isfinite(value)) {
@@ -383,6 +401,32 @@ static void printAccuracySample(const char* source,
                        physical.conservativeErrorMeters);
     printDistanceField(" lower_m=", physical.lowerBoundMeters);
     printDistanceField(" upper_m=", physical.upperBoundMeters);
+  }
+  Serial.print("\r\n");
+
+  Serial.print("cs_distance_m=");
+  Serial.print(calibratedDistance, 4);
+  Serial.print(" raw_m=");
+  Serial.print(estimate.distanceMeters, 4);
+  Serial.print(" phase_m=");
+  Serial.print(calibratedPhase, 4);
+  Serial.print(" confidence=");
+  Serial.print(confidenceLabel(confidence));
+  Serial.print(" confidence_pct=");
+  Serial.print(confidence);
+  Serial.print(" channels=");
+  Serial.print(validChannels);
+  Serial.print('/');
+  Serial.print(requestedChannels);
+  Serial.print(" rtt=");
+  Serial.print(kConnectedEnableRtt ? 1 : 0);
+  if (physicalOk) {
+    Serial.print(" typical_error_m=");
+    Serial.print(physical.typicalErrorMeters, 4);
+    Serial.print(" range_m=");
+    Serial.print(physical.lowerBoundMeters, 4);
+    Serial.print("..");
+    Serial.print(physical.upperBoundMeters, 4);
   }
   Serial.print("\r\n");
 }
@@ -1538,6 +1582,12 @@ void setup() {
   Serial.begin(115200);
   delay(350);
   Serial.print("\r\nBleChannelSoundingLlControlWorkflowCentral start\r\n");
+  Serial.print("Arduino CS serial test: upload ");
+  Serial.print("BleChannelSoundingLlControlPeripheral to the second nRF54L15 ");
+  Serial.print("board, then watch this monitor for cs_distance_m lines.\r\n");
+  Serial.print("cs_serial_initiator=READY baud=115200 peer=");
+  printAddress(kPeripheralAddress);
+  Serial.print("\r\n");
 
   Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
   Gpio::write(kPinUserLed, true);
