@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import math
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -53,6 +55,19 @@ ROLE_TO_PASS_MARKERS = {
         "CS capability exchange completed.",
         "CS config creation complete. ID:",
         "CS security enabled.",
+    ),
+}
+FLOAT_RE = r"([+-]?(?:\d+(?:\.\d+)?|\.\d+|nan|na))"
+ZEPHYR_DISTANCE_PATTERNS = {
+    "rtt": re.compile(
+        rf"Round-Trip Timing method:\s*{FLOAT_RE}\s+meters"
+        r"(?:\s*\(derived from\s*(\d+)\s+samples\))?",
+        re.IGNORECASE,
+    ),
+    "phase": re.compile(
+        rf"Phase-Based Ranging method:\s*{FLOAT_RE}\s+meters"
+        r"(?:\s*\(derived from\s*(\d+)\s+samples\))?",
+        re.IGNORECASE,
     ),
 }
 
@@ -274,6 +289,99 @@ def parse_version_tuple(value: str) -> tuple[int, ...]:
         if part:
             parts.append(int(part))
     return tuple(parts)
+
+
+def parse_distance_token(token: str) -> float | None:
+    lowered = token.strip().lower()
+    if lowered in {"", "nan", "na", "none"}:
+        return None
+    try:
+        value = float(lowered)
+    except ValueError:
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def extract_zephyr_distance_samples(log_path: Path) -> list[dict[str, object]]:
+    samples: list[dict[str, object]] = []
+    if not log_path.is_file():
+        return samples
+
+    with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            for method, pattern in ZEPHYR_DISTANCE_PATTERNS.items():
+                match = pattern.search(line)
+                if not match:
+                    continue
+                value = parse_distance_token(match.group(1))
+                if value is None:
+                    continue
+                record: dict[str, object] = {
+                    "method": method,
+                    "value_m": value,
+                    "log_path": str(log_path),
+                    "line_number": line_number,
+                }
+                if match.group(2):
+                    record["derived_samples"] = int(match.group(2))
+                samples.append(record)
+                break
+    return samples
+
+
+def zephyr_distance_values(
+    samples: list[dict[str, object]], method: str
+) -> list[float]:
+    values: list[float] = []
+    for sample in samples:
+        if str(sample.get("method", "")) != method:
+            continue
+        value = sample.get("value_m")
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            values.append(float(value))
+    return values
+
+
+def summarize_zephyr_distance_samples(
+    samples: list[dict[str, object]], method: str
+) -> dict[str, float] | None:
+    values = zephyr_distance_values(samples, method)
+    if not values:
+        return None
+    median_value = statistics.median(values)
+    mean_value = sum(values) / float(len(values))
+    variance = sum((value - mean_value) ** 2 for value in values) / float(len(values))
+    return {
+        "count": float(len(values)),
+        "median": median_value,
+        "mean": mean_value,
+        "mad": statistics.median(abs(value - median_value) for value in values),
+        "stddev": math.sqrt(variance),
+        "minimum": min(values),
+        "maximum": max(values),
+    }
+
+
+def print_zephyr_distance_summary(logs: dict[str, Path]) -> None:
+    all_samples: list[dict[str, object]] = []
+    for path in logs.values():
+        all_samples.extend(extract_zephyr_distance_samples(path))
+
+    for method in ("phase", "rtt"):
+        summary = summarize_zephyr_distance_samples(all_samples, method)
+        if summary is None:
+            print(f"zephyr_distance_{method}=NONE")
+            continue
+        print(
+            f"zephyr_distance_{method}=PASS "
+            f"count={int(summary['count'])} "
+            f"median_m={summary['median']:.6f} "
+            f"mad_m={summary['mad']:.6f} "
+            f"min_m={summary['minimum']:.6f} "
+            f"max_m={summary['maximum']:.6f}"
+        )
 
 
 def read_sdk_version(sdk_dir: Path) -> tuple[int, ...] | None:
@@ -550,7 +658,9 @@ def capture_serial_pair(
                 proc.wait(timeout=2)
 
     print(f"logs={log_dir}")
-    return validate_zephyr_logs(logs)
+    ok = validate_zephyr_logs(logs)
+    print_zephyr_distance_summary(logs)
+    return ok
 
 
 def validate_zephyr_logs(logs: dict[str, Path]) -> bool:

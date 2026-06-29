@@ -13,17 +13,18 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-█████████████████████████████████░  95%
+█████████████████████████████████░  96%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-The current stricter estimate is approximately 95%: the VPR measurement
+The current stricter estimate is approximately 96%: the VPR measurement
 execution refactor, controller-owned auto-execution proof, VPR/RADIO connected
 timing ownership proof, connected packet/timed Mode 2 ownership handoff,
 controller-owned CS security material derivation/readback, Zephyr validation
 harness, Zephyr-compatible Arduino step-data GATT bridge, and the first
-repeatable accuracy/calibration harness are complete.
+repeatable accuracy/calibration plus fixed-placement distance-parity harnesses
+are complete.
 
 ## Current Verified Baseline
 
@@ -32,7 +33,7 @@ Repository state used for this status:
 ```text
 pre-slice base commit: 9e6356e7 cs: add Zephyr interoperability harness
 branch: main
-current slice state: Slice 8 complete; Arduino now emits structured CS accuracy samples and has a repeatable calibration capture/analyze harness
+current slice state: Slice 9A complete; Arduino emits structured CS accuracy samples and the new fixed-placement parity harness can compare those medians against fresh Zephyr connected-CS distance logs
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -810,8 +811,93 @@ Remaining limitations moved to Slice 9:
 
 Goal: make CS stable enough to ship as a supported feature.
 
+Status: in progress.
+
+Slice 9A fixed-placement distance parity harness is implemented.
+
+Implemented:
+
+- `scripts/zephyr_channel_sounding_validation.py` now parses official Zephyr
+  connected-CS distance output in addition to pass/fail markers:
+  `Phase-Based Ranging method: ... meters` and
+  `Round-Trip Timing method: ... meters`.
+- `scripts/test_cs_distance_parity.py` compares Arduino
+  `cs_accuracy_sample` medians against Zephyr connected-CS medians captured
+  with the boards left in the same physical position.
+- The parity harness records raw medians and compared medians separately. By
+  default it compares absolute medians because Zephyr phase-slope output can be
+  signed while this core reports physical positive distance.
+- Output artifacts are written under ignored
+  `dist/cs_distance_parity/`.
+
+How to run the fixed-placement distance parity check:
+
+```bash
+# 1. Capture official Zephyr connected_cs logs with the boards left exactly
+#    where they are. The local workspace currently needs a compatible SDK:
+python3 scripts/zephyr_channel_sounding_validation.py pair-demo \
+  --workspace /home/lolren/Desktop/test_pi_nrf54/ncs-workspace \
+  --initiator-port /dev/ttyACM1 \
+  --reflector-port /dev/ttyACM2 \
+  --capture-seconds 45 \
+  --log-dir /tmp/zephyr_cs_fixed_position
+
+# 2. Capture Arduino at the same placement and compare to those Zephyr logs:
+python3 scripts/test_cs_distance_parity.py capture \
+  --profiles 0 \
+  --runs 1 \
+  --capture-seconds 45 \
+  --central-port /dev/ttyACM1 \
+  --peripheral-port /dev/ttyACM2 \
+  --central-uid 761FDE87 \
+  --peripheral-uid E91217E8 \
+  --zephyr-log /tmp/zephyr_cs_fixed_position/zephyr_initiator.log \
+               /tmp/zephyr_cs_fixed_position/zephyr_reflector.log \
+  --tolerance-m 0.50
+```
+
+Current verification:
+
+- Python syntax/import checks pass for the new and modified CS harnesses.
+- Synthetic parity smoke tests pass/fail correctly, including signed Zephyr
+  phase output compared against positive Arduino physical distance.
+- Arduino-only fixed-placement capture passed on the two connected XIAO
+  nRF54L15 boards:
+
+```text
+central=/dev/ttyACM1 uid=761FDE87
+peripheral=/dev/ttyACM2 uid=E91217E8
+cs_accuracy=PASS samples=1
+phase_raw median=0.7499 mad=0.0000 stddev=0.0000
+confidence median=94.0
+```
+
+Current blocker:
+
+- Live Zephyr fixed-placement comparison cannot run in this environment yet.
+  The workspace at `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace` is
+  Zephyr 4.4 and the local tool discovery did not find a compatible Zephyr SDK.
+  The current failure is:
+
+```text
+error: Zephyr SDK >= 1.0 is required for /home/lolren/Desktop/test_pi_nrf54/ncs-workspace. Install a compatible SDK or pass --sdk-dir.
+```
+
+Important interpretation:
+
+- The current Arduino baseline is useful only as a repeatability point until it
+  is compared with a fresh Zephyr log captured at the same board placement.
+- The old archived Zephyr example is not valid for this comparison because it
+  was captured from an earlier, different setup. The new parity harness rejects
+  that old-vs-new comparison, which is the intended behavior.
+- This fixed-placement parity check is enough for this slice while the boards
+  cannot be physically moved. Full calibration still requires multiple measured
+  distances later.
+
 Required work:
 
+- Run the fixed-placement Zephyr comparison once SDK >= 1.0 is installed or
+  fresh Zephyr connected-CS logs are available.
 - Long soak of connected CS procedures.
 - Reconnect, abort, timeout, and peer-loss tests.
 - Different PHY/settings and channel maps.
