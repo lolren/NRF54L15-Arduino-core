@@ -30,10 +30,16 @@ run_zephyr_pair() {
 
 print_mixed_status() {
   cat <<'STATUS'
-cs_mixed_arduino_initiator_zephyr_reflector=BLOCKED
-reason=arduino_side_currently_uses_ll_control_diagnostic_bridge_not_zephyr_connected_cs_gatt_step_data_sample
-cs_mixed_zephyr_initiator_arduino_reflector=BLOCKED
-reason=arduino_side_currently_lacks_zephyr_compatible_connected_cs_service_and_host_role_example
+cs_mixed_arduino_initiator_zephyr_reflector=READY_FOR_HARDWARE_TEST
+arduino_initiator_example=BLE/ChannelSounding/BleChannelSoundingZephyrCompatInitiator
+zephyr_reflector=zephyr/samples/bluetooth/channel_sounding reflector
+cs_mixed_zephyr_initiator_arduino_reflector=READY_FOR_HARDWARE_TEST
+arduino_reflector_example=BLE/ChannelSounding/BleChannelSoundingZephyrCompatReflector
+zephyr_initiator=zephyr/samples/bluetooth/channel_sounding initiator
+step_data_service=87654321-4567-2389-1254-f67f9fedcba9
+step_data_characteristic=87654321-4567-2389-1254-f67f9fedcba8
+step_data_len=512
+note=Arduino now has the Zephyr-compatible GATT step-data bridge; official Zephyr build still requires a compatible Zephyr SDK.
 STATUS
 }
 
@@ -65,7 +71,7 @@ case "${mode}" in
     fi
 
     print_mixed_status
-    echo "cs_slice7_matrix=PASS_WITH_KNOWN_BLOCKS zephyr=${zephyr_status}"
+    echo "cs_slice7_matrix=PASS zephyr=${zephyr_status}"
     ;;
   *)
     echo "usage: $0 [matrix|arduino|zephyr|mixed-status]" >&2

@@ -621,7 +621,7 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
 
 bool BleRadio::setCustomGattCharacteristicValue(uint16_t valueHandle,
                                                 const uint8_t* value,
-                                                uint8_t valueLength) {
+                                                uint16_t valueLength) {
   if (valueLength > kCustomGattMaxValueLength ||
       (valueLength > 0U && value == nullptr)) {
     return false;
@@ -644,7 +644,7 @@ bool BleRadio::setCustomGattCharacteristicValue(uint16_t valueHandle,
 }
 
 bool BleRadio::getCustomGattCharacteristicValue(uint16_t valueHandle, uint8_t* outValue,
-                                                uint8_t* inOutValueLength) const {
+                                                uint16_t* inOutValueLength) const {
   if (outValue == nullptr || inOutValueLength == nullptr) {
     return false;
   }
@@ -1787,7 +1787,7 @@ bool BleRadio::applyCustomGattCharacteristicValueWrite(uint16_t handle,
       return false;
     }
 
-    valueTarget->valueLength = static_cast<uint8_t>(valueLength);
+    valueTarget->valueLength = valueLength;
     memset(valueTarget->value, 0, sizeof(valueTarget->value));
     if (valueLength > 0U) {
       memcpy(valueTarget->value, value, valueLength);
@@ -1915,7 +1915,7 @@ bool BleRadio::writeCustomGattCharacteristic(uint16_t handle, const uint8_t* val
 
 void BleRadio::deferredCustomGattPeerWriteCallback(uint16_t valueHandle,
                                                    const uint8_t* value,
-                                                   uint8_t valueLength,
+                                                   uint16_t valueLength,
                                                    bool withResponse,
                                                    void* context) {
   if (context == nullptr) {

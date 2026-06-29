@@ -2450,7 +2450,7 @@ using BleBondSaveCallback = bool (*)(const BleBondRecord* record, void* context)
 using BleBondClearCallback = bool (*)(void* context);
 using BleTraceCallback = void (*)(const char* message, void* context);
 using BleGattWriteCallback = void (*)(uint16_t valueHandle, const uint8_t* value,
-                                      uint8_t valueLength, bool withResponse,
+                                      uint16_t valueLength, bool withResponse,
                                       void* context);
 
 // Minimal BLE LL radio block (legacy ADV + passive scan) implemented on RADIO.
@@ -2459,7 +2459,7 @@ class BleRadio {
  public:
   static constexpr uint8_t kCustomGattMaxServices = 8U;
   static constexpr uint8_t kCustomGattMaxCharacteristics = 24U;
-  static constexpr uint8_t kCustomGattMaxValueLength = 244U;
+  static constexpr uint16_t kCustomGattMaxValueLength = 512U;
   static constexpr uint8_t kCustomGattMaxUserDescriptionLength = 63U;
   static constexpr uint8_t kCustomGattPresentationFormatLength = 7U;
   static constexpr uint8_t kCustomGattReportReferenceLength = 2U;
@@ -2588,10 +2588,10 @@ class BleRadio {
       BleCustomGattDescriptorHandles* outDescriptorHandles = nullptr);
   bool setCustomGattCharacteristicValue(uint16_t valueHandle,
                                         const uint8_t* value,
-                                        uint8_t valueLength);
+                                        uint16_t valueLength);
   bool getCustomGattCharacteristicValue(uint16_t valueHandle,
                                         uint8_t* outValue,
-                                        uint8_t* inOutValueLength) const;
+                                        uint16_t* inOutValueLength) const;
   bool notifyCustomGattCharacteristic(uint16_t valueHandle,
                                       bool indicate = false);
   bool isCustomGattCccdEnabled(uint16_t valueHandle,
@@ -2687,6 +2687,9 @@ class BleRadio {
   bool queueAttReadRequest(uint16_t handle);
   bool queueAttWriteRequest(uint16_t handle, const uint8_t* value,
                             uint8_t valueLength, bool withResponse = true);
+  bool queueAttPrepareWriteRequest(uint16_t handle, uint16_t offset,
+                                   const uint8_t* value, uint8_t valueLength);
+  bool queueAttExecuteWriteRequest(bool execute);
   bool queueAttCccdWrite(uint16_t cccdHandle, bool notify,
                          bool indicate = false, bool withResponse = true);
   bool queueChannelSoundingLlControlPdu(const uint8_t* payload, uint8_t length);
@@ -2856,7 +2859,7 @@ class BleRadio {
     uint8_t userDescription[kCustomGattMaxUserDescriptionLength];
     uint8_t presentationFormat[kCustomGattPresentationFormatLength];
     uint8_t reportReference[kCustomGattReportReferenceLength];
-    uint8_t valueLength;
+    uint16_t valueLength;
     uint8_t value[kCustomGattMaxValueLength];
   };
 
@@ -2870,7 +2873,7 @@ class BleRadio {
     BleGattWriteCallback callback;
     void* context;
     uint16_t valueHandle;
-    uint8_t valueLength;
+    uint16_t valueLength;
     uint8_t withResponse;
     uint8_t value[kCustomGattMaxValueLength];
   };
@@ -3170,7 +3173,7 @@ class BleRadio {
                                      uint8_t* outErrorCode);
   static void deferredCustomGattPeerWriteCallback(uint16_t valueHandle,
                                                   const uint8_t* value,
-                                                  uint8_t valueLength,
+                                                  uint16_t valueLength,
                                                   bool withResponse,
                                                   void* context);
   void emitBleTrace(const char* message) const;
@@ -3204,7 +3207,7 @@ class BleRadio {
   bool serviceBackgroundConnectionEvent();
   bool enqueueDeferredGattWrite(BleGattWriteCallback callback, void* context,
                                 uint16_t valueHandle, const uint8_t* value,
-                                uint8_t valueLength, bool withResponse);
+                                uint16_t valueLength, bool withResponse);
   void dispatchDeferredGattWrites();
   bool enqueueDeferredTrace(const char* message);
   void dispatchDeferredTraces();

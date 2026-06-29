@@ -13,27 +13,25 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-█████████████████████████████░░░  84%
+███████████████████████████████░  90%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-The older `87%` tracker is too optimistic for "full working CS". It mostly
-counts support infrastructure. The current stricter estimate is approximately
-84% complete after the VPR measurement execution refactor, the focused
-controller-owned auto-execution proof, the VPR/RADIO connected timing ownership
-proof, the connected packet/timed Mode 2 ownership handoff, and controller-owned
-CS security material derivation/readback, plus a repeatable Zephyr
-interoperability validation harness.
+The current stricter estimate is approximately 90%: the VPR measurement
+execution refactor, controller-owned auto-execution proof, VPR/RADIO connected
+timing ownership proof, connected packet/timed Mode 2 ownership handoff,
+controller-owned CS security material derivation/readback, Zephyr validation
+harness, and Zephyr-compatible Arduino step-data GATT bridge are complete.
 
 ## Current Verified Baseline
 
 Repository state used for this status:
 
 ```text
-pre-slice base commit: 9fca94dd cs: finish connected controller-owned measurement path
+pre-slice base commit: 9e6356e7 cs: add Zephyr interoperability harness
 branch: main
-current slice state: Slice 7 interoperability validation harness complete; true mixed Zephyr/Arduino CS pairing still blocked by missing Zephyr-compatible Arduino host/service path
+current slice state: Slice 7B complete; Arduino now has a hardware-tested Zephyr-compatible CS Sample step-data GATT bridge
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -94,6 +92,55 @@ measurements into the host result path through native result publication. It
 does not yet prove full Zephyr parity because mixed Zephyr/Arduino pairing,
 accuracy calibration, and stress/power hardening still need to be completed.
 
+Zephyr-compatible Arduino step-data bridge compile regression passed on
+2026-06-29:
+
+```bash
+./scripts/test_cs_zephyr_bridge_compile.sh
+```
+
+Observed result:
+
+```text
+compile=BleChannelSoundingZephyrCompatInitiator
+Sketch uses 149896 bytes (9%) of program storage space.
+Global variables use 54052 bytes (34%) of dynamic memory.
+compile=BleChannelSoundingZephyrCompatReflector
+Sketch uses 149760 bytes (9%) of program storage space.
+Global variables use 54056 bytes (34%) of dynamic memory.
+cs_zephyr_bridge_compile=PASS
+```
+
+Two-board Arduino Zephyr-compatible step-data bridge hardware test passed on
+2026-06-29:
+
+```bash
+arduino-cli compile --clean --upload \
+  --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  -p /dev/ttyACM0 \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingZephyrCompatReflector/BleChannelSoundingZephyrCompatReflector.ino
+
+arduino-cli compile --clean --upload \
+  --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  -p /dev/ttyACM1 \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingZephyrCompatInitiator/BleChannelSoundingZephyrCompatInitiator.ino
+```
+
+Observed serial result:
+
+```text
+initiator: zephyr_step_write=PASS bytes=512 crc=0x72D7B7DB
+reflector: zephyr_step_rx=PASS bytes=512 crc=0x72D7B7DB
+initiator: zephyr_step_write=PASS bytes=512 crc=0xCD424572
+reflector: zephyr_step_rx=PASS bytes=512 crc=0xCD424572
+initiator: zephyr_step_write=PASS bytes=512 crc=0xBD4D196D
+reflector: zephyr_step_rx=PASS bytes=512 crc=0xBD4D196D
+```
+
 ## What Is Done
 
 - HCI command and event layout parity with Zephyr definitions.
@@ -110,6 +157,12 @@ accuracy calibration, and stress/power hardening still need to be completed.
 - Controller-owned CS security material derivation/readback. Procedure
   parameter and procedure enable commands now require valid material, not just a
   boolean security flag.
+- Zephyr-compatible CS Sample GATT step-data bridge:
+  - advertiser name `CS Sample`
+  - service UUID `87654321-4567-2389-1254-f67f9fedcba9`
+  - characteristic UUID `87654321-4567-2389-1254-f67f9fedcba8`
+  - 512-byte ATT Prepare Write / Execute Write path
+  - Arduino initiator and reflector examples for mixed-pair testing
 
 ## Main Gap
 
@@ -152,13 +205,12 @@ even though many lower-level parts are already hardware-verified.
 
 ## Required Slices
 
-Estimated remaining work: 3 full slices plus the Zephyr-compatible Arduino
-connected-CS host/service bridge before mixed Zephyr pairing can be called
-complete.
+Estimated remaining work: 2 full slices after Slice 7B.
 
-Realistic session count: 5 to 8 sessions. The risk is concentrated in Slice 5
-because it moves CS execution into production connection-event scheduling and
-therefore touches timing ownership and BLE coexistence directly.
+Realistic session count: 4 to 6 sessions. The highest remaining risk is no
+longer the missing service bridge. It is mixed Zephyr/Arduino hardware behavior,
+accuracy calibration, and long-run BLE coexistence under reconnect/abort/power
+stress.
 
 ### Slice 1: Refactor VPR Measurement Execute - Done
 
@@ -498,15 +550,17 @@ Remaining security hardening after Slice 6:
 - Compare material lifecycle and abort behavior against Zephyr once
   Arduino-to-Zephyr CS interop is available.
 
-### Slice 7: Zephyr Interoperability Harness
+### Slice 7: Zephyr Interoperability Harness and Step-Data Bridge
 
 Goal: prove interop against Zephyr, not only Arduino-to-Arduino.
 
 Completion status:
 
-- Slice 7A is complete: there is now a repeatable harness for the
-  Arduino-to-Arduino regression, the official Zephyr-to-Zephyr reference pair,
-  and the current mixed-pair status.
+- Slice 7 is complete for the current staged CS architecture.
+- Slice 7A added a repeatable harness for the Arduino-to-Arduino regression,
+  the official Zephyr-to-Zephyr reference pair, and mixed-pair status.
+- Slice 7B added Arduino examples that match Zephyr's connected-CS step-data
+  host/service flow.
 - The Arduino-to-Arduino connected workflow is the verified production-facing
   baseline for this core.
 - The official Zephyr connected-CS sample path is now scripted through
@@ -514,12 +568,12 @@ Completion status:
 - Local Zephyr build is currently environment-blocked, not core-blocked:
   `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace` is Zephyr 4.4 and requires
   Zephyr SDK >= 1.0, while the only auto-detected local SDK is 0.16.8.
-- Mixed Zephyr/Arduino interop is not honestly complete yet. The Arduino
-  examples currently expose a connected LL-control diagnostic bridge, while the
-  official Zephyr connected-CS sample expects the standard `"CS Sample"`
-  peripheral plus a 128-bit GATT step-data service:
+- Mixed Zephyr/Arduino RF parity is still a hardware-test item, but it is no
+  longer blocked by a missing Arduino host/service bridge. The Arduino side now
+  exposes and consumes the same standard `"CS Sample"` 128-bit GATT step-data
+  service used by Zephyr:
   `87654321-4567-2389-1254-f67f9fedcba9` /
-  `87654321-4567-2389-1254-f67f9fedcba8`.
+  `87654321-4567-2389-1254-f67f9fedcba8`, with 512-byte step-data writes.
 
 Implemented work:
 
@@ -534,7 +588,32 @@ Implemented work:
   - `matrix` runs Arduino-Arduino plus Zephyr reference when enabled
   - `arduino` runs only this core's connected CS workflow regression
   - `zephyr` runs the official Zephyr connected-CS pair
-  - `mixed-status` prints the current mixed-pair blockers explicitly
+  - `mixed-status` prints the exact Arduino/Zephyr examples to use for
+    mixed-pair testing
+- `scripts/test_cs_zephyr_bridge_compile.sh` now forces this repository's
+  local Bluefruit and HAL libraries through `--library`, so it cannot silently
+  pass against a stale installed Arduino15 core.
+- `BleChannelSoundingZephyrCompatInitiator` now:
+  - scans for `CS Sample`
+  - registers the Zephyr CS Sample step-data service locally
+  - discovers the peer step-data characteristic
+  - writes 512-byte step-data blobs using ATT Prepare Write / Execute Write
+  - accepts 512-byte peer step-data writes
+- `BleChannelSoundingZephyrCompatReflector` now:
+  - advertises as `CS Sample`
+  - registers the Zephyr CS Sample step-data service locally
+  - discovers the peer step-data characteristic after connection
+  - writes 512-byte local step data back to the peer when available
+  - accepts 512-byte peer step-data writes
+- Bluefruit custom GATT and client write paths now support the 512-byte
+  Zephyr step-data payload size through prepare/execute writes.
+- Bluefruit long writes now use default-PDU-safe 18-byte Prepare Write chunks
+  for cross-stack reliability before MTU/DLE timing convergence.
+- NUS and ATT large-characteristic paths were widened where needed so the
+  512-byte custom GATT size no longer wraps through byte-sized constants.
+- `Bluefruit.debugPrintLongWriteState(Stream&)` is available for bridge
+  diagnostics and is printed by the CS bridge examples only if a long write
+  fails.
 
 Verification:
 
@@ -560,6 +639,43 @@ Observed result:
 error: Zephyr SDK >= 1.0 is required for /home/lolren/Desktop/test_pi_nrf54/ncs-workspace. Install a compatible SDK or pass --sdk-dir.
 ```
 
+- Arduino bridge compile check passes:
+
+```bash
+./scripts/test_cs_zephyr_bridge_compile.sh
+```
+
+Observed result:
+
+```text
+cs_zephyr_bridge_compile=PASS fqbn=nrf54l15clean:nrf54l15clean:xiao_nrf54l15
+```
+
+- Arduino-to-Arduino Zephyr-compatible bridge hardware check passes with two
+  XIAO nRF54L15 boards:
+
+```text
+reflector: zephyr_step_rx=PASS bytes=512 crc=0x72D7B7DB
+initiator: zephyr_step_write=PASS bytes=512 crc=0x72D7B7DB
+reflector: zephyr_step_rx=PASS bytes=512 crc=0xCD424572
+initiator: zephyr_step_write=PASS bytes=512 crc=0xCD424572
+```
+
+- Mixed status now points to the bridge examples instead of reporting a missing
+  service blocker:
+
+```bash
+./scripts/test_cs_zephyr_interop.sh mixed-status
+```
+
+Expected result:
+
+```text
+cs_mixed_arduino_initiator_zephyr_reflector=READY_FOR_HARDWARE_TEST
+cs_mixed_zephyr_initiator_arduino_reflector=READY_FOR_HARDWARE_TEST
+step_data_len=512
+```
+
 Commands to run once SDK >= 1.0 is installed:
 
 ```bash
@@ -574,20 +690,33 @@ CS_ZEPHYR_CAPTURE_SECONDS=45 \
 ./scripts/test_cs_zephyr_interop.sh zephyr
 ```
 
-Remaining work before claiming real Zephyr mixed interop:
+Mixed-pair commands to run after the Zephyr SDK gate is fixed:
 
-- Add an Arduino reflector example compatible with Zephyr's `"CS Sample"` flow:
-  advertise the same name, expose the same step-data service/characteristic,
-  accept the same connection/security/GATT discovery path, and feed controller
-  CS results into that characteristic.
-- Add an Arduino initiator example compatible with the Zephyr reflector:
-  scan for `"CS Sample"`, request encryption, perform the same CS capability,
-  config, security, procedure-parameter, and procedure-enable sequence, and
-  consume reflector step data through the GATT characteristic.
-- After those examples exist, run and document:
-  - Arduino initiator to Zephyr reflector.
-  - Zephyr initiator to Arduino reflector.
-  - Abort/reconnect behavior against Zephyr.
+```bash
+# Arduino initiator to Zephyr reflector:
+arduino-cli compile --clean --upload \
+  --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  -p /dev/ttyACM1 \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingZephyrCompatInitiator/BleChannelSoundingZephyrCompatInitiator.ino
+
+# Zephyr initiator to Arduino reflector:
+arduino-cli compile --clean --upload \
+  --fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15 \
+  -p /dev/ttyACM0 \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib \
+  --library hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation \
+  hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingZephyrCompatReflector/BleChannelSoundingZephyrCompatReflector.ino
+```
+
+Remaining work before claiming full Zephyr parity:
+
+- Run actual mixed hardware tests in both directions after installing a Zephyr
+  SDK compatible with Zephyr 4.4.
+- Wire the bridge examples directly to final production CS result publication
+  once the mixed path is confirmed.
+- Validate abort/reconnect behavior against Zephyr.
 
 ### Slice 8: Accuracy and Calibration
 
@@ -631,13 +760,15 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with Slice 7B: Zephyr-compatible Arduino host/service bridge.
+Start with Slice 8: mixed Zephyr hardware validation plus accuracy and
+calibration.
 
 Reason: Slices 4, 5, and 6 prove native result publication,
 controller-owned connected measurement execution, and controller-owned security
-material in Arduino-to-Arduino runs. Slice 7A now provides the repeatable
-Zephyr reference harness, but true mixed Zephyr/Arduino interop requires
-Arduino examples/API glue that match Zephyr's connected-CS GATT step-data flow.
+material in Arduino-to-Arduino runs. Slice 7 now provides both the repeatable
+Zephyr reference harness and the Arduino examples/API glue that match Zephyr's
+connected-CS GATT step-data flow. The next useful work is proving the mixed
+path on hardware, then calibrating and hardening the result quality.
 
 Do not mark CS fully complete until these are true:
 

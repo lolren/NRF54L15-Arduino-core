@@ -280,9 +280,10 @@ uint8_t BleRadio::readAttributeValue(uint16_t handle, uint16_t offset,
     if (offset > directCharacteristic->valueLength) {
       return kAttrReadInvalidOffsetLen;
     }
-    const uint8_t remaining =
-        static_cast<uint8_t>(directCharacteristic->valueLength - offset);
-    const uint8_t toCopy = minU8(remaining, maxLen);
+    const uint16_t remaining =
+        static_cast<uint16_t>(directCharacteristic->valueLength - offset);
+    const uint8_t toCopy =
+        static_cast<uint8_t>(min<uint16_t>(remaining, maxLen));
     if (toCopy > 0U) {
       memcpy(outValue, &directCharacteristic->value[offset], toCopy);
     }
@@ -1544,8 +1545,10 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         }
 
         uint8_t temp[kCustomGattMaxValueLength] = {0};
+        const uint8_t tempMaxLen =
+            static_cast<uint8_t>(minU16(maxAttResponseLen, 0xFFU));
         const uint8_t vlen =
-            readAttributeValue(handle, 0U, temp, sizeof(temp));
+            readAttributeValue(handle, 0U, temp, tempMaxLen);
         const uint8_t readError =
             attReadSentinelToError(vlen, kAttErrReadNotPermitted);
         if (readError != 0U) {

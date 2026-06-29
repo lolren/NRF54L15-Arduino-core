@@ -11,6 +11,10 @@ class BLEClientCharacteristic;
 class BLEClientUart;
 class EddyStoneUrl;
 
+namespace xiao_nrf54l15 {
+class BleRadio;
+}
+
 enum {
   BANDWIDTH_AUTO = 0,
   BANDWIDTH_LOW,
@@ -208,7 +212,7 @@ class BLECharacteristic {
   SecureMode_t _write_perm;
   ble_gatts_char_handles_t _handles;
   uint8_t _value[BLUEFRUIT_GATT_VALUE_MAX_LEN];
-  uint8_t _value_len;
+  uint16_t _value_len;
   bool _notify_enabled;
   bool _indicate_enabled;
   const char* _usr_descriptor;
@@ -709,7 +713,7 @@ class BLEClientCharacteristic {
   uint16_t cccd_handle_;
   uint8_t properties_;
   uint8_t last_value_[BLUEFRUIT_GATT_VALUE_MAX_LEN];
-  uint8_t last_value_len_;
+  uint16_t last_value_len_;
   bool pending_notify_callback_;
 
   void handleNotify(const uint8_t* data, uint16_t len);
@@ -1203,6 +1207,9 @@ class AdafruitBluefruit {
   uint16_t getMaxMtu(uint8_t role);
   void setRssiCallback(void (*fp)(uint16_t conn_hdl, int8_t rssi));
   BLEConnection* Connection(uint16_t conn_hdl);
+  xiao_nrf54l15::BleRadio& rawRadio();
+  const xiao_nrf54l15::BleRadio& rawRadio() const;
+  void debugPrintLongWriteState(Stream& out);
   void debugPrintEncryptionCounters(Stream& out);
   void debugPrintDisconnectDebug(Stream& out);
   void debugPrintSecureConnectionsState(Stream& out);

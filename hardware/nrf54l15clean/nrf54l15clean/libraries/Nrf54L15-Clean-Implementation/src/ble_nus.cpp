@@ -281,7 +281,7 @@ uint32_t BleNordicUart::txDroppedBytes() const {
   return txDroppedBytes_;
 }
 
-uint8_t BleNordicUart::maxPayloadLength() const {
+uint16_t BleNordicUart::maxPayloadLength() const {
   return notificationValueLimit();
 }
 
@@ -385,7 +385,7 @@ size_t BleNordicUart::write(const uint8_t* buffer, size_t size) {
 }
 
 void BleNordicUart::onRxWriteThunk(uint16_t valueHandle, const uint8_t* value,
-                                   uint8_t valueLength, bool withResponse,
+                                   uint16_t valueLength, bool withResponse,
                                    void* context) {
   (void)valueHandle;
   (void)withResponse;
@@ -396,12 +396,12 @@ void BleNordicUart::onRxWriteThunk(uint16_t valueHandle, const uint8_t* value,
   self->onRxWrite(value, valueLength);
 }
 
-void BleNordicUart::onRxWrite(const uint8_t* value, uint8_t valueLength) {
+void BleNordicUart::onRxWrite(const uint8_t* value, uint16_t valueLength) {
   if (valueLength == 0U || value == nullptr) {
     return;
   }
 
-  for (uint8_t i = 0U; i < valueLength; ++i) {
+  for (uint16_t i = 0U; i < valueLength; ++i) {
     if (rxCount_ >= kRxBufferSize) {
       ++rxDroppedBytes_;
       continue;
@@ -444,7 +444,7 @@ bool BleNordicUart::queueNextNotification() {
     return false;
   }
   if (!ble_.setCustomGattCharacteristicValue(
-          txValueHandle_, txChunk_, static_cast<uint8_t>(chunkLength))) {
+          txValueHandle_, txChunk_, static_cast<uint16_t>(chunkLength))) {
     lastQueueResult_ = 6U;
     return false;
   }
@@ -459,7 +459,7 @@ bool BleNordicUart::queueNextNotification() {
     --txCount_;
     --advance;
   }
-  txChunkLength_ = static_cast<uint8_t>(chunkLength);
+  txChunkLength_ = static_cast<uint16_t>(chunkLength);
   txNotificationInFlight_ = true;
   txNotificationAwaitingAck_ =
       ble_.isCustomGattNotificationQueued(txValueHandle_, false);
@@ -468,8 +468,8 @@ bool BleNordicUart::queueNextNotification() {
   return true;
 }
 
-uint8_t BleNordicUart::notificationValueLimit() const {
-  const uint8_t limit = ble_.maxNotificationValueLength();
+uint16_t BleNordicUart::notificationValueLimit() const {
+  const uint16_t limit = ble_.maxNotificationValueLength();
   return (limit > 0U) ? limit : 1U;
 }
 
@@ -482,7 +482,7 @@ size_t BleNordicUart::copyTxChunk(uint8_t* outChunk, size_t maxLength) const {
   if (chunkLength > maxLength) {
     chunkLength = maxLength;
   }
-  const uint8_t valueLimit = notificationValueLimit();
+  const uint16_t valueLimit = notificationValueLimit();
   if (chunkLength > valueLimit) {
     chunkLength = valueLimit;
   }

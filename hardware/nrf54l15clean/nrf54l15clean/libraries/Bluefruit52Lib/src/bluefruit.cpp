@@ -52,6 +52,10 @@ constexpr uint8_t kAttOpReadByGroupTypeReq = 0x10U;
 constexpr uint8_t kAttOpReadByGroupTypeRsp = 0x11U;
 constexpr uint8_t kAttOpWriteReq = 0x12U;
 constexpr uint8_t kAttOpWriteRsp = 0x13U;
+constexpr uint8_t kAttOpPrepareWriteReq = 0x16U;
+constexpr uint8_t kAttOpPrepareWriteRsp = 0x17U;
+constexpr uint8_t kAttOpExecuteWriteReq = 0x18U;
+constexpr uint8_t kAttOpExecuteWriteRsp = 0x19U;
 constexpr uint8_t kAttOpHandleValueNtf = 0x1BU;
 constexpr uint8_t kAttErrAttributeNotFound = 0x0AU;
 
@@ -71,6 +75,15 @@ volatile uint32_t g_bluefruitMaybeAdvertiseGapMinUs = 0xFFFFFFFFUL;
 volatile uint32_t g_bluefruitMaybeAdvertiseGapMaxUs = 0U;
 volatile uint64_t g_bluefruitMaybeAdvertiseGapTotalUs = 0ULL;
 volatile uint64_t g_bluefruitMaybeAdvertiseLastEventUs = 0ULL;
+volatile uint32_t g_bluefruitLongWriteDiagCode = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagSent = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagChunk = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagMtu = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagDataLength = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagWaitOutcome = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagAttError = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagEventLength = 0U;
+volatile uint32_t g_bluefruitLongWriteDiagEventOpcode = 0U;
 extern "C" {
 volatile uint32_t __attribute__((used)) g_bluefruitBleIdleDiagMagic =
     0x42494447UL;
@@ -305,11 +318,11 @@ void writeLe16(uint8_t* data, uint16_t value) {
   data[1] = static_cast<uint8_t>((value >> 8U) & 0xFFU);
 }
 
-uint8_t clampValueLen(uint16_t len) {
+uint16_t clampValueLen(uint16_t len) {
   if (len > BleRadio::kCustomGattMaxValueLength) {
     return BleRadio::kCustomGattMaxValueLength;
   }
-  return static_cast<uint8_t>(len);
+  return len;
 }
 
 class ScopedBluefruitUserCallback {
@@ -1578,7 +1591,7 @@ class BluefruitCompatManager {
   unsigned long security_secured_callback_timeout_ms_;
 
   static void gattWriteThunk(uint16_t valueHandle, const uint8_t* value,
-                             uint8_t valueLength, bool withResponse, void* context) {
+                             uint16_t valueLength, bool withResponse, void* context) {
     (void)withResponse;
     auto* self = static_cast<BluefruitCompatManager*>(context);
     if (self != nullptr) {
@@ -1586,7 +1599,7 @@ class BluefruitCompatManager {
     }
   }
 
-  void handleGattWrite(uint16_t valueHandle, const uint8_t* value, uint8_t valueLength) {
+  void handleGattWrite(uint16_t valueHandle, const uint8_t* value, uint16_t valueLength) {
     for (uint8_t i = 0U; i < characteristic_count_; ++i) {
       BLECharacteristic* characteristic = characteristics_[i];
       if (characteristic == nullptr) {
@@ -3502,6 +3515,103 @@ bool writeHandleSync(uint16_t handle, const uint8_t* data, uint8_t dataLen,
   return wait.outcome == AttWaitOutcome::kResponse;
 }
 
+bool executePreparedWriteSync(bool execute) {
+  if (!queueCentralAttProcedure([&]() {
+        return manager().radio().queueAttExecuteWriteRequest(execute);
+      })) {
+    return false;
+  }
+
+  const AttWaitResult wait =
+      waitForAttOpcode(kAttOpExecuteWriteReq, kAttOpExecuteWriteRsp);
+  return wait.outcome == AttWaitOutcome::kResponse;
+}
+
+bool writeLongHandleSync(uint16_t handle, const uint8_t* data, uint16_t dataLen) {
+  ScopedCentralSyncProcedure scopedProcedure;
+  g_bluefruitLongWriteDiagCode = 0U;
+  g_bluefruitLongWriteDiagSent = 0U;
+  g_bluefruitLongWriteDiagChunk = 0U;
+  g_bluefruitLongWriteDiagMtu = manager().radio().currentAttMtu();
+  g_bluefruitLongWriteDiagDataLength = manager().radio().currentDataLength();
+  g_bluefruitLongWriteDiagWaitOutcome = 0U;
+  g_bluefruitLongWriteDiagAttError = 0U;
+  g_bluefruitLongWriteDiagEventLength = 0U;
+  g_bluefruitLongWriteDiagEventOpcode = 0U;
+  if (handle == 0U || data == nullptr || dataLen == 0U ||
+      dataLen > BleRadio::kCustomGattMaxValueLength) {
+    g_bluefruitLongWriteDiagCode = 1U;
+    return false;
+  }
+
+  uint16_t sent = 0U;
+  while (sent < dataLen) {
+    uint16_t attChunkMax = 0U;
+    const uint16_t attMtu = manager().radio().currentAttMtu();
+    if (attMtu > 5U) {
+      attChunkMax = static_cast<uint16_t>(attMtu - 5U);
+    }
+    uint16_t dataChunkMax = 0U;
+    const uint16_t dataLength = manager().radio().currentDataLength();
+    if (dataLength > 9U) {
+      dataChunkMax = static_cast<uint16_t>(dataLength - 9U);
+    }
+    // Keep Prepare Write chunks default-PDU safe for cross-stack reliability.
+    // Zephyr interop must work before both sides converge on MTU/DLE timing.
+    uint16_t chunkMax =
+        min<uint16_t>(min<uint16_t>(attChunkMax, dataChunkMax), 18U);
+    g_bluefruitLongWriteDiagMtu = attMtu;
+    g_bluefruitLongWriteDiagDataLength = dataLength;
+    g_bluefruitLongWriteDiagSent = sent;
+    g_bluefruitLongWriteDiagChunk = chunkMax;
+    if (chunkMax == 0U) {
+      (void)executePreparedWriteSync(false);
+      g_bluefruitLongWriteDiagCode = 2U;
+      return false;
+    }
+
+    const uint16_t remaining = static_cast<uint16_t>(dataLen - sent);
+    const uint8_t chunk =
+        static_cast<uint8_t>(min<uint16_t>(remaining, chunkMax));
+    g_bluefruitLongWriteDiagChunk = chunk;
+    if (!queueCentralAttProcedure([&]() {
+          return manager().radio().queueAttPrepareWriteRequest(
+              handle, sent, &data[sent], chunk);
+        })) {
+      (void)executePreparedWriteSync(false);
+      g_bluefruitLongWriteDiagCode = 3U;
+      return false;
+    }
+
+    const AttWaitResult wait =
+        waitForAttOpcode(kAttOpPrepareWriteReq, kAttOpPrepareWriteRsp);
+    g_bluefruitLongWriteDiagWaitOutcome =
+        static_cast<uint32_t>(wait.outcome);
+    g_bluefruitLongWriteDiagAttError = wait.errorCode;
+    g_bluefruitLongWriteDiagEventLength = wait.event.payloadLength;
+    g_bluefruitLongWriteDiagEventOpcode =
+        (wait.event.payload != nullptr && wait.event.payloadLength >= 5U)
+            ? wait.event.payload[4]
+            : 0U;
+    if (wait.outcome != AttWaitOutcome::kResponse ||
+        wait.event.payloadLength < static_cast<uint8_t>(9U + chunk) ||
+        readLe16(&wait.event.payload[5]) != handle ||
+        readLe16(&wait.event.payload[7]) != sent ||
+        memcmp(&wait.event.payload[9], &data[sent], chunk) != 0) {
+      (void)executePreparedWriteSync(false);
+      g_bluefruitLongWriteDiagCode = 4U;
+      return false;
+    }
+
+    sent = static_cast<uint16_t>(sent + chunk);
+  }
+
+  const bool executed = executePreparedWriteSync(true);
+  g_bluefruitLongWriteDiagSent = sent;
+  g_bluefruitLongWriteDiagCode = executed ? 0U : 5U;
+  return executed;
+}
+
 extern "C" void nrf54l15_bluefruit_compat_idle_service(void) {
   if (ScopedBluefruitUserCallback::active()) {
     return;
@@ -3828,7 +3938,8 @@ err_t BLECharacteristic::begin() {
           static_cast<uint8_t>(_report_ref_read_perm);
     }
   }
-  const uint8_t initialLen = clampValueLen(_value_len);
+  const uint8_t initialLen =
+      static_cast<uint8_t>(min<uint16_t>(clampValueLen(_value_len), 0xFFU));
   const uint8_t properties = mapProperties(_properties);
   bool ok = false;
   if (uuid.size() == 2U) {
@@ -3860,10 +3971,10 @@ uint16_t BLECharacteristic::write(const void* data, uint16_t len) {
   if (data == nullptr && len > 0U) {
     return 0U;
   }
-  const uint8_t toWrite = clampValueLen((_fixed_len && _max_len > 0U) ? _max_len : len);
+  const uint16_t toWrite = clampValueLen((_fixed_len && _max_len > 0U) ? _max_len : len);
   memset(_value, 0, sizeof(_value));
   if (data != nullptr && toWrite > 0U) {
-    memcpy(_value, data, min<uint8_t>(toWrite, clampValueLen(len)));
+    memcpy(_value, data, min<uint16_t>(toWrite, clampValueLen(len)));
   }
   _value_len = toWrite;
   if (_userbuf != nullptr && _userbufsize > 0U) {
@@ -3895,7 +4006,7 @@ uint16_t BLECharacteristic::read(void* buffer, uint16_t bufsize, uint16_t offset
     return 0U;
   }
   if (_handles.value_handle != 0U) {
-    uint8_t len = sizeof(_value);
+    uint16_t len = sizeof(_value);
     if (manager().radio().getCustomGattCharacteristicValue(_handles.value_handle, _value, &len)) {
       _value_len = len;
     }
@@ -4070,7 +4181,7 @@ bool BLECharacteristic::indicate32(uint16_t conn_hdl, float num) {
 }
 
 void BLECharacteristic::handleWriteFromRadio(const uint8_t* data, uint16_t len) {
-  const uint8_t toCopy = clampValueLen(len);
+  const uint16_t toCopy = clampValueLen(len);
   memset(_value, 0, sizeof(_value));
   if (data != nullptr && toCopy > 0U) {
     memcpy(_value, data, toCopy);
@@ -4897,8 +5008,7 @@ uint16_t BLEClientCharacteristic::read(void* buffer, uint16_t len) {
   if (readLen == 0U) {
     return 0U;
   }
-  last_value_len_ =
-      static_cast<uint8_t>(min<uint16_t>(readLen, sizeof(last_value_)));
+  last_value_len_ = min<uint16_t>(readLen, sizeof(last_value_));
   memcpy(last_value_, scratch, last_value_len_);
   const uint16_t copyLen = min<uint16_t>(len, readLen);
   memcpy(buffer, scratch, copyLen);
@@ -4925,6 +5035,14 @@ uint16_t BLEClientCharacteristic::write(const void* buffer, uint16_t len,
   if (!discovered_ || buffer == nullptr || len == 0U ||
       len > BleRadio::kCustomGattMaxValueLength) {
     return 0U;
+  }
+  const bool singleWriteFits =
+      (static_cast<uint16_t>(3U + len) <= manager().radio().currentAttMtu()) &&
+      (static_cast<uint16_t>(7U + len) <= manager().radio().currentDataLength());
+  if (withResponse && !singleWriteFits) {
+    return writeLongHandleSync(value_handle_, static_cast<const uint8_t*>(buffer), len)
+               ? len
+               : 0U;
   }
   if (!waitForLinkValueCapacity(len)) {
     return 0U;
@@ -6310,7 +6428,8 @@ err_t BLEDis::begin() {
     if (values_[i] == nullptr || lengths_[i] == 0U) {
       continue;
     }
-    const uint8_t len = clampValueLen(lengths_[i]);
+    const uint8_t len =
+        static_cast<uint8_t>(min<uint16_t>(clampValueLen(lengths_[i]), 0xFFU));
     if (!manager().radio().addCustomGattCharacteristic(
             _handle, kCharacteristicUuids[i], xiao_nrf54l15::kBleGattPropRead,
             reinterpret_cast<const uint8_t*>(values_[i]), len, nullptr, nullptr)) {
@@ -6845,6 +6964,38 @@ BLEConnection* AdafruitBluefruit::Connection(uint16_t conn_hdl) {
     return nullptr;
   }
   return manager().connection();
+}
+
+xiao_nrf54l15::BleRadio& AdafruitBluefruit::rawRadio() {
+  return manager().radio();
+}
+
+const xiao_nrf54l15::BleRadio& AdafruitBluefruit::rawRadio() const {
+  return manager().radio();
+}
+
+void AdafruitBluefruit::debugPrintLongWriteState(Stream& out) {
+  out.print("LONGWRITE code=");
+  out.print(g_bluefruitLongWriteDiagCode);
+  out.print(" sent=");
+  out.print(g_bluefruitLongWriteDiagSent);
+  out.print(" chunk=");
+  out.print(g_bluefruitLongWriteDiagChunk);
+  out.print(" mtu=");
+  out.print(g_bluefruitLongWriteDiagMtu);
+  out.print(" dle=");
+  out.print(g_bluefruitLongWriteDiagDataLength);
+  out.print(" wait=");
+  out.print(g_bluefruitLongWriteDiagWaitOutcome);
+  out.print(" att_err=");
+  out.print(g_bluefruitLongWriteDiagAttError);
+  out.print(" event_len=");
+  out.print(g_bluefruitLongWriteDiagEventLength);
+  out.print(" event_op=0x");
+  if (g_bluefruitLongWriteDiagEventOpcode < 16U) {
+    out.print('0');
+  }
+  out.println(g_bluefruitLongWriteDiagEventOpcode, HEX);
 }
 
 void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {

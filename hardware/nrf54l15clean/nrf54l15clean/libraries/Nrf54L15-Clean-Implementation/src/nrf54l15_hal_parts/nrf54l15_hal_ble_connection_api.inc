@@ -334,6 +334,33 @@ bool BleRadio::queueAttWriteRequest(uint16_t handle, const uint8_t* value,
   return queueAttRequest(request, static_cast<uint8_t>(3U + valueLength));
 }
 
+bool BleRadio::queueAttPrepareWriteRequest(uint16_t handle, uint16_t offset,
+                                           const uint8_t* value,
+                                           uint8_t valueLength) {
+  if (handle == 0U || (valueLength > 0U && value == nullptr) ||
+      (static_cast<uint16_t>(5U + valueLength) > sizeof(connectionPendingTxPayload_))) {
+    return false;
+  }
+  if (static_cast<uint16_t>(5U + valueLength) > currentAttMtu()) {
+    return false;
+  }
+
+  uint8_t request[255] = {0};
+  request[0] = kAttOpPrepareWriteReq;
+  writeLe16(&request[1], handle);
+  writeLe16(&request[3], offset);
+  if (valueLength > 0U) {
+    memcpy(&request[5], value, valueLength);
+  }
+  return queueAttRequest(request, static_cast<uint8_t>(5U + valueLength));
+}
+
+bool BleRadio::queueAttExecuteWriteRequest(bool execute) {
+  const uint8_t request[2] = {kAttOpExecuteWriteReq,
+                              static_cast<uint8_t>(execute ? 0x01U : 0x00U)};
+  return queueAttRequest(request, sizeof(request));
+}
+
 bool BleRadio::queueAttCccdWrite(uint16_t cccdHandle, bool notify,
                                  bool indicate, bool withResponse) {
   uint8_t value[2] = {0U, 0U};
@@ -1462,8 +1489,9 @@ void BleRadio::snapshotDeferredConnectionEvent(const BleConnectionEvent& event) 
 
 bool BleRadio::enqueueDeferredGattWrite(BleGattWriteCallback callback, void* context,
                                         uint16_t valueHandle, const uint8_t* value,
-                                        uint8_t valueLength, bool withResponse) {
-  if (callback == nullptr || (valueLength > 0U && value == nullptr)) {
+                                        uint16_t valueLength, bool withResponse) {
+  if (callback == nullptr || valueLength > kCustomGattMaxValueLength ||
+      (valueLength > 0U && value == nullptr)) {
     return false;
   }
 
