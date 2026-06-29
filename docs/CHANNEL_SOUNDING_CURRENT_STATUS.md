@@ -602,9 +602,11 @@ Completion status:
   baseline for this core.
 - The official Zephyr connected-CS sample path is now scripted through
   `scripts/zephyr_channel_sounding_validation.py`.
-- Local Zephyr build is currently environment-blocked, not core-blocked:
-  `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace` is Zephyr 4.4 and requires
-  Zephyr SDK >= 1.0, while the only auto-detected local SDK is 0.16.8.
+- Local Zephyr build is now unblocked and verified with:
+  - workspace: `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace`
+  - SDK: `/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-sdk-1.0.1`
+  - Python venv: `/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-py312`
+  - board: `xiao_nrf54l15/nrf54l15/cpuapp`
 - Mixed Zephyr/Arduino RF parity is still a hardware-test item, but it is no
   longer blocked by a missing Arduino host/service bridge. The Arduino side now
   exposes and consumes the same standard `"CS Sample"` 128-bit GATT step-data
@@ -617,7 +619,10 @@ Implemented work:
 - `scripts/zephyr_channel_sounding_validation.py` now supports:
   - local `--workspace` discovery for `ncs-workspace`
   - explicit `--sdk-dir`
-  - auto-detection of packaged SDKs
+  - auto-detection of packaged SDKs and local versioned SDK directories such
+    as `tools/zephyr-sdk-1.0.1`
+  - both pre-1.0 SDK toolchain layout and SDK 1.x
+    `gnu/arm-zephyr-eabi` layout
   - rejection of incompatible SDK 0.16.8 for Zephyr 4.4
   - `pair-demo --capture-seconds` serial capture
   - log marker validation for Zephyr initiator and reflector
@@ -660,20 +665,21 @@ Verification:
 python3 -m py_compile scripts/zephyr_channel_sounding_validation.py
 ```
 
-- Environment gate is confirmed and now fails with a clear actionable error:
+- Official Zephyr connected-CS build passes for both roles with SDK 1.0.1:
 
 ```bash
-python3 scripts/zephyr_channel_sounding_validation.py build \
-  --role initiator \
+PATH=/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-py312/bin:$PATH \
+/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-py312/bin/python \
+  scripts/zephyr_channel_sounding_validation.py build \
   --workspace /home/lolren/Desktop/test_pi_nrf54/ncs-workspace \
-  --build-root /tmp/cs_zephyr_build_probe \
-  --board xiao_nrf54l15/nrf54l15/cpuapp
+  --role both
 ```
 
 Observed result:
 
 ```text
-error: Zephyr SDK >= 1.0 is required for /home/lolren/Desktop/test_pi_nrf54/ncs-workspace. Install a compatible SDK or pass --sdk-dir.
+Built initiator: dist/zephyr_channel_sounding/connected_cs/initiator
+Built reflector: dist/zephyr_channel_sounding/connected_cs/reflector
 ```
 
 - Arduino bridge compile check passes:
@@ -713,7 +719,7 @@ cs_mixed_zephyr_initiator_arduino_reflector=READY_FOR_HARDWARE_TEST
 step_data_len=512
 ```
 
-Commands to run once SDK >= 1.0 is installed:
+Commands to run with the installed local SDK/venv:
 
 ```bash
 CS_CENTRAL_PORT=/dev/ttyACM1 \
@@ -723,11 +729,12 @@ CS_PERIPHERAL_PORT=/dev/ttyACM0 \
 CS_CENTRAL_PORT=/dev/ttyACM1 \
 CS_PERIPHERAL_PORT=/dev/ttyACM0 \
 CS_ZEPHYR_WORKSPACE=/home/lolren/Desktop/test_pi_nrf54/ncs-workspace \
+PATH=/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-py312/bin:$PATH \
 CS_ZEPHYR_CAPTURE_SECONDS=45 \
 ./scripts/test_cs_zephyr_interop.sh zephyr
 ```
 
-Mixed-pair commands to run after the Zephyr SDK gate is fixed:
+Mixed-pair commands to run for Arduino/Zephyr hardware testing:
 
 ```bash
 # Arduino initiator to Zephyr reflector:
@@ -834,9 +841,12 @@ How to run the fixed-placement distance parity check:
 
 ```bash
 # 1. Capture official Zephyr connected_cs logs with the boards left exactly
-#    where they are. The local workspace currently needs a compatible SDK:
-python3 scripts/zephyr_channel_sounding_validation.py pair-demo \
+#    where they are:
+PATH=/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-py312/bin:$PATH \
+/home/lolren/Desktop/test_pi_nrf54/tools/zephyr-py312/bin/python \
+  scripts/zephyr_channel_sounding_validation.py pair-demo \
   --workspace /home/lolren/Desktop/test_pi_nrf54/ncs-workspace \
+  --skip-build \
   --initiator-port /dev/ttyACM1 \
   --reflector-port /dev/ttyACM2 \
   --capture-seconds 45 \
@@ -872,21 +882,28 @@ phase_raw median=0.7499 mad=0.0000 stddev=0.0000
 confidence median=94.0
 ```
 
-Current blocker:
-
-- Live Zephyr fixed-placement comparison cannot run in this environment yet.
-  The workspace at `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace` is
-  Zephyr 4.4 and the local tool discovery did not find a compatible Zephyr SDK.
-  The current failure is:
+- Official Zephyr connected-CS pair hardware capture passed on the same two
+  boards:
 
 ```text
-error: Zephyr SDK >= 1.0 is required for /home/lolren/Desktop/test_pi_nrf54/ncs-workspace. Install a compatible SDK or pass --sdk-dir.
+zephyr_initiator=PASS
+zephyr_reflector=PASS
+zephyr_connected_cs_pair=PASS
+zephyr_distance_phase=PASS count=2 median_m=0.819279 mad_m=0.030545 min_m=0.788734 max_m=0.849824
+zephyr_distance_rtt=PASS count=2 median_m=13.446047 mad_m=1.179539 min_m=12.266508 max_m=14.625587
+```
+
+- Arduino-vs-Zephyr fixed-placement distance parity passed using fresh logs
+  without moving the boards:
+
+```text
+cs_distance_parity=PASS output=dist/cs_distance_parity/capture_20260629_155719 arduino_samples=1 zephyr_samples=4 zephyr_method_samples=2 arduino_m=0.749900 zephyr_m=0.819279 arduino_cmp_m=0.749900 zephyr_cmp_m=0.819279 delta_m=0.069379
 ```
 
 Important interpretation:
 
-- The current Arduino baseline is useful only as a repeatability point until it
-  is compared with a fresh Zephyr log captured at the same board placement.
+- The current Arduino baseline has now been compared with a fresh Zephyr log
+  captured at the same board placement.
 - The old archived Zephyr example is not valid for this comparison because it
   was captured from an earlier, different setup. The new parity harness rejects
   that old-vs-new comparison, which is the intended behavior.
@@ -896,8 +913,6 @@ Important interpretation:
 
 Required work:
 
-- Run the fixed-placement Zephyr comparison once SDK >= 1.0 is installed or
-  fresh Zephyr connected-CS logs are available.
 - Long soak of connected CS procedures.
 - Reconnect, abort, timeout, and peer-loss tests.
 - Different PHY/settings and channel maps.

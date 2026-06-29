@@ -24,6 +24,7 @@ DEFAULT_WORKSPACE_CANDIDATES = (
     REPO_ROOT.parent / "zephyr-main",
 )
 DEFAULT_TOOLS_CANDIDATES = (
+    REPO_ROOT.parent / "tools",
     REPO_ROOT / "hardware/nrf54l15clean/nrf54l15clean/tools",
     Path.home()
     / ".local/share/Trash/files/NRF54L15-Arduino-core/hardware/seeed/nrf54l15/tools",
@@ -422,6 +423,23 @@ def version_at_least(found: tuple[int, ...] | None, minimum: tuple[int, ...] | N
     return padded_found >= padded_minimum
 
 
+def sdk_toolchain_bin_dirs(sdk_dir: Path) -> list[Path]:
+    return [
+        sdk_dir / "arm-zephyr-eabi" / "bin",
+        sdk_dir / "gnu" / "arm-zephyr-eabi" / "bin",
+    ]
+
+
+def sdk_has_arm_toolchain(sdk_dir: Path) -> bool:
+    return any((path / "arm-zephyr-eabi-gcc").is_file() for path in sdk_toolchain_bin_dirs(sdk_dir))
+
+
+def add_sdk_candidates_from_tools(candidates: list[Path], tools_dir: Path) -> None:
+    candidates.append(tools_dir / "zephyr-sdk")
+    if tools_dir.is_dir():
+        candidates.extend(sorted(tools_dir.glob("zephyr-sdk-*")))
+
+
 def detect_sdk_dir(
     explicit: str,
     tools_dir: Path | None,
@@ -436,8 +454,10 @@ def detect_sdk_dir(
         candidates.append(Path(env_sdk).expanduser())
 
     if tools_dir is not None:
-        candidates.append(tools_dir / "zephyr-sdk")
+        add_sdk_candidates_from_tools(candidates, tools_dir)
 
+    for default_tools_dir in DEFAULT_TOOLS_CANDIDATES:
+        add_sdk_candidates_from_tools(candidates, default_tools_dir)
     candidates.extend(DEFAULT_SDK_CANDIDATES)
 
     seen: set[Path] = set()
@@ -446,8 +466,7 @@ def detect_sdk_dir(
         if resolved in seen:
             continue
         seen.add(resolved)
-        compiler = resolved / "arm-zephyr-eabi" / "bin" / "arm-zephyr-eabi-gcc"
-        if resolved.is_dir() and compiler.is_file():
+        if resolved.is_dir() and sdk_has_arm_toolchain(resolved):
             version = read_sdk_version(resolved)
             if not version_at_least(version, minimum):
                 if explicit:
@@ -519,9 +538,9 @@ def zephyr_env(layout: ZephyrLayout) -> dict[str, str]:
     path_entries: list[Path] = []
     if layout.sdk_dir is not None:
         env["ZEPHYR_SDK_INSTALL_DIR"] = str(layout.sdk_dir)
+        path_entries.extend(sdk_toolchain_bin_dirs(layout.sdk_dir))
         path_entries.extend(
             [
-                layout.sdk_dir / "arm-zephyr-eabi" / "bin",
                 layout.sdk_dir / "hosttools" / "bin",
                 layout.sdk_dir / "hosttools" / "usr" / "bin",
             ]
