@@ -8,6 +8,7 @@
  *
  * Expected serial output:
  *   cs_vpr_invalid_params=PASS statuses=12/12/12/12/C/0/0
+ *   cs_vpr_security_material=PASS pre_flags=0x0 pre_params=C post_flags=0x7 ...
  */
 
 #include <Arduino.h>
@@ -30,14 +31,34 @@ bool expectStatus(bool commandOk, uint8_t status, uint8_t expected) {
   return commandOk && status == expected;
 }
 
-bool runInvalidParamProbe() {
+bool prepareDirectConfiguredHost(BleCsControllerVprWorkflowStartStatus* outStatus) {
   gHost.reset();
   BleCsControllerVprHost::fillDemoConfig(&gConfig);
+  gConfig.session.workflow.procedureParameters.maxProcedureCount = 1U;
   gConfig.session.workflow.procedureEnable.enable = 0U;
 
-  uint8_t pumpCount = 0U;
-  bool ok = gHost.beginFreshHost(kConnHandle, gConfig, 48U, &pumpCount);
-  ok = ok && gHost.ready() && !gHost.failed();
+  BleCsControllerVprWorkflowStartStatus status{};
+  bool ok = gHost.resetTransport(true) &&
+            gHost.loadDefaultTransportImage() &&
+            gHost.bootTransport() &&
+            gHost.beginHost(kConnHandle, gConfig) &&
+            gHost.directStartConfiguredWorkflow(false, &status);
+
+  if (outStatus != nullptr) {
+    *outStatus = status;
+  }
+
+  return ok &&
+         status.readRemoteSupportedCapabilities == kHciSuccess &&
+         status.setDefaultSettings == kHciSuccess &&
+         status.createConfig == kHciSuccess &&
+         status.securityEnable == kHciSuccess &&
+         status.setProcedureParameters == kHciSuccess;
+}
+
+bool runInvalidParamProbe() {
+  BleCsControllerVprWorkflowStartStatus workflowStatus{};
+  bool ok = prepareDirectConfiguredHost(&workflowStatus);
 
   BleCsControllerCreateConfig invalidCreate = gConfig.session.workflow.createConfig;
   invalidCreate.configId = 0U;
@@ -89,8 +110,22 @@ bool runInvalidParamProbe() {
 
   Serial.print(F("cs_vpr_invalid_params="));
   Serial.print(ok ? F("PASS") : F("FAIL"));
-  Serial.print(F(" pumps="));
-  Serial.print(pumpCount);
+  Serial.print(F(" phase="));
+  Serial.print(static_cast<uint8_t>(gHost.workflowState().phase));
+  Serial.print(F(" last_op=0x"));
+  Serial.print(gHost.workflowState().lastOpcode, HEX);
+  Serial.print(F(" last_status=0x"));
+  Serial.print(gHost.workflowState().lastStatus, HEX);
+  Serial.print(F(" wf="));
+  Serial.print(workflowStatus.readRemoteSupportedCapabilities, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.setDefaultSettings, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.createConfig, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.securityEnable, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.setProcedureParameters, HEX);
   Serial.print(F(" statuses="));
   Serial.print(createStatus, HEX);
   Serial.print('/');
@@ -108,6 +143,104 @@ bool runInvalidParamProbe() {
   return ok;
 }
 
+bool runSecurityMaterialProbe() {
+  BleCsControllerVprWorkflowStartStatus workflowStatus{};
+  bool ok = prepareDirectConfiguredHost(&workflowStatus);
+
+  // Config 1 was prepared by the normal workflow. Use a fresh config ID so the
+  // negative check proves security material is bound per config, not globally.
+  BleCsControllerCreateConfig createConfig = gConfig.session.workflow.createConfig;
+  BleCsProcedureParameters procedureParams =
+      gConfig.session.workflow.procedureParameters;
+  BleCsProcedureEnable procedureEnable = gConfig.session.workflow.procedureEnable;
+  createConfig.configId = 2U;
+  procedureParams.configId = createConfig.configId;
+  procedureEnable.configId = createConfig.configId;
+  procedureEnable.enable = 1U;
+
+  uint8_t createStatus = 0xFFU;
+  ok = ok && expectStatus(gHost.directCreateConfig(createConfig, &createStatus),
+                          createStatus, kHciSuccess);
+
+  BleCsVprSecurityMaterialState preSecurity{};
+  ok = ok && gHost.directReadSecurityMaterialForTest(&preSecurity) &&
+       preSecurity.valid && preSecurity.status == kHciSuccess &&
+       !preSecurity.materialValid && preSecurity.materialToken == 0U;
+
+  uint8_t preParamsStatus = 0xFFU;
+  ok = ok && expectStatus(gHost.directSetProcedureParameters(procedureParams,
+                                                             &preParamsStatus),
+                          preParamsStatus, kHciCommandDisallowed);
+
+  uint8_t securityStatus = 0xFFU;
+  ok = ok && expectStatus(gHost.directSecurityEnable(&securityStatus),
+                          securityStatus, kHciSuccess);
+
+  BleCsVprSecurityMaterialState postSecurity{};
+  ok = ok && gHost.directReadSecurityMaterialForTest(&postSecurity) &&
+       postSecurity.valid && postSecurity.status == kHciSuccess &&
+       postSecurity.materialValid && postSecurity.controllerOwned &&
+       postSecurity.boundToConfig && postSecurity.materialValidRaw != 0U &&
+       postSecurity.connHandle == kConnHandle &&
+       postSecurity.configId == createConfig.configId &&
+       postSecurity.drbgNonce != 0U && postSecurity.materialToken != 0U &&
+       postSecurity.sessionCounter != 0U;
+
+  uint8_t postParamsStatus = 0xFFU;
+  ok = ok && expectStatus(gHost.directSetProcedureParameters(procedureParams,
+                                                             &postParamsStatus),
+                          postParamsStatus, kHciSuccess);
+
+  uint8_t enableStatus = 0xFFU;
+  ok = ok && expectStatus(gHost.directProcedureEnable(procedureEnable,
+                                                      &enableStatus),
+                          enableStatus, kHciSuccess);
+
+  Serial.print(F("cs_vpr_security_material="));
+  Serial.print(ok ? F("PASS") : F("FAIL"));
+  Serial.print(F(" phase="));
+  Serial.print(static_cast<uint8_t>(gHost.workflowState().phase));
+  Serial.print(F(" last_op=0x"));
+  Serial.print(gHost.workflowState().lastOpcode, HEX);
+  Serial.print(F(" last_status=0x"));
+  Serial.print(gHost.workflowState().lastStatus, HEX);
+  Serial.print(F(" wf="));
+  Serial.print(workflowStatus.readRemoteSupportedCapabilities, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.setDefaultSettings, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.createConfig, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.securityEnable, HEX);
+  Serial.print('/');
+  Serial.print(workflowStatus.setProcedureParameters, HEX);
+  Serial.print(F(" create="));
+  Serial.print(createStatus, HEX);
+  Serial.print(F(" pre_flags=0x"));
+  Serial.print(preSecurity.flags, HEX);
+  Serial.print(F(" pre_params="));
+  Serial.print(preParamsStatus, HEX);
+  Serial.print(F(" sec_status="));
+  Serial.print(securityStatus, HEX);
+  Serial.print(F(" post_flags=0x"));
+  Serial.print(postSecurity.flags, HEX);
+  Serial.print(F(" post_conn=0x"));
+  Serial.print(postSecurity.connHandle, HEX);
+  Serial.print(F(" post_cfg="));
+  Serial.print(postSecurity.configId);
+  Serial.print(F(" post_nonce=0x"));
+  Serial.print(postSecurity.drbgNonce, HEX);
+  Serial.print(F(" post_token=0x"));
+  Serial.print(postSecurity.materialToken, HEX);
+  Serial.print(F(" post_ctr="));
+  Serial.print(postSecurity.sessionCounter);
+  Serial.print(F(" post_params="));
+  Serial.print(postParamsStatus, HEX);
+  Serial.print(F(" enable="));
+  Serial.println(enableStatus, HEX);
+  return ok;
+}
+
 }  // namespace
 
 void setup() {
@@ -117,6 +250,7 @@ void setup() {
   }
   Serial.println(F("BleChannelSoundingVprInvalidParams"));
   (void)runInvalidParamProbe();
+  (void)runSecurityMaterialProbe();
 }
 
 void loop() {}

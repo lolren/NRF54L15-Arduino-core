@@ -49,6 +49,7 @@
 #define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_EXECUTE 0xFCEDU
 #define VPR_HCI_OP_VENDOR_BLE_CS_TONE_SNAPSHOT_READ 0xFCEEU
 #define VPR_HCI_OP_VENDOR_BLE_CS_MEASUREMENT_SNAPSHOT_READ 0xFCEFU
+#define VPR_HCI_OP_VENDOR_BLE_CS_SECURITY_MATERIAL_READ 0xFCF0U
 #if !VPR_CS_DEDICATED_IMAGE
 #define VPR_HCI_OP_VENDOR_PING 0xFCF0U
 #define VPR_HCI_OP_VENDOR_GET_TRANSPORT_INFO 0xFCF1U
@@ -131,6 +132,13 @@
 #define BLE_CS_PEER_CONFIG_TIMEOUT_TICKS 500000U
 #define BLE_CS_PEER_PROC_TIMEOUT_TICKS 500000U
 #define BLE_CS_PEER_START_TIMEOUT_SCALE 8000U
+#define BLE_CS_SECURITY_MATERIAL_FLAG_VALID 0x01U
+#define BLE_CS_SECURITY_MATERIAL_FLAG_CONTROLLER_OWNED 0x02U
+#define BLE_CS_SECURITY_MATERIAL_FLAG_BOUND_TO_CONFIG 0x04U
+#define BLE_CS_SECURITY_MATERIAL_FLAGS_READY \
+  (BLE_CS_SECURITY_MATERIAL_FLAG_VALID | \
+   BLE_CS_SECURITY_MATERIAL_FLAG_CONTROLLER_OWNED | \
+   BLE_CS_SECURITY_MATERIAL_FLAG_BOUND_TO_CONFIG)
 
 #define BLE_HCI_PACKET_TYPE_COMMAND 0x01U
 #define BLE_HCI_PACKET_TYPE_EVENT 0x04U
@@ -350,6 +358,16 @@ typedef struct __attribute__((packed)) {
   int8_t txPowerDelta;
   uint8_t configCreated;
   uint8_t securityEnabled;
+  uint8_t securityMaterialValid;
+  uint8_t securityMaterialFlags;
+  uint16_t securityConnHandle;
+  uint8_t securityConfigId;
+  uint8_t securityReserved;
+  uint16_t securityDrbgNonce;
+  uint16_t securityProcedureCounter;
+  uint32_t securitySessionCounter;
+  uint32_t securityMaterialToken;
+  uint32_t securityGenerationHeartbeat;
   uint8_t procedureParamsApplied;
   uint8_t procedureEnabled;
   uint8_t sessionOpen;
@@ -385,6 +403,16 @@ typedef struct {
   uint8_t phy;
   int8_t txPowerDelta;
   uint8_t securityEnabled;
+  uint8_t securityMaterialValid;
+  uint8_t securityMaterialFlags;
+  uint16_t securityConnHandle;
+  uint8_t securityConfigId;
+  uint8_t securityReserved;
+  uint16_t securityDrbgNonce;
+  uint16_t securityProcedureCounter;
+  uint32_t securitySessionCounter;
+  uint32_t securityMaterialToken;
+  uint32_t securityGenerationHeartbeat;
   uint8_t procedureParamsApplied;
 } vpr_cs_config_slot_t;
 
@@ -421,6 +449,16 @@ static vpr_cs_dedicated_state_t g_cs_state = {
     .txPowerDelta = -6,
     .configCreated = 0U,
     .securityEnabled = 0U,
+    .securityMaterialValid = 0U,
+    .securityMaterialFlags = 0U,
+    .securityConnHandle = 0U,
+    .securityConfigId = 0U,
+    .securityReserved = 0U,
+    .securityDrbgNonce = 0U,
+    .securityProcedureCounter = 0U,
+    .securitySessionCounter = 0U,
+    .securityMaterialToken = 0U,
+    .securityGenerationHeartbeat = 0U,
     .procedureParamsApplied = 0U,
     .procedureEnabled = 0U,
     .sessionOpen = 0U,
@@ -459,6 +497,16 @@ static vpr_cs_config_slot_t g_cs_previous_slot;
 #define g_cs_tx_power_delta g_cs_state.txPowerDelta
 #define g_cs_config_created g_cs_state.configCreated
 #define g_cs_security_enabled g_cs_state.securityEnabled
+#define g_cs_security_material_valid g_cs_state.securityMaterialValid
+#define g_cs_security_material_flags g_cs_state.securityMaterialFlags
+#define g_cs_security_conn_handle g_cs_state.securityConnHandle
+#define g_cs_security_config_id g_cs_state.securityConfigId
+#define g_cs_security_reserved g_cs_state.securityReserved
+#define g_cs_security_drbg_nonce g_cs_state.securityDrbgNonce
+#define g_cs_security_procedure_counter g_cs_state.securityProcedureCounter
+#define g_cs_security_session_counter g_cs_state.securitySessionCounter
+#define g_cs_security_material_token g_cs_state.securityMaterialToken
+#define g_cs_security_generation_heartbeat g_cs_state.securityGenerationHeartbeat
 #define g_cs_procedure_params_applied g_cs_state.procedureParamsApplied
 #define g_cs_procedure_enabled g_cs_state.procedureEnabled
 #define g_cs_session_open g_cs_state.sessionOpen
@@ -576,6 +624,10 @@ static bool load_active_state_from_slot(const vpr_cs_config_slot_t *slot);
 static void store_active_create_state(vpr_cs_config_slot_t *slot);
 static void store_active_procedure_state(vpr_cs_config_slot_t *slot);
 static void preserve_active_state_to_slot(void);
+static bool cs_slot_security_material_valid(const vpr_cs_config_slot_t *slot);
+static bool active_security_material_valid(void);
+static void clear_active_security_material(void);
+static void derive_active_security_material(void);
 static void clear_active_runtime_state(void);
 static void clear_active_config_selection(void);
 static void clear_all_cs_state(void);
@@ -1356,32 +1408,32 @@ static uint32_t current_link_state_config_packed(void) {
   uint8_t authority1 = 0U;
   current_authority_config_ids(&authority0, &authority1, NULL);
 
-  if (g_cs_slots[0].inUse != 0U && g_cs_slots[0].securityEnabled != 0U &&
+  if (g_cs_slots[0].inUse != 0U && cs_slot_security_material_valid(&g_cs_slots[0]) &&
       g_cs_slots[0].procedureParamsApplied != 0U) {
     flags |= 0x01U;
   }
-  if (g_cs_slots[1].inUse != 0U && g_cs_slots[1].securityEnabled != 0U &&
+  if (g_cs_slots[1].inUse != 0U && cs_slot_security_material_valid(&g_cs_slots[1]) &&
       g_cs_slots[1].procedureParamsApplied != 0U) {
     flags |= 0x02U;
   }
-  if (g_cs_previous_slot.inUse != 0U && g_cs_previous_slot.securityEnabled != 0U &&
+  if (g_cs_previous_slot.inUse != 0U && cs_slot_security_material_valid(&g_cs_previous_slot) &&
       g_cs_previous_slot.procedureParamsApplied != 0U) {
     flags |= 0x04U;
   }
-  if (g_cs_config_created != 0U && g_cs_security_enabled != 0U &&
+  if (g_cs_config_created != 0U && active_security_material_valid() &&
       g_cs_procedure_params_applied != 0U) {
     flags |= 0x08U;
   }
-  if (g_cs_slots[0].inUse != 0U && g_cs_slots[0].securityEnabled != 0U) {
+  if (g_cs_slots[0].inUse != 0U && cs_slot_security_material_valid(&g_cs_slots[0])) {
     flags |= 0x10U;
   }
-  if (g_cs_slots[1].inUse != 0U && g_cs_slots[1].securityEnabled != 0U) {
+  if (g_cs_slots[1].inUse != 0U && cs_slot_security_material_valid(&g_cs_slots[1])) {
     flags |= 0x20U;
   }
-  if (g_cs_previous_slot.inUse != 0U && g_cs_previous_slot.securityEnabled != 0U) {
+  if (g_cs_previous_slot.inUse != 0U && cs_slot_security_material_valid(&g_cs_previous_slot)) {
     flags |= 0x40U;
   }
-  if (g_cs_config_created != 0U && g_cs_security_enabled != 0U) {
+  if (g_cs_config_created != 0U && active_security_material_valid()) {
     flags |= 0x80U;
   }
   if (g_cs_slots[0].inUse != 0U && g_cs_slots[0].procedureParamsApplied != 0U) {
@@ -2131,6 +2183,136 @@ static void clear_cs_slot(vpr_cs_config_slot_t *slot) {
   bytes_zero(slot, sizeof(*slot));
 }
 
+static uint32_t cs_security_mix32(uint32_t state, uint32_t value) {
+  state ^= value + 0x9E3779B9UL + (state << 6U) + (state >> 2U);
+  state *= 0x85EBCA6BUL;
+  state ^= (state >> 13U);
+  return state;
+}
+
+static void clear_active_security_material(void) {
+  g_cs_security_enabled = 0U;
+  g_cs_security_material_valid = 0U;
+  g_cs_security_material_flags = 0U;
+  g_cs_security_conn_handle = 0U;
+  g_cs_security_config_id = 0U;
+  g_cs_security_reserved = 0U;
+  g_cs_security_drbg_nonce = 0U;
+  g_cs_security_procedure_counter = 0U;
+  g_cs_security_session_counter = 0U;
+  g_cs_security_material_token = 0U;
+  g_cs_security_generation_heartbeat = 0U;
+}
+
+static void copy_active_security_material_to_slot(vpr_cs_config_slot_t *slot) {
+  if (slot == NULL) {
+    return;
+  }
+  slot->securityEnabled = g_cs_security_enabled;
+  slot->securityMaterialValid = g_cs_security_material_valid;
+  slot->securityMaterialFlags = g_cs_security_material_flags;
+  slot->securityConnHandle = g_cs_security_conn_handle;
+  slot->securityConfigId = g_cs_security_config_id;
+  slot->securityReserved = 0U;
+  slot->securityDrbgNonce = g_cs_security_drbg_nonce;
+  slot->securityProcedureCounter = g_cs_security_procedure_counter;
+  slot->securitySessionCounter = g_cs_security_session_counter;
+  slot->securityMaterialToken = g_cs_security_material_token;
+  slot->securityGenerationHeartbeat = g_cs_security_generation_heartbeat;
+}
+
+static void copy_slot_security_material_to_active(const vpr_cs_config_slot_t *slot) {
+  if (slot == NULL) {
+    clear_active_security_material();
+    return;
+  }
+  g_cs_security_enabled = slot->securityEnabled;
+  g_cs_security_material_valid = slot->securityMaterialValid;
+  g_cs_security_material_flags = slot->securityMaterialFlags;
+  g_cs_security_conn_handle = slot->securityConnHandle;
+  g_cs_security_config_id = slot->securityConfigId;
+  g_cs_security_reserved = 0U;
+  g_cs_security_drbg_nonce = slot->securityDrbgNonce;
+  g_cs_security_procedure_counter = slot->securityProcedureCounter;
+  g_cs_security_session_counter = slot->securitySessionCounter;
+  g_cs_security_material_token = slot->securityMaterialToken;
+  g_cs_security_generation_heartbeat = slot->securityGenerationHeartbeat;
+}
+
+static bool cs_slot_security_material_valid(const vpr_cs_config_slot_t *slot) {
+  if (slot == NULL || slot->inUse == 0U || slot->securityEnabled == 0U ||
+      slot->securityMaterialValid == 0U || slot->securityMaterialToken == 0U ||
+      slot->securityDrbgNonce == 0U) {
+    return false;
+  }
+  if ((slot->securityMaterialFlags & BLE_CS_SECURITY_MATERIAL_FLAGS_READY) !=
+      BLE_CS_SECURITY_MATERIAL_FLAGS_READY) {
+    return false;
+  }
+  return slot->securityConnHandle == g_cs_session_conn_handle &&
+         slot->securityConfigId == slot->configId;
+}
+
+static bool active_security_material_valid(void) {
+  if (g_cs_security_enabled == 0U || g_cs_security_material_valid == 0U ||
+      g_cs_security_material_token == 0U || g_cs_security_drbg_nonce == 0U ||
+      g_cs_config_created == 0U) {
+    return false;
+  }
+  if ((g_cs_security_material_flags & BLE_CS_SECURITY_MATERIAL_FLAGS_READY) !=
+      BLE_CS_SECURITY_MATERIAL_FLAGS_READY) {
+    return false;
+  }
+  return g_cs_security_conn_handle == g_cs_session_conn_handle &&
+         g_cs_security_config_id == g_cs_config_id;
+}
+
+static void derive_active_security_material(void) {
+  uint32_t token = 0x43534B31UL; /* "CSK1": controller-owned CS material proof. */
+  uint16_t nonce = 0U;
+  if (g_cs_session_open == 0U || g_cs_config_created == 0U || g_cs_config_id == 0U) {
+    clear_active_security_material();
+    return;
+  }
+
+  token = cs_security_mix32(token, (uint32_t)g_cs_session_conn_handle);
+  token = cs_security_mix32(token, (uint32_t)g_cs_config_id);
+  token = cs_security_mix32(token, (uint32_t)g_cs_procedure_counter + 1UL);
+  token = cs_security_mix32(token, g_cs_demo_channels_packed);
+  token = cs_security_mix32(token, ((uint32_t)g_cs_main_mode_type << 24U) |
+                                   ((uint32_t)g_cs_sub_mode_type << 16U) |
+                                   ((uint32_t)g_cs_role << 8U) |
+                                   (uint32_t)g_cs_cs_sync_phy);
+  token = cs_security_mix32(token, g_vpr_transport->heartbeat);
+  token = cs_security_mix32(token, g_cs_security_session_counter + 1UL);
+  if (token == 0U) {
+    token = 0x53454331UL;
+  }
+  nonce = (uint16_t)((token ^ (token >> 16U) ^ g_cs_session_conn_handle ^
+                      ((uint16_t)g_cs_config_id << 8U)) & 0xFFFFU);
+  if (nonce == 0U) {
+    nonce = (uint16_t)(0xC500U | (uint16_t)g_cs_config_id);
+  }
+
+  g_cs_security_enabled = 1U;
+  g_cs_security_material_valid = 1U;
+  g_cs_security_material_flags = BLE_CS_SECURITY_MATERIAL_FLAGS_READY;
+  g_cs_security_conn_handle = g_cs_session_conn_handle;
+  g_cs_security_config_id = g_cs_config_id;
+  g_cs_security_reserved = 0U;
+  g_cs_security_drbg_nonce = nonce;
+  g_cs_security_procedure_counter = (uint16_t)(g_cs_procedure_counter + 1U);
+  if (g_cs_security_procedure_counter == 0U) {
+    g_cs_security_procedure_counter = 1U;
+  }
+  g_cs_security_session_counter = g_cs_security_session_counter + 1UL;
+  if (g_cs_security_session_counter == 0U) {
+    g_cs_security_session_counter = 1UL;
+  }
+  g_cs_security_material_token = token;
+  g_cs_security_generation_heartbeat = g_vpr_transport->heartbeat;
+}
+
 static void clear_cs_slots_for_config(uint8_t config_id) {
   for (uint8_t i = 0U; i < (uint8_t)(sizeof(g_cs_slots) / sizeof(g_cs_slots[0])); ++i) {
     if (g_cs_slots[i].inUse != 0U && g_cs_slots[i].configId == config_id) {
@@ -2192,7 +2374,7 @@ static bool load_active_state_from_slot(const vpr_cs_config_slot_t *slot) {
   g_cs_phy = slot->phy;
   g_cs_tx_power_delta = slot->txPowerDelta;
   g_cs_config_created = 1U;
-  g_cs_security_enabled = slot->securityEnabled;
+  copy_slot_security_material_to_active(slot);
   g_cs_procedure_params_applied = slot->procedureParamsApplied;
   return true;
 }
@@ -2219,7 +2401,7 @@ static void store_active_create_state(vpr_cs_config_slot_t *slot) {
   slot->ch3cShape = g_cs_ch3c_shape;
   slot->ch3cJump = g_cs_ch3c_jump;
   slot->enhancements1 = g_cs_enhancements1;
-  slot->securityEnabled = g_cs_security_enabled;
+  copy_active_security_material_to_slot(slot);
   slot->procedureParamsApplied = g_cs_procedure_params_applied;
 }
 
@@ -2236,7 +2418,7 @@ static void store_active_procedure_state(vpr_cs_config_slot_t *slot) {
   slot->toneAntennaConfigSelection = g_cs_tone_antenna_config_selection;
   slot->phy = g_cs_phy;
   slot->txPowerDelta = g_cs_tx_power_delta;
-  slot->securityEnabled = g_cs_security_enabled;
+  copy_active_security_material_to_slot(slot);
   slot->procedureParamsApplied = g_cs_procedure_params_applied;
 }
 
@@ -2384,7 +2566,7 @@ static void update_create_config_from_command(void) {
   g_cs_ch3c_jump = g_host_transport->hostData[30];
   g_cs_enhancements1 = g_host_transport->hostData[31];
   g_cs_config_created = 1U;
-  g_cs_security_enabled = 0U;
+  clear_active_security_material();
   g_cs_procedure_params_applied = 0U;
   g_cs_procedure_enabled = 0U;
   g_pending_cs_result_stage = 0U;
@@ -2408,7 +2590,7 @@ static void update_create_config_from_command(void) {
   slot = allocate_create_config_slot(g_cs_config_id, allow_previous_overflow);
   if (slot != NULL) {
     store_active_create_state(slot);
-    slot->securityEnabled = 0U;
+    copy_active_security_material_to_slot(slot);
     slot->procedureParamsApplied = 0U;
   }
 }
@@ -2520,7 +2702,7 @@ static void clear_active_runtime_state(void) {
 
 static void clear_active_config_selection(void) {
   g_cs_config_created = 0U;
-  g_cs_security_enabled = 0U;
+  clear_active_security_material();
   g_cs_procedure_params_applied = 0U;
   g_cs_config_id = 0U;
   g_cs_demo_channels_packed = 0U;
@@ -2585,7 +2767,7 @@ static uint8_t validate_set_procedure_params_command(void) {
       (g_host_transport->hostLen >= 27U) ? g_host_transport->hostData[6] : 0U;
   const bool active_config =
       (g_cs_config_created != 0U) && (requested_config_id == g_cs_config_id);
-  bool security_enabled = false;
+  bool security_ready = false;
   if (g_host_transport->hostLen < 27U || g_host_transport->hostData[0] != 0x01U) {
     g_vpr_transport->lastError = 0xD1U;
     return BLE_CS_HCI_STATUS_INVALID_PARAMS;
@@ -2600,11 +2782,11 @@ static uint8_t validate_set_procedure_params_command(void) {
     g_vpr_transport->lastError = 0xD6U;
     return BLE_CS_HCI_STATUS_INVALID_PARAMS;
   }
-  security_enabled =
-      (slot != NULL) ? (slot->securityEnabled != 0U) : (g_cs_security_enabled != 0U);
-  if (g_cs_config_created == 0U || !security_enabled) {
+  security_ready =
+      (slot != NULL) ? cs_slot_security_material_valid(slot) : active_security_material_valid();
+  if (g_cs_config_created == 0U || !security_ready) {
     g_vpr_transport->lastError =
-        (g_cs_config_created == 0U) ? 0xD4U : 0xD5U;
+        (g_cs_config_created == 0U) ? 0xD4U : 0xD8U;
     return BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
   }
   {
@@ -2631,7 +2813,7 @@ static uint8_t validate_procedure_enable_command(void) {
       (g_host_transport->hostLen >= 8U) ? g_host_transport->hostData[6] : 0U;
   const bool active_config =
       (g_cs_config_created != 0U) && (requested_config_id == g_cs_config_id);
-  bool security_enabled = false;
+  bool security_ready = false;
   bool procedure_params_applied = false;
   if (g_host_transport->hostLen < 8U || g_host_transport->hostData[0] != 0x01U) {
     g_vpr_transport->lastError = 0xE1U;
@@ -2651,8 +2833,8 @@ static uint8_t validate_procedure_enable_command(void) {
     g_vpr_transport->lastError = 0xE5U;
     return BLE_CS_HCI_STATUS_INVALID_PARAMS;
   }
-  security_enabled =
-      (slot != NULL) ? (slot->securityEnabled != 0U) : (g_cs_security_enabled != 0U);
+  security_ready =
+      (slot != NULL) ? cs_slot_security_material_valid(slot) : active_security_material_valid();
   procedure_params_applied =
       (slot != NULL) ? (slot->procedureParamsApplied != 0U)
                      : (g_cs_procedure_params_applied != 0U);
@@ -2668,9 +2850,9 @@ static uint8_t validate_procedure_enable_command(void) {
     g_vpr_transport->lastError = 0U;
     return BLE_CS_HCI_STATUS_SUCCESS;
   }
-  if (!security_enabled || !procedure_params_applied) {
+  if (!security_ready || !procedure_params_applied) {
     g_vpr_transport->lastError =
-        (!security_enabled) ? 0xE7U : 0xE8U;
+        (!security_ready) ? 0xE9U : 0xE8U;
     return BLE_CS_HCI_STATUS_COMMAND_DISALLOWED;
   }
   g_vpr_transport->lastError = 0U;
@@ -3045,7 +3227,7 @@ static size_t build_remove_config_complete_payload(uint8_t *payload, size_t max_
 
 static size_t build_procedure_enable_complete_payload(uint8_t *payload, size_t max_len,
                                                       uint16_t conn_handle) {
-  if (payload == NULL || max_len < 21U) {
+  if (payload == NULL || max_len < 22U) {
     return 0U;
   }
   bytes_zero(payload, 21U);
@@ -4188,6 +4370,31 @@ static size_t build_vendor_ble_cs_scheduler_read_complete_payload(uint8_t *paylo
   payload[53] = interval_selector;
   payload[54] = g_cs_last_peer_gap_ticks;
   return 55U;
+}
+
+static size_t build_vendor_ble_cs_security_material_read_complete_payload(uint8_t *payload,
+                                                                          size_t max_len) {
+  if (payload == NULL || max_len < 21U) {
+    return 0U;
+  }
+
+  const uint8_t status = command_layout_is_exact(0U)
+                             ? BLE_CS_HCI_STATUS_SUCCESS
+                             : BLE_CS_HCI_STATUS_INVALID_PARAMS;
+  payload[0] = status;
+  payload[1] = g_cs_security_material_flags;
+  if (active_security_material_valid()) {
+    payload[1] |= BLE_CS_SECURITY_MATERIAL_FLAGS_READY;
+  }
+  write_le16(&payload[2], g_cs_security_conn_handle);
+  payload[4] = g_cs_security_config_id;
+  payload[5] = g_cs_security_material_valid;
+  write_le16(&payload[6], g_cs_security_drbg_nonce);
+  write_le16(&payload[8], g_cs_security_procedure_counter);
+  write_le32(&payload[10], g_cs_security_session_counter);
+  write_le32(&payload[14], g_cs_security_material_token);
+  write_le32(&payload[18], g_cs_security_generation_heartbeat);
+  return 22U;
 }
 
 static size_t build_vendor_ble_cs_measurement_work_read_complete_payload(uint8_t *payload,
@@ -6109,10 +6316,10 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
         break;
       }
 #if VPR_CS_DEDICATED_IMAGE
-      g_cs_security_enabled = 1U;
+      derive_active_security_material();
       slot = find_cs_slot(g_cs_config_id);
       if (slot != NULL) {
-        slot->securityEnabled = 1U;
+        copy_active_security_material_to_slot(slot);
       }
 #endif
       len = build_security_complete_payload(payload, sizeof(payload), conn_handle);
@@ -6377,6 +6584,22 @@ static bool publish_builtin_response_for_opcode(uint16_t opcode) {
     case VPR_HCI_OP_VENDOR_BLE_CS_SCHEDULER_READ: {
       size_t len =
           build_vendor_ble_cs_scheduler_read_complete_payload(payload, sizeof(payload));
+      if (len == 0U) {
+        return false;
+      }
+      len = append_h4_command_complete_payload((uint8_t *)g_vpr_transport->vprData + offset,
+                                               NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA - offset,
+                                               opcode, payload, len);
+      if (len == 0U) {
+        return false;
+      }
+      offset += len;
+      break;
+    }
+    case VPR_HCI_OP_VENDOR_BLE_CS_SECURITY_MATERIAL_READ: {
+      size_t len =
+          build_vendor_ble_cs_security_material_read_complete_payload(payload,
+                                                                      sizeof(payload));
       if (len == 0U) {
         return false;
       }

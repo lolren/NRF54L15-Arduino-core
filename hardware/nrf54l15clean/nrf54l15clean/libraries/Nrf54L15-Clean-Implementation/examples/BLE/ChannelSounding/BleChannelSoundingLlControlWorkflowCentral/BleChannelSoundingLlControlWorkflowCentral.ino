@@ -1429,6 +1429,16 @@ void loop() {
       const bool workOk =
           g_csHost.directReadMeasurementWorkItemForTest(&work) &&
           work.valid && work.status == 0U && work.ready;
+      BleCsVprSecurityMaterialState security{};
+      const bool securityOk =
+          g_csHost.directReadSecurityMaterialForTest(&security) &&
+          security.valid && security.status == 0U &&
+          security.materialValid && security.controllerOwned &&
+          security.boundToConfig && security.materialValidRaw != 0U &&
+          security.connHandle == kCsConnHandle &&
+          security.configId == g_csConfig.session.workflow.createConfig.configId &&
+          security.drbgNonce != 0U && security.materialToken != 0U &&
+          security.sessionCounter != 0U;
       (void)runConnectedPhysicalSweep(workOk ? &work : nullptr);
       BleCsLlControlBridgePollResult trackerRefresh{};
       g_bridgeTracker.update(g_csHost, trackerRefresh);
@@ -1470,6 +1480,20 @@ void loop() {
       Serial.print(scheduler.localChunkStartStep);
       Serial.print('/');
       Serial.print(scheduler.peerChunkStartStep);
+      Serial.print(" sec=");
+      Serial.print(securityOk ? 1 : 0);
+      Serial.print(" sec_flags=0x");
+      Serial.print(security.flags, HEX);
+      Serial.print(" sec_conn=0x");
+      Serial.print(security.connHandle, HEX);
+      Serial.print(" sec_cfg=");
+      Serial.print(security.configId);
+      Serial.print(" sec_nonce=0x");
+      Serial.print(security.drbgNonce, HEX);
+      Serial.print(" sec_token=0x");
+      Serial.print(security.materialToken, HEX);
+      Serial.print(" sec_ctr=");
+      Serial.print(security.sessionCounter);
       Serial.print(" work=");
       Serial.print(workOk ? 1 : 0);
       Serial.print(" work_flags=0x");

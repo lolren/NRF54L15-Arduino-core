@@ -57,6 +57,10 @@ constexpr uint16_t kBleCsVprHciOpMeasurementWorkRead = 0xFCECU;
 constexpr uint16_t kBleCsVprHciOpMeasurementExecute = 0xFCEDU;
 constexpr uint16_t kBleCsVprHciOpToneSnapshotRead = 0xFCEEU;
 constexpr uint16_t kBleCsVprHciOpMeasurementSnapshotRead = 0xFCEFU;
+constexpr uint16_t kBleCsVprHciOpSecurityMaterialRead = 0xFCF0U;
+constexpr uint8_t kBleCsSecurityMaterialFlagValid = 0x01U;
+constexpr uint8_t kBleCsSecurityMaterialFlagControllerOwned = 0x02U;
+constexpr uint8_t kBleCsSecurityMaterialFlagBoundToConfig = 0x04U;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesComplete = 0x2CU;
 constexpr uint8_t kBleCsHciEvtReadRemoteFaeTableComplete = 0x2DU;
 constexpr uint8_t kBleCsHciEvtReadRemoteSupportedCapabilitiesCompleteV2 = 0x38U;
@@ -584,6 +588,23 @@ struct BleCsVprSchedulerState {
   uint8_t configId = 0U;
   uint8_t intervalSelector = 0U;
   uint8_t peerGapTicks = 0U;
+};
+
+struct BleCsVprSecurityMaterialState {
+  bool valid = false;
+  uint8_t status = 0xFFU;
+  uint8_t flags = 0U;
+  bool materialValid = false;
+  bool controllerOwned = false;
+  bool boundToConfig = false;
+  uint16_t connHandle = 0U;
+  uint8_t configId = 0U;
+  uint8_t materialValidRaw = 0U;
+  uint16_t drbgNonce = 0U;
+  uint16_t procedureCounter = 0U;
+  uint32_t sessionCounter = 0U;
+  uint32_t materialToken = 0U;
+  uint32_t generationHeartbeat = 0U;
 };
 
 struct BleCsVprMeasurementWorkItem {
@@ -2574,6 +2595,7 @@ class BleCsControllerVprHost {
       BleCsLlControlPdu* outPdu,
       BleCsVprPeerExchangeState* outState);
   bool directReadSchedulerStateForTest(BleCsVprSchedulerState* outState);
+  bool directReadSecurityMaterialForTest(BleCsVprSecurityMaterialState* outState);
   bool directReadMeasurementWorkItemForTest(BleCsVprMeasurementWorkItem* outWork);
   bool readMeasurementExecutionSnapshot(
       BleCsVprMeasurementExecutionResult* outResult);

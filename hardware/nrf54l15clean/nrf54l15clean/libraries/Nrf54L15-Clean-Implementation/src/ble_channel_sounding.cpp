@@ -4203,6 +4203,44 @@ bool parseVprSchedulerStateResponse(const uint8_t* packet,
   return true;
 }
 
+bool parseVprSecurityMaterialResponse(const uint8_t* packet,
+                                      size_t packetLen,
+                                      uint16_t expectedOpcode,
+                                      BleCsVprSecurityMaterialState* outState) {
+  if (outState == nullptr) {
+    return false;
+  }
+  *outState = BleCsVprSecurityMaterialState{};
+
+  BleCsHciCommandCompleteEvent completeEvent{};
+  if (!BleChannelSoundingRadio::parseHciCommandCompleteEvent(packet, packetLen,
+                                                             &completeEvent) ||
+      completeEvent.opcode != expectedOpcode ||
+      completeEvent.returnParams == nullptr ||
+      completeEvent.returnParamsLen < 22U) {
+    return false;
+  }
+
+  const uint8_t* params = completeEvent.returnParams;
+  outState->valid = true;
+  outState->status = params[0];
+  outState->flags = params[1];
+  outState->materialValid = (params[1] & kBleCsSecurityMaterialFlagValid) != 0U;
+  outState->controllerOwned =
+      (params[1] & kBleCsSecurityMaterialFlagControllerOwned) != 0U;
+  outState->boundToConfig =
+      (params[1] & kBleCsSecurityMaterialFlagBoundToConfig) != 0U;
+  outState->connHandle = readLe16(params + 2U);
+  outState->configId = params[4];
+  outState->materialValidRaw = params[5];
+  outState->drbgNonce = readLe16(params + 6U);
+  outState->procedureCounter = readLe16(params + 8U);
+  outState->sessionCounter = readLe32(params + 10U);
+  outState->materialToken = readLe32(params + 14U);
+  outState->generationHeartbeat = readLe32(params + 18U);
+  return true;
+}
+
 bool parseVprMeasurementWorkItemResponse(const uint8_t* packet,
                                          size_t packetLen,
                                          uint16_t expectedOpcode,
@@ -6216,6 +6254,7 @@ bool BleCsControllerVprHost::sendDirectHciCommand(uint16_t opcode,
       opcode == kBleCsVprHciOpPeerStageRead ||
       opcode == kBleCsVprHciOpPendingLocalPduRead ||
       opcode == kBleCsVprHciOpSchedulerRead ||
+      opcode == kBleCsVprHciOpSecurityMaterialRead ||
       opcode == kBleCsVprHciOpMeasurementWorkRead ||
       opcode == kBleCsVprHciOpMeasurementSnapshotRead ||
       opcode == kBleCsVprHciOpToneSnapshotRead;
@@ -6434,6 +6473,23 @@ bool BleCsControllerVprHost::directReadMeasurementWorkItemForTest(
     vprState_.linkProcedureCounter = outWork->procedureCounter;
   }
   return true;
+}
+
+bool BleCsControllerVprHost::directReadSecurityMaterialForTest(
+    BleCsVprSecurityMaterialState* outState) {
+  if (outState == nullptr) {
+    return false;
+  }
+
+  uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA] = {0};
+  size_t responseLen = 0U;
+  if (!sendDirectHciCommand(kBleCsVprHciOpSecurityMaterialRead, nullptr, 0U,
+                            response, sizeof(response), &responseLen)) {
+    return false;
+  }
+  return parseVprSecurityMaterialResponse(response, responseLen,
+                                          kBleCsVprHciOpSecurityMaterialRead,
+                                          outState);
 }
 
 bool BleCsControllerVprHost::readMeasurementExecutionSnapshot(

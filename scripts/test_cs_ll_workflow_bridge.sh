@@ -93,6 +93,7 @@ if ! grep -q "rx=0x3F" "${central_log}" ||
    ! grep -q "vpr_pdu=3" "${central_log}" ||
    ! grep -q "local=1 peer=1 proc=1 est=1" "${central_log}" ||
    ! grep -Eq "sched=1 .*sched_proc=1 .*sched_sub=[0-9]+/[1-9]" "${central_log}" ||
+   ! grep -Eq "sec=1 .*sec_flags=0x7 .*sec_conn=0x41 .*sec_cfg=1 .*sec_nonce=0x[1-9A-Fa-f][0-9A-Fa-f]* .*sec_token=0x[1-9A-Fa-f][0-9A-Fa-f]* .*sec_ctr=[1-9][0-9]*" "${central_log}" ||
    ! grep -Eq "work=1 .*work_proc=1 .*work_sub=[0-9]+/[1-9].*work_steps=[1-9][0-9]*/[1-9].*work_ch=[1-9][0-9]*:" "${central_log}"; then
   echo "CS LL workflow bridge PASS was incomplete" >&2
   sed -n '1,220p' "${central_log}" >&2

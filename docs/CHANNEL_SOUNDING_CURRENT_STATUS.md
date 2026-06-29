@@ -1,6 +1,6 @@
 # Channel Sounding Current Status
 
-Last updated: 2026-06-28
+Last updated: 2026-06-29
 
 This document is the current practical status for finishing full Bluetooth
 Channel Sounding (CS) Zephyr parity in this core. It intentionally uses a
@@ -13,25 +13,26 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-██████████████████████████░░░░░░  78%
+████████████████████████████░░░░  82%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 The older `87%` tracker is too optimistic for "full working CS". It mostly
 counts support infrastructure. The current stricter estimate is approximately
-78% complete after the VPR measurement execution refactor, the focused
+82% complete after the VPR measurement execution refactor, the focused
 controller-owned auto-execution proof, the VPR/RADIO connected timing ownership
-proof, and the connected packet/timed Mode 2 ownership handoff.
+proof, the connected packet/timed Mode 2 ownership handoff, and controller-owned
+CS security material derivation/readback.
 
 ## Current Verified Baseline
 
 Repository state used for this status:
 
 ```text
-base commit: 6007ac20 cs: refactor VPR measurement execution worker
+pre-slice base commit: 9fca94dd cs: finish connected controller-owned measurement path
 branch: main
-worktree: Slice 3B connected packet/timed ownership proof applied
+current slice state: Slice 6 controller-owned CS security material proof complete
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -53,7 +54,7 @@ std_est=1 std_steps=34/34
 host_est=1 host_steps=34/34
 ```
 
-Two-board connected LL workflow regression passed on 2026-06-28:
+Two-board connected LL workflow regression passed on 2026-06-29:
 
 ```bash
 CS_CAPTURE_SECONDS=45 \
@@ -70,6 +71,8 @@ Observed result:
 cs_ll_workflow_bridge=PASS
 vpr_pdu=3
 work=1 work_flags=0xC1 work_steps=6/6
+sec=1 sec_flags=0x7 sec_conn=0x41 sec_cfg=1
+sec_nonce=0xC4A sec_token=0xA05DAD56 sec_ctr=1
 cs_connected_sweep=PASS
 work_exec_mismatch=0x0
 work_rf_pkt=1 work_rf_buf=1 work_rf_timed=1 work_rf_timing=1
@@ -103,6 +106,9 @@ ownership still need to be completed.
 - Host result ingestion from real measurements.
 - Connected diagnostic flow showing LL-control negotiation plus VPR/RADIO-owned
   packet/timed work and real RF follow-up can work in one two-board run.
+- Controller-owned CS security material derivation/readback. Procedure
+  parameter and procedure enable commands now require valid material, not just a
+  boolean security flag.
 
 ## Main Gap
 
@@ -145,8 +151,7 @@ even though many lower-level parts are already hardware-verified.
 
 ## Required Slices
 
-Estimated remaining work: 4 full slices after the Slice 4 native result
-publication pass.
+Estimated remaining work: 3 full slices after Slice 6.
 
 Realistic session count: 5 to 8 sessions. The risk is concentrated in Slice 5
 because it moves CS execution into production connection-event scheduling and
@@ -414,23 +419,81 @@ Verification:
 
 Goal: implement and validate CS security material generation and use.
 
-Current issue:
+Completion status:
 
-- The current state machine has security stages.
-- Full CS parity needs proper security material/nonces/DRBG behavior aligned
-  with Bluetooth and Zephyr.
+- Slice 6 is complete for the current Arduino-to-Arduino controller-owned CS
+  path.
+- Zephyr keeps `LE CS Security Enable` host payload as only a connection
+  handle, so material generation remains controller-owned and is not exposed as
+  host-provided key bytes.
+- VPR derives a nonzero material token and DRBG nonce from controller-owned
+  connection/config/session state when `LE CS Security Enable` succeeds.
+- The retained config slot stores the security material alongside the config, so
+  later config selection cannot treat a stale boolean as security-ready.
+- `Set Procedure Parameters` and `Procedure Enable` now require material that is
+  valid, controller-owned, and bound to the active connection/config.
+- Dedicated VPR debug opcode `0xFCF0` exposes a read-only proof snapshot:
+  status, flags, conn handle, config id, DRBG nonce, procedure counter, material
+  token, session counter, and generation heartbeat.
 
-Required work:
+Implemented work:
 
-- Review Zephyr CS security flow and Bluetooth CS material requirements.
-- Implement missing nonce/material derivation.
-- Ensure abort/error status matches expected behavior on invalid or missing
-  material.
+- Added VPR security-material fields to active CS state and retained config
+  slots.
+- Added deterministic controller-owned material derivation and clear/copy
+  helpers.
+- Replaced boolean-only security readiness checks with material-valid checks.
+- Added host-side `BleCsVprSecurityMaterialState` and
+  `directReadSecurityMaterialForTest()`.
+- Updated `BleChannelSoundingLlControlWorkflowCentral` to print `sec=1` proof
+  fields in the workflow PASS line.
+- Updated `scripts/test_cs_ll_workflow_bridge.sh` to fail if the security proof
+  is absent or zero.
+- Extended `BleChannelSoundingVprInvalidParams` with a config-bound negative
+  security-material probe.
+- Added `scripts/test_cs_vpr_security_material.sh` so this gate is covered by
+  a focused compile/upload/serial regression.
 
 Verification:
 
-- Positive and negative security-path examples.
-- No regressions in existing LL-control workflow.
+- `CS_REGENERATE_VPR=1 ./scripts/test_cs_vpr_auto_measurement.sh` passes.
+- `CS_CAPTURE_SECONDS=45 CS_REGENERATE_VPR=0
+  ./scripts/test_cs_ll_workflow_bridge.sh` passes.
+- `CS_REGENERATE_VPR=0 ./scripts/test_cs_vpr_security_material.sh` passes.
+- The connected workflow PASS includes:
+
+```text
+sec=1
+sec_flags=0x7
+sec_conn=0x41
+sec_cfg=1
+sec_nonce=0xC4A
+sec_token=0xA05DAD56
+sec_ctr=1
+```
+
+The focused negative/security regression proves:
+
+```text
+cs_vpr_invalid_params=PASS
+cs_vpr_security_material=PASS
+pre_flags=0x0
+pre_params=C
+sec_status=0
+post_flags=0x7
+post_conn=0x41
+post_cfg=2
+post_nonce=0x8F6
+post_token=0xB341B9F6
+post_ctr=1
+post_params=0
+enable=0
+```
+
+Remaining security hardening after Slice 6:
+
+- Compare material lifecycle and abort behavior against Zephyr once
+  Arduino-to-Zephyr CS interop is available.
 
 ### Slice 7: Zephyr Interoperability
 
@@ -495,12 +558,13 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with Slice 5: integrate real RF measurements into the connected procedure.
+Start with Slice 7: Zephyr interoperability.
 
-Reason: Slice 4 now proves VPR/controller native result publication and host
-ingestion from VPR-owned output. The next meaningful gap is moving the staged
-physical RF work into the actual negotiated connection-event procedure with
-guard-before/guard-after scheduling and without CPUAPP busy-loop ownership.
+Reason: Slices 4, 5, and 6 now prove native result publication,
+controller-owned connected measurement execution, and controller-owned security
+material in Arduino-to-Arduino runs. The next meaningful gap is proving that the
+same command/event/security behavior works against Zephyr, not just this core on
+both sides.
 
 Do not mark CS fully complete until these are true:
 
