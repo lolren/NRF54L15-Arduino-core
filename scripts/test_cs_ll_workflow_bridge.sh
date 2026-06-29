@@ -12,6 +12,10 @@ central_uid="${CS_CENTRAL_UID:-761FDE87}"
 peripheral_uid="${CS_PERIPHERAL_UID:-E91217E8}"
 capture_seconds="${CS_CAPTURE_SECONDS:-40}"
 sync_installed="${CS_SYNC_INSTALLED:-1}"
+log_dir="${CS_LOG_DIR:-}"
+common_cpp_flags="${CS_CPP_EXTRA_FLAGS:-}"
+central_cpp_flags="${CS_CENTRAL_CPP_FLAGS:-${common_cpp_flags}}"
+peripheral_cpp_flags="${CS_PERIPHERAL_CPP_FLAGS:-${common_cpp_flags}}"
 
 installed_base="${CS_INSTALLED_BASE:-${HOME}/.arduino15/packages/nrf54l15clean/hardware/nrf54l15clean}"
 if [[ -z "${CS_INSTALLED_VERSION:-}" ]]; then
@@ -21,9 +25,26 @@ else
 fi
 installed_impl="${installed_base}/${installed_version}/libraries/Nrf54L15-Clean-Implementation"
 nrf_ocd="${installed_base}/${installed_version}/tools/nrf_ocd"
+core_version_include="${installed_base}/${installed_version}/cores/nrf54l15/CoreVersionGenerated.h"
 
 peripheral_sketch="${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral"
 central_sketch="${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral"
+
+central_build_args=()
+if [[ -n "${central_cpp_flags}" ]]; then
+  central_build_args+=(
+    --build-property
+    "compiler.cpp.extra_flags=-include ${core_version_include} ${central_cpp_flags}"
+  )
+fi
+
+peripheral_build_args=()
+if [[ -n "${peripheral_cpp_flags}" ]]; then
+  peripheral_build_args+=(
+    --build-property
+    "compiler.cpp.extra_flags=-include ${core_version_include} ${peripheral_cpp_flags}"
+  )
+fi
 
 if [[ ! -x "${nrf_ocd}" ]]; then
   echo "nrf_ocd not found or not executable: ${nrf_ocd}" >&2
@@ -41,18 +62,26 @@ fi
 arduino-cli compile --upload \
   -p "${peripheral_port}" \
   --fqbn "${fqbn}" \
+  "${peripheral_build_args[@]}" \
   "${peripheral_sketch}" \
   --build-path /tmp/csll_peripheral_regression
 
 arduino-cli compile --upload \
   -p "${central_port}" \
   --fqbn "${fqbn}" \
+  "${central_build_args[@]}" \
   "${central_sketch}" \
   --build-path /tmp/csll_workflow_central_regression
 
-tmpdir="$(mktemp -d)"
+if [[ -n "${log_dir}" ]]; then
+  tmpdir="${log_dir}"
+  mkdir -p "${tmpdir}"
+else
+  tmpdir="$(mktemp -d)"
+fi
 central_log="${tmpdir}/central.log"
 peripheral_log="${tmpdir}/peripheral.log"
+rm -f "${central_log}" "${peripheral_log}" "${peripheral_log}.err"
 
 stty -F "${central_port}" 115200 raw -echo -hupcl 2>/dev/null || true
 stty -F "${peripheral_port}" 115200 raw -echo -hupcl 2>/dev/null || true

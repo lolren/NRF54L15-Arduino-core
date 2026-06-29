@@ -13,16 +13,17 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-███████████████████████████████░  90%
+█████████████████████████████████░  95%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-The current stricter estimate is approximately 90%: the VPR measurement
+The current stricter estimate is approximately 95%: the VPR measurement
 execution refactor, controller-owned auto-execution proof, VPR/RADIO connected
 timing ownership proof, connected packet/timed Mode 2 ownership handoff,
 controller-owned CS security material derivation/readback, Zephyr validation
-harness, and Zephyr-compatible Arduino step-data GATT bridge are complete.
+harness, Zephyr-compatible Arduino step-data GATT bridge, and the first
+repeatable accuracy/calibration harness are complete.
 
 ## Current Verified Baseline
 
@@ -31,7 +32,7 @@ Repository state used for this status:
 ```text
 pre-slice base commit: 9e6356e7 cs: add Zephyr interoperability harness
 branch: main
-current slice state: Slice 7B complete; Arduino now has a hardware-tested Zephyr-compatible CS Sample step-data GATT bridge
+current slice state: Slice 8 complete; Arduino now emits structured CS accuracy samples and has a repeatable calibration capture/analyze harness
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -110,6 +111,41 @@ Sketch uses 149760 bytes (9%) of program storage space.
 Global variables use 54056 bytes (34%) of dynamic memory.
 cs_zephyr_bridge_compile=PASS
 ```
+
+Slice 8 accuracy capture passed on 2026-06-29:
+
+```bash
+python3 scripts/test_cs_accuracy_calibration.py capture \
+  --runs 1 \
+  --profiles 0 \
+  --capture-seconds 50 \
+  --central-port /dev/ttyACM1 \
+  --peripheral-port /dev/ttyACM2 \
+  --central-uid 761FDE87 \
+  --peripheral-uid E91217E8 \
+  --source connected \
+  --profile-name BleCsCalibrationProfileSlice8 \
+  --board-pair 761FDE87_E91217E8 \
+  --notes "post-log-format profile-0 bench capture; no reference distance supplied because spacing is approximate" \
+  --skip-calibration-artifacts
+```
+
+Observed result:
+
+```text
+cs_accuracy=PASS samples=1
+phase_raw median=0.7499 mad=0.0000 stddev=0.0000
+confidence median=94.0
+cs_accuracy_sample source=connected profile=0 profile_channels=9 executed_channels=6 rtt_enabled=0 requested_channels=6 valid_channels=6 used_channels=6 total_channels=6 rtt_channels=0 phase_raw_m=0.7499 phase_m=0.7499 dist_raw_m=0.7499 dist_m=0.7499 confidence=94 confidence_label=high
+```
+
+Profile 1 and profile 2 captures also passed the same connected workflow. They
+confirmed an important current limitation: the profile selector changes the
+requested compile-time channel list (9/18/37), but the connected production path
+executes the six channels owned by the scheduled VPR work item. The log now
+prints both `profile_channels` and `executed_channels` so this is visible. A
+future larger-channel connected schedule needs to expand the procedure work
+item, not just the sketch-side sweep list.
 
 Two-board Arduino Zephyr-compatible step-data bridge hardware test passed on
 2026-06-29:
@@ -205,12 +241,12 @@ even though many lower-level parts are already hardware-verified.
 
 ## Required Slices
 
-Estimated remaining work: 2 full slices after Slice 7B.
+Estimated remaining work: 1 full slice after Slice 8.
 
-Realistic session count: 4 to 6 sessions. The highest remaining risk is no
-longer the missing service bridge. It is mixed Zephyr/Arduino hardware behavior,
-accuracy calibration, and long-run BLE coexistence under reconnect/abort/power
-stress.
+Realistic session count: 2 to 4 sessions. The highest remaining risk is no
+longer the missing service bridge or a missing accuracy harness. It is mixed
+Zephyr/Arduino hardware behavior, larger connected schedule coverage, and
+long-run BLE coexistence under reconnect/abort/power stress.
 
 ### Slice 1: Refactor VPR Measurement Execute - Done
 
@@ -722,22 +758,53 @@ Remaining work before claiming full Zephyr parity:
 
 Goal: make distance output usable and explainable.
 
-Current issue:
+Status: complete for the current staged connected-CS architecture.
+
+Implemented:
+
+- `BleChannelSoundingLlControlWorkflowCentral` now supports compile-time
+  connected channel profiles:
+  profile 0 fast list, profile 1 wider list, profile 2 full 37-channel list.
+- The diagnostic emits a machine-readable `cs_accuracy_sample` line containing
+  raw distance, calibrated distance, RTT fields, residuals, quality counters,
+  confidence score, confidence label, calibration scale/offset, and calibrated
+  error-window fields when a validated profile is supplied.
+- The diagnostic now reports `profile_channels` and `executed_channels`
+  separately. This matters because the current production connected procedure
+  executes the VPR work item's scheduled six channels even when the sketch
+  requests a wider profile.
+- `CS_CONNECTED_ENABLE_RTT=1` can be passed as a compile flag, or
+  `scripts/test_cs_accuracy_calibration.py capture --enable-rtt` can be used,
+  to run the same diagnostic with RTT fields enabled.
+- `scripts/test_cs_accuracy_calibration.py` captures two-board hardware runs,
+  preserves logs under `dist/cs_accuracy/`, extracts accuracy records, writes
+  CSV/JSON/Markdown summaries, and can call
+  `scripts/channel_sounding_calibration.py` to emit calibration JSON/header
+  artifacts when a trusted reference distance is supplied.
+- `scripts/test_cs_ll_workflow_bridge.sh` now accepts stable log directories
+  and per-side compile flags while preserving the core's forced
+  `CoreVersionGenerated.h` include.
+
+Hardware verification:
+
+- Profile 0 compiled and ran on two XIAO nRF54L15 boards.
+- Profile 1 and profile 2 compiled and ran on the same pair, confirming the
+  current six-channel connected work-item clamp.
+- The final profile-0 run produced `phase_raw_m=0.7499` with confidence `94`
+  at the current bench spacing. No calibration profile was generated from that
+  run because the board distance was approximate.
+
+Remaining limitations moved to Slice 9:
 
 - Estimates exist but values are not yet a final calibrated product.
 - The known physical distance during development has often been approximate.
-
-Required work:
-
-- Test multiple distances and channel counts.
-- Validate phase-slope and RTT contribution.
-- Apply FAE, antenna path, and board-pair bias corrections.
-- Add quality/confidence reporting.
-
-Verification:
-
-- Repeatable results over several fixed distances.
-- Documented expected error and limitations.
+- Real calibration still requires captures at measured fixed distances, then
+  applying the generated scale/offset/header and validating a second pass.
+- RTT is compile-time switchable but not yet characterized against a measured
+  fixture.
+- Wider connected channel profiles require the controller procedure builder to
+  schedule more steps in the VPR work item; increasing only the sketch list is
+  intentionally not enough.
 
 ### Slice 9: Stress, Power, and Regression Hardening
 
@@ -748,6 +815,9 @@ Required work:
 - Long soak of connected CS procedures.
 - Reconnect, abort, timeout, and peer-loss tests.
 - Different PHY/settings and channel maps.
+- Larger connected CS schedules beyond the current six-channel VPR work item.
+- Measured-distance calibration passes with generated profile headers applied.
+- RTT-enabled accuracy captures on a measured fixture.
 - Power behavior while idle and during CS events.
 - Regression scripts for raw RF, connected workflow, Zephyr interop, and
   security error paths.
@@ -760,15 +830,17 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with Slice 8: mixed Zephyr hardware validation plus accuracy and
-calibration.
+Start with Slice 9: stress, power, reconnect/abort, mixed Zephyr hardware, and
+larger connected schedule hardening.
 
 Reason: Slices 4, 5, and 6 prove native result publication,
 controller-owned connected measurement execution, and controller-owned security
-material in Arduino-to-Arduino runs. Slice 7 now provides both the repeatable
+material in Arduino-to-Arduino runs. Slice 7 provides both the repeatable
 Zephyr reference harness and the Arduino examples/API glue that match Zephyr's
-connected-CS GATT step-data flow. The next useful work is proving the mixed
-path on hardware, then calibrating and hardening the result quality.
+connected-CS GATT step-data flow. Slice 8 now provides structured accuracy
+records and a repeatable calibration harness. The next useful work is proving
+the mixed path on hardware, expanding connected schedules beyond the current
+six-channel VPR work item, and hardening reconnect/abort/power behavior.
 
 Do not mark CS fully complete until these are true:
 

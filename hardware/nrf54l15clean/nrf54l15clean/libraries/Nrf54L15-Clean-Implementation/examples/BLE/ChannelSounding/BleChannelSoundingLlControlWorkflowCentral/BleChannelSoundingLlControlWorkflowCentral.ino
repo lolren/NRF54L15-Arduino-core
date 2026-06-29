@@ -26,6 +26,34 @@ using namespace xiao_nrf54l15;
 #define CS_AUTO_MEASUREMENT_PROOF_ONLY 0
 #endif
 
+#ifndef CS_CONNECTED_PHYSICAL_CHANNEL_PROFILE
+#define CS_CONNECTED_PHYSICAL_CHANNEL_PROFILE 0
+#endif
+
+#ifndef CS_CONNECTED_ENABLE_RTT
+#define CS_CONNECTED_ENABLE_RTT 0
+#endif
+
+#ifndef CS_CALIBRATION_SCALE
+#define CS_CALIBRATION_SCALE 1.0f
+#endif
+
+#ifndef CS_CALIBRATION_OFFSET_M
+#define CS_CALIBRATION_OFFSET_M 0.0f
+#endif
+
+#ifndef CS_CALIBRATION_VALIDATED_MAD_M
+#define CS_CALIBRATION_VALIDATED_MAD_M 0.0f
+#endif
+
+#ifndef CS_CALIBRATION_VALIDATED_P90_M
+#define CS_CALIBRATION_VALIDATED_P90_M 0.0f
+#endif
+
+#ifndef CS_CALIBRATION_VALIDATED_SAMPLES
+#define CS_CALIBRATION_VALIDATED_SAMPLES 0
+#endif
+
 namespace {
 
 static BleRadio g_ble;
@@ -45,12 +73,41 @@ static constexpr BoardAntennaPath kPhysicalAntennaPath = BoardAntennaPath::kCera
 static constexpr uint8_t kPhysicalChannelCount = 37U;
 static constexpr uint8_t kPhysicalMinValidChannels = 8U;
 static constexpr uint8_t kPhysicalMaxSweeps = 3U;
-static constexpr uint8_t kConnectedPhysicalSweepChannels[] = {
+static constexpr uint8_t kConnectedPhysicalSweepChannelsFast[] = {
     18U, 4U, 32U, 10U, 26U, 1U, 35U, 14U, 22U,
 };
+static constexpr uint8_t kConnectedPhysicalSweepChannelsWide[] = {
+    18U, 4U, 32U, 10U, 26U, 1U, 35U, 14U, 22U,
+    6U, 30U, 11U, 25U, 2U, 34U, 15U, 21U, 7U,
+};
+static constexpr uint8_t kConnectedPhysicalSweepChannelsFull[] = {
+    18U, 4U, 32U, 10U, 26U, 1U, 35U, 14U, 22U,
+    6U, 30U, 11U, 25U, 2U, 34U, 15U, 21U, 7U,
+    29U, 12U, 24U, 3U, 33U, 16U, 20U, 8U, 28U,
+    13U, 23U, 5U, 31U, 9U, 27U, 0U, 36U, 17U, 19U,
+};
+#if CS_CONNECTED_PHYSICAL_CHANNEL_PROFILE == 2
+static constexpr const uint8_t* kConnectedPhysicalSweepChannels =
+    kConnectedPhysicalSweepChannelsFull;
 static constexpr uint8_t kConnectedPhysicalSweepChannelCount =
-    sizeof(kConnectedPhysicalSweepChannels) /
-    sizeof(kConnectedPhysicalSweepChannels[0]);
+    sizeof(kConnectedPhysicalSweepChannelsFull) /
+    sizeof(kConnectedPhysicalSweepChannelsFull[0]);
+static constexpr uint8_t kConnectedPhysicalChannelProfile = 2U;
+#elif CS_CONNECTED_PHYSICAL_CHANNEL_PROFILE == 1
+static constexpr const uint8_t* kConnectedPhysicalSweepChannels =
+    kConnectedPhysicalSweepChannelsWide;
+static constexpr uint8_t kConnectedPhysicalSweepChannelCount =
+    sizeof(kConnectedPhysicalSweepChannelsWide) /
+    sizeof(kConnectedPhysicalSweepChannelsWide[0]);
+static constexpr uint8_t kConnectedPhysicalChannelProfile = 1U;
+#else
+static constexpr const uint8_t* kConnectedPhysicalSweepChannels =
+    kConnectedPhysicalSweepChannelsFast;
+static constexpr uint8_t kConnectedPhysicalSweepChannelCount =
+    sizeof(kConnectedPhysicalSweepChannelsFast) /
+    sizeof(kConnectedPhysicalSweepChannelsFast[0]);
+static constexpr uint8_t kConnectedPhysicalChannelProfile = 0U;
+#endif
 static constexpr uint8_t kConnectedPhysicalMinValidChannels = 3U;
 static constexpr uint32_t kConnectedCsSingleChannelWindowUs = 14000UL;
 static constexpr uint32_t kConnectedCsFullSweepWindowUs =
@@ -65,12 +122,32 @@ static constexpr bool kAutoMeasurementProofOnly = true;
 #else
 static constexpr bool kAutoMeasurementProofOnly = false;
 #endif
+#if CS_CONNECTED_ENABLE_RTT
+static constexpr bool kConnectedEnableRtt = true;
+#else
+static constexpr bool kConnectedEnableRtt = false;
+#endif
 static constexpr uint8_t kVprStageProcedureActive = 6U;
 static constexpr uint8_t kVprWorkFlagControllerAutoExecuted = 0x80U;
 static constexpr uint8_t kVprExecFlagControllerOwnedSnapshot = 0x10U;
 static constexpr uint32_t kAutoMeasurementProofTimeoutMs = 30000UL;
 static constexpr uint32_t kAutoMeasurementProofRetryDelayMs = 10UL;
 static constexpr uint8_t kAutoMeasurementProofReadRetries = 20U;
+static constexpr BleCsCalibrationProfile kConnectedCalibrationProfile = {
+    CS_CALIBRATION_SCALE,
+    CS_CALIBRATION_OFFSET_M,
+    0.0f,
+    0.0f,
+    0.0f,
+    CS_CALIBRATION_OFFSET_M,
+    0.0f,
+    0.0f,
+    0.0f,
+    CS_CALIBRATION_VALIDATED_MAD_M,
+    CS_CALIBRATION_VALIDATED_P90_M,
+    0U,
+    static_cast<uint16_t>(CS_CALIBRATION_VALIDATED_SAMPLES),
+};
 
 static bool g_wasConnected = false;
 static bool g_bridgeStarted = false;
@@ -163,6 +240,151 @@ static void printDistanceField(const char* label, float value) {
   } else {
     Serial.print("nan");
   }
+}
+
+static uint8_t estimateConfidencePercent(const BleCsEstimate& estimate,
+                                         uint8_t validChannels,
+                                         uint8_t requestedChannels,
+                                         uint8_t minValidChannels) {
+  if (!estimate.valid || !isfinite(estimate.distanceMeters) ||
+      !(estimate.distanceMeters > 0.0f)) {
+    return 0U;
+  }
+
+  const float requested = (requestedChannels > 0U)
+                              ? static_cast<float>(requestedChannels)
+                              : 1.0f;
+  const float channelRatio =
+      static_cast<float>(validChannels) / requested;
+  const float usedRatio =
+      static_cast<float>(estimate.usedChannels) /
+      fmaxf(static_cast<float>(minValidChannels), 1.0f);
+  const float residualPenalty =
+      isfinite(estimate.residualVariance)
+          ? fminf(sqrtf(fmaxf(estimate.residualVariance, 0.0f)) / 0.75f, 1.0f)
+          : 1.0f;
+  const float fitPenalty =
+      isfinite(estimate.fitDeltaMeters)
+          ? fminf(estimate.fitDeltaMeters / 0.75f, 1.0f)
+          : 1.0f;
+  const float qualityScore =
+      isfinite(estimate.medianToneQuality)
+          ? fminf(fmaxf(estimate.medianToneQuality / 2.0f, 0.0f), 1.0f)
+          : 0.5f;
+
+  float score =
+      (45.0f * fminf(channelRatio, 1.0f)) +
+      (25.0f * fminf(usedRatio, 1.0f)) +
+      (20.0f * (1.0f - residualPenalty)) +
+      (10.0f * qualityScore);
+  score -= 15.0f * fitPenalty;
+  if (estimate.rejectedLowQualityChannels > 0U) {
+    score -= fminf(static_cast<float>(estimate.rejectedLowQualityChannels) * 2.0f,
+                   12.0f);
+  }
+  if (estimate.rejectedResidualChannels > 0U) {
+    score -= fminf(static_cast<float>(estimate.rejectedResidualChannels) * 3.0f,
+                   15.0f);
+  }
+
+  if (score < 0.0f) {
+    score = 0.0f;
+  }
+  if (score > 100.0f) {
+    score = 100.0f;
+  }
+  return static_cast<uint8_t>(score + 0.5f);
+}
+
+static const char* confidenceLabel(uint8_t confidence) {
+  if (confidence >= 75U) {
+    return "high";
+  }
+  if (confidence >= 45U) {
+    return "medium";
+  }
+  if (confidence > 0U) {
+    return "low";
+  }
+  return "invalid";
+}
+
+static void printAccuracySample(const char* source,
+                                const BleCsEstimate& estimate,
+                                uint8_t validChannels,
+                                uint8_t requestedChannels,
+                                uint8_t minValidChannels) {
+  const uint8_t confidence =
+      estimateConfidencePercent(estimate, validChannels, requestedChannels,
+                                minValidChannels);
+  const float calibratedDistance =
+      BleChannelSoundingRadio::applyCalibrationProfile(
+          estimate.distanceMeters, kConnectedCalibrationProfile);
+  const float calibratedPhase =
+      BleChannelSoundingRadio::applyCalibrationProfile(
+          estimate.phaseSlopeDistanceMeters, kConnectedCalibrationProfile);
+  BleCsPhysicalDistanceEstimate physical{};
+  const bool physicalOk =
+      BleChannelSoundingRadio::estimatePhysicalDistance(
+          estimate.distanceMeters, kConnectedCalibrationProfile, &physical);
+
+  Serial.print("cs_accuracy_sample source=");
+  Serial.print(source);
+  Serial.print(" profile=");
+  Serial.print(kConnectedPhysicalChannelProfile);
+  Serial.print(" profile_channels=");
+  Serial.print(kConnectedPhysicalSweepChannelCount);
+  Serial.print(" executed_channels=");
+  Serial.print(requestedChannels);
+  Serial.print(" rtt_enabled=");
+  Serial.print(kConnectedEnableRtt ? 1 : 0);
+  Serial.print(" requested_channels=");
+  Serial.print(requestedChannels);
+  Serial.print(" valid_channels=");
+  Serial.print(validChannels);
+  Serial.print(" used_channels=");
+  Serial.print(estimate.usedChannels);
+  Serial.print(" total_channels=");
+  Serial.print(estimate.totalToneChannels);
+  Serial.print(" rtt_channels=");
+  Serial.print(estimate.rttChannels);
+  Serial.print(" rejected_low=");
+  Serial.print(estimate.rejectedLowQualityChannels);
+  Serial.print(" rejected_residual=");
+  Serial.print(estimate.rejectedResidualChannels);
+  printDistanceField(" phase_raw_m=", estimate.phaseSlopeDistanceMeters);
+  printDistanceField(" phase_m=", calibratedPhase);
+  printDistanceField(" rtt_m=", estimate.rttDistanceMeters);
+  printDistanceField(" dist_raw_m=", estimate.distanceMeters);
+  printDistanceField(" dist_m=", calibratedDistance);
+  Serial.print(" slope=");
+  Serial.print(estimate.slopeRadPerHz, 10);
+  Serial.print(" residual=");
+  Serial.print(estimate.residualVariance, 6);
+  Serial.print(" rtt_var=");
+  Serial.print(estimate.rttVariance, 6);
+  Serial.print(" median_quality=");
+  Serial.print(estimate.medianToneQuality, 4);
+  Serial.print(" fit_delta_m=");
+  Serial.print(estimate.fitDeltaMeters, 4);
+  Serial.print(" confidence=");
+  Serial.print(confidence);
+  Serial.print(" confidence_label=");
+  Serial.print(confidenceLabel(confidence));
+  Serial.print(" calib_scale=");
+  Serial.print(kConnectedCalibrationProfile.scale, 6);
+  Serial.print(" calib_offset_m=");
+  Serial.print(kConnectedCalibrationProfile.offsetMeters, 4);
+  Serial.print(" calibrated_window=");
+  Serial.print(physicalOk ? 1 : 0);
+  if (physicalOk) {
+    printDistanceField(" typical_error_m=", physical.typicalErrorMeters);
+    printDistanceField(" conservative_error_m=",
+                       physical.conservativeErrorMeters);
+    printDistanceField(" lower_m=", physical.lowerBoundMeters);
+    printDistanceField(" upper_m=", physical.upperBoundMeters);
+  }
+  Serial.print("\r\n");
 }
 
 static const char* phaseName(BleCsControllerWorkflowPhase phase) {
@@ -704,7 +926,7 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   radioConfig.responseListenWindowUs = 9000U;
   radioConfig.maxPayloadLength = 32U;
   radioConfig.minToneMagnitude = 8U;
-  radioConfig.enableRtt = false;
+  radioConfig.enableRtt = kConnectedEnableRtt;
   radioConfig.enableRawDfeCapture = true;
 
   BleCsConnectedMode2SweepConfig sweepConfig{};
@@ -1119,6 +1341,16 @@ static bool runConnectedPhysicalSweep(const BleCsVprMeasurementWorkItem* workIte
   printDistanceField(" host_m=",
                      g_csHost.sessionState().estimate.phaseSlopeDistanceMeters);
   Serial.print("\r\n");
+
+  const BleCsEstimate& connectedEstimate =
+      sweepResult.hostEstimateValid ? g_csHost.sessionState().estimate
+                                    : sweepResult.rawEstimate;
+  if (connectedEstimate.valid) {
+    printAccuracySample("connected", connectedEstimate,
+                        sweepResult.validChannels,
+                        sweepResult.sweepChannelCount,
+                        kConnectedPhysicalMinValidChannels);
+  }
   return g_connectedPhysicalOk;
 }
 
@@ -1147,7 +1379,7 @@ static bool beginPhysicalFollowup() {
   config.responseListenWindowUs = 12000U;
   config.maxPayloadLength = 32U;
   config.minToneMagnitude = 16U;
-  config.enableRtt = false;
+  config.enableRtt = kConnectedEnableRtt;
   config.enableRawDfeCapture = true;
 
   const bool rfOk = BoardControl::enableRfPath(kPhysicalAntennaPath);
@@ -1273,6 +1505,8 @@ static void runPhysicalFollowup() {
     Serial.print(" proc=");
     Serial.print(g_csHost.sessionState().completedProcedureCounter);
     Serial.print("\r\n");
+    printAccuracySample("followup", rawEstimate, validChannels,
+                        kPhysicalChannelCount, kPhysicalMinValidChannels);
     return;
   }
 
