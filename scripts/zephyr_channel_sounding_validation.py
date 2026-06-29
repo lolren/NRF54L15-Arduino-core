@@ -4,26 +4,65 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BOARD = "xiao_nrf54l15/nrf54l15/cpuapp"
 DEFAULT_SAMPLE = "connected_cs"
+DEFAULT_WORKSPACE_CANDIDATES = (
+    REPO_ROOT.parent / "ncs-workspace",
+    REPO_ROOT.parent / "zephyr-main",
+)
 DEFAULT_TOOLS_CANDIDATES = (
     REPO_ROOT / "hardware/nrf54l15clean/nrf54l15clean/tools",
     Path.home()
+    / ".local/share/Trash/files/NRF54L15-Arduino-core/hardware/seeed/nrf54l15/tools",
+    Path.home()
     / ".local/share/Trash/files/here/xiao-nrf54l15-arduino-core/hardware/seeed/nrf54l15/tools",
 )
+DEFAULT_SDK_CANDIDATES = tuple(candidate / "zephyr-sdk" for candidate in DEFAULT_TOOLS_CANDIDATES)
 ROLE_TO_SAMPLE_PATH = {
     "initiator": Path("zephyr/samples/bluetooth/channel_sounding/connected_cs/initiator"),
     "reflector": Path("zephyr/samples/bluetooth/channel_sounding/connected_cs/reflector"),
 }
+ROLE_TO_PASS_MARKERS = {
+    "initiator": (
+        "Starting Channel Sounding Demo",
+        "Connected to ",
+        "MTU exchange success",
+        "Security changed to level",
+        "CS capability exchange completed.",
+        "CS config creation complete. ID:",
+        "CS security enabled.",
+        "CS procedures enabled.",
+        "Estimated distance",
+    ),
+    "reflector": (
+        "Starting Channel Sounding Demo",
+        "Connected to ",
+        "MTU exchange success",
+        "Found expected UUID",
+        "CS capability exchange completed.",
+        "CS config creation complete. ID:",
+        "CS security enabled.",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class ZephyrLayout:
+    workspace: Path
+    zephyr_base: Path
+    sdk_dir: Path | None
+    pydeps_dir: Path | None
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,15 +105,39 @@ def parse_args() -> argparse.Namespace:
         default="/dev/ttyACM1",
         help="Serial port whose attached probe should receive the reflector image.",
     )
+    pair.add_argument(
+        "--capture-seconds",
+        type=float,
+        default=0.0,
+        help="Capture and validate Zephyr serial logs for this many seconds after reset.",
+    )
+    pair.add_argument(
+        "--log-dir",
+        default="",
+        help="Directory for captured logs. Defaults to a timestamped dist/ path.",
+    )
 
     return parser.parse_args()
 
 
 def add_common_build_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--workspace",
+        default="",
+        help=(
+            "Zephyr/NCS workspace containing zephyr/. Overrides packaged --tools-dir "
+            "source discovery when set."
+        ),
+    )
+    parser.add_argument(
         "--tools-dir",
         default="",
         help="Path to a tools dir containing ncs/, pydeps/, and zephyr-sdk/.",
+    )
+    parser.add_argument(
+        "--sdk-dir",
+        default="",
+        help="Optional Zephyr SDK directory. Auto-detected from packaged tools when omitted.",
     )
     parser.add_argument(
         "--board",
@@ -177,6 +240,164 @@ def detect_tools_dir(explicit: str) -> Path:
     )
 
 
+def looks_like_workspace(path: Path) -> bool:
+    return (path / "zephyr").is_dir() and (
+        (path / ".west" / "config").is_file() or (path / "zephyr" / "samples").is_dir()
+    )
+
+
+def detect_workspace(explicit: str) -> Path | None:
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+
+    env_workspace = os.environ.get("XIAO_NRF54L15_ZEPHYR_WORKSPACE", "").strip()
+    if env_workspace:
+        candidates.append(Path(env_workspace).expanduser())
+
+    candidates.extend(DEFAULT_WORKSPACE_CANDIDATES)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.is_dir() and looks_like_workspace(resolved):
+            return resolved
+    return None
+
+
+def parse_version_tuple(value: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for part in re.split(r"[^0-9]+", value.strip()):
+        if part:
+            parts.append(int(part))
+    return tuple(parts)
+
+
+def read_sdk_version(sdk_dir: Path) -> tuple[int, ...] | None:
+    version_file = sdk_dir / "sdk_version"
+    if not version_file.is_file():
+        return None
+    try:
+        return parse_version_tuple(version_file.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def minimum_sdk_for_workspace(workspace: Path) -> tuple[int, ...] | None:
+    version_file = workspace / "zephyr" / "VERSION"
+    if not version_file.is_file():
+        return None
+    values: dict[str, int] = {}
+    try:
+        for line in version_file.read_text().splitlines():
+            match = re.match(r"(VERSION_MAJOR|VERSION_MINOR)\s*=\s*(\d+)", line)
+            if match:
+                values[match.group(1)] = int(match.group(2))
+    except OSError:
+        return None
+    if (values.get("VERSION_MAJOR", 0), values.get("VERSION_MINOR", 0)) >= (4, 4):
+        return (1, 0)
+    return None
+
+
+def version_at_least(found: tuple[int, ...] | None, minimum: tuple[int, ...] | None) -> bool:
+    if minimum is None:
+        return True
+    if found is None:
+        return False
+    width = max(len(found), len(minimum))
+    padded_found = found + (0,) * (width - len(found))
+    padded_minimum = minimum + (0,) * (width - len(minimum))
+    return padded_found >= padded_minimum
+
+
+def detect_sdk_dir(
+    explicit: str,
+    tools_dir: Path | None,
+    minimum: tuple[int, ...] | None,
+) -> Path | None:
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+
+    env_sdk = os.environ.get("ZEPHYR_SDK_INSTALL_DIR", "").strip()
+    if env_sdk:
+        candidates.append(Path(env_sdk).expanduser())
+
+    if tools_dir is not None:
+        candidates.append(tools_dir / "zephyr-sdk")
+
+    candidates.extend(DEFAULT_SDK_CANDIDATES)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        compiler = resolved / "arm-zephyr-eabi" / "bin" / "arm-zephyr-eabi-gcc"
+        if resolved.is_dir() and compiler.is_file():
+            version = read_sdk_version(resolved)
+            if not version_at_least(version, minimum):
+                if explicit:
+                    min_text = ".".join(str(v) for v in minimum or ())
+                    found_text = ".".join(str(v) for v in version or ())
+                    raise RuntimeError(
+                        f"Zephyr SDK {found_text or 'unknown'} at {resolved} is too old; "
+                        f"this workspace requires >= {min_text}."
+                    )
+                continue
+            return resolved
+    return None
+
+
+def detect_layout(workspace_arg: str, tools_arg: str, sdk_arg: str) -> ZephyrLayout:
+    env_workspace = os.environ.get("XIAO_NRF54L15_ZEPHYR_WORKSPACE", "").strip()
+    if workspace_arg or env_workspace or not tools_arg:
+        workspace = detect_workspace(workspace_arg)
+    else:
+        workspace = None
+    tools_dir: Path | None = None
+
+    if workspace is None:
+        tools_dir = detect_tools_dir(tools_arg)
+        workspace = tools_dir / "ncs"
+    elif tools_arg:
+        tools_dir = detect_tools_dir(tools_arg)
+    else:
+        env_tools = os.environ.get("XIAO_NRF54L15_TOOLS_DIR", "").strip()
+        if env_tools:
+            candidate = Path(env_tools).expanduser().resolve()
+            if candidate.is_dir():
+                tools_dir = candidate
+
+    zephyr_base = workspace / "zephyr"
+    if not zephyr_base.is_dir():
+        raise RuntimeError(f"Zephyr base not found under workspace: {zephyr_base}")
+
+    minimum_sdk = minimum_sdk_for_workspace(workspace)
+    sdk_dir = detect_sdk_dir(sdk_arg, tools_dir, minimum_sdk)
+    if minimum_sdk is not None and sdk_dir is None:
+        min_text = ".".join(str(v) for v in minimum_sdk)
+        raise RuntimeError(
+            f"Zephyr SDK >= {min_text} is required for {workspace}. "
+            "Install a compatible SDK or pass --sdk-dir."
+        )
+    pydeps_dir = None
+    if tools_dir is not None and (tools_dir / "pydeps").is_dir():
+        pydeps_dir = tools_dir / "pydeps"
+
+    return ZephyrLayout(
+        workspace=workspace.resolve(),
+        zephyr_base=zephyr_base.resolve(),
+        sdk_dir=sdk_dir.resolve() if sdk_dir is not None else None,
+        pydeps_dir=pydeps_dir.resolve() if pydeps_dir is not None else None,
+    )
+
+
 def run(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> None:
     print("$", " ".join(cmd), flush=True)
     proc = subprocess.run(cmd, cwd=cwd, env=env, check=False, text=True)
@@ -184,25 +405,30 @@ def run(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> None:
         raise RuntimeError(f"command failed with exit code {proc.returncode}")
 
 
-def zephyr_env(tools_dir: Path) -> dict[str, str]:
+def zephyr_env(layout: ZephyrLayout) -> dict[str, str]:
     env = dict(os.environ)
-    sdk_dir = tools_dir / "zephyr-sdk"
-    env["ZEPHYR_BASE"] = str(tools_dir / "ncs" / "zephyr")
-    env["ZEPHYR_SDK_INSTALL_DIR"] = str(sdk_dir)
-    pydeps_dir = str(tools_dir / "pydeps")
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        pydeps_dir
-        if not existing_pythonpath
-        else os.pathsep.join([pydeps_dir, existing_pythonpath])
-    )
-    path_entries = [
-        sdk_dir / "arm-zephyr-eabi" / "bin",
-        sdk_dir / "hosttools" / "bin",
-        sdk_dir / "hosttools" / "usr" / "bin",
-    ]
+    env["ZEPHYR_BASE"] = str(layout.zephyr_base)
+    path_entries: list[Path] = []
+    if layout.sdk_dir is not None:
+        env["ZEPHYR_SDK_INSTALL_DIR"] = str(layout.sdk_dir)
+        path_entries.extend(
+            [
+                layout.sdk_dir / "arm-zephyr-eabi" / "bin",
+                layout.sdk_dir / "hosttools" / "bin",
+                layout.sdk_dir / "hosttools" / "usr" / "bin",
+            ]
+        )
+    if layout.pydeps_dir is not None:
+        pydeps_dir = str(layout.pydeps_dir)
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            pydeps_dir
+            if not existing_pythonpath
+            else os.pathsep.join([pydeps_dir, existing_pythonpath])
+        )
     existing_path = env.get("PATH", "")
-    env["PATH"] = os.pathsep.join([str(p) for p in path_entries] + [existing_path])
+    if path_entries:
+        env["PATH"] = os.pathsep.join([str(p) for p in path_entries] + [existing_path])
     return env
 
 
@@ -233,7 +459,10 @@ def detect_pyocd() -> list[str]:
     raise RuntimeError("pyOCD is required")
 
 
-def west_cmd(tools_dir: Path) -> list[str]:
+def west_cmd(_layout: ZephyrLayout) -> list[str]:
+    west = shutil.which("west")
+    if west:
+        return [west]
     return [detect_python(), "-m", "west"]
 
 
@@ -241,26 +470,25 @@ def build_dir_for(build_root: Path, role: str) -> Path:
     return build_root / DEFAULT_SAMPLE / role
 
 
-def app_dir_for(tools_dir: Path, role: str) -> Path:
-    return tools_dir / "ncs" / ROLE_TO_SAMPLE_PATH[role]
+def app_dir_for(layout: ZephyrLayout, role: str) -> Path:
+    return layout.workspace / ROLE_TO_SAMPLE_PATH[role]
 
 
-def build_role(tools_dir: Path, build_root: Path, board: str, role: str) -> Path:
-    env = zephyr_env(tools_dir)
+def build_role(layout: ZephyrLayout, build_root: Path, board: str, role: str) -> Path:
+    env = zephyr_env(layout)
     build_dir = build_dir_for(build_root, role)
-    app_dir = app_dir_for(tools_dir, role)
+    app_dir = app_dir_for(layout, role)
     build_dir.parent.mkdir(parents=True, exist_ok=True)
     run(
-        west_cmd(tools_dir)
+        west_cmd(layout)
         + ["build", "-p", "always", "-b", board, str(app_dir), "-d", str(build_dir)],
-        cwd=tools_dir / "ncs",
+        cwd=layout.workspace,
         env=env,
     )
     return build_dir
 
 
-def flash_role(tools_dir: Path, build_root: Path, role: str, uid: str) -> None:
-    _ = tools_dir
+def flash_role(_layout: ZephyrLayout, build_root: Path, role: str, uid: str) -> None:
     build_dir = build_dir_for(build_root, role)
     merged_hex = build_dir / "merged.hex"
     if not merged_hex.is_file():
@@ -283,21 +511,82 @@ def print_monitor_hint(initiator_port: str, reflector_port: str) -> None:
     print("Then run this command again with `reset` or `pair-demo` to retrigger boot output.")
 
 
+def capture_serial_pair(
+    initiator_uid: str,
+    reflector_uid: str,
+    initiator_port: str,
+    reflector_port: str,
+    capture_seconds: float,
+    log_dir: Path,
+) -> bool:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logs = {
+        "initiator": log_dir / "zephyr_initiator.log",
+        "reflector": log_dir / "zephyr_reflector.log",
+    }
+
+    for port in (initiator_port, reflector_port):
+        subprocess.run(
+            ["stty", "-F", port, "115200", "raw", "-echo", "-hupcl"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    with logs["initiator"].open("wb") as initiator_out, logs["reflector"].open("wb") as reflector_out:
+        initiator_cat = subprocess.Popen(["cat", initiator_port], stdout=initiator_out)
+        reflector_cat = subprocess.Popen(["cat", reflector_port], stdout=reflector_out)
+        time.sleep(0.5)
+        reset_probe(reflector_uid)
+        reset_probe(initiator_uid)
+        time.sleep(capture_seconds)
+        for proc in (initiator_cat, reflector_cat):
+            proc.terminate()
+        for proc in (initiator_cat, reflector_cat):
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+
+    print(f"logs={log_dir}")
+    return validate_zephyr_logs(logs)
+
+
+def validate_zephyr_logs(logs: dict[str, Path]) -> bool:
+    passed = True
+    for role, path in logs.items():
+        text = path.read_text(errors="replace") if path.is_file() else ""
+        missing = [marker for marker in ROLE_TO_PASS_MARKERS[role] if marker not in text]
+        if missing:
+            passed = False
+            print(f"zephyr_{role}=FAIL missing={','.join(missing)}")
+            print(f"--- {path} ---")
+            print(text[-4000:])
+        else:
+            print(f"zephyr_{role}=PASS")
+    if passed:
+        print("zephyr_connected_cs_pair=PASS")
+    else:
+        print("zephyr_connected_cs_pair=FAIL")
+    return passed
+
+
 def main() -> int:
     args = parse_args()
-    tools_dir = detect_tools_dir(args.tools_dir)
+    layout = detect_layout(args.workspace, args.tools_dir, args.sdk_dir)
     build_root = Path(args.build_root).expanduser().resolve()
 
     if args.command == "build":
         roles = ("initiator", "reflector") if args.role == "both" else (args.role,)
         for role in roles:
-            build_path = build_role(tools_dir, build_root, args.board, role)
+            build_path = build_role(layout, build_root, args.board, role)
             print(f"Built {role}: {build_path}")
         return 0
 
     if args.command == "flash":
         uid = require_uid(args.port, args.uid)
-        flash_role(tools_dir, build_root, args.role, uid)
+        flash_role(layout, build_root, args.role, uid)
         print(f"Flashed {args.role} using UID {uid}")
         return 0
 
@@ -310,17 +599,32 @@ def main() -> int:
     if args.command == "pair-demo":
         if not args.skip_build:
             for role in ("initiator", "reflector"):
-                build_path = build_role(tools_dir, build_root, args.board, role)
+                build_path = build_role(layout, build_root, args.board, role)
                 print(f"Built {role}: {build_path}")
 
         initiator_uid = require_uid(args.initiator_port, "")
         reflector_uid = require_uid(args.reflector_port, "")
-        flash_role(tools_dir, build_root, "initiator", initiator_uid)
-        flash_role(tools_dir, build_root, "reflector", reflector_uid)
-        reset_probe(initiator_uid)
-        reset_probe(reflector_uid)
+        flash_role(layout, build_root, "initiator", initiator_uid)
+        flash_role(layout, build_root, "reflector", reflector_uid)
         print(f"Initiator flashed/reset on {args.initiator_port} ({initiator_uid})")
         print(f"Reflector flashed/reset on {args.reflector_port} ({reflector_uid})")
+        if args.capture_seconds > 0.0:
+            if args.log_dir:
+                log_dir = Path(args.log_dir).expanduser().resolve()
+            else:
+                stamp = time.strftime("%Y%m%d_%H%M%S")
+                log_dir = REPO_ROOT / "dist" / "zephyr_channel_sounding" / f"logs_{stamp}"
+            ok = capture_serial_pair(
+                initiator_uid,
+                reflector_uid,
+                args.initiator_port,
+                args.reflector_port,
+                args.capture_seconds,
+                log_dir,
+            )
+            return 0 if ok else 1
+        reset_probe(initiator_uid)
+        reset_probe(reflector_uid)
         print_monitor_hint(args.initiator_port, args.reflector_port)
         return 0
 
@@ -328,4 +632,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1)

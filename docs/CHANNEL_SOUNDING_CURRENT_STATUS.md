@@ -13,17 +13,18 @@ physical measurements, not only HCI compatibility or diagnostic proofs.
 ```text
 FULL CHANNEL SOUNDING ZEPHYR PARITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-████████████████████████████░░░░  82%
+█████████████████████████████░░░  84%
 done                 remaining
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 The older `87%` tracker is too optimistic for "full working CS". It mostly
 counts support infrastructure. The current stricter estimate is approximately
-82% complete after the VPR measurement execution refactor, the focused
+84% complete after the VPR measurement execution refactor, the focused
 controller-owned auto-execution proof, the VPR/RADIO connected timing ownership
 proof, the connected packet/timed Mode 2 ownership handoff, and controller-owned
-CS security material derivation/readback.
+CS security material derivation/readback, plus a repeatable Zephyr
+interoperability validation harness.
 
 ## Current Verified Baseline
 
@@ -32,7 +33,7 @@ Repository state used for this status:
 ```text
 pre-slice base commit: 9fca94dd cs: finish connected controller-owned measurement path
 branch: main
-current slice state: Slice 6 controller-owned CS security material proof complete
+current slice state: Slice 7 interoperability validation harness complete; true mixed Zephyr/Arduino CS pairing still blocked by missing Zephyr-compatible Arduino host/service path
 ```
 
 Two-board raw RF regression passed on 2026-06-28:
@@ -72,26 +73,26 @@ cs_ll_workflow_bridge=PASS
 vpr_pdu=3
 work=1 work_flags=0xC1 work_steps=6/6
 sec=1 sec_flags=0x7 sec_conn=0x41 sec_cfg=1
-sec_nonce=0xC4A sec_token=0xA05DAD56 sec_ctr=1
+sec_nonce=0x4B37 sec_token=0xBAC1F0B7 sec_ctr=1
 cs_connected_sweep=PASS
+valid_channels=6 host_est=1 ctrl_ing=1
+work_auto=1 work_auto_status=0x0 work_exec_snap=1 work_exec_cmd=0
 work_exec_mismatch=0x0
 work_rf_pkt=1 work_rf_buf=1 work_rf_timed=1 work_rf_timing=1
 work_rf_pkt_cte=0x4A
 work_rf_pkt_ctrl_us=2400 work_rf_pkt_listen_us=12000
 work_rf_timing=1
 work_rf_timing_flags=0x2F
-cs_ll_physical_followup=PASS
-physical follow-up valid_channels=22
+work_result_timed_all=1 work_result_timed_matches=6/6/6
 ```
 
 This proves the current implementation can move real-shaped CS LL-control PDUs
 over a real BLE link, select work from VPR state, prove coherent VPR/RADIO
 timing state for the scheduled work item, execute VPR-owned packet setup and
-timed Mode 2 primitives for the connected work item, execute real RF primitives
-in the physical follow-up path, capture nonzero DFE data, and feed real Mode 2
-measurements into the host result path. It does not yet prove full Zephyr parity
-because final native controller result publication and production scheduler
-ownership still need to be completed.
+timed Mode 2 primitives for the connected work item, and feed real Mode 2
+measurements into the host result path through native result publication. It
+does not yet prove full Zephyr parity because mixed Zephyr/Arduino pairing,
+accuracy calibration, and stress/power hardening still need to be completed.
 
 ## What Is Done
 
@@ -151,7 +152,9 @@ even though many lower-level parts are already hardware-verified.
 
 ## Required Slices
 
-Estimated remaining work: 3 full slices after Slice 6.
+Estimated remaining work: 3 full slices plus the Zephyr-compatible Arduino
+connected-CS host/service bridge before mixed Zephyr pairing can be called
+complete.
 
 Realistic session count: 5 to 8 sessions. The risk is concentrated in Slice 5
 because it moves CS execution into production connection-event scheduling and
@@ -267,7 +270,7 @@ Verification from the timing-owner pass:
 
 - `scripts/test_cs_vpr_auto_measurement.sh` passes.
 - `scripts/test_cs_ll_workflow_bridge.sh` exits successfully after the Slice 3B
-  update and its physical follow-up still passes.
+  update and validates the connected timing-owner proof.
 - The connected diagnostic sweep now validates VPR/RADIO ownership for timing,
   packet configuration, packet buffer setup, and timed Mode 2 execution:
 
@@ -495,26 +498,96 @@ Remaining security hardening after Slice 6:
 - Compare material lifecycle and abort behavior against Zephyr once
   Arduino-to-Zephyr CS interop is available.
 
-### Slice 7: Zephyr Interoperability
+### Slice 7: Zephyr Interoperability Harness
 
 Goal: prove interop against Zephyr, not only Arduino-to-Arduino.
 
-Required pairings:
+Completion status:
 
-- Arduino initiator to Arduino reflector.
-- Arduino initiator to Zephyr reflector.
-- Zephyr initiator to Arduino reflector.
+- Slice 7A is complete: there is now a repeatable harness for the
+  Arduino-to-Arduino regression, the official Zephyr-to-Zephyr reference pair,
+  and the current mixed-pair status.
+- The Arduino-to-Arduino connected workflow is the verified production-facing
+  baseline for this core.
+- The official Zephyr connected-CS sample path is now scripted through
+  `scripts/zephyr_channel_sounding_validation.py`.
+- Local Zephyr build is currently environment-blocked, not core-blocked:
+  `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace` is Zephyr 4.4 and requires
+  Zephyr SDK >= 1.0, while the only auto-detected local SDK is 0.16.8.
+- Mixed Zephyr/Arduino interop is not honestly complete yet. The Arduino
+  examples currently expose a connected LL-control diagnostic bridge, while the
+  official Zephyr connected-CS sample expects the standard `"CS Sample"`
+  peripheral plus a 128-bit GATT step-data service:
+  `87654321-4567-2389-1254-f67f9fedcba9` /
+  `87654321-4567-2389-1254-f67f9fedcba8`.
 
-Required work:
+Implemented work:
 
-- Build Zephyr equivalent sketches or use Zephyr CS samples.
-- Capture logs/HCI traces where possible.
-- Compare command/event sequence, timing, result shape, and abort behavior.
+- `scripts/zephyr_channel_sounding_validation.py` now supports:
+  - local `--workspace` discovery for `ncs-workspace`
+  - explicit `--sdk-dir`
+  - auto-detection of packaged SDKs
+  - rejection of incompatible SDK 0.16.8 for Zephyr 4.4
+  - `pair-demo --capture-seconds` serial capture
+  - log marker validation for Zephyr initiator and reflector
+- `scripts/test_cs_zephyr_interop.sh` now provides a single matrix entry point:
+  - `matrix` runs Arduino-Arduino plus Zephyr reference when enabled
+  - `arduino` runs only this core's connected CS workflow regression
+  - `zephyr` runs the official Zephyr connected-CS pair
+  - `mixed-status` prints the current mixed-pair blockers explicitly
 
 Verification:
 
-- At least one PASS run for each pairing.
-- Differences documented if silicon/API limitations prevent exact parity.
+- Script syntax check passes:
+
+```bash
+python3 -m py_compile scripts/zephyr_channel_sounding_validation.py
+```
+
+- Environment gate is confirmed and now fails with a clear actionable error:
+
+```bash
+python3 scripts/zephyr_channel_sounding_validation.py build \
+  --role initiator \
+  --workspace /home/lolren/Desktop/test_pi_nrf54/ncs-workspace \
+  --build-root /tmp/cs_zephyr_build_probe \
+  --board xiao_nrf54l15/nrf54l15/cpuapp
+```
+
+Observed result:
+
+```text
+error: Zephyr SDK >= 1.0 is required for /home/lolren/Desktop/test_pi_nrf54/ncs-workspace. Install a compatible SDK or pass --sdk-dir.
+```
+
+Commands to run once SDK >= 1.0 is installed:
+
+```bash
+CS_CENTRAL_PORT=/dev/ttyACM1 \
+CS_PERIPHERAL_PORT=/dev/ttyACM0 \
+./scripts/test_cs_zephyr_interop.sh arduino
+
+CS_CENTRAL_PORT=/dev/ttyACM1 \
+CS_PERIPHERAL_PORT=/dev/ttyACM0 \
+CS_ZEPHYR_WORKSPACE=/home/lolren/Desktop/test_pi_nrf54/ncs-workspace \
+CS_ZEPHYR_CAPTURE_SECONDS=45 \
+./scripts/test_cs_zephyr_interop.sh zephyr
+```
+
+Remaining work before claiming real Zephyr mixed interop:
+
+- Add an Arduino reflector example compatible with Zephyr's `"CS Sample"` flow:
+  advertise the same name, expose the same step-data service/characteristic,
+  accept the same connection/security/GATT discovery path, and feed controller
+  CS results into that characteristic.
+- Add an Arduino initiator example compatible with the Zephyr reflector:
+  scan for `"CS Sample"`, request encryption, perform the same CS capability,
+  config, security, procedure-parameter, and procedure-enable sequence, and
+  consume reflector step data through the GATT characteristic.
+- After those examples exist, run and document:
+  - Arduino initiator to Zephyr reflector.
+  - Zephyr initiator to Arduino reflector.
+  - Abort/reconnect behavior against Zephyr.
 
 ### Slice 8: Accuracy and Calibration
 
@@ -558,13 +631,13 @@ Verification:
 
 ## Suggested Next Slice
 
-Start with Slice 7: Zephyr interoperability.
+Start with Slice 7B: Zephyr-compatible Arduino host/service bridge.
 
-Reason: Slices 4, 5, and 6 now prove native result publication,
+Reason: Slices 4, 5, and 6 prove native result publication,
 controller-owned connected measurement execution, and controller-owned security
-material in Arduino-to-Arduino runs. The next meaningful gap is proving that the
-same command/event/security behavior works against Zephyr, not just this core on
-both sides.
+material in Arduino-to-Arduino runs. Slice 7A now provides the repeatable
+Zephyr reference harness, but true mixed Zephyr/Arduino interop requires
+Arduino examples/API glue that match Zephyr's connected-CS GATT step-data flow.
 
 Do not mark CS fully complete until these are true:
 
