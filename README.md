@@ -220,6 +220,7 @@ Examples:
 
 - `npm1300_charger_set_current(ma)` sets the battery charge-current target and now also updates the nPM1300 VBUS input-current limiter so the default 100 mA input limit does not throttle higher charge currents.
 - `npm1300_vbus_set_input_current_limit_ma(ma)` and `npm1300_vbus_get_input_current_limit_ma()` expose the VBUS limiter directly. This limit is the allowed USB/VBUS input draw, not the measured battery charge or discharge current.
+- `npm1300_enter_timed_hibernate_ms(ms)` programs the nPM1300 hibernate wake timer and enters PMIC hibernate mode. On XIAO nRF54LM20A this is the lowest-current timed sleep path; wake is a cold boot after the PMIC restores power. Measure from the battery/VBAT pads because USB/debug wiring can dominate the current.
 - Use `File > Examples > Nrf54L15-Clean-Implementation > PMIC > nPM1300_ChargerControl` or `File > Examples > Power > nPM1300_BatteryCurrent` to compare `IBAT` with the configured `VBUS_ILIM`.
 
 ---

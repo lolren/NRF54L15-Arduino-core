@@ -133,6 +133,13 @@ constexpr uint8_t kLedModeHost = 2U;
 constexpr uint8_t kLedOffsetMode = 0x00U;
 constexpr uint8_t kLedOffsetSet = 0x03U;
 constexpr uint8_t kLedOffsetClr = 0x04U;
+constexpr uint8_t kTimerOffsetStart = 0x00U;
+constexpr uint8_t kTimerOffsetTargetStrobe = 0x03U;
+constexpr uint8_t kTimerOffsetConfig = 0x05U;
+constexpr uint8_t kTimerOffsetTargetHigh = 0x08U;
+constexpr uint8_t kTimerOffsetTargetMid = 0x09U;
+constexpr uint8_t kTimerOffsetTargetLow = 0x0AU;
+constexpr uint8_t kTimerConfigWakeupTimer16Ms = 0x04U;
 constexpr uint8_t kShipOffsetShip = 0x02U;
 constexpr uint8_t kShipOffsetHibernate = 0x00U;
 constexpr uint8_t kAdcMaxBatch = 6U;
@@ -653,6 +660,40 @@ bool npm1300_enter_ship_mode(void) {
 bool npm1300_enter_hibernate(void) {
     return npm1300_write_reg(NPM1300_BASE_SHIP, kShipOffsetHibernate, 1U);
 }
+
+bool npm1300_configure_hibernate_timer_ms(uint32_t delay_ms) {
+    if (delay_ms == 0UL || delay_ms > NPM1300_HIBERNATE_TIMER_MAX_MS) {
+        return false;
+    }
+
+    const uint32_t ticks =
+        (delay_ms + (NPM1300_HIBERNATE_TIMER_PRESCALE_MS - 1UL)) /
+        NPM1300_HIBERNATE_TIMER_PRESCALE_MS;
+    if (ticks == 0UL || ticks > 0xFFFFFFUL) {
+        return false;
+    }
+
+    return npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetHigh,
+                             static_cast<uint8_t>((ticks >> 16U) & 0xFFU)) &&
+           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetMid,
+                             static_cast<uint8_t>((ticks >> 8U) & 0xFFU)) &&
+           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetLow,
+                             static_cast<uint8_t>(ticks & 0xFFU)) &&
+           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetStrobe, 1U) &&
+           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetConfig,
+                             kTimerConfigWakeupTimer16Ms) &&
+           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetStart, 1U);
+}
+
+bool npm1300_enter_timed_hibernate_ms(uint32_t delay_ms) {
+    return npm1300_configure_hibernate_timer_ms(delay_ms) &&
+           npm1300_enter_hibernate();
+}
+
+bool npm1300_enter_hibernate_after_ms(uint32_t delay_ms) {
+    return npm1300_enter_timed_hibernate_ms(delay_ms);
+}
+
 bool npm1300_led_set(uint8_t led, uint8_t brightness) {
     if (led >= kLedCount) return false;
     return npm1300_write_reg(NPM1300_BASE_LED, kLedOffsetMode + led, kLedModeHost) &&

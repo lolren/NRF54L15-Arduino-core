@@ -156,8 +156,14 @@ int32_t npm1300_read_vsys_mv(void);
 int32_t npm1300_read_vbus_mv(void);
 
 /* Ultra-low power modes. */
+#define NPM1300_HIBERNATE_TIMER_PRESCALE_MS 16UL
+#define NPM1300_HIBERNATE_TIMER_MAX_MS      268435440UL
+
 bool npm1300_enter_ship_mode(void);
 bool npm1300_enter_hibernate(void);
+bool npm1300_configure_hibernate_timer_ms(uint32_t delay_ms);
+bool npm1300_enter_timed_hibernate_ms(uint32_t delay_ms);
+bool npm1300_enter_hibernate_after_ms(uint32_t delay_ms);  /* compatibility alias */
 
 /* PMIC LED and GPIO helpers. LED brightness is treated as off/on. */
 bool npm1300_led_set(uint8_t led, uint8_t brightness);
