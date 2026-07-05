@@ -40,6 +40,7 @@ OPEN_NRF_OCD_RELEASE = "v0.3.2"
 OPEN_NRF_OCD_RELEASE_BASE_URL = (
     "https://github.com/lolren/open-nrf-ocd/releases/download"
 )
+NRF_OCD_TRANSPORT_FALLBACK = -2
 
 def run(cmd: List[str], timeout: Optional[float] = None) -> subprocess.CompletedProcess:
     try:
@@ -70,6 +71,18 @@ def print_result(result: subprocess.CompletedProcess) -> None:
         print(result.stdout, end="")
     if result.returncode != 0 and result.stderr:
         print(result.stderr, file=sys.stderr, end="")
+
+def looks_like_nrf_ocd_transport_error(output: str) -> bool:
+    text = output.lower()
+    return (
+        "bulk write failed" in text
+        or "bulk read failed" in text
+        or "bulk retries exhausted" in text
+        or "failed to halt target: bus fault" in text
+        or "failed to re-halt after erase" in text
+        or "target_init failed: i/o error" in text
+        or "target_init failed: timeout" in text
+    )
 
 def tool_available(name: str) -> bool:
     return shutil.which(name) is not None
@@ -1376,16 +1389,21 @@ def upload_nrf_ocd(
     print(f"Flashing {hex_path}")
     print(f"Runner: nrf_ocd")
     print(f"Probe UID: {uid or 'auto-select'}")
+    captured_output: List[str] = []
     try:
         # Run nrf_ocd, streaming all output in real-time
         import subprocess as _sp
         proc = _sp.Popen(args, stdout=_sp.PIPE, stderr=_sp.STDOUT, bufsize=0)
         for line in iter(proc.stdout.readline, b''):
             if line:
+                captured_output.append(line.decode(errors="replace"))
                 sys.stdout.buffer.write(line)
                 sys.stdout.buffer.flush()
         proc.stdout.close()
-        return proc.wait()
+        rc = proc.wait()
+        if rc != 0 and looks_like_nrf_ocd_transport_error("".join(captured_output)):
+            return NRF_OCD_TRANSPORT_FALLBACK
+        return rc
     except subprocess.TimeoutExpired:
         proc.kill()
         print("nrf_ocd timed out", file=sys.stderr)
@@ -1487,6 +1505,7 @@ def main() -> int:
         return 4
 
     rc = 1
+    tried_nrf_ocd = False
     if runner == "uf2":
         rc = upload_uf2(
             uf2_path,
@@ -1539,6 +1558,7 @@ def main() -> int:
         )
 
     elif runner == "nrf_ocd":
+        tried_nrf_ocd = True
         nrf_rc = upload_nrf_ocd(
             args.hex,
             args.target,
@@ -1547,13 +1567,35 @@ def main() -> int:
         )
         if nrf_rc == 0:
             rc = 0
+        elif nrf_rc == NRF_OCD_TRANSPORT_FALLBACK:
+            print(
+                "nrf_ocd CMSIS-DAP transport failed; retrying with pyOCD safe mode...",
+                file=sys.stderr,
+            )
+            if detect_pyocd_command(host_tools_path) is None:
+                if install_pyocd(host_tools_path):
+                    print("pyocd installation succeeded.")
+                else:
+                    print("pyocd installation failed.", file=sys.stderr)
+                    print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
+            rc = upload_pyocd(
+                args.hex,
+                args.target,
+                selected_uid,
+                allow_uid_fallback=allow_inferred_uid_fallback,
+                retries=args.retries,
+                retry_delay=args.retry_delay,
+                host_tools_path=host_tools_path,
+                safe_mode=True,
+                port=args.port,
+            )
         elif nrf_rc == -1:
             print("nrf_ocd not found (please install or choose pyOCD)", file=sys.stderr)
     elif runner != "uf2":
         print(f"ERROR: Unsupported runner: {runner}", file=sys.stderr)
         return 4
 
-    if rc != 0:
+    if rc != 0 and not tried_nrf_ocd:
         # Final fallback: try nrf_ocd
         nrf_rc = upload_nrf_ocd(
             args.hex,
