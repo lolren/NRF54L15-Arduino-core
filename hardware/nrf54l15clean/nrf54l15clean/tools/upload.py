@@ -36,7 +36,7 @@ DEFAULT_UF2_LABELS = (
     "DAPLINK",
 )
 UF2_MARKER_FILES = ("INFO_UF2.TXT", "CURRENT.UF2", "INDEX.HTM")
-OPEN_NRF_OCD_RELEASE = "v0.3.2"
+OPEN_NRF_OCD_RELEASE = "v0.3.3"
 OPEN_NRF_OCD_RELEASE_BASE_URL = (
     "https://github.com/lolren/open-nrf-ocd/releases/download"
 )
