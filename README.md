@@ -71,17 +71,19 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 
 | | |
 |---|---|
-| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="280"><br>**XIAO nRF54L15**<br>`xiao_nrf54l15` | <img src="docs/nrf54lm20a_front_pinout.png" width="280"><br>**XIAO nRF54LM20A / Sense**<br>`xiao_nrf54lm20b` |
-| <img src="docs/boards/holyiot_25007_product.png" width="280"><br>**HOLYIOT-25007**<br>`holyiot_25007_nrf54l15` | <img src="docs/boards/holyiot_25008_product.jpg" width="280"><br>**HOLYIOT-25008**<br>`holyiot_25008_nrf54l15` |
+| <img src="docs/xiao_nrf54l15_default_pin_routes.png" width="280"><br>**[XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)**<br>`xiao_nrf54l15` | <img src="docs/nrf54lm20a_front_pinout.png" width="280"><br>**[XIAO nRF54LM20A / Sense](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/)**<br>`xiao_nrf54lm20b` |
+| <img src="docs/boards/holyiot_25007_product.png" width="280"><br>**[HOLYIOT-25007](docs/holyiot-25007-module-reference.md)**<br>`holyiot_25007_nrf54l15` | <img src="docs/boards/holyiot_25008_product.jpg" width="280"><br>**[HOLYIOT-25008](docs/holyiot-25008-module-reference.md)**<br>`holyiot_25008_nrf54l15` |
 
 </div>
 
-| Board | Specs |
-|---|---|
-| **XIAO nRF54L15** | 128 MHz M33 · 1.5 MB NVM · 512 KB RAM |
-| **XIAO nRF54LM20A / Sense** | 128 MHz M33 · 2 MB NVM · 512 KB RAM · nPM1300 PMIC · onboard PY25Q64 QSPI flash · LSM6DS3TR‑C IMU + MSM261DGT006 mic (Sense) · [back pinout](docs/nrf54lm20a_back_pinout.png) · [official wiki](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) |
-| **HOLYIOT-25007** | 18.0 × 14.8 mm · PCB antenna |
-| **HOLYIOT-25008** | 23.2 × 17.5 mm · PCB antenna |
+| Product | Arduino board selection | Specs / notes |
+|---|---|---|
+| **[Seeed Studio XIAO nRF54L15](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)** | [XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/) (`xiao_nrf54l15`) | 128 MHz M33 + 128 MHz RISC-V coprocessor · 1.5 MB NVM · 256 KB RAM |
+| **[Seeed Studio XIAO nRF54L15 Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)** | [XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/) (`xiao_nrf54l15`) | Same core board support as [XIAO nRF54L15](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/) · onboard LSM6DS3TR-C IMU + MSM261DGT006 PDM mic |
+| **[Seeed Studio XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/)** | [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) (`xiao_nrf54lm20b`) | 128 MHz M33 + 128 MHz RISC-V coprocessor · 2 MB NVM · 512 KB RAM · nPM1300 PMIC · onboard 8 MB PY25Q64 QSPI flash · [back pinout](docs/nrf54lm20a_back_pinout.png) |
+| **[Seeed Studio XIAO nRF54LM20A Sense](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/)** | [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) (`xiao_nrf54lm20b`) | Same core board support as [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) · onboard LSM6DS3TR-C IMU + MSM261DGT006 PDM mic · nPM1300 PMIC · onboard 8 MB PY25Q64 QSPI flash · [back pinout](docs/nrf54lm20a_back_pinout.png) |
+| **[HOLYIOT-25007](docs/holyiot-25007-module-reference.md)** | [HOLYIOT-25007 nRF54L15 Module](docs/holyiot-25007-module-reference.md) (`holyiot_25007_nrf54l15`) | 18.0 x 14.8 mm · PCB antenna |
+| **[HOLYIOT-25008](docs/holyiot-25008-module-reference.md)** | [HOLYIOT-25008 nRF54L15 Module](docs/holyiot-25008-module-reference.md) (`holyiot_25008_nrf54l15`) | 23.2 x 17.5 mm · PCB antenna |
 
 > See [board reference](docs/board-reference.md) for detailed pin assignments and schematics.
 
@@ -161,11 +163,11 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 | **VPR RISC‑V Coprocessor** | ✅ |
 | **SoftPeripheral SDK + sQSPI** | ✅ |
 | **nPM1300 PMIC Driver** | ✅ |
-| **LM20A QSPI Flash + Sleep** | ✅ |
+| **[XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) QSPI Flash + Sleep** | ✅ |
 | **GPIO Bit‑Bang I²C** (zero residual) | ✅ |
 | **Buck Hysteretic Mode** (µA sleep) | ✅ |
-| **LM20A IMU** (LSM6DS3TR‑C) | ✅ |
-| **LM20A PDM Mic** (MSM261DGT006) | ✅ |
+| **[XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) IMU** (LSM6DS3TR‑C) | ✅ |
+| **[XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) PDM Mic** (MSM261DGT006) | ✅ |
 
 ---
 
@@ -177,29 +179,29 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 
 | Board family | External Arduino `SPI` pins | Implemented max on exposed pins | `SPI_HS` / 32 MHz status |
 |---|---|---|---|
-| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the dedicated P2 `SPIM00` route | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical pins and automatically selects 128 MHz only while a 32 MHz transaction is active |
-| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` route on dedicated P2 `SPIM00` | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical P2.01/P2.04/P2.02 route and automatically enables 32 MHz transactions |
-| **XIAO nRF54LM20A / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
+| **[XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the dedicated P2 `SPIM00` route | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical pins and automatically selects 128 MHz only while a 32 MHz transaction is active |
+| **[HOLYIOT-25007](docs/holyiot-25007-module-reference.md) / [HOLYIOT-25008](docs/holyiot-25008-module-reference.md) / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` route on dedicated P2 `SPIM00` | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical P2.01/P2.04/P2.02 route and automatically enables 32 MHz transactions |
+| **[XIAO nRF54LM20A / Sense](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/)** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
 
 Notes:
 
-- On **nRF54L15**, the exposed Arduino SPI pins can only use `SPIM00`. `SPI` and `SPI_HS` are separate logical objects that retain separate settings, but share that one physical controller and must be used sequentially.
-- On **nRF54L15**, `SPI_HS` temporarily raises the CPU/peripheral clock to 128 MHz for a 32 MHz request and restores the previous CPU clock at `endTransaction()`. Normal `SPI` never changes the CPU profile.
-- On **LM20A**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
-- On **L15**, `SPI_HS` is plain 1-bit SPI on the P2 high-speed route, not Quad SPI.
-- On **XIAO L15**, `SPI_HS` defaults to `D2` for software-controlled chip select. P2.05 remains reserved for the RF switch.
-- On **LM20A**, the 32 MHz `SPI_HS` path is useful for the onboard QSPI flash and deliberate advanced probing of the flash pads. The schematic does not expose that HS bus on the normal XIAO header.
-- The L15 implementation follows the documented P2 high-speed pad requirements, including E0/E1 output drive, maximum `HSBIAS` slew above 8 MHz, and the nRF54L SPIM anomaly 8 workaround.
+- On **[XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)**, the exposed Arduino SPI pins can only use `SPIM00`. `SPI` and `SPI_HS` are separate logical objects that retain separate settings, but share that one physical controller and must be used sequentially.
+- On **[XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)**, `SPI_HS` temporarily raises the CPU/peripheral clock to 128 MHz for a 32 MHz request and restores the previous CPU clock at `endTransaction()`. Normal `SPI` never changes the CPU profile.
+- On **[XIAO nRF54LM20A / Sense](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/)**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
+- On **[XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)**, `SPI_HS` is plain 1-bit SPI on the P2 high-speed route, not Quad SPI.
+- On **[XIAO nRF54L15](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/)**, `SPI_HS` defaults to `D2` for software-controlled chip select. P2.05 remains reserved for the RF switch.
+- On **[XIAO nRF54LM20A / Sense](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/)**, the 32 MHz `SPI_HS` path is useful for the onboard QSPI flash and deliberate advanced probing of the flash pads. The schematic does not expose that HS bus on the normal XIAO header.
+- The [XIAO nRF54L15 / Sense](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/) implementation follows the documented P2 high-speed pad requirements, including E0/E1 output drive, maximum `HSBIAS` slew above 8 MHz, and the nRF54L SPIM anomaly 8 workaround.
 - Examples: `File > Examples > SPI > HighSpeedSpi32MHzProbe`, `File > Examples > XiaoLM20A > QspiFlashInfo`, and `File > Examples > Adafruit SPIFlash > FlashInfo`.
 
-## LM20A Onboard QSPI Flash
+## [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) Onboard QSPI Flash
 
-XIAO nRF54LM20A includes an onboard PY25Q64-class 8 MB flash on the dedicated QSPI/HS-SPI pads. Nordic DK-style MX25R6435F QSPI flash is also recognized by the bundled SPIFlash compatibility layer. The core exposes this in two layers:
+[XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) includes an onboard PY25Q64-class 8 MB flash on the dedicated QSPI/HS-SPI pads. Nordic DK-style MX25R6435F QSPI flash is also recognized by the bundled SPIFlash compatibility layer. The core exposes this in two layers:
 
 - `XiaoQspiFlash` for board-specific low-level control, including JEDEC read, read/write/erase, and `prepareForSleep()`.
 - `Adafruit_SPIFlash` compatibility with `Adafruit_FlashTransport_QSPI_NRF54`, so sketches can use common `begin()`, `readBuffer()`, `writeBuffer()`, `eraseSector()`, `readJEDECID()`, and `runCommand(0xB9)` style calls.
 
-For low-current sleep on LM20A, put the external flash into deep power-down before sleeping. Use `XiaoQspiFlash.prepareForSleep()` or `flash.runCommand(0xB9); flash.end();` from the SPIFlash-compatible API.
+For low-current sleep on [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/), put the external flash into deep power-down before sleeping. Use `XiaoQspiFlash.prepareForSleep()` or `flash.runCommand(0xB9); flash.end();` from the SPIFlash-compatible API.
 
 Examples:
 
@@ -216,11 +218,11 @@ Examples:
 - `systemOffWakeReset(ms)` enters real no-retention `SYSTEMOFF`: the GRTC wake timer restarts the chip, so execution begins again from `setup()`.
 - `wasSystemOffWakeReset()`, `wasSystemOffWakeFromGrtc()`, and `clearSystemOffWakeResetReason()` are available for boot diagnostics. See `File > Examples > Power > SystemOffWakeReset`.
 
-## XIAO nRF54LM20A nPM1300 Charging Notes
+## [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) nPM1300 Charging Notes
 
 - `npm1300_charger_set_current(ma)` sets the battery charge-current target and now also updates the nPM1300 VBUS input-current limiter so the default 100 mA input limit does not throttle higher charge currents.
 - `npm1300_vbus_set_input_current_limit_ma(ma)` and `npm1300_vbus_get_input_current_limit_ma()` expose the VBUS limiter directly. This limit is the allowed USB/VBUS input draw, not the measured battery charge or discharge current.
-- `npm1300_enter_timed_hibernate_ms(ms)` programs the nPM1300 hibernate wake timer and enters PMIC hibernate mode. On XIAO nRF54LM20A this is the lowest-current timed sleep path; wake is a cold boot after the PMIC restores power. Measure from the battery/VBAT pads because USB/debug wiring can dominate the current.
+- `npm1300_enter_timed_hibernate_ms(ms)` programs the nPM1300 hibernate wake timer and enters PMIC hibernate mode. On [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) this is the lowest-current timed sleep path; wake is a cold boot after the PMIC restores power. Measure from the battery/VBAT pads because USB/debug wiring can dominate the current.
 - Use `File > Examples > Nrf54L15-Clean-Implementation > PMIC > nPM1300_ChargerControl` or `File > Examples > Power > nPM1300_BatteryCurrent` to compare `IBAT` with the configured `VBUS_ILIM`.
 
 ---
@@ -244,7 +246,7 @@ Examples:
 - **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
 - **Thread and Matter are staged protocol stacks.** OpenThread FTD/MeshCoP/SRP/UDP and custom Matter command-surface demos compile on all staged boards; local two-board SRP readiness is working, but production-grade HA/OTBR commissioning and long soak validation are still pending.
 - **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
-- **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
+- **[XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
 - **Channel Sounding connected-CS parity is staged.** The HCI/VPR workflow, real over-air LL-control bridge, raw two-board RF tone/DFE smoke path, and post-LL-control real-measurement Mode 2 host ingestion are hardware-tested, but the final Zephyr-parity connected scheduler still needs VPR/RADIO-owned in-connection subevent timing and real connected result generation.
 
@@ -272,7 +274,7 @@ Examples:
 
 ## ⚡ PWM (analogWrite)
 
-### Pin Allocation (LM20A)
+### Pin Allocation ([XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/))
 
 | Instance | Channels | Pins |
 |---|---|---|
@@ -328,7 +330,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 # Unplug and replug the board
 ```
 
-> This is a one-time setup. The udev rule grants plugdev group access to `/dev/hidraw*` and the USB device node. Covers both L15 (0066) and LM20A (0068).
+> This is a one-time setup. The udev rule grants plugdev group access to `/dev/hidraw*` and the USB device node. Covers both [XIAO nRF54L15](https://wiki.seeedstudio.com/xiao_nrf54l15_sense_getting_started/) (0066) and [XIAO nRF54LM20A](https://wiki.seeedstudio.com/xiao_nrf54lm20a_getting_started/) (0068).
 
 ### Linux Mint: No probe detected even after udev rules
 
