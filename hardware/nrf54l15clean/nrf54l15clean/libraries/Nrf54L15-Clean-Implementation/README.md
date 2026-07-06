@@ -357,17 +357,15 @@ Thread example organization:
   - two-board hardware proof is now real: with the same fixed dataset on two
     attached XIAO nRF54L15 boards, one node settles as `leader` and the second
     settles as `child`
-  - the current staged attach logs live at:
-    `measurements/thread_phase3_latest/role_probe_board_a_legacy28_migrated.log`
-    `measurements/thread_phase3_latest/role_probe_board_b_legacy28_migrated.log`
+  - staged attach logs are local measurement artifacts generated under
+    `measurements/` and are not tracked in git.
   - the staged UDP payload probe now also exists:
     `OpenThreadUdpStageProbe`
   - with the same fixed dataset on two attached XIAO nRF54L15 boards, the
     `child` sends `stage-ping` to the leader RLOC and the `leader` replies
     with `stage-pong`
-  - the current staged UDP logs live at:
-    `measurements/thread_phase3_latest/udp_stage_probe_board_a.log`
-    `measurements/thread_phase3_latest/udp_stage_probe_board_b.log`
+  - staged UDP logs are local measurement artifacts generated under
+    `measurements/` and are not tracked in git.
 - the first Arduino-facing staged Thread surface now also exists:
   - enable `Tools > Thread Core > Experimental Stage Core (Leader/Child/Router + UDP)`
   - include `nrf54_thread_experimental.h`
@@ -381,13 +379,8 @@ Thread example organization:
     `ThreadExperimentalSleepyParent`
     `ThreadExperimentalSleepyChild`
     `ThreadExperimentalReconnectStress`
-  - the current wrapper-level hardware logs live at:
-    `measurements/thread_phase4_latest/thread_udp_hello_board_a.log`
-    `measurements/thread_phase4_latest/thread_udp_hello_board_b.log`
-    `measurements/thread_phase4_latest/thread_router_promotion_board_a.log`
-    `measurements/thread_phase4_latest/thread_router_promotion_board_b.log`
-    `measurements/thread_phase4_latest/thread_pskc_udp_hello_board_a.log`
-    `measurements/thread_phase4_latest/thread_pskc_udp_hello_board_b.log`
+  - wrapper-level hardware logs are local measurement artifacts generated under
+    `measurements/` and are not tracked in git.
 - the PAL now includes repo-backed RNG/AES/key-ref/SHA/HMAC/HKDF/PBKDF2-CMAC
   seams; ECDSA still returns explicit `OT_ERROR_NOT_CAPABLE`.
 - the first radio slice now wraps `ZigbeeRadio` directly for Thread first pass,
@@ -489,13 +482,8 @@ Thread example organization:
     `src/matter_onoff_light.cpp`
     with the first sketch-level example at
     `examples/Matter/MatterOnOffLightApiDemo`
-  - the current probe logs live at:
-    `measurements/matter_phase5_latest/matter_foundation_probe_default.log`
-    `measurements/matter_phase5_latest/matter_foundation_probe_staged.log`
-  - the current Phase 6 compile logs live at:
-    `measurements/matter_phase6_latest/matter_onoff_api_demo_stage.compile.log`
-    `measurements/matter_phase6_latest/matter_onoff_foundation_target_stage.compile.log`
-    `measurements/matter_phase6_latest/matter_foundation_probe_stage.compile.log`
+  - probe and compile logs are local measurement artifacts generated under
+    `measurements/` and are not tracked in git.
   - with the hidden seam enabled, that probe now compiles against staged
     upstream CHIP headers and reports values from
     `CHIPVendorIdentifiers.hpp` / `NodeId.h`
