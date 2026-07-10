@@ -37,6 +37,12 @@ void pmic_bus_end() {
         g_pmicWire.end();
         g_busStarted = false;
     }
+    // These are dedicated PMIC pins. Restore their reset-state input-buffer
+    // disconnect after each transaction so measurements do not add GPIO bias
+    // current while the bus is idle.
+    NRF_P1->DIRCLR = (1UL << 17U) | (1UL << 18U);
+    NRF_P1->PIN_CNF[17U] = GPIO_PIN_CNF_INPUT_Disconnect;
+    NRF_P1->PIN_CNF[18U] = GPIO_PIN_CNF_INPUT_Disconnect;
 }
 
 bool pmic_read_burst(uint8_t base, uint8_t offset, uint8_t* data, size_t len) {
@@ -553,6 +559,10 @@ bool npm1300_imu_mic_power_enable(bool enable) {
 }
 bool npm1300_sensor_power_enable(bool enable) {
     return npm1300_imu_mic_power_enable(enable);
+}
+bool npm1300_prepare_for_sleep(void) {
+    g_adcValid = false;
+    return npm1300_write_reg(NPM1300_BASE_ADC, kAdcOffsetIbatEnable, 0U);
 }
 
 bool npm1300_buck1_enable(bool e) { return buck_enable(0, e); }

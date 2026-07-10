@@ -100,7 +100,7 @@ static void zephyrApplyClockTrimParity(void) {
     const uint32_t slopeSignK = slopeMaskK - (slopeMaskK >> 1U);
     const int32_t slopeK = (int32_t)(slopeFieldK ^ slopeSignK) - (int32_t)slopeSignK;
     const uint32_t offsetK = (xosc32ktrim & FICR_XOSC32KTRIM_OFFSET_Msk) >> FICR_XOSC32KTRIM_OFFSET_Pos;
-    const uint32_t lfxoIntcapFemtoF = 16000UL;
+    const uint32_t lfxoIntcapFemtoF = 17000UL;
     const uint32_t lfxoMidValue = (2UL * lfxoIntcapFemtoF - 12000UL) * (uint32_t)(slopeK + 392) + ((offsetK << 3U) * 1000UL);
     uint32_t lfxoIntcap = lfxoMidValue / 512000UL;
     if ((lfxoMidValue % 512000UL) >= 256000UL) ++lfxoIntcap;
@@ -112,7 +112,7 @@ static void zephyrApplyClockTrimParity(void) {
     const uint32_t slopeSignM = slopeMaskM - (slopeMaskM >> 1U);
     const int32_t slopeM = (int32_t)(slopeFieldM ^ slopeSignM) - (int32_t)slopeSignM;
     const uint32_t offsetM = (xosc32mtrim & FICR_XOSC32MTRIM_OFFSET_Msk) >> FICR_XOSC32MTRIM_OFFSET_Pos;
-    const uint32_t hfxoIntcapFemtoF = 16000UL;
+    const uint32_t hfxoIntcapFemtoF = 15000UL;
     const uint32_t hfxoMidValue = (((hfxoIntcapFemtoF - 5500UL) * (uint32_t)(slopeM + 791)) + ((offsetM << 2U) * 1000UL)) >> 8U;
     uint32_t hfxoIntcap = hfxoMidValue / 1000UL;
     if ((hfxoMidValue % 1000UL) >= 500UL) ++hfxoIntcap;

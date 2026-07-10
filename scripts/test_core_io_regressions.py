@@ -339,6 +339,76 @@ def validate_xiao_low_power_board_contracts() -> None:
     assert "gpioSetInputHighZ(kSamd11RxPort" not in board_state_body
     print("PASS XIAO low-power board state preserves SAMD11 serial bridge pins")
 
+    lm20_time = (PLATFORM / "cores/nrf54lm20b/wiring_time.c").read_text(
+        encoding="utf-8"
+    )
+    lm20_clock_select = function_body(
+        lm20_time, "static uint32_t selectRunningGrtcLfClockSource("
+    )
+    assert "ARDUINO_NRF54LM20A" in lm20_clock_select
+    assert "startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFXO);" in lm20_clock_select
+    assert "return GRTC_CLKCFG_CLKSEL_SystemLFCLK;" in lm20_clock_select
+    assert "ensureSystemOffLfxoRunning" not in lm20_clock_select
+    assert "CLOCK_LFCLK_SRC_SRC_LFRC" in lm20_clock_select
+
+    lm20_system = (PLATFORM / "cores/nrf54lm20b/system_nrf54lm20b.c").read_text(
+        encoding="utf-8"
+    )
+    assert "lfxoIntcapFemtoF = 17000UL" in lm20_system
+    assert "hfxoIntcapFemtoF = 15000UL" in lm20_system
+
+    qspi_transport = (
+        PLATFORM
+        / "libraries/Adafruit_SPIFlash/src/qspi/Adafruit_FlashTransport_QSPI_NRF54.cpp"
+    ).read_text(encoding="utf-8")
+    qspi_end = function_body(
+        qspi_transport, "void Adafruit_FlashTransport_QSPI_NRF54::end()"
+    )
+    assert "XiaoQspiFlash.prepareForSleep()" in qspi_end
+    assert "XiaoQspiFlash.end()" not in qspi_end
+
+    npm_source = (
+        PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src/npm1300.cpp"
+    ).read_text(encoding="utf-8")
+    npm_sleep = function_body(npm_source, "bool npm1300_prepare_for_sleep(")
+    assert "kAdcOffsetIbatEnable, 0U" in npm_sleep
+    npm_bus_end = function_body(npm_source, "void pmic_bus_end()")
+    assert "GPIO_PIN_CNF_INPUT_Disconnect" in npm_bus_end
+    system_off_prepare = function_body(
+        lm20_time, "bool nrf54lm20b_core_prepare_system_off(void)\n{"
+    )
+    assert "xiaoNrf54lm20PmicPrepareForSleep" in system_off_prepare
+    assert "npm1300_prepare_for_sleep" not in system_off_prepare
+
+    lm20_variant = (
+        PLATFORM / "variants/xiao_nrf54lm20b/variant.cpp"
+    ).read_text(encoding="utf-8")
+    variant_pmic_sleep = function_body(
+        lm20_variant, 'extern "C" int xiaoNrf54lm20PmicPrepareForSleep(void)'
+    )
+    assert "kPmicAdcBase = 0x05U" in lm20_variant
+    assert "kPmicIbatEnableOffset" in variant_pmic_sleep
+    assert "parkPmicPins" in variant_pmic_sleep
+
+    delay_probe_paths = [
+        PLATFORM / "examples/Power/DelayAutoLowPowerMeasure/DelayAutoLowPowerMeasure.ino",
+        PLATFORM / "examples/XiaoL15/DelayAutoLowPowerMeasure/DelayAutoLowPowerMeasure.ino",
+    ]
+    delay_probes = [path.read_text(encoding="utf-8") for path in delay_probe_paths]
+    assert delay_probes[0] == delay_probes[1], "delay-current probe copies diverged"
+    assert "npm1300_imu_mic_power_enable(false)" in delay_probes[0]
+    assert "npm1300_buck1_set_mode(NPM1300_BUCK_MODE_AUTO)" in delay_probes[0]
+    assert "npm1300_prepare_for_sleep()" in delay_probes[0]
+
+    system_off_probe = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/LowPower/LowPowerZephyrParityBlink/LowPowerZephyrParityBlink.ino"
+    ).read_text(encoding="utf-8")
+    assert "npm1300_imu_mic_power_enable(false)" in system_off_probe
+    assert "npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST)" in system_off_probe
+    assert "npm1300_prepare_for_sleep()" in system_off_probe
+    print("PASS LM20A LFXO, oscillator-load, QSPI, and PMIC sleep contracts")
+
 
 def validate_xiao_retention_probe_contracts() -> None:
     probe_paths = [

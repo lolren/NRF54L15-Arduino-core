@@ -68,8 +68,9 @@ static inline int arduinoXiaoNrf54l15GetRfSwitchPower(void) {
     return 0;
 }
 
-// ─── Low power stub ──────────────────────────────────────────
+// ─── Board low-power helpers ─────────────────────────────────
 int xiaoNrf54lm20QspiFlashPrepareForSleep(void);
+int xiaoNrf54lm20PmicPrepareForSleep(void);
 
 static inline void xiaoNrf54l15EnterLowestPowerBoardState(void) {
     (void)xiaoNrf54lm20QspiFlashPrepareForSleep();

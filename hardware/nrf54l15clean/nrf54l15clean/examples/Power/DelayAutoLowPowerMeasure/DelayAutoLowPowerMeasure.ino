@@ -15,7 +15,19 @@
 // - disconnect external LEDs and other GPIO loads
 // - select Tools -> Power Profile -> Low Power (WFI Idle)
 
-void setup() {}
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_XIAO_NRF54LM20A_CLEAN)
+#include <npm1300.h>
+#endif
+
+void setup() {
+#if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_XIAO_NRF54LM20A_CLEAN)
+  // nPM1300 state survives MCU reset. Clear loads left by a previous sensor or
+  // battery-measurement sketch so each current run starts from the same state.
+  (void)npm1300_imu_mic_power_enable(false);
+  (void)npm1300_buck1_set_mode(NPM1300_BUCK_MODE_AUTO);
+  (void)npm1300_prepare_for_sleep();
+#endif
+}
 
 void loop() {
   delay(1000);

@@ -163,10 +163,18 @@ static bool ensureSystemOffLfxoRunning(void)
 
 static uint32_t selectRunningGrtcLfClockSource(void)
 {
-    // Note: ensureSystemOffLfxoRunning is NOT called here.
-    // It is only needed for SYSTEM OFF wake (programSystemOffWakeUs).
-    // Calling it here would stop the LFCLK on every delay(), corrupting
-    // GRTC timing and making delay() take 10x longer.
+#if defined(ARDUINO_NRF54LM20A) || \
+    defined(ARDUINO_XIAO_NRF54LM20A_CLEAN)
+    // LM20A boards populate the 32.768 kHz crystal. SystemLFCLK uses LFRC
+    // during crystal startup and switches to LFXO when it is ready, avoiding
+    // a roughly 430 ms stall in the first delay()/micros() call.
+    if (lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
+        return GRTC_CLKCFG_CLKSEL_LFXO;
+    }
+    startLfclkSource(CLOCK_LFCLK_SRC_SRC_LFXO);
+    return GRTC_CLKCFG_CLKSEL_SystemLFCLK;
+#endif
+
     if (lfclkRunningFrom(CLOCK_LFCLK_STAT_SRC_LFXO)) {
         return GRTC_CLKCFG_CLKSEL_LFXO;
     }
@@ -1227,6 +1235,7 @@ bool nrf54lm20b_core_prepare_system_off(void)
 #if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B) || \
     defined(ARDUINO_XIAO_NRF54LM20A_CLEAN) || \
     defined(ARDUINO_XIAO_NRF54LM20B_CLEAN)
+    (void)xiaoNrf54lm20PmicPrepareForSleep();
     if (xiaoNrf54lm20QspiFlashPrepareForSleep() == 0) {
         return false;
     }

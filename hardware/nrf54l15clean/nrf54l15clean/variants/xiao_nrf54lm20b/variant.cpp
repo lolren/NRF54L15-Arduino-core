@@ -9,6 +9,42 @@
 
 #include "variant.h"
 #include "Arduino.h"
+#include "Wire.h"
+
+namespace {
+
+static constexpr uint8_t kPmicAddress = 0x6BU;
+static constexpr uint8_t kPmicAdcBase = 0x05U;
+static constexpr uint8_t kPmicIbatEnableOffset = 0x24U;
+static constexpr uint32_t kPmicTwimBase = 0x500ED000UL;
+
+static TwoWire g_pmicSleepWire(
+    reinterpret_cast<NRF_TWIM_Type*>(kPmicTwimBase),
+    PIN_PMIC_SDA,
+    PIN_PMIC_SCL);
+
+static void parkPmicPins() {
+    NRF_P1->DIRCLR = (1UL << 17U) | (1UL << 18U);
+    NRF_P1->PIN_CNF[17U] = GPIO_PIN_CNF_INPUT_Disconnect;
+    NRF_P1->PIN_CNF[18U] = GPIO_PIN_CNF_INPUT_Disconnect;
+}
+
+}  // namespace
+
+extern "C" int xiaoNrf54lm20PmicPrepareForSleep(void)
+{
+    g_pmicSleepWire.setClock(100000UL);
+    g_pmicSleepWire.begin();
+    g_pmicSleepWire.beginTransmission(kPmicAddress);
+    const bool queued =
+        g_pmicSleepWire.write(kPmicAdcBase) == 1U &&
+        g_pmicSleepWire.write(kPmicIbatEnableOffset) == 1U &&
+        g_pmicSleepWire.write(0U) == 1U;
+    const uint8_t status = g_pmicSleepWire.endTransmission();
+    g_pmicSleepWire.end();
+    parkPmicPins();
+    return (queued && status == 0U) ? 1 : 0;
+}
 
 extern "C" void initVariant(void)
 {

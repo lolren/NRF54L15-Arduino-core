@@ -9,7 +9,7 @@ This report is based only on the repository, the supplied local PDFs/text extrac
 
 ## Remediation Update - 2026-07-10
 
-Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.218**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218 source and hardware follow-up together record the current source-tree result.
+Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.219**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline, the 0.9.218 source and hardware follow-up, and the 0.9.219 LM20A power follow-up together record the current source-tree result.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -42,6 +42,19 @@ Hardware evidence from this follow-up:
 * LM20A passed timed System OFF wake, QSPI JEDEC/status/deep-power-down, IMU `WHO_AM_I=0x6A`, live PDM microphone capture, and a BLE-disabled IMU regression run.
 
 This does not change the explicit remaining limits below: Windows PowerShell execution, external UART loopback, BLE HID pairing, RF/protocol conformance, current characterization and other board-specific lab tests still need their relevant external equipment or reporters.
+
+### LM20A Power Follow-up - 2026-07-10 (v0.9.219)
+
+The LM20A `delay()` path now requests the board's populated LFXO without waiting for crystal startup, allowing SystemLFCLK to switch from LFRC to LFXO without a first-delay stall. The board clock-load values are aligned with the XIAO LM20A design, external flash is returned to deep power-down when the Adafruit transport ends, and the nPM1300 cleanup path disables persistent IBAT measurement, parks PMIC I2C input buffers, and is linked into ordinary SYSTEM OFF sketches.
+
+Connected-board functional evidence on UID `3377B9D6`:
+
+* First `delay(1)` measured 1,028 us; 10/100/1000 ms delays were within 26 us of target after LFXO selection.
+* 27 of 27 measured idle loops entered WFI, with no skipped-WFI events; LFCLK reported LFXO and constant-latency mode was disabled.
+* The QSPI flash reported JEDEC `85 20 17`, woke after deep power-down, and re-entered deep power-down through the Adafruit transport path.
+* A forced nPM1300 IBAT-enable state was cleared by a generic SYSTEM OFF sketch that did not include the PMIC library; PMIC SCL/SDA returned to `PIN_CNF=0x2`.
+
+The connected CMSIS-DAP wakes SYSTEM OFF through the debug interface (`RESETREAS.DIF`), so it cannot establish the board's microamp floor. A PPK2 or battery test with USB and SWD detached remains required for the 7.5 uA System ON and 3 uA System OFF targets.
 
 ## Executive Summary
 

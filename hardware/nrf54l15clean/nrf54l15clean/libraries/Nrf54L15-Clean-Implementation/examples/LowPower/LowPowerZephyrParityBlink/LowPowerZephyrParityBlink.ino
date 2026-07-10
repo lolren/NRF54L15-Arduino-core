@@ -95,9 +95,12 @@ void setup() {
     busyWaitMs(kPostUploadGraceMs);
 
 #if defined(NRF54LM20_FAMILY)
-    // Enable buck hysteretic mode for lowest system-off quiescent current.
-    // The PMIC register settings persist across MCU SYSTEM OFF.
-    npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
+    // PMIC settings persist across reflashes and MCU SYSTEM OFF. Normalize
+    // loads left by sensor, battery-current, or forced-PWM examples before
+    // taking a floor measurement.
+    (void)npm1300_imu_mic_power_enable(false);
+    (void)npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
+    (void)npm1300_prepare_for_sleep();
 #endif
   }
 }
@@ -109,9 +112,10 @@ void loop() {
 
   xiaoNrf54l15EnterLowestPowerBoardState();
 #if defined(NRF54LM20_FAMILY)
-  // Re-apply hysteretic mode before each SYSTEM OFF.
-  // Safe to call repeatedly — PMIC ignores no-op writes.
-  npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
+  // These writes are safe to repeat and keep each cycle measurement-ready.
+  (void)npm1300_imu_mic_power_enable(false);
+  (void)npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
+  (void)npm1300_prepare_for_sleep();
 #endif
   gPower.systemOffTimedWakeUsNoRetention(kSystemOffUs);
 }

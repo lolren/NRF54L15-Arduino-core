@@ -110,6 +110,9 @@ bool npm1300_ldo2_set_mode(uint8_t mode);
 bool npm1300_imu_mic_power_enable(bool enable);
 bool npm1300_sensor_power_enable(bool enable);  /* compatibility alias */
 
+/* Stop optional PMIC measurement loads before MCU sleep. */
+bool npm1300_prepare_for_sleep(void);
+
 /* Buck regulators. */
 bool npm1300_buck1_enable(bool enable);
 bool npm1300_buck1_set_voltage(uint16_t mv);

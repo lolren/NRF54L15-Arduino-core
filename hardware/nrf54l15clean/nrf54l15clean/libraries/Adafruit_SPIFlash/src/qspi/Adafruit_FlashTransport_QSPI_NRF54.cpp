@@ -36,7 +36,9 @@ bool Adafruit_FlashTransport_QSPI_NRF54::begin() {
 
 void Adafruit_FlashTransport_QSPI_NRF54::end() {
 #if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
-  XiaoQspiFlash.end();
+  // The onboard flash is awake after begin(). Restore the board's default
+  // deep-power-down state when the transport releases it.
+  (void)XiaoQspiFlash.prepareForSleep();
 #endif
 }
 
