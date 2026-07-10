@@ -47,6 +47,24 @@ For the module boards, use:
 | `VBAT_EN` (`23`) | `P1.15` | N/A | VBAT divider enable |
 | `VBAT_READ` / `A7` | `P1.14` | `AIN7` | VBAT divider sense input |
 
+## I2C / Wire Usage
+
+For sensors on the XIAO header I2C pins, use the default bus directly:
+
+```cpp
+#include <Wire.h>
+
+void setup() {
+  Wire.begin();          // SDA=D4/P1.10, SCL=D5/P1.11
+  Wire.setClock(100000); // MLX90614 and many SMBus sensors prefer 100 kHz
+}
+```
+
+`Wire.setPins(SDA, SCL); Wire.begin();` is only needed when a sketch intentionally
+remaps `Wire` to another valid TWIM route. `Wire.begin(address)` starts target
+mode and is not a pin-selection API. The default `SDA` and `SCL` constants map
+to `D4` and `D5` respectively on XIAO nRF54L15.
+
 ## PWM Capability
 
 | Pins | `analogWrite()` mode | Frequency control | Notes |

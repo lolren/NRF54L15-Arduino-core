@@ -23,11 +23,17 @@ UPLOAD_PATH = (
 )
 PLATFORM_PATH = UPLOAD_PATH.parents[1] / "platform.txt"
 UF2_EMITTER = UPLOAD_PATH.parent / "uf2" / "uf2_emit.py"
+UF2_CONV = UPLOAD_PATH.parent / "uf2" / "uf2conv.py"
 SPEC = importlib.util.spec_from_file_location("nrf54_upload", UPLOAD_PATH)
 UPLOAD = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 sys.modules[SPEC.name] = UPLOAD
 SPEC.loader.exec_module(UPLOAD)
+UF2_SPEC = importlib.util.spec_from_file_location("nrf54_uf2conv", UF2_CONV)
+UF2_CONV_MODULE = importlib.util.module_from_spec(UF2_SPEC)
+assert UF2_SPEC.loader is not None
+sys.modules[UF2_SPEC.name] = UF2_CONV_MODULE
+UF2_SPEC.loader.exec_module(UF2_CONV_MODULE)
 
 
 def result(returncode: int) -> subprocess.CompletedProcess:
@@ -89,6 +95,12 @@ class PlatformRecipeTests(unittest.TestCase):
         self.assertIn("uf2_emit.ps1", pattern)
         self.assertIn('-InputPath "{build.path}/{build.project_name}.bin"', pattern)
         self.assertNotIn("{tools.python3", pattern)
+
+    def test_windows_uf2_emitter_uses_unsigned_constants(self):
+        script = (UF2_EMITTER.parent / "uf2_emit.ps1").read_text(encoding="utf-8")
+        self.assertIn('$uf2MagicStart1 = Convert-ToUInt32 "0x9E5D5157"', script)
+        self.assertNotIn("Set-UInt32LE $block 4 0x9E5D5157", script)
+        self.assertNotIn("Set-UInt32LE $block 28 0xADA54B15", script)
 
     def test_programmer_recipe_selects_pyocd(self):
         pattern = self.properties["tools.nrf54program.program.pattern"]
@@ -181,6 +193,27 @@ class PlatformRecipeTests(unittest.TestCase):
             self.assertEqual(magic0, 0x0A324655)
             self.assertEqual(magic1, 0x9E5D5157)
             self.assertEqual(magic_end, 0x0AB16F30)
+
+    def test_uf2_deploy_write_rejects_device_root_escape(self):
+        with tempfile.TemporaryDirectory(prefix="nrf54-uf2-root-") as directory:
+            root = Path(directory) / "drive"
+            root.mkdir()
+            outside = Path(directory) / "NEW.UF2"
+
+            with self.assertRaises(ValueError):
+                UF2_CONV_MODULE.write_file(str(root / ".." / "NEW.UF2"), b"bad", root=root)
+
+            self.assertFalse(outside.exists())
+
+    def test_uf2_deploy_write_allows_device_root_child(self):
+        with tempfile.TemporaryDirectory(prefix="nrf54-uf2-root-") as directory:
+            root = Path(directory) / "drive"
+            root.mkdir()
+            output = root / "NEW.UF2"
+
+            UF2_CONV_MODULE.write_file(str(output), b"ok", root=root)
+
+            self.assertEqual(output.read_bytes(), b"ok")
 
 
 if __name__ == "__main__":

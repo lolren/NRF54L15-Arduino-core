@@ -8,6 +8,7 @@ import os.path
 import argparse
 import json
 from time import sleep
+from pathlib import Path
 
 
 UF2_MAGIC_START0 = 0x0A324655 # "UF2\n"
@@ -18,6 +19,30 @@ INFO_FILE = "/INFO_UF2.TXT"
 
 appstartaddr = 0x2000
 familyid = 0x0
+
+
+def resolve_existing_file(path):
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(path)
+    return resolved
+
+
+def resolve_output_file(path, *, root=None):
+    resolved = Path(path).expanduser().resolve()
+    if root is not None:
+        root_path = Path(root).expanduser().resolve()
+        try:
+            resolved.relative_to(root_path)
+        except ValueError:
+            raise ValueError("Output path escapes device root: {}".format(path))
+    return resolved
+
+
+def device_root(path):
+    if sys.platform == "win32" and re.match(r"^[A-Za-z]:$", path):
+        return path + os.sep
+    return path
 
 
 def is_uf2(buf):
@@ -237,7 +262,8 @@ def get_drives():
 
 
 def board_id(path):
-    with open(path + INFO_FILE, mode='r') as file:
+    info_path = resolve_existing_file(os.path.join(device_root(path), INFO_FILE.lstrip("/")))
+    with open(info_path, mode='r') as file:
         file_content = file.read()
     return re.search(r"Board-ID: ([^\r\n]*)", file_content).group(1)
 
@@ -247,10 +273,11 @@ def list_drives():
         print(d, board_id(d))
 
 
-def write_file(name, buf):
-    with open(name, "wb") as f:
+def write_file(name, buf, root=None):
+    target = resolve_output_file(name, root=root)
+    with open(target, "wb") as f:
         f.write(buf)
-    print("Wrote %d bytes to %s" % (len(buf), name))
+    print("Wrote %d bytes to %s" % (len(buf), target))
 
 
 def load_families():
@@ -317,7 +344,8 @@ def main():
     else:
         if not args.input:
             error("Need input file")
-        with open(args.input, mode='rb') as f:
+        input_path = resolve_existing_file(args.input)
+        with open(input_path, mode='rb') as f:
             inpbuf = f.read()
         from_uf2 = is_uf2(inpbuf)
         ext = "uf2"
@@ -356,7 +384,8 @@ def main():
                     error("No drive to deploy.")
             for d in drives:
                 print("Flashing %s (%s)" % (d, board_id(d)))
-                write_file(d + "/NEW.UF2", outbuf)
+                root = device_root(d)
+                write_file(os.path.join(root, "NEW.UF2"), outbuf, root=root)
 
 
 if __name__ == "__main__":

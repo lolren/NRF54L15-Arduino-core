@@ -6,6 +6,10 @@ function Assert-Equal($Actual, $Expected, [string] $Label) {
     }
 }
 
+function Convert-HexUInt32([string] $Value) {
+    return [Convert]::ToUInt32($Value, 16)
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $tools = Join-Path $root "hardware/nrf54l15clean/nrf54l15clean/tools"
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("nrf54-native-" + [Guid]::NewGuid())
@@ -27,18 +31,23 @@ try {
         -BaseAddress "0x1000"
 
     [byte[]] $encoded = [IO.File]::ReadAllBytes($uf2)
+    [uint32] $magic0 = Convert-HexUInt32 "0A324655"
+    [uint32] $magic1 = Convert-HexUInt32 "9E5D5157"
+    [uint32] $familyFlag = Convert-HexUInt32 "00002000"
+    [uint32] $familyId = Convert-HexUInt32 "ADA54B15"
+    [uint32] $endMagic = Convert-HexUInt32 "0AB16F30"
     Assert-Equal $encoded.Length 1024 "UF2 byte length"
     for ($blockNumber = 0; $blockNumber -lt 2; ++$blockNumber) {
         $offset = $blockNumber * 512
-        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 0)) 0x0A324655 "magic0"
-        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 4)) 0x9E5D5157 "magic1"
-        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 8)) 0x00002000 "family flag"
+        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 0)) $magic0 "magic0"
+        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 4)) $magic1 "magic1"
+        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 8)) $familyFlag "family flag"
         Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 12)) (0x1000 + 256 * $blockNumber) "target address"
         Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 16)) 256 "payload size"
         Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 20)) $blockNumber "block number"
         Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 24)) 2 "block count"
-        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 28)) 0xADA54B15 "family ID"
-        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 508)) 0x0AB16F30 "end magic"
+        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 28)) $familyId "family ID"
+        Assert-Equal ([BitConverter]::ToUInt32($encoded, $offset + 508)) $endMagic "end magic"
     }
     for ($index = 0; $index -lt $fixture.Length; ++$index) {
         $block = [Math]::Floor($index / 256)

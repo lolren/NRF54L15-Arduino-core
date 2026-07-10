@@ -34,6 +34,10 @@ if ($image.Length -eq 0) {
 
 [uint32] $familyId = Convert-ToUInt32 $Family
 [uint32] $base = Convert-ToUInt32 $BaseAddress
+[uint32] $uf2MagicStart0 = Convert-ToUInt32 "0x0A324655"
+[uint32] $uf2MagicStart1 = Convert-ToUInt32 "0x9E5D5157"
+[uint32] $uf2FamilyFlag = Convert-ToUInt32 "0x00002000"
+[uint32] $uf2MagicEnd = Convert-ToUInt32 "0x0AB16F30"
 [int] $chunkSize = 256
 [uint32] $blockCount = [uint32] [Math]::Ceiling($image.Length / [double] $chunkSize)
 $stream = New-Object IO.MemoryStream
@@ -44,16 +48,16 @@ try {
         [int] $sourceLength = [Math]::Min($chunkSize, $image.Length - $sourceOffset)
         [byte[]] $block = New-Object byte[] 512
 
-        Set-UInt32LE $block 0 0x0A324655
-        Set-UInt32LE $block 4 0x9E5D5157
-        Set-UInt32LE $block 8 0x00002000
+        Set-UInt32LE $block 0 $uf2MagicStart0
+        Set-UInt32LE $block 4 $uf2MagicStart1
+        Set-UInt32LE $block 8 $uf2FamilyFlag
         Set-UInt32LE $block 12 ([uint32] ($base + $sourceOffset))
         Set-UInt32LE $block 16 ([uint32] $chunkSize)
         Set-UInt32LE $block 20 $blockNumber
         Set-UInt32LE $block 24 $blockCount
         Set-UInt32LE $block 28 $familyId
         [Array]::Copy($image, $sourceOffset, $block, 32, $sourceLength)
-        Set-UInt32LE $block 508 0x0AB16F30
+        Set-UInt32LE $block 508 $uf2MagicEnd
         $stream.Write($block, 0, $block.Length)
     }
 
