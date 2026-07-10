@@ -9,7 +9,7 @@ This report is based only on the repository, the supplied local PDFs/text extrac
 
 ## Remediation Update - 2026-07-10
 
-Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.219**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline, the 0.9.218 source and hardware follow-up, and the 0.9.219 LM20A power follow-up together record the current source-tree result.
+Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.220**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline, the 0.9.218 source and hardware follow-up, the 0.9.219 LM20A power follow-up, and the 0.9.220 BLE HID interoperability follow-up together record the current source-tree result.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -55,6 +55,18 @@ Connected-board functional evidence on UID `3377B9D6`:
 * A forced nPM1300 IBAT-enable state was cleared by a generic SYSTEM OFF sketch that did not include the PMIC library; PMIC SCL/SDA returned to `PIN_CNF=0x2`.
 
 The connected CMSIS-DAP wakes SYSTEM OFF through the debug interface (`RESETREAS.DIF`), so it cannot establish the board's microamp floor. A PPK2 or battery test with USB and SWD detached remains required for the 7.5 uA System ON and 3 uA System OFF targets.
+
+### BLE HID Interoperability Follow-up - 2026-07-10 (v0.9.220)
+
+The BLE HID mouse path was retested after Sony Xperia interoperability regressed from Pixel/Fairphone-only success. The production fix now keeps zero-length encrypted data-channel ACKs as empty plaintext LL data PDUs, accepts peer zero-length ACKs while encryption is active, clears zero/zero PHY update indications without queuing a reserved instant, removes the incomplete GATT robust-caching attributes until a compliant Database Hash implementation exists, and groups multiple advertised service UUIDs into one complete-list AD structure.
+
+Connected-board evidence on XIAO nRF54L15 UID `761FDE87`:
+
+* The HID pairing probe paired, encrypted, completed HID discovery, and was accepted as an input device by Pixel, Fairphone 5, and Sony Xperia phones.
+* Source-local builds passed for `Bluefruit52Lib/examples/Diagnostics/hid_pairing_probe` with BLE trace enabled, `Bluefruit52Lib/examples/HID/blehid_mouse`, and `Bluefruit52Lib/examples/Peripheral/bleuart`.
+* `./tools/release.sh 0.9.220` passed package-index verification, release-archive verification, and the archive Thread/Matter stage-probe compiles. Its archive is `nrf54l15clean-0.9.220-181902d5c1e0.tar.bz2`, SHA-256 `181902d5c1e0731d7f15169d8f1231f0207d2eddfd3309c0b87474ac08e7b06f`, size `26940757`.
+
+This follow-up does not claim full Bluetooth qualification or RF conformance. It closes the reported Android HID interoperability regression locally and leaves external retesting to users on their affected phones.
 
 ## Executive Summary
 

@@ -4292,19 +4292,21 @@ bool BLEAdvertisingData::addService(const BLEClientService& service) {
 }
 
 bool BLEAdvertisingData::addService(const BLEService& service1, const BLEService& service2) {
-  return addService(service1) && addService(service2);
+  const BLEUuid uuids[] = {service1.uuid, service2.uuid};
+  return addUuid(uuids, 2U);
 }
 
 bool BLEAdvertisingData::addService(const BLEService& service1, const BLEService& service2,
                                     const BLEService& service3) {
-  return addService(service1) && addService(service2) && addService(service3);
+  const BLEUuid uuids[] = {service1.uuid, service2.uuid, service3.uuid};
+  return addUuid(uuids, 3U);
 }
 
 bool BLEAdvertisingData::addService(const BLEService& service1, const BLEService& service2,
                                     const BLEService& service3,
                                     const BLEService& service4) {
-  return addService(service1) && addService(service2) && addService(service3) &&
-         addService(service4);
+  const BLEUuid uuids[] = {service1.uuid, service2.uuid, service3.uuid, service4.uuid};
+  return addUuid(uuids, 4U);
 }
 
 bool BLEAdvertisingData::addService(const BLEUuid& uuid) { return addUuid(uuid); }
@@ -4321,27 +4323,64 @@ bool BLEAdvertisingData::addUuid(const BLEUuid& uuid) {
 }
 
 bool BLEAdvertisingData::addUuid(const BLEUuid& uuid1, const BLEUuid& uuid2) {
-  return addUuid(uuid1) && addUuid(uuid2);
+  const BLEUuid uuids[] = {uuid1, uuid2};
+  return addUuid(uuids, 2U);
 }
 
 bool BLEAdvertisingData::addUuid(const BLEUuid& uuid1, const BLEUuid& uuid2,
                                  const BLEUuid& uuid3) {
-  return addUuid(uuid1) && addUuid(uuid2) && addUuid(uuid3);
+  const BLEUuid uuids[] = {uuid1, uuid2, uuid3};
+  return addUuid(uuids, 3U);
 }
 
 bool BLEAdvertisingData::addUuid(const BLEUuid& uuid1, const BLEUuid& uuid2,
                                  const BLEUuid& uuid3, const BLEUuid& uuid4) {
-  return addUuid(uuid1) && addUuid(uuid2) && addUuid(uuid3) && addUuid(uuid4);
+  const BLEUuid uuids[] = {uuid1, uuid2, uuid3, uuid4};
+  return addUuid(uuids, 4U);
 }
 
 bool BLEAdvertisingData::addUuid(const BLEUuid uuids[], uint8_t count) {
   if (uuids == nullptr) {
     return false;
   }
+
+  uint8_t uuid16Data[31] = {0};
+  uint8_t uuid16Len = 0U;
+  uint8_t uuid128Data[31] = {0};
+  uint8_t uuid128Len = 0U;
   for (uint8_t i = 0U; i < count; ++i) {
-    if (!addUuid(uuids[i])) {
-      return false;
+    if (uuids[i].size() == 2U) {
+      if ((uuid16Len + sizeof(uint16_t)) > sizeof(uuid16Data)) {
+        return false;
+      }
+      const uint16_t uuid16 = uuids[i].uuid16();
+      memcpy(&uuid16Data[uuid16Len], &uuid16, sizeof(uuid16));
+      uuid16Len = static_cast<uint8_t>(uuid16Len + sizeof(uuid16));
+      continue;
     }
+    if (uuids[i].size() == 16U) {
+      if ((uuid128Len + 16U) > sizeof(uuid128Data)) {
+        return false;
+      }
+      memcpy(&uuid128Data[uuid128Len], uuids[i].uuid128(), 16U);
+      uuid128Len = static_cast<uint8_t>(uuid128Len + 16U);
+      continue;
+    }
+    return false;
+  }
+
+  const uint16_t requiredLen =
+      static_cast<uint16_t>((uuid16Len > 0U ? uuid16Len + 2U : 0U) +
+                            (uuid128Len > 0U ? uuid128Len + 2U : 0U));
+  if ((static_cast<uint16_t>(len_) + requiredLen) > sizeof(data_)) {
+    return false;
+  }
+
+  if (uuid16Len > 0U && !addData(kAdTypeComplete16, uuid16Data, uuid16Len)) {
+    return false;
+  }
+  if (uuid128Len > 0U && !addData(kAdTypeComplete128, uuid128Data, uuid128Len)) {
+    return false;
   }
   return true;
 }

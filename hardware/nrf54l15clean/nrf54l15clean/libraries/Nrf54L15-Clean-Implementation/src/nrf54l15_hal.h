@@ -3087,7 +3087,6 @@ class BleRadio {
   bool buildAttErrorResponse(uint8_t requestOpcode, uint16_t handle,
                              uint8_t errorCode, uint8_t* outAttResponse,
                              uint16_t* outAttResponseLength) const;
-  void buildGattDatabaseHash(uint8_t outHash[16]) const;
   uint8_t readAttributeValue(uint16_t handle, uint16_t offset, uint8_t* outValue,
                              uint8_t maxLen) const;
   void clearSmpPairingState();
@@ -3621,7 +3620,6 @@ class BleRadio {
   uint16_t gapPpcpLatency_;
   uint16_t gapPpcpTimeout_;
   uint8_t gapBatteryLevel_;
-  uint8_t connectionGattClientSupportedFeatures_;
   BleCustomServiceState customGattServices_[kCustomGattMaxServices];
   BleCustomCharacteristicState customGattCharacteristics_[kCustomGattMaxCharacteristics];
   BleCustomWriteHandlerState customGattWriteHandlers_[kCustomGattMaxCharacteristics];

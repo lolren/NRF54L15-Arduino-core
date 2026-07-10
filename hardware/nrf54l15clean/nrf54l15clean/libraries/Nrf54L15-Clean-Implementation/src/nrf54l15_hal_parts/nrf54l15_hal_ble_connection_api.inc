@@ -1386,7 +1386,6 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
-  connectionGattClientSupportedFeatures_ = 0U;
   latestConnectionRssiDbm_ = 0;
   latestConnectionRssiValid_ = false;
   clearPreparedWriteState();

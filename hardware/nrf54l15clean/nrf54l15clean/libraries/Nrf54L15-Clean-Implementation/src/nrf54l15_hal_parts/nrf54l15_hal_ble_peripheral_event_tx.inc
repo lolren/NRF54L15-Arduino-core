@@ -406,13 +406,11 @@
       (rxL2capCid == kBleL2capCidAtt) &&
       (rxAttOpcode == kAttOpWriteReq)) {
     const uint16_t handle = readLe16(&rxPacket_[2 + kBleL2capHeaderLen + 1U]);
-    const bool isGattClientFeaturesHandle =
-        (handle == kHandleGattClientSupportedFeaturesValue);
     const bool isCccdHandle =
         (handle == kHandleGattServiceChangedCccd) ||
         (handle == kHandleBatteryLevelCccd) ||
         (findCustomCharacteristicByCccdHandle(handle) != nullptr);
-    rxL2capCanUseImmediateResponse = isGattClientFeaturesHandle || isCccdHandle;
+    rxL2capCanUseImmediateResponse = isCccdHandle;
   }
   if (rxL2capCanUseImmediateResponse) {
     l2capHandledImmediate = true;
@@ -770,6 +768,7 @@
       (txLlid == kBlePduLlControl) &&
       (txLength >= 1U) &&
       (txPlainPayloadForCurrentTx[0] == kBleLlCtrlStartEncRsp);
+  const bool txIsEmptyAckPlain = (txLlid == 0x01U) && (txLength == 0U);
   const bool txIsSmpPlain =
       txPayloadIsNewPlain &&
       (txLlid == kBlePduDataStartOrComplete) &&
@@ -781,7 +780,8 @@
       connectionEncSessionValid_ &&
       txIsStartEncRspPlain &&
       connectionEncEnableTxOnNextEvent_;
-  const bool encryptCurrentTx = (sessionEncryptionActive ||
+  const bool encryptCurrentTx = !txIsEmptyAckPlain &&
+                                (sessionEncryptionActive ||
                                  encryptStartEncRspTransition) &&
                                 (txPayloadIsNewPlain || connectionLastTxWasEncrypted_);
   uint8_t txLengthOnAir = txLength;
@@ -810,8 +810,7 @@
         connectionEncEnableTxOnNextEvent_ = false;
       }
       // `connectionEncTxCounter_` tracks the next TX packet counter to use.
-      // Every fresh encrypted data-channel PDU, including an empty plaintext
-      // PDU whose on-air body is the MIC, consumes one counter value.
+      // Fresh encrypted non-empty data-channel PDUs consume one counter value.
       // Retransmissions reuse the cached ciphertext.
       uint64_t txCounterToUse = connectionEncTxCounter_;
       if (txPayloadIsNewPlain &&
@@ -1254,12 +1253,15 @@
 	            (txFollowLlid == kBlePduLlControl) &&
 	            (txFollowLength >= 1U) &&
 	            (plainPayload[0] == kBleLlCtrlStartEncRsp);
+	        const bool txFollowIsEmptyAckPlain =
+	            (txFollowLlid == 0x01U) && (txFollowLength == 0U);
 	        const bool encryptFollowStartEncRsp =
 	            connectionEncSessionValid_ &&
 	            txFollowIsStartEncRspPlain &&
 	            connectionEncEnableTxOnNextEvent_;
 	        const bool encryptFollowTx =
-	            sessionEncryptionActive || encryptFollowStartEncRsp;
+	            !txFollowIsEmptyAckPlain &&
+	            (sessionEncryptionActive || encryptFollowStartEncRsp);
 
 	        if (!encryptFollowTx) {
 	          if (txFollowCanUseFreshPayload) {
@@ -1504,10 +1506,16 @@
               (connectionEncAwaitingStartRsp_ ||
                connectionEncStartReqPending_ ||
                connectionEncStartReqTxPending_ ||
-               finalStartRspQueuedFollow) &&
+	               finalStartRspQueuedFollow) &&
               (connectionEncRxCounter_ <= 1ULL);
+          const bool allowEncryptedEmptyPduFollow =
+              connectionEncRxEnabled_ &&
+              (rxLengthFollowRaw == 0U) &&
+              ((llidFollow == kBlePduDataStartOrComplete) ||
+               (llidFollow == 0x01U));
 
-          if (!allowPlainStartEncRspFollow && !allowPlainZeroLenFollow) {
+          if (!allowPlainStartEncRspFollow && !allowPlainZeroLenFollow &&
+              !allowEncryptedEmptyPduFollow) {
             if (rxLengthFollowRaw < kBleMicLen) {
               if (connectionEncRxEnabled_) {
                 terminateInd = true;

@@ -615,6 +615,18 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
             supportedBlePhys(centralToPeripheralRaw);
         const uint8_t peripheralToCentralPhy =
             supportedBlePhys(peripheralToCentralRaw);
+        // A zero PHY in both directions completes the LLCP procedure without
+        // an instant. The instant bytes are reserved in that form.
+        if (centralToPeripheralRaw == 0U && peripheralToCentralRaw == 0U) {
+          connectionPhyUpdatePending_ = false;
+          connectionPhyUpdateInstant_ = 0U;
+          connectionPendingTxPhy_ = connectionCurrentTxPhy_;
+          connectionPendingRxPhy_ = connectionCurrentRxPhy_;
+          connectionPhyRequestPending_ = false;
+          connectionPhyRequestInFlight_ = false;
+          emitBleTrace("LL_PHY_UPDATE_NO_CHANGE");
+          return false;
+        }
         const uint16_t instant = readLe16(&payload[3]);
         const uint16_t instantDelta =
             static_cast<uint16_t>(instant - currentEventCounter);
@@ -2244,6 +2256,13 @@ void BleRadio::emitBleTrace(const char* message) const {
   if (message == nullptr) {
     return;
   }
+  // These are emitted for ordinary idle connection events and can overwhelm
+  // the serial transport before a pairing failure can be observed.
+  if ((strcmp(message, "EVT_RX_TIMEOUT") == 0) ||
+      (strcmp(message, "EVT_TX_TIMEOUT") == 0) ||
+      (strcmp(message, "EVT_LATE_SKIP") == 0)) {
+    return;
+  }
   if (bleRunningInIsr()) {
     const_cast<BleRadio*>(this)->enqueueDeferredTrace(message);
     return;
@@ -2614,7 +2633,6 @@ void BleRadio::restoreAdvertisingLinkDefaults() {
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
-  connectionGattClientSupportedFeatures_ = 0U;
   connectionSmpSecurityRequestPending_ = false;
   clearPreparedWriteState();
   clearIncomingL2capReassembly();

@@ -1861,8 +1861,13 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
              connectionEncStartReqTxPending_ ||
              finalStartRspQueued) &&
             (connectionEncRxCounter_ <= 1ULL);
+        const bool allowEncryptedEmptyPdu =
+            connectionEncRxEnabled_ &&
+            (rxLengthRaw == 0U) &&
+            ((llid == kBlePduDataStartOrComplete) || (llid == 0x01U));
         if (connectionEncRxEnabled_ &&
-            !allowStartProcedurePlainZeroLen) {
+            !allowStartProcedurePlainZeroLen &&
+            !allowEncryptedEmptyPdu) {
           terminateInd = true;
           terminateMicFailure = true;
           ++encDebug_.encRxShortPduCount;

@@ -325,7 +325,6 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       gapPpcpLatency_(kBlePreferredConnLatency),
       gapPpcpTimeout_(kBlePreferredConnTimeoutUnits),
       gapBatteryLevel_(100U),
-      connectionGattClientSupportedFeatures_(0U),
       customGattServices_{},
       customGattCharacteristics_{},
       customGattWriteHandlers_{},

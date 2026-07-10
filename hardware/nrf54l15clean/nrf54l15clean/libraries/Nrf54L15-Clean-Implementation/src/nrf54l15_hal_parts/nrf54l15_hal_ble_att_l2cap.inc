@@ -47,36 +47,6 @@ static uint8_t attPermissionErrorToReadSentinel(uint8_t errorCode) {
   return kAttrReadNotPermittedLen;
 }
 
-void BleRadio::buildGattDatabaseHash(uint8_t outHash[16]) const {
-  if (outHash == nullptr) {
-    return;
-  }
-
-  uint32_t builtInCrc = crc32(reinterpret_cast<const uint8_t*>(kBlePrimaryServices),
-                              sizeof(kBlePrimaryServices));
-  builtInCrc ^= crc32(reinterpret_cast<const uint8_t*>(kBleCharacteristics),
-                      sizeof(kBleCharacteristics));
-  builtInCrc ^= crc32(reinterpret_cast<const uint8_t*>(kBleAttributeUuids),
-                      sizeof(kBleAttributeUuids));
-
-  const uint32_t serviceCrc =
-      crc32(reinterpret_cast<const uint8_t*>(customGattServices_),
-            sizeof(customGattServices_));
-  const uint32_t characteristicCrc =
-      crc32(reinterpret_cast<const uint8_t*>(customGattCharacteristics_),
-            sizeof(customGattCharacteristics_));
-  const uint32_t countCrc =
-      (static_cast<uint32_t>(customGattServiceCount_) << 24U) ^
-      (static_cast<uint32_t>(customGattCharacteristicCount_) << 16U) ^
-      static_cast<uint32_t>(customGattNextHandle_);
-
-  writeLe32(&outHash[0], builtInCrc);
-  writeLe32(&outHash[4], serviceCrc);
-  writeLe32(&outHash[8], characteristicCrc);
-  writeLe32(&outHash[12], crc32(reinterpret_cast<const uint8_t*>(&countCrc),
-                                sizeof(countCrc)));
-}
-
 void BleRadio::clearPreparedWriteState() {
   connectionPreparedWriteActive_ = false;
   connectionPreparedWriteHandle_ = 0U;
@@ -416,38 +386,6 @@ uint8_t BleRadio::readAttributeValue(uint16_t handle, uint16_t offset,
                 connectionServiceChangedIndicationsEnabled_ ? 0x0002U : 0x0000U);
       fullLen = 2U;
       break;
-    case kHandleGattClientSupportedFeaturesDecl:
-      fullValue[0] = static_cast<uint8_t>(kGattCharacteristicPropRead |
-                                          kGattCharacteristicPropWrite);
-      writeLe16(&fullValue[1], kHandleGattClientSupportedFeaturesValue);
-      writeLe16(&fullValue[3], kUuidGattClientSupportedFeatures);
-      fullLen = 5U;
-      break;
-    case kHandleGattClientSupportedFeaturesValue:
-      fullValue[0] = connectionGattClientSupportedFeatures_;
-      fullLen = 1U;
-      break;
-    case kHandleGattDatabaseHashDecl:
-      fullValue[0] = kGattCharacteristicPropRead;
-      writeLe16(&fullValue[1], kHandleGattDatabaseHashValue);
-      writeLe16(&fullValue[3], kUuidGattDatabaseHash);
-      fullLen = 5U;
-      break;
-    case kHandleGattDatabaseHashValue:
-      buildGattDatabaseHash(fullValue);
-      fullLen = 16U;
-      break;
-    case kHandleGattServerSupportedFeaturesDecl:
-      fullValue[0] = kGattCharacteristicPropRead;
-      writeLe16(&fullValue[1], kHandleGattServerSupportedFeaturesValue);
-      writeLe16(&fullValue[3], kUuidGattServerSupportedFeatures);
-      fullLen = 5U;
-      break;
-    case kHandleGattServerSupportedFeaturesValue:
-      // Bit 0 advertises EATT. This core currently exposes classic ATT only.
-      fullValue[0] = 0x00U;
-      fullLen = 1U;
-      break;
     case kHandleBatteryService:
       writeLe16(&fullValue[0], kUuidBatteryService);
       fullLen = 2U;
@@ -615,15 +553,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       case kUuidServiceChanged:
         emitBleTrace("ATT_RX_UUID_SVC_CHANGED");
         break;
-      case kUuidGattClientSupportedFeatures:
-        emitBleTrace("ATT_RX_UUID_GATT_CLIENT_FEATURES");
-        break;
-      case kUuidGattDatabaseHash:
-        emitBleTrace("ATT_RX_UUID_GATT_DB_HASH");
-        break;
-      case kUuidGattServerSupportedFeatures:
-        emitBleTrace("ATT_RX_UUID_GATT_SERVER_FEATURES");
-        break;
       case kUuidBatteryLevel:
         emitBleTrace("ATT_RX_UUID_BATT");
         break;
@@ -724,7 +653,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       return;
     }
     if (handle >= kHandleGattService &&
-        handle <= kHandleGattServerSupportedFeaturesValue) {
+        handle <= kHandleGattServiceChangedCccd) {
       emitBleTrace("ATT_RX_HANDLE_GATT");
       return;
     }
@@ -1291,15 +1220,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         } else if (typeLength == kBleUuidLength16 && type16 == kUuidServiceChanged) {
           handles[handleCount++] = kHandleGattServiceChangedValue;
         } else if (typeLength == kBleUuidLength16 &&
-                   type16 == kUuidGattClientSupportedFeatures) {
-          handles[handleCount++] = kHandleGattClientSupportedFeaturesValue;
-        } else if (typeLength == kBleUuidLength16 &&
-                   type16 == kUuidGattDatabaseHash) {
-          handles[handleCount++] = kHandleGattDatabaseHashValue;
-        } else if (typeLength == kBleUuidLength16 &&
-                   type16 == kUuidGattServerSupportedFeatures) {
-          handles[handleCount++] = kHandleGattServerSupportedFeaturesValue;
-        } else if (typeLength == kBleUuidLength16 &&
                    type16 == kUuidClientCharacteristicConfig) {
           handles[handleCount++] = kHandleGattServiceChangedCccd;
           handles[handleCount++] = kHandleBatteryLevelCccd;
@@ -1765,17 +1685,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       const uint16_t valueLen = static_cast<uint16_t>(requestLength - 3U);
       const uint8_t* value = (valueLen > 0U) ? &attRequest[3] : nullptr;
 
-      if (handle == kHandleGattClientSupportedFeaturesValue) {
-        if (valueLen != 1U || value == nullptr) {
-          return buildAttErrorResponse(opcode, handle, kAttErrInvalidAttrValueLen,
-                                       outAttResponse, outAttResponseLength);
-        }
-        connectionGattClientSupportedFeatures_ = value[0];
-        outAttResponse[0] = kAttOpWriteRsp;
-        *outAttResponseLength = 1U;
-        return true;
-      }
-
       const bool isCccdHandle =
           (handle == kHandleGattServiceChangedCccd) ||
           (handle == kHandleBatteryLevelCccd) ||
@@ -1817,13 +1726,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         emitAttHandleTrace(handle);
         const uint16_t valueLen = static_cast<uint16_t>(requestLength - 3U);
         const uint8_t* value = (valueLen > 0U) ? &attRequest[3] : nullptr;
-        if (handle == kHandleGattClientSupportedFeaturesValue) {
-          if (valueLen == 1U && value != nullptr) {
-            connectionGattClientSupportedFeatures_ = value[0];
-          }
-          *outAttResponseLength = 0U;
-          return false;
-        }
         const bool isCccdHandle =
             (handle == kHandleGattServiceChangedCccd) ||
             (handle == kHandleBatteryLevelCccd) ||
