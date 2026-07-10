@@ -17,26 +17,41 @@ bool g_lastTwim22 = false;
 bool g_lastTwim30 = false;
 bool g_lastSpim22 = false;
 bool g_lastSpim30 = false;
+unsigned long g_lastStatusMs = 0UL;
+
+void announceStage(const char* stage) {
+  Serial.print("probe=");
+  Serial.println(stage);
+  Serial.flush();
+}
 
 void runProbe() {
+  announceStage("uart22");
   g_lastUart22 = g_uart22.begin(kPinD0, kPinD1, UarteBaud::k115200);
   g_uart22.end();
 
+  announceStage("uart30");
   g_lastUart30 = g_uart30.begin(kPinD2, kPinD3, UarteBaud::k115200);
   g_uart30.end();
 
+  announceStage("twim22");
   g_lastTwim22 = g_twim22.begin(kDefaultI2cScl, kDefaultI2cSda, TwimFrequency::k400k);
   g_twim22.end();
 
+  announceStage("twim30");
   g_lastTwim30 = g_twim30.begin(kPinD11, kPinD12, TwimFrequency::k400k);
   g_twim30.end();
 
+  announceStage("spim22");
   g_lastSpim22 = g_spim22.begin(kDefaultSpiSck, kDefaultSpiMosi, kDefaultSpiMiso,
                                 kPinDisconnected, 4000000UL);
   g_spim22.end();
 
+  announceStage("spim30");
   g_lastSpim30 = g_spim30.begin(kPinD13, kPinD14, kPinD15, kPinD12, 4000000UL);
   g_spim30.end();
+
+  announceStage("complete");
 }
 
 void printStatus() {
@@ -66,11 +81,18 @@ void setup() {
   Serial.println();
   Serial.println("serial-fabric runtime probe");
   printHelp();
+  Serial.flush();
   runProbe();
   printStatus();
 }
 
 void loop() {
+  const unsigned long now = millis();
+  if ((now - g_lastStatusMs) >= 1000UL) {
+    g_lastStatusMs = now;
+    printStatus();
+  }
+
   if (!Serial.available()) {
     delay(20);
     return;

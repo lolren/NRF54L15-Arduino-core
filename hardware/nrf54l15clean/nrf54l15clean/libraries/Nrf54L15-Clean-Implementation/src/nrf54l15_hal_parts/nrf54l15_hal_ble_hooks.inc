@@ -122,6 +122,11 @@ extern "C" uint8_t nrf54l15_clean_low_power_micro_delay_sleep_allowed(void) {
 }
 
 extern "C" uint32_t nrf54l15_ble_grtc_reserved_cc_mask(void) {
+#if defined(NRF54L15_CLEAN_BLE_DISABLED) || \
+    (defined(NRF54L15_CLEAN_BLE_ENABLED) && (NRF54L15_CLEAN_BLE_ENABLED == 0))
+  // A BLE-disabled build has no deferred radio work that can claim GRTC CCs.
+  return 0U;
+#else
   uint32_t mask = 0U;
   mask |= (1UL << kBleBackgroundCompareChannel);
   mask |= (1UL << kBleBackgroundAdvPrewarmCompareChannel);
@@ -135,4 +140,5 @@ extern "C" uint32_t nrf54l15_ble_grtc_reserved_cc_mask(void) {
   mask |= (1UL << kBleBackgroundAdvFinalCleanupCompareChannel);
   mask |= (1UL << kBleBackgroundConnRxCompareChannel);
   return mask;
+#endif
 }

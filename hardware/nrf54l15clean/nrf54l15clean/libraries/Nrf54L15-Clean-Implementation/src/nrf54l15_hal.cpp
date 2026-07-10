@@ -231,6 +231,8 @@ extern "C" bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit) {
 }
 
 extern "C" void nrf54l15_ble_grtc_irq_service(void) {
+#if !defined(NRF54L15_CLEAN_BLE_DISABLED) && \
+    (!defined(NRF54L15_CLEAN_BLE_ENABLED) || (NRF54L15_CLEAN_BLE_ENABLED != 0))
   bleScanSleepWaitHandleTimeoutIrq();
   if (!bleBackgroundOwnerBlocksIdleWake() &&
       g_bleIdleWakeArmed != 0U &&
@@ -256,6 +258,7 @@ extern "C" void nrf54l15_ble_grtc_irq_service(void) {
   } else {
     clearUnownedBleBackgroundGrtcCompares();
   }
+#endif
   nrf54l15_grtc_irq_observer();
 }
 

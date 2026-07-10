@@ -9,7 +9,7 @@ This report is based only on the repository, the supplied local PDFs/text extrac
 
 ## Remediation Update - 2026-07-10
 
-Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.216**. The findings below are retained as the original audit record; this section records the remediation result for the current source tree.
+Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.218**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218 source and hardware follow-up together record the current source-tree result.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -20,11 +20,28 @@ Verification completed in this remediation pass:
 * `python3 -m py_compile scripts/build_all_examples.py scripts/build_release.py scripts/test_all_examples.py scripts/verify_package_index.py scripts/verify_release_archive.py hardware/nrf54l15clean/nrf54l15clean/tools/upload.py` passed.
 * `.github/workflows/ci.yml` and `.github/workflows/release.yml` parsed successfully as YAML.
 * Focused source-local example builds passed for `SystemOffWake`, `SerialDual`, `blehid_mouse`, `HalRegisterContracts`, `PwmDatasheetStress` and `HighSpeedSpi32MHzProbe` on the L15 and LM20 board profiles.
-* Full source-local example matrix passed: `844/844` jobs in `/tmp/nrf54-full-build-report-fixed.json`.
-* `./tools/release.sh 0.9.216` passed, including package-index verification and release-archive Thread/Matter stage-probe compilation. Final archive: `nrf54l15clean-0.9.216-d5ce457a0d02.tar.bz2`, SHA-256 `d5ce457a0d02c347c1812a0e84e204cd88552eff5721e380681967b6cc25128b`, size `26944797`.
-* XIAO nRF54L15 hardware UID `761FDE87` flashed and ran `Power/SystemOffWakeDiag`; repeated boots reported `status=timed_system_off_wake_ok` with GRTC wake/reset evidence. The LM20 board UID `3377B9D6` was not enumerating on USB during this remediation session, so LM20 hardware execution could not be repeated here; LM20 coverage is source-local compile, release-archive compile and static regression validation.
+* Full source-local example matrix passed: `846/846` jobs in `/tmp/nrf54-full-build-report-0.9.218-final.json`.
+* The initial `./tools/release.sh 0.9.216` passed, including package-index verification and release-archive Thread/Matter stage-probe compilation. Its historical archive was `nrf54l15clean-0.9.216-d5ce457a0d02.tar.bz2`, SHA-256 `d5ce457a0d02c347c1812a0e84e204cd88552eff5721e380681967b6cc25128b`, size `26944797`.
+* Final `./tools/release.sh 0.9.218` passed package-index verification and release-archive Thread/Matter stage-probe compilation. Its archive is `nrf54l15clean-0.9.218-33bf48c9834a.tar.bz2`, SHA-256 `33bf48c9834a6cbb1494b80e348fb9bef9f7f783c9e50e0c85f6543aabe9810c`, size `26944208`.
+* The initial L15 hardware pass ran `Power/SystemOffWakeDiag` on UID `761FDE87`; the LM20 board UID `3377B9D6` was not enumerating during that earlier remediation session. The v0.9.218 follow-up below records the later two-board CLI hardware evidence.
 
 Nordic documents System OFF as emulated while debugging. Under that condition the diagnostic can show a debug/software reset bit rather than a physical OFF reset bit, but the fixed code now treats a fired GRTC compare after `WFI` as a wake event and forces the reset path needed by the Arduino API. True non-debug System OFF still enters through `NRF_REGULATORS->SYSTEMOFF`.
+
+### Hardware Follow-up - 2026-07-10 (v0.9.218)
+
+A CLI retest used the connected XIAO nRF54L15 (`761FDE87`, `/dev/ttyACM0`) and XIAO nRF54LM20A (`3377B9D6`, `/dev/ttyACM1`). It found that the earlier Sense rail-retention sketch was not a valid proof: a BLE-disabled build still reserved and cleared the sketch's GRTC compare channel, and enabling bridge `Serial` before the measured delay suppressed the board-state transition being examined. The report's aggregate source-level remediation claim remains valid, but this hardware-test gap required a follow-up correction.
+
+Version 0.9.218 releases BLE-disabled GRTC ownership, keeps the BLE IRQ service from clearing unused BLE compares in that configuration, and rewrites `SenseDelayRailRetentionProbe` as a one-shot measurement before bridge serial is configured. The probe now uses the free CC5 while the core's tickless delay uses CC6, rejects a BLE-enabled build with a clear configuration error, waits 10 ms for the IMU rail, and reports retained measurement data after wake.
+
+Hardware evidence from this follow-up:
+
+* L15 `SystemOffWakeDiag` passed three timed wake cycles with `status=timed_system_off_wake_ok` and a GRTC reset flag.
+* Final `CoreVersionProbe` captures reported `Core version heartbeat: 0.9.218` on both connected boards.
+* L15 rail retention passed: `mid_count=1`, IMU/VBAT stayed high, RF power dropped during idle and restored after wake, `post_rfctl=0`, `vbat_raw=573`, `WHO_AM_I=0x6A`, and `retention_status=PASS`.
+* L15 serial-fabric initialization passed for UARTE22/UARTE30, TWIM22/TWIM30 and SPIM22/SPIM30; the runtime probe now reports the all-pass status every second for CLI monitoring.
+* LM20A passed timed System OFF wake, QSPI JEDEC/status/deep-power-down, IMU `WHO_AM_I=0x6A`, live PDM microphone capture, and a BLE-disabled IMU regression run.
+
+This does not change the explicit remaining limits below: Windows PowerShell execution, external UART loopback, BLE HID pairing, RF/protocol conformance, current characterization and other board-specific lab tests still need their relevant external equipment or reporters.
 
 ## Executive Summary
 

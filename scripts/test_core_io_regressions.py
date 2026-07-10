@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import tempfile
@@ -339,6 +340,71 @@ def validate_xiao_low_power_board_contracts() -> None:
     print("PASS XIAO low-power board state preserves SAMD11 serial bridge pins")
 
 
+def validate_xiao_retention_probe_contracts() -> None:
+    probe_paths = [
+        PLATFORM / "examples/Power/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino",
+        PLATFORM / "examples/XiaoL15/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino",
+    ]
+    probes = [path.read_text(encoding="utf-8") for path in probe_paths]
+    assert probes[0] == probes[1], "retention probe copies diverged"
+    probe = probes[0]
+    assert "kProbeCompareChannel = 5U" in probe
+    assert "BLE Support: Disabled (required)" in probe
+    assert "#error \"SenseDelayRailRetentionProbe requires Tools -> BLE Support -> Disabled.\"" in probe
+    setup_body = function_body(probe, "void setup()")
+    assert setup_body.index("delay(10);") < setup_body.index(
+        "runRetentionMeasurement();"
+    )
+    assert "g_grtc.begin(" not in probe
+    assert probe.index("runRetentionMeasurement();") < probe.index("Serial.begin(115200);")
+    assert "retention_status=" in probe
+    assert "g_postRfCtlPin == 0U" in probe
+    assert "g_vbatRaw > 0" in probe
+
+    matrix_namespace = runpy.run_path(str(ROOT / "scripts/build_all_examples.py"))
+    feature_options = matrix_namespace["feature_options"]
+    for path in probe_paths:
+        relative = path.relative_to(PLATFORM).as_posix()
+        assert "clean_ble=off" in feature_options(relative)
+
+    hooks_source = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_ble_hooks.inc"
+    ).read_text(encoding="utf-8")
+    hal_source = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal.cpp"
+    ).read_text(encoding="utf-8")
+    mask_body = function_body(
+        hooks_source, "extern \"C\" uint32_t nrf54l15_ble_grtc_reserved_cc_mask(void)"
+    )
+    irq_body = function_body(
+        hal_source, "extern \"C\" void nrf54l15_ble_grtc_irq_service(void)"
+    )
+    assert "NRF54L15_CLEAN_BLE_DISABLED" in mask_body
+    assert "return 0U;" in mask_body
+    assert "NRF54L15_CLEAN_BLE_DISABLED" in irq_body
+    assert irq_body.index("nrf54l15_grtc_irq_observer();") > irq_body.index("#endif")
+    print("PASS BLE-disabled GRTC ownership and XIAO rail-retention probe contract")
+
+
+def validate_serial_fabric_runtime_probe_contracts() -> None:
+    probe_paths = [
+        PLATFORM / "examples/Serial/SerialFabricRuntimeProbe/SerialFabricRuntimeProbe.ino",
+        PLATFORM / "examples/Peripherals/SerialFabricRuntimeProbe/SerialFabricRuntimeProbe.ino",
+    ]
+    probes = [path.read_text(encoding="utf-8") for path in probe_paths]
+    assert probes[0] == probes[1], "serial-fabric probe copies diverged"
+    probe = probes[0]
+    assert "void announceStage(const char* stage)" in probe
+    assert "Serial.flush();" in probe
+    assert "g_lastStatusMs" in probe
+    assert "(now - g_lastStatusMs) >= 1000UL" in probe
+    for stage in ("uart22", "uart30", "twim22", "twim30", "spim22", "spim30"):
+        assert f'announceStage("{stage}")' in probe
+    print("PASS serial-fabric runtime probe duplicate and CLI-status contract")
+
+
 def compile_and_run_host_tests(temp: Path) -> None:
     cxx = os.environ.get("CXX")
     if not cxx:
@@ -406,6 +472,8 @@ def main() -> int:
     validate_spi_contracts()
     validate_system_off_wake_contracts()
     validate_xiao_low_power_board_contracts()
+    validate_xiao_retention_probe_contracts()
+    validate_serial_fabric_runtime_probe_contracts()
     with tempfile.TemporaryDirectory(prefix="nrf54-core-io-") as directory:
         compile_and_run_host_tests(Path(directory))
     return 0

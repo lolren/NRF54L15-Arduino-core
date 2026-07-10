@@ -10,13 +10,13 @@
   - immediately probe the Sense IMU and VBAT divider after wake
 
   Expected on a fixed core:
-  - mid-delay pin samples stay HIGH
+  - mid-delay IMU/VBAT samples stay HIGH while RF switch power is LOW
   - immediate post-delay WHO_AM_I reads keep succeeding on Sense boards
   - VBAT raw stays readable with VBAT_EN held HIGH
 
-  Recommended board menu:
+  Required board menu:
   - Power Profile: Low Power (WFI Idle)
-  - BLE Support: Disabled
+  - BLE Support: Disabled (required)
 */
 
 #include <Arduino.h>
@@ -24,11 +24,19 @@
 
 #include "nrf54l15_hal.h"
 
+#if !defined(NRF54L15_CLEAN_BLE_DISABLED) && \
+    (!defined(NRF54L15_CLEAN_BLE_ENABLED) || \
+     (NRF54L15_CLEAN_BLE_ENABLED != 0))
+#error "SenseDelayRailRetentionProbe requires Tools -> BLE Support -> Disabled."
+#endif
+
 using namespace xiao_nrf54l15;
 
 static Grtc g_grtc;
 
-static constexpr uint8_t kProbeCompareChannel = 6U;
+// BLE-disabled builds leave CC5 available while the core's tickless delay
+// uses CC6. The compile-time guard above prevents an invalid BLE-on run.
+static constexpr uint8_t kProbeCompareChannel = 5U;
 static constexpr uint32_t kMidSampleDelayUs = 250000UL;
 static constexpr uint8_t kImuWhoAmIReg = 0x0FU;
 static const uint8_t kImuAddresses[] = {0x6AU, 0x6BU};
@@ -42,6 +50,13 @@ static volatile uint8_t g_midSampleArmed = 0U;
 
 static bool g_haveImu = false;
 static uint8_t g_imuAddress = 0U;
+static uint8_t g_postImuPin = 0U;
+static uint8_t g_postRfPin = 0U;
+static uint8_t g_postRfCtlPin = 0U;
+static uint8_t g_postVbatPin = 0U;
+static uint8_t g_postImuOk = 0U;
+static uint8_t g_postWhoAmI = 0U;
+static int g_vbatRaw = -1;
 
 static bool readWhoAmI(uint8_t address, uint8_t* whoAmI) {
   if (whoAmI == nullptr) {
@@ -108,10 +123,65 @@ extern "C" void nrf54l15_grtc_irq_observer(void) {
   ++g_midSampleCount;
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(1200);
+static void runRetentionMeasurement() {
+  armMidDelaySample();
+  delay(500);
 
+  uint8_t whoAmI = 0U;
+  g_postImuOk = static_cast<uint8_t>(
+      g_haveImu && readWhoAmI(g_imuAddress, &whoAmI));
+  g_postWhoAmI = whoAmI;
+  g_postImuPin = static_cast<uint8_t>(digitalRead(IMU_MIC_EN) != 0 ? 1U : 0U);
+  g_postRfPin = static_cast<uint8_t>(digitalRead(RF_SW) != 0 ? 1U : 0U);
+  g_postRfCtlPin = static_cast<uint8_t>(digitalRead(RF_SW_CTL) != 0 ? 1U : 0U);
+  g_postVbatPin = static_cast<uint8_t>(digitalRead(VBAT_EN) != 0 ? 1U : 0U);
+  g_vbatRaw = analogRead(VBAT_READ);
+}
+
+static void reportMeasurement() {
+  const bool passed =
+      g_haveImu && g_midSampleCount == 1U && g_midSampleArmed == 0U &&
+      g_midImuPin == 1U && g_midRfPin == 0U && g_midVbatPin == 1U &&
+      g_postImuPin == 1U && g_postRfPin == 1U && g_postRfCtlPin == 0U &&
+      g_postVbatPin == 1U && g_vbatRaw > 0 && g_postImuOk != 0U &&
+      g_postWhoAmI == 0x6AU;
+
+  Serial.print("mid_count=");
+  Serial.print(g_midSampleCount);
+  Serial.print(" armed=");
+  Serial.print(g_midSampleArmed);
+  Serial.print(" mid_imu=");
+  Serial.print(g_midImuPin);
+  Serial.print(" mid_rf=");
+  Serial.print(g_midRfPin);
+  Serial.print(" mid_rfctl=");
+  Serial.print(g_midRfCtlPin);
+  Serial.print(" mid_vbat=");
+  Serial.print(g_midVbatPin);
+  Serial.print(" post_imu=");
+  Serial.print(g_postImuPin);
+  Serial.print(" post_rf=");
+  Serial.print(g_postRfPin);
+  Serial.print(" post_rfctl=");
+  Serial.print(g_postRfCtlPin);
+  Serial.print(" post_vbat=");
+  Serial.print(g_postVbatPin);
+  Serial.print(" vbat_raw=");
+  Serial.print(g_vbatRaw);
+  Serial.print(" imu_ok=");
+  Serial.print(g_postImuOk);
+  if (g_postImuOk != 0U) {
+    Serial.print(" who=0x");
+    if (g_postWhoAmI < 0x10U) {
+      Serial.print('0');
+    }
+    Serial.print(g_postWhoAmI, HEX);
+  }
+  Serial.print(" retention_status=");
+  Serial.println(passed ? "PASS" : "FAIL");
+}
+
+void setup() {
   pinMode(IMU_MIC_EN, OUTPUT);
   pinMode(RF_SW, OUTPUT);
   pinMode(RF_SW_CTL, OUTPUT);
@@ -125,18 +195,19 @@ void setup() {
   Wire1.begin();
   Wire1.setClock(400000UL);
 
-  // Force the low-power delay timebase/IRQ path up once before the first
-  // actual probe loop, then configure our extra compare channel on the same
-  // GRTC instance.
-  delay(1);
-  (void)g_grtc.begin(GrtcClockSource::kLfxo);
-  g_grtc.enableCompareInterrupt(kProbeCompareChannel, true);
+  // Do not configure bridge Serial before the measurement: plain delay()
+  // intentionally skips board-state collapse while the bridge UART is active.
+  // The settle window also initializes the core-owned low-power timebase.
+  delay(10);
 
   uint8_t whoAmI = 0U;
   g_haveImu = detectSenseImu(&g_imuAddress, &whoAmI);
+  runRetentionMeasurement();
 
+  // Start the bridge only after the measured delay and report from retained RAM.
+  Serial.begin(115200);
   Serial.println("SenseDelayRailRetentionProbe");
-  Serial.println("Holding IMU_MIC_EN/RF_SW/VBAT_EN HIGH across plain delay().");
+  Serial.println("Measured plain delay() before bridge Serial was configured.");
   Serial.print("sense_imu=");
   Serial.print(g_haveImu ? "yes" : "no");
   if (g_haveImu) {
@@ -156,45 +227,6 @@ void setup() {
 }
 
 void loop() {
-  armMidDelaySample();
-  delay(500);
-
-  uint8_t whoAmI = 0U;
-  const bool whoOk = g_haveImu && readWhoAmI(g_imuAddress, &whoAmI);
-  const int raw = analogRead(VBAT_READ);
-
-  Serial.print("mid_count=");
-  Serial.print(g_midSampleCount);
-  Serial.print(" armed=");
-  Serial.print(g_midSampleArmed);
-  Serial.print(" mid_imu=");
-  Serial.print(g_midImuPin);
-  Serial.print(" mid_rf=");
-  Serial.print(g_midRfPin);
-  Serial.print(" mid_rfctl=");
-  Serial.print(g_midRfCtlPin);
-  Serial.print(" mid_vbat=");
-  Serial.print(g_midVbatPin);
-  Serial.print(" post_imu=");
-  Serial.print(digitalRead(IMU_MIC_EN));
-  Serial.print(" post_rf=");
-  Serial.print(digitalRead(RF_SW));
-  Serial.print(" post_rfctl=");
-  Serial.print(digitalRead(RF_SW_CTL));
-  Serial.print(" post_vbat=");
-  Serial.print(digitalRead(VBAT_EN));
-  Serial.print(" vbat_raw=");
-  Serial.print(raw);
-  Serial.print(" imu_ok=");
-  Serial.print(whoOk ? 1 : 0);
-  if (whoOk) {
-    Serial.print(" who=0x");
-    if (whoAmI < 0x10U) {
-      Serial.print('0');
-    }
-    Serial.print(whoAmI, HEX);
-  }
-  Serial.println();
-
+  reportMeasurement();
   delay(1000);
 }

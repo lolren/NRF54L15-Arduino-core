@@ -80,6 +80,8 @@ def feature_options(relative: str) -> tuple[str, ...]:
         if "clean_thread=stage" not in options:
             options.append("clean_thread=stage")
         options.append("clean_matter=stage")
+    if name == "sensedelayrailretentionprobe.ino":
+        options.append("clean_ble=off")
     return tuple(options)
 
 
