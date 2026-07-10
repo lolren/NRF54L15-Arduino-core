@@ -35,11 +35,10 @@ HOST_TOOL_WHEELHOUSE_PLATFORMS = {
 }
 REQUIRED_PLATFORM_TOOL_DEPENDENCIES = (
     {"packager": "arduino", "name": "arm-none-eabi-gcc", "version": "7-2017q4"},
-    {"packager": "arduino", "name": "openocd", "version": "0.11.0-arduino2"},
 )
 HOST_TOOL_REQUIREMENTS_FILE = "requirements-pyocd.txt"
 ARCHIVE_HASH_LEN = 12
-DEFAULT_PLATFORM_PACKAGE_EXCLUDES = (
+OPENTHREAD_PLATFORM_PACKAGE_EXCLUDES = (
     "libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core",
     "libraries/Nrf54L15-Clean-Implementation/src/openthread_core_stage",
     "libraries/Nrf54L15-Clean-Implementation/src/openthread_core_stage_bridge.cpp",
@@ -446,7 +445,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-openthread-core",
         action="store_true",
-        help="Include the optional upstream OpenThread core staging tree in the platform archive",
+        help="Deprecated compatibility flag; OpenThread sources are included by default",
+    )
+    parser.add_argument(
+        "--exclude-openthread-core",
+        action="store_true",
+        help=(
+            "Build a reduced archive without OpenThread/Matter support. This is only "
+            "valid for private packages whose boards.txt removes those feature menus."
+        ),
     )
     parser.add_argument(
         "--platform-exclude",
@@ -598,6 +605,10 @@ def should_rebuild_host_tools(args, existing_index):
 
 def main() -> int:
     args = parse_args()
+    if args.include_openthread_core and args.exclude_openthread_core:
+        raise SystemExit(
+            "--include-openthread-core and --exclude-openthread-core are mutually exclusive"
+        )
     root = args.root.resolve()
     dist_dir = args.dist_dir.resolve() if args.dist_dir else (root / "dist")
     dist_dir.mkdir(parents=True, exist_ok=True)
@@ -612,11 +623,10 @@ def main() -> int:
     update_platform_txt_version(platform_dir, version)
 
     release_base_url = args.release_base_url.format(version=version)
-    platform_excludes = tuple(
-        filter(
-            None,
-            [] if args.include_openthread_core else DEFAULT_PLATFORM_PACKAGE_EXCLUDES,
-        )
+    platform_excludes = (
+        OPENTHREAD_PLATFORM_PACKAGE_EXCLUDES
+        if args.exclude_openthread_core
+        else ()
     ) + tuple(
         normalize_exclude_path(item)
         for item in args.platform_exclude

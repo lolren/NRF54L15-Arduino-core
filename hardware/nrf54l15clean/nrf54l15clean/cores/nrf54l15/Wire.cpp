@@ -62,8 +62,8 @@ static constexpr uint32_t T_ENABLE_TWIM        = 6UL;
 static constexpr uint32_t T_ENABLE_TWIS        = 9UL;
 
 static constexpr uint32_t T_TWIM_ERRORSRC_ALL  = 0x7UL;
-static constexpr uint32_t T_TWIM_ERRORSRC_ANACK = 0x1UL;
-static constexpr uint32_t T_TWIM_ERRORSRC_DNACK = 0x2UL;
+static constexpr uint32_t T_TWIM_ERRORSRC_ANACK = (1UL << 1U);
+static constexpr uint32_t T_TWIM_ERRORSRC_DNACK = (1UL << 2U);
 
 static constexpr uint32_t T_TWIS_ERRORSRC_OVERFLOW = (1UL << 0U);
 static constexpr uint32_t T_TWIS_ERRORSRC_DNACK    = (1UL << 2U);
@@ -122,20 +122,19 @@ static bool wait_event_or_error(uintptr_t base, uint32_t event_off, uint32_t spi
     return false;
 }
 
-static bool wait_tx_done_or_error(uintptr_t base, uint32_t spin) {
-    while (spin-- > 0U) {
-        if (reg32(base + T_EVENTS_LASTTX) != 0U || reg32(base + T_EVENTS_DMA_TX_END) != 0U) {
-            return true;
-        }
-        if (reg32(base + T_EVENTS_ERROR) != 0U) {
-            return false;
-        }
-    }
-    return false;
-}
-
 static bool decode_pin(uint8_t pin, uint8_t* port, uint8_t* p) {
     return pinToPortPin(pin, port, p);
+}
+
+static bool twim_route_valid(const NRF_TWIM_Type* twim,
+                             uint8_t sclPort, uint8_t sdaPort) {
+    if (twim == nullptr || sclPort != sdaPort) {
+        return false;
+    }
+    if (reinterpret_cast<uintptr_t>(twim) == reinterpret_cast<uintptr_t>(NRF_TWIM30)) {
+        return sclPort == 0U;
+    }
+    return sclPort == 1U;
 }
 
 static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
@@ -333,7 +332,8 @@ void TwoWire::begin() {
     }
 
     uint8_t sclPort = 0, sclPin = 0, sdaPort = 0, sdaPin = 0;
-    if (!decode_pin(_scl, &sclPort, &sclPin) || !decode_pin(_sda, &sdaPort, &sdaPin)) {
+    if (!decode_pin(_scl, &sclPort, &sclPin) || !decode_pin(_sda, &sdaPort, &sdaPin) ||
+        !twim_route_valid(_twim, sclPort, sdaPort)) {
         return;
     }
 
@@ -375,7 +375,8 @@ void TwoWire::begin(uint8_t address) {
     }
 
     uint8_t sclPort = 0, sclPin = 0, sdaPort = 0, sdaPin = 0;
-    if (!decode_pin(_scl, &sclPort, &sclPin) || !decode_pin(_sda, &sdaPort, &sdaPin)) {
+    if (!decode_pin(_scl, &sclPort, &sclPin) || !decode_pin(_sda, &sdaPort, &sdaPin) ||
+        !twim_route_valid(_twim, sclPort, sdaPort)) {
         return;
     }
 
@@ -474,7 +475,8 @@ bool TwoWire::setPins(uint8_t sda, uint8_t scl) {
     }
 
     uint8_t sclPort = 0, sclPin = 0, sdaPort = 0, sdaPin = 0;
-    if (!decode_pin(scl, &sclPort, &sclPin) || !decode_pin(sda, &sdaPort, &sdaPin)) {
+    if (!decode_pin(scl, &sclPort, &sclPin) || !decode_pin(sda, &sdaPort, &sdaPin) ||
+        !twim_route_valid(_twim, sclPort, sdaPort)) {
         return false;
     }
 
@@ -536,35 +538,6 @@ uint8_t TwoWire::endTransmission(bool sendStop) {
     }
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_twim);
-
-    if (_txBufferLength == 0U && sendStop) {
-        // Force an address phase in write mode so write-only targets
-        // (for example SSD1306) can be detected by begin()/scanner code.
-        uint8_t dummy = 0x00U;
-
-        reg32(base + T_EVENTS_STOPPED) = 0U;
-        reg32(base + T_EVENTS_ERROR) = 0U;
-        reg32(base + T_EVENTS_LASTTX) = 0U;
-        reg32(base + T_EVENTS_DMA_TX_END) = 0U;
-        reg32(base + T_TWIM_ERRORSRC) = T_TWIM_ERRORSRC_ALL;
-
-        reg32(base + T_ADDRESS) = _txAddress;
-        reg32(base + T_DMA_TX_PTR) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&dummy));
-        reg32(base + T_DMA_TX_MAXCNT) = 1U;
-        reg32(base + T_TASKS_DMA_TX_START) = 1U;
-
-        const bool writeOk = wait_tx_done_or_error(base, 300000UL);
-        const uint32_t errorsrc = reg32(base + T_TWIM_ERRORSRC) & T_TWIM_ERRORSRC_ALL;
-
-        reg32(base + T_TASKS_STOP) = 1U;
-        const bool stopOk = wait_event(base, T_EVENTS_STOPPED, 300000UL);
-        reg32(base + T_TWIM_ERRORSRC) = T_TWIM_ERRORSRC_ALL;
-
-        _pendingRepeatedStart = false;
-        _txBufferLength = 0U;
-        _lastActivityUs = micros();
-        return end_tx_error_code(writeOk, stopOk, errorsrc);
-    }
 
     reg32(base + T_EVENTS_STOPPED) = 0U;
     reg32(base + T_EVENTS_ERROR) = 0U;
@@ -754,6 +727,30 @@ void TwoWire::serviceAutoGate() {
         end();
     }
 #endif
+}
+
+bool TwoWire::quiesceForSystemOff(uint32_t spinLimit) {
+    if (!_initialized || _twim == nullptr) {
+        return true;
+    }
+
+    const uintptr_t base = reinterpret_cast<uintptr_t>(_twim);
+    reg32(base + T_INTENCLR) = T_TWIS_INT_MASK;
+    reg32(base + T_EVENTS_STOPPED) = 0U;
+    reg32(base + T_TASKS_STOP) = 1U;
+    uint32_t remaining = spinLimit;
+    while (reg32(base + T_EVENTS_STOPPED) == 0U && remaining > 0U) {
+        --remaining;
+    }
+    const bool stopped = reg32(base + T_EVENTS_STOPPED) != 0U;
+    end();
+    return stopped && !_initialized && reg32(base + T_ENABLE) == T_ENABLE_DISABLED;
+}
+
+extern "C" bool nrf54_core_quiesce_wire_for_system_off(uint32_t spin_limit) {
+    const bool wireOk = Wire.quiesceForSystemOff(spin_limit);
+    const bool wire1Ok = Wire1.quiesceForSystemOff(spin_limit);
+    return wireOk && wire1Ok;
 }
 
 int TwoWire::targetWriteRequestedAdapter(struct i2c_target_config* config) {

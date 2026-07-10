@@ -60,6 +60,7 @@ public:
     void onReceive(void (*callback)(int));
     void onRequest(void (*callback)(void));
     void serviceAutoGate();
+    bool quiesceForSystemOff(uint32_t spinLimit);
 
     uint8_t getTransmissionAddress() const { return _txAddress; }
 

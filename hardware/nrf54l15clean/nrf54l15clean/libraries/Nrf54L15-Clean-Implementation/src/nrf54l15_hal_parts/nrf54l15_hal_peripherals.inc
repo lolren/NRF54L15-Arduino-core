@@ -1037,6 +1037,7 @@ Pwm::Pwm(uint32_t base)
       counterMode_(CounterMode::kUp),
       highLevelManaged_(false),
       configured_(false),
+      running_(false),
       irqCallback_(nullptr),
       irqContext_(nullptr),
       sequence_{0, 0, 0, 0} {}
@@ -1044,7 +1045,8 @@ Pwm::Pwm(uint32_t base)
 bool Pwm::beginRaw(const Pin* outPins, uint8_t channelCount, uint32_t frequencyHz,
                    DecoderLoad load, DecoderMode mode, uint8_t idleOutMask,
                    CounterMode counterMode) {
-  if (outPins == nullptr || channelCount == 0U || channelCount > maxChannelCount()) {
+  if (base_ == 0U || outPins == nullptr || channelCount == 0U ||
+      channelCount > maxChannelCount()) {
     return false;
   }
 
@@ -1082,8 +1084,10 @@ bool Pwm::beginRaw(const Pin* outPins, uint8_t channelCount, uint32_t frequencyH
     reg32(base_ + pwmDmaSeqPtrOffset(seq)) =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&sequence_[0]));
     reg32(base_ + pwmDmaSeqMaxCntOffset(seq)) = 0U;
-    reg32(base_ + pwm::SEQ_REFRESH + (static_cast<uint32_t>(seq) * sizeof(uint32_t))) = 0U;
-    reg32(base_ + pwm::SEQ_ENDDELAY + (static_cast<uint32_t>(seq) * sizeof(uint32_t))) =
+    reg32(base_ + pwm::SEQ_REFRESH +
+          (static_cast<uint32_t>(seq) * pwm::SEQ_CONFIG_STRIDE)) = 0U;
+    reg32(base_ + pwm::SEQ_ENDDELAY +
+          (static_cast<uint32_t>(seq) * pwm::SEQ_CONFIG_STRIDE)) =
         0U;
   }
 
@@ -1093,6 +1097,11 @@ bool Pwm::beginRaw(const Pin* outPins, uint8_t channelCount, uint32_t frequencyH
   highLevelManaged_ = false;
   reg32(base_ + pwm::ENABLE) = pwm::ENABLE_ENABLED;
   configured_ = true;
+  running_ = false;
+  Pwm** slot = pwmActiveSlotForBase(base_);
+  if (slot != nullptr) {
+    *slot = this;
+  }
   return true;
 }
 
@@ -1184,7 +1193,8 @@ bool Pwm::setDutyPermille(uint8_t channel, uint16_t dutyPermille) {
 }
 
 bool Pwm::setActiveHigh(uint8_t channel, bool activeHigh) {
-  if (!highLevelManaged_ || !channelConfigured(channel)) {
+  if (!configured_ || running_ || !highLevelManaged_ ||
+      !channelConfigured(channel)) {
     return false;
   }
 
@@ -1195,10 +1205,8 @@ bool Pwm::setActiveHigh(uint8_t channel, bool activeHigh) {
     activeHighMask_ &= static_cast<uint8_t>(~bit);
   }
 
-  if (!configured_) {
-    return false;
-  }
-
+  // IDLEOUT writes are ignored while PWM is enabled.
+  reg32(base_ + pwm::ENABLE) = pwm::ENABLE_DISABLED;
   uint32_t idleOut = reg32(base_ + pwm::IDLEOUT);
   if (activeHigh) {
     idleOut &= ~(1UL << channel);
@@ -1207,6 +1215,7 @@ bool Pwm::setActiveHigh(uint8_t channel, bool activeHigh) {
   }
   reg32(base_ + pwm::IDLEOUT) = idleOut;
   updateSequenceWords();
+  reg32(base_ + pwm::ENABLE) = pwm::ENABLE_ENABLED;
   return true;
 }
 
@@ -1220,9 +1229,11 @@ bool Pwm::setSequence(uint8_t sequence, const uint16_t* words, uint16_t wordCoun
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(words));
   reg32(base_ + pwmDmaSeqMaxCntOffset(sequence)) =
       static_cast<uint32_t>(wordCount * sizeof(uint16_t));
-  reg32(base_ + pwm::SEQ_REFRESH + (static_cast<uint32_t>(sequence) * sizeof(uint32_t))) =
+  reg32(base_ + pwm::SEQ_REFRESH +
+        (static_cast<uint32_t>(sequence) * pwm::SEQ_CONFIG_STRIDE)) =
       refreshCount;
-  reg32(base_ + pwm::SEQ_ENDDELAY + (static_cast<uint32_t>(sequence) * sizeof(uint32_t))) =
+  reg32(base_ + pwm::SEQ_ENDDELAY +
+        (static_cast<uint32_t>(sequence) * pwm::SEQ_CONFIG_STRIDE)) =
       endDelay;
   sequenceConfiguredMask_ |= static_cast<uint8_t>(1U << sequence);
   return true;
@@ -1501,20 +1512,38 @@ bool Pwm::start(uint8_t sequence, uint32_t spinLimit) {
   }
 
   reg32(base_ + pwmTaskSeqStartOffset(sequence)) = 1;
-  return waitForEvent(base_, pwmEventSeqStartedOffset(sequence), spinLimit);
+  const bool started =
+      waitForEvent(base_, pwmEventSeqStartedOffset(sequence), spinLimit);
+  if (!started) {
+    reg32(base_ + pwm::TASKS_STOP) = 1U;
+    (void)waitForEvent(base_, pwm::EVENTS_STOPPED, spinLimit);
+    running_ = false;
+    return false;
+  }
+  running_ = true;
+  return true;
 }
 
 bool Pwm::stop(uint32_t spinLimit) {
   if (!configured_) {
     return false;
   }
+  if (!running_) {
+    return true;
+  }
 
   clearEvent(base_, pwm::EVENTS_STOPPED);
   reg32(base_ + pwm::TASKS_STOP) = 1;
   reg32(base_ + pwm::SHORTS) = 0;
 
-  return waitForEvent(base_, pwm::EVENTS_STOPPED, spinLimit);
+  const bool stopped = waitForEvent(base_, pwm::EVENTS_STOPPED, spinLimit);
+  if (stopped) {
+    running_ = false;
+  }
+  return stopped;
 }
+
+bool Pwm::running() const { return running_; }
 
 void Pwm::end() {
   if (configured_) {
@@ -1535,6 +1564,7 @@ void Pwm::end() {
 
   reg32(base_ + pwm::ENABLE) = pwm::ENABLE_DISABLED;
   reg32(base_ + pwm::SHORTS) = 0;
+  running_ = false;
   disconnectAllOutputs();
 
   configured_ = false;
@@ -1792,9 +1822,22 @@ Gpiote::Gpiote(uint32_t base, uint8_t channelCount)
   }
 }
 
+namespace {
+bool gpioteOwnsPin(uint32_t base, const Pin& pin) {
+  if (base == nrf54l15::GPIOTE30_BASE) return pin.port == 0U;
+  if (base != nrf54l15::GPIOTE20_BASE) return false;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  return pin.port == 1U || pin.port == 3U;
+#else
+  return pin.port == 1U;
+#endif
+}
+}  // namespace
+
 bool Gpiote::configureEvent(uint8_t channel, const Pin& pin, GpiotePolarity polarity,
                             bool enableInterruptFlag) {
-  if (channel >= channelCount_ || !isConnected(pin)) {
+  if (channel >= channelCount_ || !isConnected(pin) ||
+      !gpioteOwnsPin(base_, pin)) {
     return false;
   }
 
@@ -1819,7 +1862,8 @@ bool Gpiote::configureEvent(uint8_t channel, const Pin& pin, GpiotePolarity pola
 
 bool Gpiote::configureTask(uint8_t channel, const Pin& pin, GpiotePolarity polarity,
                            bool initialHigh) {
-  if (channel >= channelCount_ || !isConnected(pin)) {
+  if (channel >= channelCount_ || !isConnected(pin) ||
+      !gpioteOwnsPin(base_, pin)) {
     return false;
   }
 

@@ -74,7 +74,8 @@ void setup() {
   (void)Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
   (void)Gpio::write(kPinUserLed, true);  // LED off
 
-  NRF_OSCILLATORS->PLL.FREQ = OSCILLATORS_PLL_FREQ_FREQ_CK64M;
+  // Select 64 MHz from the board's CPU Frequency menu before uploading for
+  // the lowest active current. nRF54L frequency selection is startup-only.
   Serial.println("LowPowerPeripheralGating: started");
 }
 

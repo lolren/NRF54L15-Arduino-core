@@ -6,8 +6,8 @@
   nRF54L15 boards:
     SPI and SPI_HS use the same P2 SPIM00 SCK/MISO/MOSI route.
     They are separate logical objects and must be used sequentially.
-    SPI_HS temporarily selects the 128 MHz CPU clock for a 32 MHz request,
-    then restores the previous CPU clock at endTransaction().
+    SPIM00 uses its fixed 128 MHz peripheral source for a 32 MHz request;
+    the CPU clock profile is not changed.
     On XIAO nRF54L15, both use D8/D9/D10 and default to D2 for software CS.
 
   XIAO nRF54LM20A:
@@ -33,7 +33,7 @@ void setup() {
 #elif defined(ARDUINO_NRF54L15)
   Serial.println("Board: nRF54L15");
   Serial.println("SPI and SPI_HS share the exposed P2 SPIM00 pins.");
-  Serial.println("SPI_HS: 32 MHz with temporary 128 MHz CPU clock.");
+  Serial.println("SPI_HS: 32 MHz from the fixed 128 MHz SPIM00 source.");
   Serial.println("Use SPI and SPI_HS sequentially, not simultaneously.");
 #else
   Serial.println("Board: unknown nRF54 clean-core target.");

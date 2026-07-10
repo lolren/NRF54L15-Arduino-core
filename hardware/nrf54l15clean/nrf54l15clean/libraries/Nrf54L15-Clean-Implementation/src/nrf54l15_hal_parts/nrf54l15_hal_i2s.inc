@@ -6,13 +6,16 @@ I2sTx::I2sTx(uint32_t base)
       refillCallback_(nullptr),
       refillContext_(nullptr),
       nextBufferIndex_(1U),
+      pointerPrimed_(false),
       configured_(false),
       running_(false),
       restartPending_(false),
       txPtrUpdCount_(0U),
       stoppedCount_(0U),
       restartCount_(0U),
-      manualStopCount_(0U) {}
+      manualStopCount_(0U) {
+  if (!supported()) i2s_ = nullptr;
+}
 
 bool I2sTx::setBuffers(uint32_t* buffer0, uint32_t* buffer1, uint32_t wordCount) {
   if (buffer0 == nullptr || buffer1 == nullptr || wordCount == 0U) {
@@ -22,8 +25,9 @@ bool I2sTx::setBuffers(uint32_t* buffer0, uint32_t* buffer1, uint32_t wordCount)
       (reinterpret_cast<uintptr_t>(buffer1) & 0x3U) != 0U) {
     return false;
   }
-  if (wordCount >
-      (I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos)) {
+  const uint32_t maxBytes =
+      I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos;
+  if (wordCount > maxBytes / sizeof(uint32_t)) {
     return false;
   }
 
@@ -99,7 +103,8 @@ bool I2sTx::begin(const I2sTxConfig& config, uint32_t* buffer0, uint32_t* buffer
       (config_.channels << I2S_CONFIG_CHANNELS_CHANNELS_Pos) &
       I2S_CONFIG_CHANNELS_CHANNELS_Msk;
 
-  i2s_->RXTXD.MAXCNT = (wordCount_ << I2S_RXTXD_MAXCNT_MAXCNT_Pos) &
+  i2s_->RXTXD.MAXCNT = ((wordCount_ * sizeof(uint32_t)) <<
+                        I2S_RXTXD_MAXCNT_MAXCNT_Pos) &
                        I2S_RXTXD_MAXCNT_MAXCNT_Msk;
   i2s_->INTENCLR = I2S_INTENCLR_TXPTRUPD_Msk | I2S_INTENCLR_STOPPED_Msk;
   clearEvents();
@@ -112,10 +117,13 @@ bool I2sTx::begin(const I2sTxConfig& config, uint32_t* buffer0, uint32_t* buffer
   i2s_->ENABLE = (I2S_ENABLE_ENABLE_Enabled << I2S_ENABLE_ENABLE_Pos) &
                  I2S_ENABLE_ENABLE_Msk;
 
+#if NRF54_HAS_I2S20
   NVIC_SetPriority(I2S20_IRQn, config_.irqPriority);
   NVIC_EnableIRQ(I2S20_IRQn);
+#endif
 
   nextBufferIndex_ = 1U;
+  pointerPrimed_ = false;
   configured_ = true;
   running_ = false;
   restartPending_ = false;
@@ -123,6 +131,7 @@ bool I2sTx::begin(const I2sTxConfig& config, uint32_t* buffer0, uint32_t* buffer
   stoppedCount_ = 0U;
   restartCount_ = 0U;
   manualStopCount_ = 0U;
+  (void)makeActive();
   return true;
 }
 
@@ -147,6 +156,7 @@ void I2sTx::end() {
   configured_ = false;
   running_ = false;
   restartPending_ = false;
+  pointerPrimed_ = false;
 }
 
 bool I2sTx::start() {
@@ -156,6 +166,7 @@ bool I2sTx::start() {
 
   clearEvents();
   nextBufferIndex_ = 1U;
+  pointerPrimed_ = false;
   armBuffer(0U);
   i2s_->INTENSET = I2S_INTENSET_TXPTRUPD_Msk | I2S_INTENSET_STOPPED_Msk;
   running_ = true;
@@ -171,6 +182,22 @@ bool I2sTx::stop() {
 
   ++manualStopCount_;
   i2s_->TASKS_STOP = I2S_TASKS_STOP_TASKS_STOP_Trigger;
+  return true;
+}
+
+bool I2sTx::quiesce(uint32_t spinLimit) {
+  if (!configured_ || i2s_ == nullptr) return true;
+  i2s_->INTENCLR = I2S_INTENCLR_TXPTRUPD_Msk | I2S_INTENCLR_STOPPED_Msk;
+  if (running_) {
+    i2s_->EVENTS_STOPPED = 0U;
+    i2s_->TASKS_STOP = I2S_TASKS_STOP_TASKS_STOP_Trigger;
+    if (!waitForNonZero(&i2s_->EVENTS_STOPPED, spinLimit)) return false;
+    i2s_->EVENTS_STOPPED = 0U;
+    ++stoppedCount_;
+  }
+  running_ = false;
+  restartPending_ = false;
+  pointerPrimed_ = false;
   return true;
 }
 
@@ -192,9 +219,10 @@ void I2sTx::onIrq() {
     const uint8_t queuedIndex = nextBufferIndex_;
     armBuffer(queuedIndex);
     nextBufferIndex_ ^= 1U;
-    if (refillCallback_ != nullptr) {
-      refillCallback_(buffers_[nextBufferIndex_], wordCount_, refillContext_);
+    if (pointerPrimed_ && refillCallback_ != nullptr) {
+      refillCallback_(buffers_[queuedIndex], wordCount_, refillContext_);
     }
+    pointerPrimed_ = true;
     ++txPtrUpdCount_;
   }
 
@@ -256,13 +284,16 @@ I2sRx::I2sRx(uint32_t base)
       receiveCallback_(nullptr),
       receiveContext_(nullptr),
       nextBufferIndex_(1U),
+      pointerPrimed_(false),
       configured_(false),
       running_(false),
       restartPending_(false),
       rxPtrUpdCount_(0U),
       stoppedCount_(0U),
       restartCount_(0U),
-      manualStopCount_(0U) {}
+      manualStopCount_(0U) {
+  if (!supported()) i2s_ = nullptr;
+}
 
 bool I2sRx::setBuffers(uint32_t* buffer0, uint32_t* buffer1, uint32_t wordCount) {
   if (buffer0 == nullptr || buffer1 == nullptr || wordCount == 0U) {
@@ -272,8 +303,9 @@ bool I2sRx::setBuffers(uint32_t* buffer0, uint32_t* buffer1, uint32_t wordCount)
       (reinterpret_cast<uintptr_t>(buffer1) & 0x3U) != 0U) {
     return false;
   }
-  if (wordCount >
-      (I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos)) {
+  const uint32_t maxBytes =
+      I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos;
+  if (wordCount > maxBytes / sizeof(uint32_t)) {
     return false;
   }
 
@@ -349,7 +381,8 @@ bool I2sRx::begin(const I2sRxConfig& config, uint32_t* buffer0, uint32_t* buffer
       (config_.channels << I2S_CONFIG_CHANNELS_CHANNELS_Pos) &
       I2S_CONFIG_CHANNELS_CHANNELS_Msk;
 
-  i2s_->RXTXD.MAXCNT = (wordCount_ << I2S_RXTXD_MAXCNT_MAXCNT_Pos) &
+  i2s_->RXTXD.MAXCNT = ((wordCount_ * sizeof(uint32_t)) <<
+                        I2S_RXTXD_MAXCNT_MAXCNT_Pos) &
                        I2S_RXTXD_MAXCNT_MAXCNT_Msk;
   i2s_->INTENCLR = I2S_INTENCLR_RXPTRUPD_Msk | I2S_INTENCLR_STOPPED_Msk;
   clearEvents();
@@ -358,10 +391,13 @@ bool I2sRx::begin(const I2sRxConfig& config, uint32_t* buffer0, uint32_t* buffer
   i2s_->ENABLE = (I2S_ENABLE_ENABLE_Enabled << I2S_ENABLE_ENABLE_Pos) &
                  I2S_ENABLE_ENABLE_Msk;
 
+#if NRF54_HAS_I2S20
   NVIC_SetPriority(I2S20_IRQn, config_.irqPriority);
   NVIC_EnableIRQ(I2S20_IRQn);
+#endif
 
   nextBufferIndex_ = 1U;
+  pointerPrimed_ = false;
   configured_ = true;
   running_ = false;
   restartPending_ = false;
@@ -369,6 +405,7 @@ bool I2sRx::begin(const I2sRxConfig& config, uint32_t* buffer0, uint32_t* buffer
   stoppedCount_ = 0U;
   restartCount_ = 0U;
   manualStopCount_ = 0U;
+  (void)makeActive();
   return true;
 }
 
@@ -393,6 +430,7 @@ void I2sRx::end() {
   configured_ = false;
   running_ = false;
   restartPending_ = false;
+  pointerPrimed_ = false;
 }
 
 bool I2sRx::start() {
@@ -402,6 +440,7 @@ bool I2sRx::start() {
 
   clearEvents();
   nextBufferIndex_ = 1U;
+  pointerPrimed_ = false;
   armBuffer(0U);
   i2s_->INTENSET = I2S_INTENSET_RXPTRUPD_Msk | I2S_INTENSET_STOPPED_Msk;
   running_ = true;
@@ -417,6 +456,22 @@ bool I2sRx::stop() {
 
   ++manualStopCount_;
   i2s_->TASKS_STOP = I2S_TASKS_STOP_TASKS_STOP_Trigger;
+  return true;
+}
+
+bool I2sRx::quiesce(uint32_t spinLimit) {
+  if (!configured_ || i2s_ == nullptr) return true;
+  i2s_->INTENCLR = I2S_INTENCLR_RXPTRUPD_Msk | I2S_INTENCLR_STOPPED_Msk;
+  if (running_) {
+    i2s_->EVENTS_STOPPED = 0U;
+    i2s_->TASKS_STOP = I2S_TASKS_STOP_TASKS_STOP_Trigger;
+    if (!waitForNonZero(&i2s_->EVENTS_STOPPED, spinLimit)) return false;
+    i2s_->EVENTS_STOPPED = 0U;
+    ++stoppedCount_;
+  }
+  running_ = false;
+  restartPending_ = false;
+  pointerPrimed_ = false;
   return true;
 }
 
@@ -438,9 +493,10 @@ void I2sRx::onIrq() {
     const uint8_t queuedIndex = nextBufferIndex_;
     armBuffer(queuedIndex);
     nextBufferIndex_ ^= 1U;
-    if (receiveCallback_ != nullptr) {
-      receiveCallback_(buffers_[nextBufferIndex_], wordCount_, receiveContext_);
+    if (pointerPrimed_ && receiveCallback_ != nullptr) {
+      receiveCallback_(buffers_[queuedIndex], wordCount_, receiveContext_);
     }
+    pointerPrimed_ = true;
     ++rxPtrUpdCount_;
   }
 
@@ -506,6 +562,8 @@ I2sDuplex::I2sDuplex(uint32_t base)
       rxReceiveContext_(nullptr),
       nextTxBufferIndex_(1U),
       nextRxBufferIndex_(1U),
+      txPointerPrimed_(false),
+      rxPointerPrimed_(false),
       configured_(false),
       running_(false),
       restartPending_(false),
@@ -513,7 +571,9 @@ I2sDuplex::I2sDuplex(uint32_t base)
       rxPtrUpdCount_(0U),
       stoppedCount_(0U),
       restartCount_(0U),
-      manualStopCount_(0U) {}
+      manualStopCount_(0U) {
+  if (!supported()) i2s_ = nullptr;
+}
 
 bool I2sDuplex::setTxBuffers(uint32_t* buffer0, uint32_t* buffer1,
                              uint32_t wordCount) {
@@ -524,8 +584,9 @@ bool I2sDuplex::setTxBuffers(uint32_t* buffer0, uint32_t* buffer1,
       (reinterpret_cast<uintptr_t>(buffer1) & 0x3U) != 0U) {
     return false;
   }
-  if (wordCount >
-      (I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos)) {
+  const uint32_t maxBytes =
+      I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos;
+  if (wordCount > maxBytes / sizeof(uint32_t)) {
     return false;
   }
 
@@ -544,8 +605,9 @@ bool I2sDuplex::setRxBuffers(uint32_t* buffer0, uint32_t* buffer1,
       (reinterpret_cast<uintptr_t>(buffer1) & 0x3U) != 0U) {
     return false;
   }
-  if (wordCount >
-      (I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos)) {
+  const uint32_t maxBytes =
+      I2S_RXTXD_MAXCNT_MAXCNT_Msk >> I2S_RXTXD_MAXCNT_MAXCNT_Pos;
+  if (wordCount > maxBytes / sizeof(uint32_t)) {
     return false;
   }
   if (wordCount_ != 0U && wordCount_ != wordCount) {
@@ -628,7 +690,8 @@ bool I2sDuplex::begin(const I2sDuplexConfig& config, uint32_t* txBuffer0,
       (config_.channels << I2S_CONFIG_CHANNELS_CHANNELS_Pos) &
       I2S_CONFIG_CHANNELS_CHANNELS_Msk;
 
-  i2s_->RXTXD.MAXCNT = (wordCount_ << I2S_RXTXD_MAXCNT_MAXCNT_Pos) &
+  i2s_->RXTXD.MAXCNT = ((wordCount_ * sizeof(uint32_t)) <<
+                        I2S_RXTXD_MAXCNT_MAXCNT_Pos) &
                        I2S_RXTXD_MAXCNT_MAXCNT_Msk;
   i2s_->INTENCLR = I2S_INTENCLR_TXPTRUPD_Msk | I2S_INTENCLR_RXPTRUPD_Msk |
                    I2S_INTENCLR_STOPPED_Msk;
@@ -639,11 +702,15 @@ bool I2sDuplex::begin(const I2sDuplexConfig& config, uint32_t* txBuffer0,
   i2s_->ENABLE = (I2S_ENABLE_ENABLE_Enabled << I2S_ENABLE_ENABLE_Pos) &
                  I2S_ENABLE_ENABLE_Msk;
 
+#if NRF54_HAS_I2S20
   NVIC_SetPriority(I2S20_IRQn, config_.irqPriority);
   NVIC_EnableIRQ(I2S20_IRQn);
+#endif
 
   nextTxBufferIndex_ = 1U;
   nextRxBufferIndex_ = 1U;
+  txPointerPrimed_ = false;
+  rxPointerPrimed_ = false;
   configured_ = true;
   running_ = false;
   restartPending_ = false;
@@ -652,6 +719,7 @@ bool I2sDuplex::begin(const I2sDuplexConfig& config, uint32_t* txBuffer0,
   stoppedCount_ = 0U;
   restartCount_ = 0U;
   manualStopCount_ = 0U;
+  (void)makeActive();
   return true;
 }
 
@@ -677,6 +745,8 @@ void I2sDuplex::end() {
   configured_ = false;
   running_ = false;
   restartPending_ = false;
+  txPointerPrimed_ = false;
+  rxPointerPrimed_ = false;
 }
 
 bool I2sDuplex::start() {
@@ -687,6 +757,8 @@ bool I2sDuplex::start() {
   clearEvents();
   nextTxBufferIndex_ = 1U;
   nextRxBufferIndex_ = 1U;
+  txPointerPrimed_ = false;
+  rxPointerPrimed_ = false;
   armTxBuffer(0U);
   armRxBuffer(0U);
   i2s_->INTENSET = I2S_INTENSET_TXPTRUPD_Msk | I2S_INTENSET_RXPTRUPD_Msk |
@@ -704,6 +776,24 @@ bool I2sDuplex::stop() {
 
   ++manualStopCount_;
   i2s_->TASKS_STOP = I2S_TASKS_STOP_TASKS_STOP_Trigger;
+  return true;
+}
+
+bool I2sDuplex::quiesce(uint32_t spinLimit) {
+  if (!configured_ || i2s_ == nullptr) return true;
+  i2s_->INTENCLR = I2S_INTENCLR_TXPTRUPD_Msk | I2S_INTENCLR_RXPTRUPD_Msk |
+                   I2S_INTENCLR_STOPPED_Msk;
+  if (running_) {
+    i2s_->EVENTS_STOPPED = 0U;
+    i2s_->TASKS_STOP = I2S_TASKS_STOP_TASKS_STOP_Trigger;
+    if (!waitForNonZero(&i2s_->EVENTS_STOPPED, spinLimit)) return false;
+    i2s_->EVENTS_STOPPED = 0U;
+    ++stoppedCount_;
+  }
+  running_ = false;
+  restartPending_ = false;
+  txPointerPrimed_ = false;
+  rxPointerPrimed_ = false;
   return true;
 }
 
@@ -725,10 +815,10 @@ void I2sDuplex::onIrq() {
     const uint8_t queuedIndex = nextTxBufferIndex_;
     armTxBuffer(queuedIndex);
     nextTxBufferIndex_ ^= 1U;
-    if (txRefillCallback_ != nullptr) {
-      txRefillCallback_(txBuffers_[nextTxBufferIndex_], wordCount_,
-                        txRefillContext_);
+    if (txPointerPrimed_ && txRefillCallback_ != nullptr) {
+      txRefillCallback_(txBuffers_[queuedIndex], wordCount_, txRefillContext_);
     }
+    txPointerPrimed_ = true;
     ++txPtrUpdCount_;
   }
 
@@ -737,10 +827,10 @@ void I2sDuplex::onIrq() {
     const uint8_t queuedIndex = nextRxBufferIndex_;
     armRxBuffer(queuedIndex);
     nextRxBufferIndex_ ^= 1U;
-    if (rxReceiveCallback_ != nullptr) {
-      rxReceiveCallback_(rxBuffers_[nextRxBufferIndex_], wordCount_,
-                         rxReceiveContext_);
+    if (rxPointerPrimed_ && rxReceiveCallback_ != nullptr) {
+      rxReceiveCallback_(rxBuffers_[queuedIndex], wordCount_, rxReceiveContext_);
     }
+    rxPointerPrimed_ = true;
     ++rxPtrUpdCount_;
   }
 

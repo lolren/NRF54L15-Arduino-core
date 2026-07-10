@@ -7,7 +7,7 @@ using namespace xiao_nrf54l15;
 
 // Datasheet-guided low-power strategy:
 // - Keep CPU in System ON idle using WFI whenever no work is pending.
-// - Use lower CPU frequency (64 MHz) when workload is light.
+// - Select 64 MHz from the board menu when optimizing active current.
 // - Keep peripherals inactive unless needed.
 
 // Heartbeat cadence and LED visibility settings.
@@ -16,16 +16,6 @@ static constexpr uint32_t kLedPulseMs = 8UL;
 
 static inline void cpuIdleWfi() {
   __asm volatile("wfi");
-}
-
-static bool setCpuFreqRaw(uint32_t raw, uint32_t spinLimit = 500000UL) {
-  NRF_OSCILLATORS->PLL.FREQ = raw;
-  while (spinLimit-- > 0U) {
-    if ((NRF_OSCILLATORS->PLL.CURRENTFREQ & 0x3UL) == raw) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static const char* cpuFreqName(uint32_t raw) {
@@ -52,12 +42,9 @@ void setup() {
   (void)Gpio::write(kPinUserLed, true);  // LED off (active-low)
   (void)Gpio::configure(kPinUserButton, GpioDirection::kInput, GpioPull::kDisabled);
 
-  const bool freqOk = setCpuFreqRaw(OSCILLATORS_PLL_FREQ_FREQ_CK64M);
   const uint32_t current = (NRF_OSCILLATORS->PLL.CURRENTFREQ & 0x3UL);
 
-  Serial.print("LowPowerIdleWfi: freq-set=");
-  Serial.print(freqOk ? "OK" : "FAIL");
-  Serial.print(" current=");
+  Serial.print("LowPowerIdleWfi: boot-frequency=");
   Serial.println(cpuFreqName(current));
 }
 
@@ -71,13 +58,9 @@ void loop() {
 
   bool buttonHigh = true;
   (void)Gpio::read(kPinUserButton, &buttonHigh);
-  if (!buttonHigh) {
-    // Button held: switch temporarily to performance mode without changing the
-    // basic WFI idle strategy of the sketch.
-    (void)setCpuFreqRaw(OSCILLATORS_PLL_FREQ_FREQ_CK128M);
-  } else {
-    (void)setCpuFreqRaw(OSCILLATORS_PLL_FREQ_FREQ_CK64M);
-  }
+  // Reading the button keeps this input in the workload without changing the
+  // startup-only CPU frequency selection.
+  (void)buttonHigh;
 
   const uint32_t tNext = t0 + kHeartbeatPeriodMs;
   sleepUntilMs(tNext);

@@ -6,261 +6,216 @@
 
 namespace xiao_nrf54l15 {
 
-// Oscillator Control (OSCILLATORS)
-// Controls HFXO (32 MHz crystal), PLL, and LFCLK source selection.
-// Datasheet chapter 5.4 (OSCILLATORS — Oscillator control).
+// Clock task/event control is implemented by CLOCK. OSCILLATORS only contains
+// trim registers and must not be used for start/stop task access.
 class Oscillators {
  public:
-  // ---- LFCLK source selection ----
-
   enum class LfclkSource : uint32_t {
-    kLfrc   = 0,  // 32.768 kHz RC oscillator (internal)
-    kLfxo   = 1,  // 32.768 kHz crystal oscillator (external)
-    kLfSynt = 2,  // 32.768 kHz synthesized from HFCLK
+    kLfrc = 0,
+    kLfxo = 1,
+    kLfSynt = 2,
   };
 
-  // Set LFCLK source. Must be set BEFORE starting LFCLK.
-  inline static void setLfclkSource(LfclkSource src) {
-    writeReg(OSCILLATORS_LFCLKSRC, static_cast<uint32_t>(src));
+  inline static void setLfclkSource(LfclkSource source) {
+    writeReg(kLfclkSrc, static_cast<uint32_t>(source));
   }
 
-  // Get current LFCLK source setting.
   inline static LfclkSource getLfclkSource() {
-    return static_cast<LfclkSource>(readReg(OSCILLATORS_LFCLKSRC) & 0x3);
+    return static_cast<LfclkSource>(readReg(kLfclkSrc) & 0x3UL);
   }
 
-  // Get copy of LFCLK source that was active when LFCLK was started.
   inline static LfclkSource getLfclkSourceCopy() {
-    return static_cast<LfclkSource>(readReg(OSCILLATORS_LFCLKSRCCOPY) & 0x3);
+    return static_cast<LfclkSource>(readReg(kLfclkSrcCopy) & 0x3UL);
   }
 
-  // ---- LFCLK control ----
+  inline static void startLfclk() { writeReg(kTasksLfclkStart, 1); }
+  inline static void stopLfclk() { writeReg(kTasksLfclkStop, 1); }
 
-  // Start LFCLK (using the currently configured source).
-  inline static void startLfclk() {
-    writeReg(OSCILLATORS_TASKS_LFCLKSTART, 1);
-  }
-
-  // Stop LFCLK.
-  inline static void stopLfclk() {
-    writeReg(OSCILLATORS_TASKS_LFCLKSTOP, 1);
-  }
-
-  // Check if LFCLK start task was triggered.
   inline static bool lfclkStartTriggered() {
-    return (readReg(OSCILLATORS_LFCLKRUN) & 0x1) != 0;
+    return (readReg(kLfclkRun) & 1UL) != 0;
   }
 
-  // Check if LFCLK is currently running.
   inline static bool lfclkRunning() {
-    return (readReg(OSCILLATORS_LFCLKSTAT) & 0x1) != 0;
+    return (readReg(kLfclkStat) & kStateMask) != 0;
   }
 
-  // Check if LFCLK stopped event has fired.
   inline static bool lfclkStopped(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_LFCLKSTOPPED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_LFCLKSTOPPED, 0);
-    return ev != 0;
+    (void)clear;
+    return !lfclkRunning();
   }
 
-  // Check if LFCLK started event has fired.
   inline static bool lfclkStarted(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_LFCLKSTARTED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_LFCLKSTARTED, 0);
-    return ev != 0;
+    return event(kEventsLfclkStarted, clear);
   }
 
-  // ---- HFXO (32 MHz crystal) control ----
+  inline static void startHfxo() { writeReg(kTasksXoStart, 1); }
+  inline static void stopHfxo() { writeReg(kTasksXoStop, 1); }
+  inline static void tuneHfxo() { writeReg(kTasksXoTune, 1); }
 
-  // Start HFXO (32 MHz crystal oscillator).
-  inline static void startHfxo() {
-    writeReg(OSCILLATORS_TASKS_XOSTART, 1);
-  }
-
-  // Stop HFXO.
-  inline static void stopHfxo() {
-    writeReg(OSCILLATORS_TASKS_XOSTOP, 1);
-  }
-
-  // Trigger HFXO tuning (using FICR trim values).
-  inline static void tuneHfxo() {
-    writeReg(OSCILLATORS_TASKS_XOTUNE, 1);
-  }
-
-  // Check if HFXO start task was triggered.
   inline static bool hfxoStartTriggered() {
-    return (readReg(OSCILLATORS_XORUN) & 0x1) != 0;
+    return (readReg(kXoRun) & 1UL) != 0;
   }
 
-  // Check if HFXO is currently running.
   inline static bool hfxoRunning() {
-    return (readReg(OSCILLATORS_XOSTAT) & 0x1) != 0;
+    return (readReg(kXoStat) & kStateMask) != 0;
   }
 
-  // Check if HFXO tuning completed successfully.
   inline static bool hfxoTuned(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_XOTUNED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_XOTUNED, 0);
-    return ev != 0;
+    return event(kEventsXoTuned, clear);
   }
 
-  // Check if HFXO tuning failed.
   inline static bool hfxoTuneFailed(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_XOTUNEFAILED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_XOTUNEFAILED, 0);
-    return ev != 0;
+    return event(kEventsXoTuneFailed, clear);
   }
 
-  // Check if HFXO started event has fired.
+  inline static bool hfxoTuneError(bool clear = true) {
+    return event(kEventsXoTuneError, clear);
+  }
+
   inline static bool hfxoStarted(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_XOSTARTED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_XOSTARTED, 0);
-    return ev != 0;
+    return event(kEventsXoStarted, clear);
   }
 
-  // Check if HFXO stopped event has fired.
   inline static bool hfxoStopped(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_XOSTOPPED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_XOSTOPPED, 0);
-    return ev != 0;
+    (void)clear;
+    return !hfxoRunning();
   }
 
-  // ---- PLL control ----
+  inline static void startPl1() { writeReg(kTasksPllStart, 1); }
+  inline static void stopPl1() { writeReg(kTasksPllStop, 1); }
+  inline static void startPll() { startPl1(); }
+  inline static void stopPll() { stopPl1(); }
 
-  // Start the PLL (used for HFCLK from HFXO).
-  inline static void startPl1() {
-    writeReg(OSCILLATORS_TASKS_PLLSTART, 1);
-  }
-
-  // Stop the PLL.
-  inline static void stopPl1() {
-    writeReg(OSCILLATORS_TASKS_PLLSTOP, 1);
-  }
-
-  // Check if PLL is running.
   inline static bool pllRunning() {
-    return (readReg(OSCILLATORS_PLLSTAT) & 0x1) != 0;
+    return (readReg(kPllStat) & kStateMask) != 0;
   }
 
-  // Check if PLL started event has fired.
   inline static bool pllStarted(bool clear = true) {
-    uint32_t ev = readReg(OSCILLATORS_EVENTS_PLLSTARTED);
-    if (clear) writeReg(OSCILLATORS_EVENTS_PLLSTARTED, 0);
-    return ev != 0;
+    return event(kEventsPllStarted, clear);
   }
 
-  // ---- HFCLK source (via CLOCK peripheral, mirrored here for convenience) ----
-
-  // HFCLK source selection (from CLOCK peripheral).
   enum class HfclkSource : uint32_t {
-    kRcOsc = 0,   // Internal 64 MHz RC oscillator (default after reset)
-    kHfxo  = 1,   // 32 MHz crystal oscillator + PLL (128 MHz)
-    kSynt  = 2,   // Synthesized from LFCLK (64 MHz)
+    kRcOsc = 0,
+    kHfxo = 1,
+    kSynt = 2,
   };
 
-  // Set HFCLK source (via CLOCK.HFCLKSRC).
-  inline static void setHfclkSource(HfclkSource src) {
-    // CLOCK peripheral (LP domain, secure).
-    uint32_t clockBase = 0x4010E000UL;  // Non-secure alias
-    *reinterpret_cast<volatile uint32_t*>(clockBase + 0x530) = static_cast<uint32_t>(src);
+  // There is no CLOCK.HFCLKSRC register on nRF54L. Retain the compatibility
+  // setter as software state. HFCLK is generated by the PLL; XOSTART selects
+  // the accurate crystal reference by making the PLL lock to HFXO.
+  inline static void setHfclkSource(HfclkSource source) {
+    requestedHfclkSource() = source;
   }
 
-  // Get HFCLK source copy (set when HFCLKSTART task triggered).
+  inline static constexpr bool hfclkSourceSupported(HfclkSource source) {
+    return source != HfclkSource::kSynt;
+  }
+
   inline static HfclkSource getHfclkSourceCopy() {
-    uint32_t clockBase = 0x4010E000UL;
-    return static_cast<HfclkSource>(*reinterpret_cast<const volatile uint32_t*>(clockBase + 0x534) & 0x3);
+    return hfxoRunning() ? HfclkSource::kHfxo : HfclkSource::kRcOsc;
   }
 
-  // Start HFCLK.
   inline static void startHfclk() {
-    uint32_t clockBase = 0x4010E000UL;
-    *reinterpret_cast<volatile uint32_t*>(clockBase + 0x000) = 1;  // TASKS_HFCLKSTART
+    const HfclkSource source = requestedHfclkSource();
+    if (!hfclkSourceSupported(source)) return;
+    writeReg(kEventsPllStarted, 0);
+    if (source == HfclkSource::kHfxo) {
+      writeReg(kEventsXoStarted, 0);
+      startHfxo();
+    }
+    // PLLSTART is a keep-running request, not a runtime frequency change.
+    startPll();
   }
 
-  // Stop HFCLK.
   inline static void stopHfclk() {
-    uint32_t clockBase = 0x4010E000UL;
-    *reinterpret_cast<volatile uint32_t*>(clockBase + 0x004) = 1;  // TASKS_HFCLKSTOP
+    const HfclkSource source = requestedHfclkSource();
+    if (!hfclkSourceSupported(source)) return;
+    stopPll();
+    if (source == HfclkSource::kHfxo) stopHfxo();
   }
 
-  // Check if HFCLK started event fired.
   inline static bool hfclkStarted(bool clear = true) {
-    uint32_t clockBase = 0x4010E000UL;
-    uint32_t ev = *reinterpret_cast<const volatile uint32_t*>(clockBase + 0x100);  // EVENTS_HFCLKSTARTED
-    if (clear) *reinterpret_cast<volatile uint32_t*>(clockBase + 0x100) = 0;
-    return ev != 0;
+    const HfclkSource source = requestedHfclkSource();
+    if (!hfclkSourceSupported(source)) return false;
+    if (source != HfclkSource::kHfxo) return pllStarted(clear);
+
+    const bool xoStarted = event(kEventsXoStarted, false);
+    const bool pllHasStarted = event(kEventsPllStarted, false);
+    if (clear) {
+      if (xoStarted) writeReg(kEventsXoStarted, 0);
+      if (pllHasStarted) writeReg(kEventsPllStarted, 0);
+    }
+    return xoStarted && pllHasStarted;
   }
 
-  // Check if HFCLK stopped event fired.
   inline static bool hfclkStopped(bool clear = true) {
-    uint32_t clockBase = 0x4010E000UL;
-    uint32_t ev = *reinterpret_cast<const volatile uint32_t*>(clockBase + 0x104);  // EVENTS_HFCLKSTOPPED
-    if (clear) *reinterpret_cast<volatile uint32_t*>(clockBase + 0x104) = 0;
-    return ev != 0;
+    (void)clear;
+    const HfclkSource source = requestedHfclkSource();
+    if (!hfclkSourceSupported(source)) return false;
+    return source == HfclkSource::kHfxo
+               ? (!hfxoRunning() && !pllRunning())
+               : !pllRunning();
   }
 
-  // Check if HFCLK is running.
   inline static bool hfclkRunning() {
-    uint32_t clockBase = 0x4010E000UL;
-    return (*reinterpret_cast<const volatile uint32_t*>(clockBase + 0x400) & 0x1) != 0;
+    const HfclkSource source = requestedHfclkSource();
+    if (!hfclkSourceSupported(source)) return false;
+    return pllRunning() &&
+           (source != HfclkSource::kHfxo || hfxoRunning());
   }
-
-  // ---- Interrupts ----
 
   inline static void enableHfxoStartedInterrupt(bool enable = true) {
-    if (enable) writeReg(OSCILLATORS_INTENSET, (1UL << 0));
-    else         writeReg(OSCILLATORS_INTENCLR, (1UL << 0));
+    writeReg(enable ? kIntenSet : kIntenClr, 1UL << 0);
   }
 
   inline static void enableLfclkStartedInterrupt(bool enable = true) {
-    if (enable) writeReg(OSCILLATORS_INTENSET, (1UL << 2));
-    else         writeReg(OSCILLATORS_INTENCLR, (1UL << 2));
+    writeReg(enable ? kIntenSet : kIntenClr, 1UL << 2);
   }
 
-  // ---- Low-level ----
-
   inline static uint32_t readReg(uint32_t offset) {
-    return *reinterpret_cast<const volatile uint32_t*>(BASE + offset);
+    return *reinterpret_cast<const volatile uint32_t*>(kBase + offset);
   }
 
   inline static void writeReg(uint32_t offset, uint32_t value) {
-    *reinterpret_cast<volatile uint32_t*>(BASE + offset) = value;
+    *reinterpret_cast<volatile uint32_t*>(kBase + offset) = value;
   }
 
  private:
-  static constexpr uint32_t BASE = 0x40120000UL;  // OSCILLATORS base (PERI domain, non-secure alias)
+  static constexpr uintptr_t kBase = nrf54l15::CLOCK_BASE;
+  static constexpr uint32_t kTasksXoStart = 0x000;
+  static constexpr uint32_t kTasksXoStop = 0x004;
+  static constexpr uint32_t kTasksPllStart = 0x008;
+  static constexpr uint32_t kTasksPllStop = 0x00C;
+  static constexpr uint32_t kTasksLfclkStart = 0x010;
+  static constexpr uint32_t kTasksLfclkStop = 0x014;
+  static constexpr uint32_t kTasksXoTune = 0x01C;
+  static constexpr uint32_t kEventsXoStarted = 0x100;
+  static constexpr uint32_t kEventsPllStarted = 0x104;
+  static constexpr uint32_t kEventsLfclkStarted = 0x108;
+  static constexpr uint32_t kEventsXoTuned = 0x110;
+  static constexpr uint32_t kEventsXoTuneError = 0x114;
+  static constexpr uint32_t kEventsXoTuneFailed = 0x118;
+  static constexpr uint32_t kIntenSet = 0x304;
+  static constexpr uint32_t kIntenClr = 0x308;
+  static constexpr uint32_t kXoRun = 0x408;
+  static constexpr uint32_t kXoStat = 0x40C;
+  static constexpr uint32_t kPllStat = 0x42C;
+  static constexpr uint32_t kLfclkSrc = 0x440;
+  static constexpr uint32_t kLfclkRun = 0x448;
+  static constexpr uint32_t kLfclkStat = 0x44C;
+  static constexpr uint32_t kLfclkSrcCopy = 0x450;
+  static constexpr uint32_t kStateMask = 1UL << 16;
 
-  // Task offsets.
-  static constexpr uint32_t OSCILLATORS_TASKS_XOSTART     = 0x000;
-  static constexpr uint32_t OSCILLATORS_TASKS_XOSTOP      = 0x004;
-  static constexpr uint32_t OSCILLATORS_TASKS_XOTUNE      = 0x008;
-  static constexpr uint32_t OSCILLATORS_TASKS_PLLSTART    = 0x00C;
-  static constexpr uint32_t OSCILLATORS_TASKS_PLLSTOP     = 0x010;
-  static constexpr uint32_t OSCILLATORS_TASKS_LFCLKSTART  = 0x018;
-  static constexpr uint32_t OSCILLATORS_TASKS_LFCLKSTOP   = 0x01C;
+  inline static bool event(uint32_t offset, bool clear) {
+    const bool set = readReg(offset) != 0;
+    if (set && clear) writeReg(offset, 0);
+    return set;
+  }
 
-  // Event offsets.
-  static constexpr uint32_t OSCILLATORS_EVENTS_XOSTARTED    = 0x100;
-  static constexpr uint32_t OSCILLATORS_EVENTS_XOSTOPPED    = 0x104;
-  static constexpr uint32_t OSCILLATORS_EVENTS_PLLSTARTED   = 0x108;
-  static constexpr uint32_t OSCILLATORS_EVENTS_PLLSTOPPED   = 0x10C;
-  static constexpr uint32_t OSCILLATORS_EVENTS_LFCLKSTARTED = 0x114;
-  static constexpr uint32_t OSCILLATORS_EVENTS_LFCLKSTOPPED = 0x118;
-  static constexpr uint32_t OSCILLATORS_EVENTS_XOTUNED      = 0x110;
-  static constexpr uint32_t OSCILLATORS_EVENTS_XOTUNEFAILED = 0x120;
-  static constexpr uint32_t OSCILLATORS_EVENTS_XOTUNEERROR  = 0x11C;
-
-  // Config / status offsets.
-  static constexpr uint32_t OSCILLATORS_LFCLKSRC      = 0x440;
-  static constexpr uint32_t OSCILLATORS_LFCLKSRCCOPY  = 0x450;
-  static constexpr uint32_t OSCILLATORS_XORUN         = 0x408;
-  static constexpr uint32_t OSCILLATORS_XOSTAT        = 0x40C;
-  static constexpr uint32_t OSCILLATORS_PLLRUN        = 0x428;
-  static constexpr uint32_t OSCILLATORS_PLLSTAT       = 0x42C;
-  static constexpr uint32_t OSCILLATORS_LFCLKRUN      = 0x448;
-  static constexpr uint32_t OSCILLATORS_LFCLKSTAT     = 0x44C;
-  static constexpr uint32_t OSCILLATORS_INTENSET      = 0x300;
-  static constexpr uint32_t OSCILLATORS_INTENCLR      = 0x304;
+  inline static HfclkSource& requestedHfclkSource() {
+    static HfclkSource source = HfclkSource::kRcOsc;
+    return source;
+  }
 };
 
 }  // namespace xiao_nrf54l15

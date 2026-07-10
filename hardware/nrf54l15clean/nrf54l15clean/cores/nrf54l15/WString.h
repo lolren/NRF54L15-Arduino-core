@@ -254,20 +254,7 @@ public:
 
     bool concat(const String& other)
     {
-        const size_t rhs_len = other.length();
-        if (rhs_len == 0U) {
-            return true;
-        }
-
-        char* new_buf = (char*)realloc(_data, _length + rhs_len + 1U);
-        if (new_buf == nullptr) {
-            return false;
-        }
-
-        memcpy(new_buf + _length, other.c_str(), rhs_len + 1U);
-        _data = new_buf;
-        _length += rhs_len;
-        return true;
+        return concat(other.c_str());
     }
 
     bool concat(const char* value)
@@ -281,14 +268,31 @@ public:
             return true;
         }
 
-        char* new_buf = (char*)realloc(_data, _length + rhs_len + 1U);
+        if (_length == SIZE_MAX || rhs_len > SIZE_MAX - _length - 1U) {
+            return false;
+        }
+
+        const size_t old_length = _length;
+        const uintptr_t data_begin = reinterpret_cast<uintptr_t>(_data);
+        const uintptr_t data_end = data_begin + old_length;
+        const uintptr_t value_address = reinterpret_cast<uintptr_t>(value);
+        const bool aliases_data = _data != nullptr &&
+                                  value_address >= data_begin &&
+                                  value_address <= data_end;
+        const size_t source_offset = aliases_data
+                                         ? static_cast<size_t>(value_address - data_begin)
+                                         : 0U;
+
+        char* new_buf = (char*)realloc(_data, old_length + rhs_len + 1U);
         if (new_buf == nullptr) {
             return false;
         }
 
-        memcpy(new_buf + _length, value, rhs_len + 1U);
+        const char* source = aliases_data ? (new_buf + source_offset) : value;
+        memmove(new_buf + old_length, source, rhs_len);
+        new_buf[old_length + rhs_len] = '\0';
         _data = new_buf;
-        _length += rhs_len;
+        _length = old_length + rhs_len;
         return true;
     }
 

@@ -14,6 +14,7 @@
 extern "C" {
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
 
 // ============================================================================
@@ -33,19 +34,39 @@ extern "C" {
 
 typedef struct {
     volatile uint32_t ISER[9U];           /*!< Interrupt Set Enable Register */
-    uint32_t RESERVED0[24U];
+    uint32_t RESERVED0[23U];
     volatile uint32_t ICER[9U];           /*!< Interrupt Clear Enable Register */
-    uint32_t RESERVED1[24U];
+    uint32_t RESERVED1[23U];
     volatile uint32_t ISPR[9U];           /*!< Interrupt Set Pending Register */
-    uint32_t RESERVED2[24U];
+    uint32_t RESERVED2[23U];
     volatile uint32_t ICPR[9U];           /*!< Interrupt Clear Pending Register */
-    uint32_t RESERVED3[24U];
+    uint32_t RESERVED3[23U];
     volatile uint32_t IABR[9U];           /*!< Interrupt Active Bit Register */
-    uint32_t RESERVED4[56U];
+    uint32_t RESERVED4[55U];
     volatile uint8_t  IP[270U];           /*!< Interrupt Priority Register */
-    uint32_t RESERVED5[644U];
+    uint8_t RESERVED5[0xE00U - 0x300U - 270U];
     volatile uint32_t STIR;               /*!< Software Trigger Interrupt Register */
 } NVIC_Type;
+
+#if defined(__cplusplus)
+static_assert(offsetof(NVIC_Type, ISER) == 0x000U, "NVIC ISER offset");
+static_assert(offsetof(NVIC_Type, ICER) == 0x080U, "NVIC ICER offset");
+static_assert(offsetof(NVIC_Type, ISPR) == 0x100U, "NVIC ISPR offset");
+static_assert(offsetof(NVIC_Type, ICPR) == 0x180U, "NVIC ICPR offset");
+static_assert(offsetof(NVIC_Type, IABR) == 0x200U, "NVIC IABR offset");
+static_assert(offsetof(NVIC_Type, IP) == 0x300U, "NVIC IP offset");
+static_assert(offsetof(NVIC_Type, STIR) == 0xE00U, "NVIC STIR offset");
+static_assert(sizeof(NVIC_Type) == 0xE04U, "NVIC register block size");
+#else
+_Static_assert(offsetof(NVIC_Type, ISER) == 0x000U, "NVIC ISER offset");
+_Static_assert(offsetof(NVIC_Type, ICER) == 0x080U, "NVIC ICER offset");
+_Static_assert(offsetof(NVIC_Type, ISPR) == 0x100U, "NVIC ISPR offset");
+_Static_assert(offsetof(NVIC_Type, ICPR) == 0x180U, "NVIC ICPR offset");
+_Static_assert(offsetof(NVIC_Type, IABR) == 0x200U, "NVIC IABR offset");
+_Static_assert(offsetof(NVIC_Type, IP) == 0x300U, "NVIC IP offset");
+_Static_assert(offsetof(NVIC_Type, STIR) == 0xE00U, "NVIC STIR offset");
+_Static_assert(sizeof(NVIC_Type) == 0xE04U, "NVIC register block size");
+#endif
 
 #define NVIC_BASE           0xE000E100UL
 #define NVIC                ((NVIC_Type *) NVIC_BASE)
@@ -102,10 +123,10 @@ typedef enum IRQn {
     EGU10_IRQn            = 135,
     RADIO_0_IRQn          = 138,
     RADIO_1_IRQn          = 139,
-    SPIM20_IRQn            = 140,
-    SPIM21_IRQn            = 141,
-    TWIM20_IRQn            = 149,
-    TWIM21_IRQn            = 150,
+    SPIM20_IRQn            = 198,
+    SPIM21_IRQn            = 199,
+    TWIM20_IRQn            = 198,
+    TWIM21_IRQn            = 199,
     SPIM22_IRQn            = 200,
     EGU20_IRQn             = 201,
     TIMER20_IRQn           = 202,
@@ -118,7 +139,7 @@ typedef enum IRQn {
     PWM20_IRQn             = 210,
     PWM21_IRQn             = 211,
     PWM22_IRQn             = 212,
-    SAADC_IRQn             = 157,
+    SAADC_IRQn             = 213,
     NFCT_IRQn              = 214,
     TEMP_IRQn              = 215,
     GPIOTE20_0_IRQn        = 218,
@@ -141,6 +162,11 @@ typedef enum IRQn {
 
 #define AAR00_IRQn AAR00_CCM00_IRQn
 #define CCM00_IRQn AAR00_CCM00_IRQn
+#define SERIAL00_IRQn SPIM00_IRQn
+#define SERIAL20_IRQn SPIM20_IRQn
+#define SERIAL21_IRQn SPIM21_IRQn
+#define SERIAL22_IRQn SPIM22_IRQn
+#define SERIAL30_IRQn SPIM30_IRQn
 #define UARTE00_IRQn SPIM00_IRQn
 #define UARTE20_IRQn SPIM20_IRQn
 #define UARTE21_IRQn SPIM21_IRQn
@@ -278,11 +304,25 @@ static inline void __ISB(void)
 // NVIC Functions
 // ============================================================================
 
+static inline volatile uint8_t* __NVIC_SystemPriorityByte(IRQn_Type IRQn)
+{
+    const int32_t irqn = (int32_t)IRQn;
+    if (irqn < -12 || irqn > -1) {
+        return (volatile uint8_t*)0;
+    }
+    return &((volatile uint8_t*)0xE000ED18UL)[(((uint32_t)IRQn) & 0xFUL) - 4UL];
+}
+
 // Set Interrupt Priority
 static inline void __NVIC_SetPriority(IRQn_Type IRQn, uint32_t priority)
 {
     if ((int32_t)IRQn >= 0) {
         NVIC->IP[((uint32_t)IRQn)] = (uint8_t)(priority << (8U - __NVIC_PRIO_BITS));
+    } else {
+        volatile uint8_t* shp = __NVIC_SystemPriorityByte(IRQn);
+        if (shp != (volatile uint8_t*)0) {
+            *shp = (uint8_t)(priority << (8U - __NVIC_PRIO_BITS));
+        }
     }
 }
 
@@ -291,6 +331,10 @@ static inline uint32_t __NVIC_GetPriority(IRQn_Type IRQn)
 {
     if ((int32_t)IRQn >= 0) {
         return ((uint32_t)NVIC->IP[((uint32_t)IRQn)] >> (8U - __NVIC_PRIO_BITS));
+    }
+    volatile uint8_t* shp = __NVIC_SystemPriorityByte(IRQn);
+    if (shp != (volatile uint8_t*)0) {
+        return ((uint32_t)*shp >> (8U - __NVIC_PRIO_BITS));
     }
     return 0;
 }

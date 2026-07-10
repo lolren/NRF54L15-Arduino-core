@@ -1,6 +1,6 @@
 /*
  * System startup for nRF54LM20B.
- * PLL defaults to 64 MHz — no frequency change needed.
+ * PLL frequency is selected once during startup.
  * Applies trim, cache, and debug signal setup.
  */
 #include <stdbool.h>
@@ -9,8 +9,11 @@
 #include "nrf54lm20b.h"
 
 uint32_t SystemCoreClock = 64000000UL;
-static uint32_t g_idleCpuTargetRaw = OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M;
-static bool g_idleCpuScalingEnabled = false;
+static uint32_t g_resetReasonAtBoot = 0U;
+
+#if defined(NRF54L15_CLEAN_POWER_LOW)
+void nrf54lm20b_core_bootstrap_low_power_timebase(void);
+#endif
 
 #if !defined(NRF_TRUSTZONE_NONSECURE)
 static const NRF_FICR_Type *const kFicr = (const NRF_FICR_Type *)0x00FFC000UL;
@@ -50,12 +53,6 @@ static uint32_t cpuFrequencyHzFromRaw(uint32_t raw) {
     return 0UL;
 }
 
-static uint32_t cpuFrequencyRawFromHz(uint32_t hz) {
-    if (hz >= 128000000UL) return OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK128M;
-    if (hz >=  64000000UL) return OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M;
-    return 0UL;
-}
-
 static void setPllFrequency(uint32_t target) {
     NRF_OSCILLATORS->PLL.FREQ = target;
     uint32_t guard = 0U;
@@ -84,9 +81,6 @@ static void zephyrApplySystemInitParity(void) {
     /* Device configuration for ES silicon */
     if (*reg32(kDeviceConfigReg) == 0U)
         *reg32(kDeviceConfigReg) = 0xC8U;
-
-    if (NRF_RESET->RESETREAS & RESET_RESETREAS_RESETPIN_Msk)
-        NRF_RESET->RESETREAS = ~RESET_RESETREAS_RESETPIN_Msk;
 
     /* Allow RRAMC low power mode */
     *reg32(kRramcLowPowerConfigReg) = 3U;
@@ -131,7 +125,15 @@ static void zephyrApplyClockTrimParity(void) {
 
 void SystemInit(void)
 {
-    /* PLL is already at 64 MHz by default on LM20B — no change needed */
+    /* RESETREAS is cumulative and W1C. Preserve every cause for the sketch;
+     * System OFF entry clears it only after all shutdown prerequisites pass. */
+    g_resetReasonAtBoot = NRF_RESET->RESETREAS;
+
+#if defined(ARDUINO_NRF54_CPU_128M)
+    setPllFrequency(OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK128M);
+#else
+    setPllFrequency(OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M);
+#endif
 
 #if !defined(NRF_TRUSTZONE_NONSECURE)
     /* Force green LED (P1.24) HIGH before debug signal init.
@@ -151,14 +153,19 @@ void SystemInit(void)
     NRF_P1->OUTSET = (1UL << 22) | (1UL << 23) | (1UL << 24);
 #endif
     SystemCoreClockUpdate();
+
+#if defined(NRF54L15_CLEAN_POWER_LOW)
+    /* Restore reset GRTC registers before C++ constructors run. */
+    if ((g_resetReasonAtBoot &
+         (RESET_RESETREAS_OFF_Msk | RESET_RESETREAS_GRTC_Msk)) != 0U) {
+        nrf54lm20b_core_bootstrap_low_power_timebase();
+    }
+#endif
 }
 
 bool nrf54lm20b_core_set_cpu_frequency_hz(uint32_t hz) {
-    uint32_t raw = cpuFrequencyRawFromHz(hz);
-    if (raw == 0UL) return false;
-    setPllFrequency(raw);
     SystemCoreClockUpdate();
-    return currentPllFrequencyRaw() == raw;
+    return hz == SystemCoreClock;
 }
 
 uint32_t nrf54lm20b_core_get_cpu_frequency_hz(void) {
@@ -167,30 +174,21 @@ uint32_t nrf54lm20b_core_get_cpu_frequency_hz(void) {
 }
 
 bool nrf54lm20b_core_set_idle_cpu_scaling_hz(uint32_t hz, bool enable) {
-    if (!enable) { g_idleCpuScalingEnabled = false; return true; }
-    uint32_t raw = cpuFrequencyRawFromHz(hz);
-    if (raw == 0UL) return false;
-    g_idleCpuTargetRaw = raw;
-    g_idleCpuScalingEnabled = true;
-    return true;
+    (void)hz;
+    return !enable;
 }
 
-bool nrf54lm20b_core_get_idle_cpu_scaling_enabled(void) { return g_idleCpuScalingEnabled; }
-uint32_t nrf54lm20b_core_get_idle_cpu_frequency_hz(void) { return cpuFrequencyHzFromRaw(g_idleCpuTargetRaw); }
+bool nrf54lm20b_core_get_idle_cpu_scaling_enabled(void) { return false; }
+uint32_t nrf54lm20b_core_get_idle_cpu_frequency_hz(void) {
+    return nrf54lm20b_core_get_cpu_frequency_hz();
+}
 
 uint32_t nrf54lm20b_core_enter_idle_cpu_scaling(void) {
-    if (!g_idleCpuScalingEnabled) return 0UL;
-    uint32_t cur = currentPllFrequencyRaw();
-    if (cur == 0UL || cur == g_idleCpuTargetRaw) return 0UL;
-    setPllFrequency(g_idleCpuTargetRaw);
-    SystemCoreClockUpdate();
-    return cur;
+    return 0UL;
 }
 
 void nrf54lm20b_core_exit_idle_cpu_scaling(uint32_t prev) {
-    if (prev == 0UL) return;
-    setPllFrequency(prev);
-    SystemCoreClockUpdate();
+    (void)prev;
 }
 
 /* nrf54l15_core_* aliases for library compatibility (Arduino.h declares nrf54l15_core_*) */
@@ -214,3 +212,12 @@ uint32_t nrf54l15_core_enter_idle_cpu_scaling(void);
 
 __attribute__((alias("nrf54lm20b_core_exit_idle_cpu_scaling")))
 void nrf54l15_core_exit_idle_cpu_scaling(uint32_t);
+
+uint32_t nrf54_core_reset_reason(void) {
+    return g_resetReasonAtBoot;
+}
+
+void nrf54_core_clear_reset_reason(uint32_t mask) {
+    NRF_RESET->RESETREAS = mask;
+    g_resetReasonAtBoot &= ~mask;
+}

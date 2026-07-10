@@ -24,8 +24,12 @@ constexpr uint32_t kVprNordicCtrlOffset = VPRCSR_NORDIC_VPRNORDICCTRL;
 constexpr uint32_t kVprNordicCacheCtrlOffset = VPRCSR_NORDIC_CACHE_CTRL;
 constexpr uint32_t kVprContextRestorePowerIndex = 1U;
 constexpr uint32_t kVprContextRestoreRetMask = MEMCONF_POWER_RET_MEM0_Msk;
-constexpr uint32_t kVprContextRestoreRet2PowerIndex = 0U;
-constexpr uint32_t kVprContextRestoreRet2Mask = MEMCONF_POWER_RET2_MEM7_Msk;
+constexpr uint32_t kVprContextRestoreRamPowerIndex = 0U;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+constexpr uint32_t kVprContextRestoreRamMask = MEMCONF_POWER_RET_MEM15_Msk;
+#else
+constexpr uint32_t kVprContextRestoreRamMask = MEMCONF_POWER_RET2_MEM7_Msk;
+#endif
 constexpr uint32_t kAddressSlavePos = 12U;
 constexpr uint32_t kAddressSlaveMask = (0x3FUL << kAddressSlavePos);
 constexpr uint32_t kMpcOverrideGranularity = 0x1000UL;
@@ -427,10 +431,22 @@ bool VprControl::enableContextRestore(bool enable) {
   NRF_MEMCONF_Type* cfg = memconf();
   if (enable) {
     cfg->POWER[kVprContextRestorePowerIndex].RET |= kVprContextRestoreRetMask;
-    cfg->POWER[kVprContextRestoreRet2PowerIndex].RET2 |= kVprContextRestoreRet2Mask;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+    cfg->POWER[kVprContextRestoreRamPowerIndex].RET |=
+        kVprContextRestoreRamMask;
+#else
+    cfg->POWER[kVprContextRestoreRamPowerIndex].RET2 |=
+        kVprContextRestoreRamMask;
+#endif
   } else {
     cfg->POWER[kVprContextRestorePowerIndex].RET &= ~kVprContextRestoreRetMask;
-    cfg->POWER[kVprContextRestoreRet2PowerIndex].RET2 &= ~kVprContextRestoreRet2Mask;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+    cfg->POWER[kVprContextRestoreRamPowerIndex].RET &=
+        ~kVprContextRestoreRamMask;
+#else
+    cfg->POWER[kVprContextRestoreRamPowerIndex].RET2 &=
+        ~kVprContextRestoreRamMask;
+#endif
   }
   fullSyncBarrier();
   return contextRestoreEnabled() == enable;
@@ -438,7 +454,7 @@ bool VprControl::enableContextRestore(bool enable) {
 
 bool VprControl::contextRestoreEnabled() {
   return ((rawMemconfPower1Ret() & kVprContextRestoreRetMask) != 0U) &&
-         ((rawMemconfPower0Ret2() & kVprContextRestoreRet2Mask) != 0U);
+         ((rawMemconfPower0Ret2() & kVprContextRestoreRamMask) != 0U);
 }
 
 bool VprControl::hartResetPulse(uint32_t spinLimit) {
@@ -496,7 +512,13 @@ bool VprControl::restartAfterHibernateReset() {
 bool VprControl::resumeRetainedContext() { return restartAfterHibernateReset(); }
 
 uint32_t VprControl::rawMemconfPower0Ret2() {
-  return memconf()->POWER[kVprContextRestoreRet2PowerIndex].RET2;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  // LM20 has no RET2 register; its VPR save area is RAM01 section 7
+  // (MEM15), controlled by POWER[0].RET.
+  return memconf()->POWER[kVprContextRestoreRamPowerIndex].RET;
+#else
+  return memconf()->POWER[kVprContextRestoreRamPowerIndex].RET2;
+#endif
 }
 
 uint32_t VprControl::rawMemconfPower1Ret() {

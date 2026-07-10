@@ -79,7 +79,7 @@
 #define PIN_A1 (1)
 #define PIN_A2 (2)
 #define PIN_A3 (3)
-#define PIN_A4 (4)
+#define PIN_A4 (0xFFU)  // D4/P1.10 has no SAADC input
 #define PIN_A5 (5)
 
 enum {
@@ -242,7 +242,7 @@ static inline uint8_t analogInputToDigitalPin(uint8_t p)
         case 1: return PIN_A1;
         case 2: return PIN_A2;
         case 3: return PIN_A3;
-        case 4: return PIN_A4;
+        case 4: return 0xFFU;
         case 5: return PIN_A5;
         case 6: return PIN_A6;
         case 7: return PIN_A7;

@@ -92,7 +92,7 @@ bool clearBondStored(void*) {
 
 // ─── Peripheral: GATT write handler ──────────────────────────
 
-void onGattWrite(uint16_t h, const uint8_t* d, uint8_t n, bool, void*) {
+void onGattWrite(uint16_t h, const uint8_t* d, uint16_t n, bool, void*) {
   if (h != g_writeHandle || !d) return;
   Serial.print("ble_pair gatt-write val=");
   if (n == 1U) {
@@ -582,10 +582,10 @@ void loop() {
       }
 
       // Read notifications
-      uint8_t nbuf[32]={0}; uint8_t nlen=32;
+      uint8_t nbuf[32]={0}; uint16_t nlen=32;
       if (g_ble.getCustomGattCharacteristicValue(g_notifyHandle, nbuf, &nlen) && nlen) {
         Serial.print("ble_pair central: notify=");
-        Serial.write(nbuf, nlen<30?nlen:30);
+        Serial.write(nbuf, nlen < 30U ? nlen : 30U);
         Serial.println();
       }
     }

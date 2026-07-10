@@ -24,9 +24,13 @@ class MatterRng {
 
   // Generate a random 32-bit value.
   uint32_t getRandomUint32(uint32_t spinLimit = 400000UL);
+  bool getRandomUint32(uint32_t* outValue,
+                       uint32_t spinLimit = 400000UL);
 
   // Generate a random 64-bit value.
   uint64_t getRandomUint64(uint32_t spinLimit = 400000UL);
+  bool getRandomUint64(uint64_t* outValue,
+                       uint32_t spinLimit = 400000UL);
 
   // Check if the RNG is healthy and available.
   bool isReady() const;

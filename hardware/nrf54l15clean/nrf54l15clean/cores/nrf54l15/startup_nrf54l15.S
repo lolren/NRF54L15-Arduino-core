@@ -25,7 +25,6 @@
     .section .isr_vector, "a"
     .align 4
     .type g_pfnVectors, %object
-    .size g_pfnVectors, .-g_pfnVectors
 
 g_pfnVectors:
     .word   __stack_start__         /* 0: Initial Stack Pointer */
@@ -72,21 +71,13 @@ g_pfnVectors:
     /* IRQ 138..139: RADIO instances. */
     .word   RADIO_0_IRQHandler
     .word   RADIO_1_IRQHandler
-    /* IRQ 140..141: serial-fabric instances used by HardwareSerial. */
+    /* IRQ 140..197 */
+    .rept 58
+    .word   Default_Handler
+    .endr
+    /* IRQ 198..200: SERIAL20..22 shared serial-fabric instances. */
     .word   SPIM20_IRQHandler
     .word   SPIM21_IRQHandler
-    /* IRQ 142..148 */
-    .rept 7
-    .word   Default_Handler
-    .endr
-    /* IRQ 149..150: TWIM/TWIS instances used by Wire target IRQ mode. */
-    .word   TWIM20_IRQHandler
-    .word   TWIM21_IRQHandler
-    /* IRQ 151..199 */
-    .rept 49
-    .word   Default_Handler
-    .endr
-    /* IRQ 200: serial-fabric instance 22. */
     .word   SPIM22_IRQHandler
     /* IRQ 201: EGU20. */
     .word   EGU20_IRQHandler
@@ -98,16 +89,19 @@ g_pfnVectors:
     .word   TIMER24_IRQHandler
     /* IRQ 207 */
     .word   Default_Handler
-    /* IRQ 208..209 */
-    .rept 2
-    .word   Default_Handler
-    .endr
+    /* IRQ 208..209: PDM20..PDM21 */
+    .word   PDM20_IRQHandler
+    .word   PDM21_IRQHandler
     /* IRQ 210..212: PWM20..PWM22 */
     .word   PWM20_IRQHandler
     .word   PWM21_IRQHandler
     .word   PWM22_IRQHandler
-    /* IRQ 213..217 */
-    .rept 5
+    /* IRQ 213: SAADC; IRQ 214: NFCT; IRQ 215: TEMP. */
+    .word   SAADC_IRQHandler
+    .word   NFCT_IRQHandler
+    .word   TEMP_IRQHandler
+    /* IRQ 216..217 */
+    .rept 2
     .word   Default_Handler
     .endr
     /* IRQ 218..219: GPIOTE20 IRQ lines used by attachInterrupt(). */
@@ -117,16 +111,20 @@ g_pfnVectors:
     .word   Default_Handler
     /* IRQ 221: I2S20 */
     .word   I2S20_IRQHandler
-    /* IRQ 222..225 */
-    .rept 4
+    /* IRQ 222..223 */
+    .rept 2
     .word   Default_Handler
     .endr
-    /* IRQ 226..228: GRTC interrupt groups. */
+    /* IRQ 224..225: QDEC20..QDEC21. */
+    .word   QDEC20_IRQHandler
+    .word   QDEC21_IRQHandler
+    /* IRQ 226..229: GRTC interrupt groups. */
     .word   GRTC_0_IRQHandler
     .word   GRTC_1_IRQHandler
     .word   GRTC_2_IRQHandler
-    /* IRQ 229..259 */
-    .rept 31
+    .word   GRTC_3_IRQHandler
+    /* IRQ 230..259 */
+    .rept 30
     .word   Default_Handler
     .endr
     /* IRQ 260: serial-fabric instance 30. */
@@ -135,10 +133,19 @@ g_pfnVectors:
     .word   CLOCK_POWER_IRQHandler
     /* IRQ 262: LPCOMP */
     .word   LPCOMP_IRQHandler
-    /* IRQ 263..269 */
-    .rept 7
+    /* IRQ 263 */
+    .word   Default_Handler
+    /* IRQ 264..265: WDT30..WDT31. */
+    .word   WDT30_IRQHandler
+    .word   WDT31_IRQHandler
+    /* IRQ 266..267 */
+    .rept 2
     .word   Default_Handler
     .endr
+    /* IRQ 268..269: GPIOTE30 interrupt lines for P0. */
+    .word   GPIOTE30_0_IRQHandler
+    .word   GPIOTE30_1_IRQHandler
+    .size g_pfnVectors, .-g_pfnVectors
 
 /* *****************************************************************************
  * Reset Handler
@@ -329,6 +336,78 @@ RADIO_1_IRQHandler:
 I2S20_IRQHandler:
     b .
     .size I2S20_IRQHandler, .-I2S20_IRQHandler
+
+    .weak SAADC_IRQHandler
+    .type SAADC_IRQHandler, %function
+SAADC_IRQHandler:
+    b .
+    .size SAADC_IRQHandler, .-SAADC_IRQHandler
+
+    .weak NFCT_IRQHandler
+    .type NFCT_IRQHandler, %function
+NFCT_IRQHandler:
+    b .
+    .size NFCT_IRQHandler, .-NFCT_IRQHandler
+
+    .weak PDM20_IRQHandler
+    .type PDM20_IRQHandler, %function
+PDM20_IRQHandler:
+    b .
+    .size PDM20_IRQHandler, .-PDM20_IRQHandler
+
+    .weak PDM21_IRQHandler
+    .type PDM21_IRQHandler, %function
+PDM21_IRQHandler:
+    b .
+    .size PDM21_IRQHandler, .-PDM21_IRQHandler
+
+    .weak TEMP_IRQHandler
+    .type TEMP_IRQHandler, %function
+TEMP_IRQHandler:
+    b .
+    .size TEMP_IRQHandler, .-TEMP_IRQHandler
+
+    .weak QDEC20_IRQHandler
+    .type QDEC20_IRQHandler, %function
+QDEC20_IRQHandler:
+    b .
+    .size QDEC20_IRQHandler, .-QDEC20_IRQHandler
+
+    .weak QDEC21_IRQHandler
+    .type QDEC21_IRQHandler, %function
+QDEC21_IRQHandler:
+    b .
+    .size QDEC21_IRQHandler, .-QDEC21_IRQHandler
+
+    .weak GRTC_3_IRQHandler
+    .type GRTC_3_IRQHandler, %function
+GRTC_3_IRQHandler:
+    b .
+    .size GRTC_3_IRQHandler, .-GRTC_3_IRQHandler
+
+    .weak WDT30_IRQHandler
+    .type WDT30_IRQHandler, %function
+WDT30_IRQHandler:
+    b .
+    .size WDT30_IRQHandler, .-WDT30_IRQHandler
+
+    .weak WDT31_IRQHandler
+    .type WDT31_IRQHandler, %function
+WDT31_IRQHandler:
+    b .
+    .size WDT31_IRQHandler, .-WDT31_IRQHandler
+
+    .weak GPIOTE30_0_IRQHandler
+    .type GPIOTE30_0_IRQHandler, %function
+GPIOTE30_0_IRQHandler:
+    b .
+    .size GPIOTE30_0_IRQHandler, .-GPIOTE30_0_IRQHandler
+
+    .weak GPIOTE30_1_IRQHandler
+    .type GPIOTE30_1_IRQHandler, %function
+GPIOTE30_1_IRQHandler:
+    b .
+    .size GPIOTE30_1_IRQHandler, .-GPIOTE30_1_IRQHandler
 
     .weak SPIM22_IRQHandler
     .type SPIM22_IRQHandler, %function

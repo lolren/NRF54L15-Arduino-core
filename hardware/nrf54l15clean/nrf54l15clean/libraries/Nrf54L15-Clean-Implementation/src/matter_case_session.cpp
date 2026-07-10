@@ -261,7 +261,9 @@ bool MatterCaseSession::buildSigma1(CaseSigma1* outMsg) {
   outMsg->initiatorSessionId = localSessionId_;
 
   // Generate ephemeral key pair
-  Secp256r1::generateKeyPair(&ephPrivateKey_, &ephPublicKey_);
+  if (!Secp256r1::generateKeyPair(&ephPrivateKey_, &ephPublicKey_)) {
+    return false;
+  }
   Secp256r1::encodeUncompressed(ephPublicKey_, outMsg->initiatorEphPubKey);
 
   // No resumption
@@ -298,7 +300,9 @@ bool MatterCaseSession::buildSigma2(CaseSigma2* outMsg) {
   outMsg->responderSessionId = localSessionId_;
 
   // Generate ephemeral key pair
-  Secp256r1::generateKeyPair(&ephPrivateKey_, &ephPublicKey_);
+  if (!Secp256r1::generateKeyPair(&ephPrivateKey_, &ephPublicKey_)) {
+    return false;
+  }
   Secp256r1::encodeUncompressed(ephPublicKey_, outMsg->responderEphPubKey);
 
   // Derive shared secret via ECDH: shared = ephPrivate * peerEphPublic

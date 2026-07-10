@@ -20,17 +20,17 @@
 #define SPI_MODE2 0x02  // CPOL=1, CPHA=0
 #define SPI_MODE3 0x03  // CPOL=1, CPHA=1
 
-// Clock settings. The exposed L15 SPI pins use SPIM00. SPI_HS keeps separate
-// bus state and may temporarily select the 128 MHz CPU clock for 32 MHz SCK.
+// SPIM00 has a fixed 128 MHz source and a divisor range of 4..126.
 #define SPI_CLOCK_32M    32000000UL
 #define SPI_CLOCK_16M    16000000UL
 #define SPI_CLOCK_8M      8000000UL
 #define SPI_CLOCK_DIV4   4000000   // 4 MHz
 #define SPI_CLOCK_DIV8   2000000   // 2 MHz
-#define SPI_CLOCK_DIV16  1000000   // 1 MHz
-#define SPI_CLOCK_DIV32  500000    // 500 kHz
-#define SPI_CLOCK_DIV64  250000    // 250 kHz
-#define SPI_CLOCK_DIV128 125000    // 125 kHz
+#define SPI_CLOCK_MIN     1015873UL
+#define SPI_CLOCK_DIV16  SPI_CLOCK_MIN
+#define SPI_CLOCK_DIV32  SPI_CLOCK_MIN
+#define SPI_CLOCK_DIV64  SPI_CLOCK_MIN
+#define SPI_CLOCK_DIV128 SPI_CLOCK_MIN
 
 // Bit order
 #define SPI_BIT_ORDER_MSBFIRST 0
@@ -107,6 +107,7 @@ public:
 
     // Called from core idle path to optionally auto-disable SPI on idle windows.
     void serviceAutoGate();
+    bool quiesceForSystemOff(uint32_t spinLimit);
 
 private:
     NRF_SPIM_Type* _spim;

@@ -1,168 +1,139 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
-
-#include "nrf54l15_regs.h"
 
 namespace xiao_nrf54l15 {
 
-// Instruction/Data Cache (CACHE)
-// Controls the Cortex-M33 instruction and data cache.
-// Datasheet chapter 4.2.5 (CACHE — Instruction/data cache).
+// nRF54 ICACHE is a unified, write-around instruction/data cache. CPU stores
+// reach memory directly, so there are no dirty cache lines to write back.
 class Cache {
  public:
-  // ---- Cache control ----
-
-  // Enable the cache (instruction + data).
   inline static void enable() {
-    writeReg(CACHE_ENABLE, 1);
+    writeReg(kEnable, 1);
+    instructionBarrier();
   }
 
-  // Disable the cache.
   inline static void disable() {
-    writeReg(CACHE_ENABLE, 0);
+    dataBarrier();
+    writeReg(kEnable, 0);
+    instructionBarrier();
   }
 
-  // Check if cache is enabled.
-  inline static bool isEnabled() {
-    return readReg(CACHE_ENABLE) != 0;
-  }
+  inline static bool isEnabled() { return readReg(kEnable) != 0; }
 
-  // ---- Cache maintenance (coherency with DMA / VPR shared memory) ----
+  inline static void invalidateDataCache() { invalidateAll(); }
 
-  // Invalidate the entire data cache.
-  // Use before reading data that may have been modified by DMA or VPR.
-  inline static void invalidateDataCache() {
-    writeReg(CACHE_DINVDALL, 1);
-    // Wait for completion.
-    while (isDataInvalidatePending()) { /* spin */ }
-  }
+  // ICACHE uses write-around allocation. A data barrier is the required DMA
+  // hand-off; the peripheral has no clean/write-back task.
+  inline static void cleanDataCache() { dataBarrier(); }
 
-  // Clean (write-back) the entire data cache.
-  // Use before DMA reads from memory that the CPU has written to.
-  inline static void cleanDataCache() {
-    writeReg(CACHE_DCLEANALL, 1);
-    while (isDataCleanPending()) { /* spin */ }
-  }
+  inline static void cleanInvalidateDataCache() { invalidateAll(); }
 
-  // Clean and invalidate the entire data cache.
-  // Full coherence reset — use when both reading and writing via DMA.
-  inline static void cleanInvalidateDataCache() {
-    writeReg(CACHE_DCLEANINVDALL, 1);
-    while (isDataCleanPending()) { /* spin */ }
-  }
+  inline static void invalidateInstructionCache() { invalidateAll(); }
 
-  // Invalidate the entire instruction cache.
-  // Use after writing to flash (e.g., bootloader handoff).
-  inline static void invalidateInstructionCache() {
-    writeReg(CACHE_IINVDALL, 1);
-    while (isInstrInvalidatePending()) { /* spin */ }
-  }
-
-  // ---- Line-granularity cache ops (for VPR shared memory regions) ----
-
-  // Invalidate a data cache line by address.
-  // addr must be cache-line aligned (16 bytes).
   inline static void invalidateDataCacheLine(uint32_t addr) {
-    writeReg(CACHE_DINVDADDR, addr & 0xFFFFFFF0);
-    while (isDataInvalidatePending()) { /* spin */ }
+    invalidateLine(addr);
   }
 
-  // Clean a data cache line by address.
-  // addr must be cache-line aligned (16 bytes).
-  inline static void cleanDataCacheLine(uint32_t addr) {
-    writeReg(CACHE_DCLEANADDR, addr & 0xFFFFFFF0);
-    while (isDataCleanPending()) { /* spin */ }
-  }
+  inline static void cleanDataCacheLine(uint32_t) { dataBarrier(); }
 
-  // Clean and invalidate a data cache line by address.
   inline static void cleanInvalidateDataCacheLine(uint32_t addr) {
-    writeReg(CACHE_DCLEANINVDADDR, addr & 0xFFFFFFF0);
-    while (isDataCleanPending()) { /* spin */ }
+    invalidateLine(addr);
   }
 
-  // Invalidate an instruction cache line by address.
   inline static void invalidateInstructionCacheLine(uint32_t addr) {
-    writeReg(CACHE_IINVDADDR, addr & 0xFFFFFFF0);
-    while (isInstrInvalidatePending()) { /* spin */ }
+    invalidateLine(addr);
   }
 
-  // ---- Convenience: flush a buffer for DMA compatibility ----
-
-  // Clean the data cache for a given buffer so DMA can read correct data.
-  // len is rounded up to the next cache line.
   inline static void cleanForDma(const void* ptr, size_t len) {
-    if (!ptr || len == 0) return;
-    uint32_t start = reinterpret_cast<uint32_t>(ptr) & 0xFFFFFFF0;
-    uint32_t end   = (reinterpret_cast<uint32_t>(ptr) + len + 15) & 0xFFFFFFF0;
-    for (uint32_t addr = start; addr < end; addr += 16) {
-      cleanDataCacheLine(addr);
-    }
+    if (ptr == nullptr || len == 0) return;
+    dataBarrier();
   }
 
-  // Invalidate the data cache for a given buffer so CPU reads fresh DMA data.
   inline static void invalidateForDma(void* ptr, size_t len) {
-    if (!ptr || len == 0) return;
-    uint32_t start = reinterpret_cast<uint32_t>(ptr) & 0xFFFFFFF0;
-    uint32_t end   = (reinterpret_cast<uint32_t>(ptr) + len + 15) & 0xFFFFFFF0;
-    for (uint32_t addr = start; addr < end; addr += 16) {
-      invalidateDataCacheLine(addr);
-    }
+    if (ptr == nullptr || len == 0) return;
+    forEachLine(ptr, len, invalidateLine);
   }
 
-  // Clean then invalidate — full coherence reset for a buffer.
   inline static void cleanInvalidateForDma(void* ptr, size_t len) {
-    if (!ptr || len == 0) return;
-    uint32_t start = reinterpret_cast<uint32_t>(ptr) & 0xFFFFFFF0;
-    uint32_t end   = (reinterpret_cast<uint32_t>(ptr) + len + 15) & 0xFFFFFFF0;
-    for (uint32_t addr = start; addr < end; addr += 16) {
-      cleanInvalidateDataCacheLine(addr);
-    }
+    invalidateForDma(ptr, len);
   }
 
-  // ---- Status ----
-
-  inline static bool isDataInvalidatePending() {
-    return (readReg(CACHE_STATUS) & CACHE_STATUS_DINVALL_Msk) != 0;
-  }
-
-  inline static bool isDataCleanPending() {
-    return (readReg(CACHE_STATUS) & CACHE_STATUS_DCLEANALL_Msk) != 0;
-  }
-
-  inline static bool isInstrInvalidatePending() {
-    return (readReg(CACHE_STATUS) & CACHE_STATUS_IINVALL_Msk) != 0;
-  }
-
-  // ---- Low-level ----
+  inline static bool isDataInvalidatePending() { return isBusy(); }
+  inline static bool isDataCleanPending() { return false; }
+  inline static bool isInstrInvalidatePending() { return isBusy(); }
 
   inline static uint32_t readReg(uint32_t offset) {
-    return *reinterpret_cast<const volatile uint32_t*>(BASE + offset);
+    return *reinterpret_cast<const volatile uint32_t*>(kBase + offset);
   }
 
   inline static void writeReg(uint32_t offset, uint32_t value) {
-    *reinterpret_cast<volatile uint32_t*>(BASE + offset) = value;
+    *reinterpret_cast<volatile uint32_t*>(kBase + offset) = value;
   }
 
  private:
-  static constexpr uint32_t BASE = 0x4004B000UL;  // CACHE base (MCU domain, non-secure alias)
+  static constexpr uintptr_t kBase = 0xE0082000UL;
+  static constexpr uint32_t kTasksInvalidateCache = 0x008;
+  static constexpr uint32_t kTasksInvalidateLine = 0x014;
+  static constexpr uint32_t kStatus = 0x400;
+  static constexpr uint32_t kEnable = 0x404;
+  static constexpr uint32_t kLineAddr = 0x410;
+  static constexpr uintptr_t kLineSize = 32;
+  static constexpr uint32_t kDefaultSpinLimit = 1000000UL;
 
-  // Register offsets from datasheet.
-  static constexpr uint32_t CACHE_ENABLE         = 0x500;
-  static constexpr uint32_t CACHE_DINVDALL       = 0x004;  // Task: invalidate all data
-  static constexpr uint32_t CACHE_DCLEANALL      = 0x008;  // Task: clean all data
-  static constexpr uint32_t CACHE_DCLEANINVDALL  = 0x00C;  // Task: clean + invalidate all data
-  static constexpr uint32_t CACHE_IINVDALL       = 0x010;  // Task: invalidate all instructions
-  static constexpr uint32_t CACHE_DINVDADDR      = 0x020;  // Task: invalidate data by address
-  static constexpr uint32_t CACHE_DCLEANADDR     = 0x024;  // Task: clean data by address
-  static constexpr uint32_t CACHE_DCLEANINVDADDR = 0x028;  // Task: clean+invalidate data by address
-  static constexpr uint32_t CACHE_IINVDADDR      = 0x02C;  // Task: invalidate instr by address
-  static constexpr uint32_t CACHE_STATUS         = 0x400;
+  inline static bool isBusy() { return (readReg(kStatus) & 1UL) != 0; }
 
-  // Status bit masks.
-  static constexpr uint32_t CACHE_STATUS_DINVALL_Msk    = (1UL << 0);
-  static constexpr uint32_t CACHE_STATUS_DCLEANALL_Msk  = (1UL << 1);
-  static constexpr uint32_t CACHE_STATUS_IINVALL_Msk    = (1UL << 2);
+  inline static bool waitReady(uint32_t spinLimit = kDefaultSpinLimit) {
+    while (spinLimit-- != 0) {
+      if (!isBusy()) return true;
+    }
+    return false;
+  }
+
+  inline static void invalidateAll() {
+    dataBarrier();
+    if (!waitReady()) return;
+    writeReg(kTasksInvalidateCache, 1);
+    (void)waitReady();
+    instructionBarrier();
+  }
+
+  inline static void invalidateLine(uint32_t addr) {
+    dataBarrier();
+    if (!waitReady()) return;
+    writeReg(kLineAddr, addr & ~static_cast<uint32_t>(kLineSize - 1));
+    writeReg(kTasksInvalidateLine, 1);
+    (void)waitReady();
+    instructionBarrier();
+  }
+
+  inline static void forEachLine(void* ptr, size_t len,
+                                 void (*operation)(uint32_t)) {
+    const uintptr_t first = reinterpret_cast<uintptr_t>(ptr) & ~(kLineSize - 1);
+    const uintptr_t lastByte = reinterpret_cast<uintptr_t>(ptr) + len - 1;
+    const uintptr_t last = lastByte & ~(kLineSize - 1);
+    for (uintptr_t addr = first;; addr += kLineSize) {
+      operation(static_cast<uint32_t>(addr));
+      if (addr == last) break;
+    }
+  }
+
+  inline static void dataBarrier() {
+#if defined(__arm__) || defined(__thumb__)
+    __asm volatile("dsb 0xF" ::: "memory");
+#else
+    __asm volatile("" ::: "memory");
+#endif
+  }
+
+  inline static void instructionBarrier() {
+#if defined(__arm__) || defined(__thumb__)
+    __asm volatile("isb 0xF" ::: "memory");
+#else
+    __asm volatile("" ::: "memory");
+#endif
+  }
 };
 
 }  // namespace xiao_nrf54l15

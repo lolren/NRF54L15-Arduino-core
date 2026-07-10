@@ -143,9 +143,9 @@ constexpr uint8_t kTimerConfigWakeupTimer16Ms = 0x04U;
 constexpr uint8_t kShipOffsetShip = 0x02U;
 constexpr uint8_t kShipOffsetHibernate = 0x00U;
 constexpr uint8_t kAdcMaxBatch = 6U;
-constexpr uint16_t kNpm1300LdoTableSize = 4U;
-static const uint16_t kLdoVoltages[] = {1100, 1800, 2500, 3300};
-static constexpr uint16_t NPM1300_LDO_VOLTAGE_3V3_RAW = 3300U;
+constexpr uint16_t kRailVoltageMinMv = 1000U;
+constexpr uint16_t kRailVoltageMaxMv = 3300U;
+constexpr uint16_t kRailVoltageStepMv = 100U;
 
 static constexpr uint8_t kChargerStatusChargingMask = 0x1CU;
 static constexpr uint8_t kChargerEnableChargingMask = 0x01U;
@@ -373,11 +373,14 @@ static uint8_t charger_vterm_index(uint16_t mv) {
     return (uint8_t)(4U + ((mv - 4000U + 25U) / 50U));
 }
 
-static bool voltage_to_index(uint16_t mv, uint8_t* idx) {
-    for (uint8_t i = 0; i < kNpm1300LdoTableSize; i++) {
-        if (kLdoVoltages[i] == mv) { *idx = i; return true; }
+static bool voltage_to_code(uint16_t mv, uint8_t* code) {
+    if (code == nullptr || mv < kRailVoltageMinMv || mv > kRailVoltageMaxMv ||
+        ((mv - kRailVoltageMinMv) % kRailVoltageStepMv) != 0U) {
+        return false;
     }
-    return false;
+    *code = static_cast<uint8_t>((mv - kRailVoltageMinMv) /
+                                 kRailVoltageStepMv);
+    return true;
 }
 
 static void ensure_adc_active() {
@@ -447,10 +450,10 @@ static bool buck_enable(uint8_t channel, bool enable) {
 }
 
 static bool buck_set_voltage(uint8_t channel, uint16_t mv) {
-    uint8_t index = 0;
-    if (!voltage_to_index(mv, &index)) return false;
+    uint8_t code = 0;
+    if (!voltage_to_code(mv, &code)) return false;
     channel = clamp_channel(channel);
-    return npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetVoutNorm + (channel * 2U), index) &&
+    return npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetVoutNorm + (channel * 2U), code) &&
            npm1300_write_reg(NPM1300_BASE_BUCK, kBuckOffsetSwCtrl, 1U << channel);
 }
 
@@ -512,8 +515,8 @@ bool npm1300_ldo1_enable(bool enable) {
     return npm1300_write_reg(NPM1300_BASE_LDSW, enable ? kLdSwOffsetEnSet : kLdSwOffsetEnClr, 1U);
 }
 bool npm1300_ldo1_set_voltage(uint16_t mv) {
-    uint8_t idx; if (!voltage_to_index(mv, &idx)) return false;
-    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetVoutSel, idx);
+    uint8_t code; if (!voltage_to_code(mv, &code)) return false;
+    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetVoutSel, code);
 }
 bool npm1300_ldo1_is_enabled(void) {
     uint8_t s; return npm1300_read_reg(NPM1300_BASE_LDSW, kLdSwOffsetStatus, &s) &&
@@ -525,8 +528,8 @@ bool npm1300_ldo2_enable(bool enable) {
                              1U);
 }
 bool npm1300_ldo2_set_voltage(uint16_t mv) {
-    uint8_t idx; if (!voltage_to_index(mv, &idx)) return false;
-    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetVoutSel + 1U, idx);
+    uint8_t code; if (!voltage_to_code(mv, &code)) return false;
+    return npm1300_write_reg(NPM1300_BASE_LDSW, kLdSwOffsetVoutSel + 1U, code);
 }
 bool npm1300_ldo2_is_enabled(void) {
     uint8_t s; return npm1300_read_reg(NPM1300_BASE_LDSW, kLdSwOffsetStatus, &s) &&

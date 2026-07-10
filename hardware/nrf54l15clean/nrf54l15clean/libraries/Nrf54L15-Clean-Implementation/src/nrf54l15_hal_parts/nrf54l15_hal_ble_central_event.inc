@@ -125,15 +125,9 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
 
   const bool canSendNewPayloadThisEvent =
       !connectionTxHistoryValid_ || connectionFreshTxAllowed_;
-  // Do not replace an earlier empty ACK with a fresh queued central request.
-  // Reusing the same SN with a different ATT/L2CAP payload is fragile during
-  // coded-PHY setup and under duplex traffic, and can make the peer treat the
-  // request as a duplicate or miss it entirely. Wait for a fresh TX state
-  // before promoting any queued central request.
-  const bool promotePendingTxAfterEmptyAck = false;
   uint8_t txLlid = 0x01U;
   uint8_t txLength = 0U;
-  if (canSendNewPayloadThisEvent || promotePendingTxAfterEmptyAck) {
+  if (canSendNewPayloadThisEvent) {
     maybeQueueCentralLinkSetupRequest();
     if (!connectionPendingTxValid_ &&
         (channelSoundingLlControlTxCount_ > 0U)) {
@@ -173,7 +167,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   }
 
   const bool txHasFollowingPayload =
-      (canSendNewPayloadThisEvent || promotePendingTxAfterEmptyAck) &&
+      canSendNewPayloadThisEvent &&
       (connectionPendingTxValid_ ||
        (channelSoundingLlControlTxCount_ > 0U) ||
        (connectionCustomNotificationQueueCount_ > 0U));
@@ -265,7 +259,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                      spinLimit / 2U + 1U);
   }
   if (!txOk) {
-    if ((canSendNewPayloadThisEvent || promotePendingTxAfterEmptyAck) &&
+    if (canSendNewPayloadThisEvent &&
         (txLength > 0U) && !connectionPendingTxValid_) {
       memcpy(connectionPendingTxPayload_, connectionTxPayload_, txLength);
       connectionPendingTxLlid_ = txLlid;
@@ -619,15 +613,9 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       connectionEncRxEnabled_ &&
       !connectionEncAwaitingStartRsp_) {
     if (rxLengthRaw < kBleMicLen) {
-      const bool allowPostStartPlainZeroLen =
-          (rxLengthRaw == 0U) &&
-          (connectionEncRxCounter_ <= 3ULL) &&
-          ((llid == kBlePduDataStartOrComplete) || (llid == 0x01U));
-      if (!allowPostStartPlainZeroLen) {
-        terminateInd = true;
-        ++encDebug_.encRxShortPduCount;
-        emitBleTrace("ENC_RX_SHORT_PDU");
-      }
+      terminateInd = true;
+      ++encDebug_.encRxShortPduCount;
+      emitBleTrace("ENC_RX_SHORT_PDU");
     } else {
       uint8_t plaintext[kBleDataPduMaxPayload] = {0};
       uint8_t plaintextLen = 0U;
@@ -693,40 +681,6 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       }
     }
   }
-  bool implicitEmptyAck = false;
-  const bool lastTxWasEmptyAck =
-      connectionTxHistoryValid_ &&
-      (connectionLastTxLlid_ == 0x01U) &&
-      (connectionLastTxLength_ == 0U);
-  const bool lastTxHadAttPayload =
-      connectionTxHistoryValid_ &&
-      (connectionLastTxLlid_ == kBlePduDataStartOrComplete) &&
-      (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
-      (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidAtt);
-  const bool peerAdvancedToNewAttServerProgress =
-      packetIsNew &&
-      (llid == kBlePduDataStartOrComplete) &&
-      (rxLength >= (kBleL2capHeaderLen + 1U)) &&
-      (readLe16(&rxPacket_[4]) == kBleL2capCidAtt) &&
-      (attOpcodeIsServerResponsePdu(rxPacket_[2 + kBleL2capHeaderLen]) ||
-       (rxPacket_[2 + kBleL2capHeaderLen] == kAttOpHandleValueNtf) ||
-       (rxPacket_[2 + kBleL2capHeaderLen] == kAttOpHandleValueInd));
-  // Some peers keep NESN stale while they continue pushing notifications or a
-  // server response. Treat that higher-layer progress as an implicit ACK so
-  // the central can advance SN and deliver the next queued ATT request, both
-  // before and after link-layer encryption comes up.
-  if (!peerAckedLastTx &&
-      connectionTxHistoryValid_ &&
-      packetIsNew &&
-      ((lastTxWasEmptyAck && peerAdvancedToNewAttServerProgress) ||
-       (lastTxHadAttPayload && peerAdvancedToNewAttServerProgress))) {
-    peerAckedLastTx = true;
-    implicitEmptyAck = true;
-    if (lastTxHadAttPayload && peerAdvancedToNewAttServerProgress) {
-      ++encDebug_.connImplicitAttProgressAckCount;
-    }
-    emitBleTrace("CENTRAL_IMPLICIT_ATT_ACK");
-  }
   if (peerAckedLastTx) {
     connectionTxSn_ ^= 0x01U;
     connectionFreshTxAllowed_ = true;
@@ -756,7 +710,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     event->packetIsNew = packetIsNew;
     event->peerAckedLastTx = peerAckedLastTx;
     event->freshTxAllowed = (!connectionTxHistoryValid_ || peerAckedLastTx);
-    event->implicitEmptyAck = implicitEmptyAck;
+    event->implicitEmptyAck = false;
     event->llid = llid;
     event->rxNesn = nesn;
     event->rxSn = sn;
@@ -1306,36 +1260,6 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         }
       }
 
-      bool implicitEmptyAckFollow = false;
-      const bool lastTxWasEmptyAckFollow =
-          connectionTxHistoryValid_ &&
-          (connectionLastTxLlid_ == 0x01U) &&
-          (connectionLastTxLength_ == 0U);
-      const bool lastTxHadAttPayloadFollow =
-          connectionTxHistoryValid_ &&
-          (connectionLastTxLlid_ == kBlePduDataStartOrComplete) &&
-          (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
-          (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidAtt);
-      const bool peerAdvancedToNewAttServerProgressFollow =
-          packetIsNewFollow &&
-          (llidFollow == kBlePduDataStartOrComplete) &&
-          (rxLengthFollow >= (kBleL2capHeaderLen + 1U)) &&
-          (readLe16(&rxPacket_[4]) == kBleL2capCidAtt) &&
-          (attOpcodeIsServerResponsePdu(rxPacket_[2 + kBleL2capHeaderLen]) ||
-           (rxPacket_[2 + kBleL2capHeaderLen] == kAttOpHandleValueNtf) ||
-           (rxPacket_[2 + kBleL2capHeaderLen] == kAttOpHandleValueInd));
-      if (!peerAckedLastTxFollow &&
-          connectionTxHistoryValid_ &&
-          packetIsNewFollow &&
-          ((lastTxWasEmptyAckFollow && peerAdvancedToNewAttServerProgressFollow) ||
-           (lastTxHadAttPayloadFollow && peerAdvancedToNewAttServerProgressFollow))) {
-        peerAckedLastTxFollow = true;
-        implicitEmptyAckFollow = true;
-        if (lastTxHadAttPayloadFollow &&
-            peerAdvancedToNewAttServerProgressFollow) {
-          ++encDebug_.connImplicitAttProgressAckCount;
-        }
-      }
       if (peerAckedLastTxFollow) {
         connectionTxSn_ ^= 0x01U;
         connectionFreshTxAllowed_ = true;

@@ -21,9 +21,38 @@
  * BUTTON B: Not used since it is hard to press
  * BUTTON C: Down or decline call
  */
+#include <Arduino.h>
 #include <Wire.h>
+#include <stdio.h>
+#if __has_include(<Adafruit_GFX.h>) && __has_include(<Adafruit_SSD1306.h>)
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#define BLUEFRUIT_OLED_AVAILABLE 1
+#else
+#define BLUEFRUIT_OLED_AVAILABLE 0
+#define SSD1306_SWITCHCAPVCC 0
+#define WHITE 1
+class Adafruit_SSD1306 {
+public:
+  explicit Adafruit_SSD1306(int = -1) {}
+  bool begin(uint8_t, uint8_t) { return true; }
+  void display() {}
+  void clearDisplay() {}
+  void setCursor(int16_t, int16_t) {}
+  void setTextColor(uint16_t) {}
+  void setTextSize(uint8_t) {}
+  void print(const char* text) { Serial.print(text); }
+  void println(const char* text) { Serial.println(text); }
+  void println() { Serial.println(); }
+  template <typename T> void print(T value) { Serial.print(value); }
+  template <typename T> void println(T value) { Serial.println(value); }
+  template <typename... Args> void printf(const char* format, Args... args) {
+    char buffer[96];
+    snprintf(buffer, sizeof(buffer), format, args...);
+    Serial.print(buffer);
+  }
+};
+#endif
 #include <bluefruit.h>
 
 /*------------- OLED and Buttons -------------*/
@@ -71,6 +100,11 @@ BLEAncs       bleancs;
 
 void setup()
 {
+#if !BLUEFRUIT_OLED_AVAILABLE
+  Serial.begin(115200);
+  delay(100);
+#endif
+
   // Button configured
   pinMode(BUTTON_A, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);

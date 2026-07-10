@@ -523,7 +523,7 @@ bool MatterPaseCommissioning::computeSpake2pX() {
   // Prover (commissionee) computes:
   // X = x*G + w0*G = (x + w0)*G
   Secp256r1Scalar xScalar;
-  Secp256r1::generateRandomScalar(&xScalar);
+  if (!Secp256r1::generateRandomScalar(&xScalar)) return false;
 
   // y + w0 (mod n)
   Secp256r1::BigNum256 xBn, w0Bn, sumBn;
@@ -559,7 +559,7 @@ bool MatterPaseCommissioning::computeSpake2pY() {
   // Responder (commissionee/prover) computes:
   // Y = (x + w0)*G
   Secp256r1Scalar yScalar;
-  Secp256r1::generateRandomScalar(&yScalar);
+  if (!Secp256r1::generateRandomScalar(&yScalar)) return false;
 
   // x + w0 (mod n)
   Secp256r1::BigNum256 yBn, w0Bn, sumBn;

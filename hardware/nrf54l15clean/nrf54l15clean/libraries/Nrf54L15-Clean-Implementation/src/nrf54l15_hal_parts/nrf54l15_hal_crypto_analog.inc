@@ -38,17 +38,39 @@ constexpr uint32_t kVdmaDescriptorAttrCcmMdata =
      << VDMADESCRIPTOR_CONFIG_ATTRIBUTE_Pos) &
     VDMADESCRIPTOR_CONFIG_ATTRIBUTE_Msk;
 constexpr size_t kAarMaxIrksScratch = 64U;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+// LM20 RNG STATUS: REP/PROP/aggregate health failures, startup/per-share
+// failures, and conditioning-too-slow. FIFO full (bit 7) is not an error.
+constexpr uint32_t kCracenRngFailureMask =
+    CRACENCORE_RNGCONTROL_STATUS_REPFAIL_Msk |
+    CRACENCORE_RNGCONTROL_STATUS_PROPFAIL_Msk |
+    CRACENCORE_RNGCONTROL_STATUS_ANYHEALTHTESTFAIL_Msk |
+    CRACENCORE_RNGCONTROL_STATUS_STARTUPFAIL_Msk |
+    CRACENCORE_RNGCONTROL_STATUS_REPTESTFAILPERSHARE_Msk |
+    CRACENCORE_RNGCONTROL_STATUS_PROPTESTFAILPERSHARE_Msk |
+    CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Msk;
+#else
 constexpr uint32_t kCracenRngFailureMask =
     CRACENCORE_RNGCONTROL_STATUS_REPFAIL_Msk |
     CRACENCORE_RNGCONTROL_STATUS_PROPFAIL_Msk |
     CRACENCORE_RNGCONTROL_STATUS_STARTUPFAIL_Msk |
     CRACENCORE_RNGCONTROL_STATUS_FIFOACCFAIL_Msk;
+#endif
 
 alignas(4) uint8_t g_aarAddressScratch[6] = {};
 alignas(4) uint8_t g_aarIrkScratch[kAarMaxIrksScratch * 16U] = {};
 alignas(4) uint16_t g_aarResolvedIndexScratch = 0xFFFFU;
 alignas(4) NRF_VDMADESCRIPTOR_Type g_aarInJobs[kAarMaxIrksScratch + 3U] = {};
 alignas(4) NRF_VDMADESCRIPTOR_Type g_aarOutJobs[2] = {};
+alignas(4) volatile int16_t g_saadcSampleScratch = 0;
+
+bool isQdecPortSupported(const Pin& pin) {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  return pin.port == 1U || pin.port == 3U;
+#else
+  return pin.port == 1U;
+#endif
+}
 
 uint32_t packBigEndianWord(const uint8_t* bytes) {
   return (static_cast<uint32_t>(bytes[0]) << 24U) |
@@ -114,6 +136,12 @@ bool CracenRng::beginNonBlocking() {
   clearEvent();
 
   uint32_t control = core_->RNGCONTROL.CONTROL;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  // ENABLE is a self-clearing start pulse on LM20.
+  control |= CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
+  core_->RNGCONTROL.CONTROL = control;
+  __asm volatile("dsb 0xF" ::: "memory");
+#else
   control &= ~CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
   core_->RNGCONTROL.CONTROL = control;
   __asm volatile("dsb 0xF" ::: "memory");
@@ -121,16 +149,25 @@ bool CracenRng::beginNonBlocking() {
   control |= CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
   core_->RNGCONTROL.CONTROL = control;
   __asm volatile("dsb 0xF" ::: "memory");
+#endif
 
   active_ = true;
-  return healthy();
+  if (!healthy()) {
+    end();
+    return false;
+  }
+  return true;
 }
 
 bool CracenRng::begin(uint32_t spinLimit) {
   if (!beginNonBlocking()) {
     return false;
   }
-  return ensureDataAvailable(spinLimit);
+  if (!ensureDataAvailable(spinLimit)) {
+    end();
+    return false;
+  }
+  return true;
 }
 
 void CracenRng::end() {
@@ -139,10 +176,12 @@ void CracenRng::end() {
     return;
   }
 
+#if !defined(NRF54LM20A_XXAA) && !defined(NRF54LM20B_XXAA)
   uint32_t control = core_->RNGCONTROL.CONTROL;
   control &= ~CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
   core_->RNGCONTROL.CONTROL = control;
   __asm volatile("dsb 0xF" ::: "memory");
+#endif
 
   cracen_->ENABLE &= ~CRACEN_ENABLE_RNG_Msk;
   clearEvent();
@@ -153,6 +192,7 @@ bool CracenRng::fill(void* data, size_t length, uint32_t spinLimit) {
   if (data == nullptr) {
     return false;
   }
+  memset(data, 0, length);
 
   const bool temporaryBegin = !active_;
   if (temporaryBegin && !begin(spinLimit)) {
@@ -178,6 +218,9 @@ bool CracenRng::fill(void* data, size_t length, uint32_t spinLimit) {
   if (temporaryBegin) {
     end();
   }
+  if (!ok) {
+    memset(data, 0, length);
+  }
   return ok;
 }
 
@@ -185,6 +228,7 @@ bool CracenRng::randomWord(uint32_t* outWord, uint32_t spinLimit) {
   if (outWord == nullptr) {
     return false;
   }
+  *outWord = 0U;
 
   const bool temporaryBegin = !active_;
   if (temporaryBegin && !begin(spinLimit)) {
@@ -206,6 +250,7 @@ bool CracenRng::tryRandomWord(uint32_t* outWord) {
   if (outWord == nullptr) {
     return false;
   }
+  *outWord = 0U;
 
   const bool temporaryBegin = !active_;
   if (temporaryBegin && !beginNonBlocking()) {
@@ -1146,7 +1191,9 @@ bool Qdec::begin(const Pin& pinA, const Pin& pinB, QdecSamplePeriod samplePeriod
     end();
   }
 
-  if (!isConnected(pinA) || !isConnected(pinB)) {
+  if (qdec_ == nullptr || !isConnected(pinA) || !isConnected(pinB) ||
+      !isQdecPortSupported(pinA) || !isQdecPortSupported(pinB) ||
+      (isConnected(ledPin) && !isQdecPortSupported(ledPin))) {
     return false;
   }
   if ((pinA.port == pinB.port) && (pinA.pin == pinB.pin)) {
@@ -1513,42 +1560,44 @@ bool Saadc::configureDifferential(uint8_t channel, const Pin& positivePin,
 }
 
 bool Saadc::sampleRaw(int16_t* outRaw, uint32_t spinLimit) const {
-  if (!configured_ || outRaw == nullptr) {
+  if (!configured_ || base_ == 0U || outRaw == nullptr) {
     return false;
   }
 
-  // EasyDMA writes this value asynchronously, keep it volatile.
-  volatile int16_t sample = 0;
+  // Keep the DMA target alive even if STOPPED never arrives. A stack target
+  // would become a use-after-return destination on a timeout path.
+  g_saadcSampleScratch = 0;
 
   clearEvent(base_, saadc::EVENTS_STARTED);
   clearEvent(base_, saadc::EVENTS_END);
   clearEvent(base_, saadc::EVENTS_STOPPED);
 
   reg32(base_ + saadc::RESULT_PTR) =
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&sample));
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_saadcSampleScratch));
   // On nRF54 SAADC this counter is in bytes.
-  reg32(base_ + saadc::RESULT_MAXCNT) = sizeof(sample);
+  reg32(base_ + saadc::RESULT_MAXCNT) = sizeof(g_saadcSampleScratch);
 
   reg32(base_ + saadc::TASKS_START) = 1;
-  if (!waitForEvent(base_, saadc::EVENTS_STARTED, spinLimit)) {
-    return false;
-  }
-
-  reg32(base_ + saadc::TASKS_SAMPLE) = 1;
-  if (!waitForEvent(base_, saadc::EVENTS_END, spinLimit)) {
-    return false;
+  const bool started = waitForEvent(base_, saadc::EVENTS_STARTED, spinLimit);
+  bool ended = false;
+  if (started) {
+    reg32(base_ + saadc::TASKS_SAMPLE) = 1;
+    ended = waitForEvent(base_, saadc::EVENTS_END, spinLimit);
   }
 
   reg32(base_ + saadc::TASKS_STOP) = 1;
-  if (!waitForEvent(base_, saadc::EVENTS_STOPPED, spinLimit)) {
+  const bool stopped = waitForEvent(base_, saadc::EVENTS_STOPPED, spinLimit);
+  if (stopped) {
+    reg32(base_ + saadc::RESULT_MAXCNT) = 0U;
+    reg32(base_ + saadc::RESULT_PTR) = 0U;
+  }
+
+  if (!started || !ended || !stopped ||
+      reg32(base_ + saadc::RESULT_AMOUNT) < sizeof(g_saadcSampleScratch)) {
     return false;
   }
 
-  if (reg32(base_ + saadc::RESULT_AMOUNT) < sizeof(sample)) {
-    return false;
-  }
-
-  *outRaw = sample;
+  *outRaw = g_saadcSampleScratch;
   return true;
 }
 
@@ -1761,20 +1810,22 @@ Watchdog::Watchdog(uint32_t base)
 
 bool Watchdog::configure(uint32_t timeoutMs, uint8_t reloadRegister, bool runInSleep,
                          bool runInDebugHalt, bool allowStop) {
-  if (reloadRegister > 7U || timeoutMs == 0U) {
+  if (wdt_ == nullptr || reloadRegister > 7U || timeoutMs == 0U) {
     return false;
   }
   if (isRunning()) {
     return false;
   }
 
-  uint64_t cycles64 =
+  const uint64_t requestedTicks =
       (static_cast<uint64_t>(timeoutMs) * 32768ULL + 999ULL) / 1000ULL;
-  if (cycles64 < WDT_CRV_CRV_Min) {
-    cycles64 = WDT_CRV_CRV_Min;
+  // Timeout is (CRV + 1) / 32768 seconds.
+  uint64_t crv = requestedTicks - 1ULL;
+  if (crv < WDT_CRV_CRV_Min) {
+    crv = WDT_CRV_CRV_Min;
   }
-  if (cycles64 > WDT_CRV_CRV_Max) {
-    cycles64 = WDT_CRV_CRV_Max;
+  if (crv > WDT_CRV_CRV_Max) {
+    crv = WDT_CRV_CRV_Max;
   }
 
   uint32_t cfg = 0;
@@ -1785,12 +1836,10 @@ bool Watchdog::configure(uint32_t timeoutMs, uint8_t reloadRegister, bool runInS
   cfg |= ((allowStop ? WDT_CONFIG_STOPEN_Enable : WDT_CONFIG_STOPEN_Disable)
           << WDT_CONFIG_STOPEN_Pos);
 
-  wdt_->CRV = static_cast<uint32_t>(cycles64);
+  wdt_->CRV = static_cast<uint32_t>(crv);
   wdt_->RREN = (1UL << reloadRegister);
   wdt_->CONFIG = cfg;
-  if (allowStop) {
-    wdt_->TSEN = WDT_TSEN_TSEN_Enable;
-  }
+  wdt_->TSEN = allowStop ? WDT_TSEN_TSEN_Enable : 0U;
 
   defaultReloadRegister_ = reloadRegister;
   allowStop_ = allowStop;
@@ -1806,7 +1855,12 @@ bool Watchdog::stop(uint32_t spinLimit) {
 
   wdt_->EVENTS_STOPPED = 0U;
   wdt_->TASKS_STOP = WDT_TASKS_STOP_TASKS_STOP_Trigger;
-  return waitForNonZero(&wdt_->EVENTS_STOPPED, spinLimit);
+  if (!waitForNonZero(&wdt_->EVENTS_STOPPED, spinLimit)) {
+    return false;
+  }
+  wdt_->TSEN = 0U;
+  allowStop_ = false;
+  return true;
 }
 
 bool Watchdog::feed(uint8_t reloadRegister) {

@@ -90,7 +90,7 @@ static void armMidDelaySample() {
                                     true);
 }
 
-extern "C" void nrf54l15_ble_grtc_irq_service(void) {
+extern "C" void nrf54l15_grtc_irq_observer(void) {
   if (NRF_GRTC->EVENTS_COMPARE[kProbeCompareChannel] == 0U) {
     return;
   }

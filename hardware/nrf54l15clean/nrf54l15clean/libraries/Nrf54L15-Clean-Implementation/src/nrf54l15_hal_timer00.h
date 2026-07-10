@@ -6,7 +6,7 @@
 
 namespace xiao_nrf54l15 {
 
-// TIMER00 — MCU-Domain Timer (128 MHz pclk, 6 compare channels)
+// TIMER00 — MCU-Domain Timer (128 MHz pclk, 5 user compare channels)
 //
 // TIMER00 runs in the MCU domain with a 128 MHz peripheral clock,
 // giving ~7.8125 ns tick resolution at prescaler 0.
@@ -22,9 +22,9 @@ class Timer00 {
   bool begin(uint8_t bitWidth = 3,
              uint8_t prescaler = 4,
              bool counterMode = false) {
-    if (base_ == 0) return false;
-    wr(0x508, bitWidth & 0x3);      // BITMODE
-    wr(0x510, prescaler & 0xF);     // PRESCALER
+    if (base_ == 0 || bitWidth > 3U || prescaler > 9U) return false;
+    wr(0x508, bitWidth);            // BITMODE
+    wr(0x510, prescaler);           // PRESCALER
     wr(0x504, counterMode ? 1 : 0); // MODE
     return true;
   }
@@ -35,7 +35,8 @@ class Timer00 {
   }
 
   uint32_t ticksFromMicros(uint32_t us) const {
-    return (us * timerHz()) / 1000000;
+    return static_cast<uint32_t>((static_cast<uint64_t>(us) * timerHz()) /
+                                 1000000ULL);
   }
 
   // ---- Tasks ----
@@ -48,19 +49,21 @@ class Timer00 {
   // ---- Counter value ----
 
   uint32_t counterValue() {
-    return rd(0x54C);  // CNTVAL
+    // TIMER has no live CNTVAL register. Reserve CC[5] and capture into it.
+    wr(0x040 + kCaptureChannel * 4, 1);
+    return rd(0x540 + kCaptureChannel * 4);
   }
 
-  // ---- Compare channels (6 channels) ----
+  // ---- Compare channels (CC[0..4], with CC[5] reserved for capture) ----
 
   bool setCompare(uint8_t channel, uint32_t value) {
-    if (channel > 5) return false;
+    if (channel >= kCaptureChannel) return false;
     wr(0x540 + channel * 4, value);
     return true;
   }
 
   uint32_t getCompare(uint8_t channel) {
-    if (channel > 5) return 0;
+    if (channel >= kCaptureChannel) return 0;
     return rd(0x540 + channel * 4);
   }
 
@@ -68,16 +71,19 @@ class Timer00 {
                             bool autoStop = false,
                             bool autoClear = false) {
     if (!setCompare(channel, value)) return false;
-    if (autoStop) {
-      wr(0x200, rd(0x200) | (1U << (16 + channel * 1)));
-    }
+    uint32_t shorts = rd(0x200);
+    const uint32_t clearMask = 1UL << channel;
+    const uint32_t stopMask = 1UL << (16 + channel);
+    shorts = autoClear ? (shorts | clearMask) : (shorts & ~clearMask);
+    shorts = autoStop ? (shorts | stopMask) : (shorts & ~stopMask);
+    wr(0x200, shorts);
     return true;
   }
 
   // ---- Events ----
 
   bool pollCompare(uint8_t channel, bool clearEvent = true) {
-    if (channel > 5) return false;
+    if (channel >= kCaptureChannel) return false;
     uint32_t off = 0x140 + channel * 4;
     uint32_t val = rd(off);
     if (clearEvent) wr(off, 0);
@@ -87,28 +93,25 @@ class Timer00 {
   // ---- Interrupts ----
 
   void enableCompareInterrupt(uint8_t channel, bool enable = true) {
-    if (channel > 5) return;
+    if (channel >= kCaptureChannel) return;
     if (enable) {
-      wr(0x304, (1UL << (16 + channel * 4)));
+      wr(0x304, 1UL << (16U + channel));
     } else {
-      wr(0x308, (1UL << (16 + channel * 4)));
+      wr(0x308, 1UL << (16U + channel));
     }
   }
 
   // ---- One-shot mode ----
 
   void setOneShot(uint8_t channel, bool enable = true) {
-    if (channel > 5) return;
-    uint32_t val = rd(0x580);
-    if (enable) val |= (1U << channel);
-    else        val &= ~(1U << channel);
-    wr(0x580, val);
+    if (channel >= kCaptureChannel) return;
+    wr(0x580 + channel * 4, enable ? 1UL : 0UL);
   }
 
   // ---- PPI publish/subscribe ----
 
   volatile uint32_t* publishCompareRegister(uint8_t channel) const {
-    if (channel > 5) return nullptr;
+    if (channel >= kCaptureChannel) return nullptr;
     return reinterpret_cast<volatile uint32_t*>(base_ + 0x1C0 + channel * 4);
   }
 
@@ -133,6 +136,7 @@ class Timer00 {
   uint32_t base() const { return base_; }
 
  private:
+  static constexpr uint8_t kCaptureChannel = 5;
   uint32_t base_;
 
   inline uint32_t rd(uint32_t off) const {

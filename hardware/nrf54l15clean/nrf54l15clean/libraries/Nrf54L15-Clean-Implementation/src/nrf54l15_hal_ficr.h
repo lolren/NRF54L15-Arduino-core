@@ -66,10 +66,11 @@ class Ficr {
 
   // Returns true if this is an nRF54LM20A or nRF54LM20B.
   inline static bool isNrf54lm20() {
-    return partCode() == PART_NRF54LM20A;
+    const uint32_t part = partCode();
+    return part == PART_NRF54LM20A || part == PART_NRF54LM20B;
   }
 
-  // Variant string (up to 8 ASCII chars, null-terminated).
+  // Variant is exactly four ASCII bytes in network/display order.
   // Returns true if variant data is valid (not all 0xFF).
   inline static bool variant(char* out, size_t outLen) {
     if (!out || outLen == 0) return false;
@@ -78,10 +79,9 @@ class Ficr {
       out[0] = '\0';
       return false;
     }
-    // Variant is ASCII-encoded: bytes 0-7 of the 32-bit value.
-    size_t copyLen = outLen < 8 ? outLen : 8;
+    const size_t copyLen = (outLen - 1 < 4) ? outLen - 1 : 4;
     for (size_t i = 0; i < copyLen; i++) {
-      out[i] = static_cast<char>((raw >> (i * 8)) & 0xFF);
+      out[i] = static_cast<char>((raw >> (24 - i * 8)) & 0xFF);
     }
     out[copyLen] = '\0';
     return true;
@@ -114,9 +114,9 @@ class Ficr {
     out[0] = (uint8_t)(addr0 >> 0);
     out[1] = (uint8_t)(addr0 >> 8);
     out[2] = (uint8_t)(addr0 >> 16);
-    out[3] = (uint8_t)(addr1 >> 0);
-    out[4] = (uint8_t)(addr1 >> 8);
-    out[5] = (uint8_t)(addr1 >> 16);
+    out[3] = (uint8_t)(addr0 >> 24);
+    out[4] = (uint8_t)(addr1 >> 0);
+    out[5] = (uint8_t)(addr1 >> 8);
   }
 
   // Device address type: 0 = Public, 1 = Random.
@@ -166,24 +166,21 @@ class Ficr {
     return readRegister(OFFS_XOSC32KTRIM);
   }
 
-  // XOSC32M slope component (bits [15:0] of trim word).
-  inline static uint16_t xosc32mSlope() {
-    return static_cast<uint16_t>(xosc32mTrim() & 0xFFFF);
+  // SLOPE is a signed 9-bit field [8:0]; OFFSET is unsigned [25:16].
+  inline static int16_t xosc32mSlope() {
+    return decodeSlope(xosc32mTrim());
   }
 
-  // XOSC32M offset component (bits [31:16] of trim word).
-  inline static int16_t xosc32mOffset() {
-    return static_cast<int16_t>(static_cast<int32_t>(xosc32mTrim() << 16) >> 16);
+  inline static uint16_t xosc32mOffset() {
+    return static_cast<uint16_t>((xosc32mTrim() >> 16) & 0x3FFUL);
   }
 
-  // XOSC32K slope component (bits [15:0] of trim word).
-  inline static uint16_t xosc32kSlope() {
-    return static_cast<uint16_t>(xosc32kTrim() & 0xFFFF);
+  inline static int16_t xosc32kSlope() {
+    return decodeSlope(xosc32kTrim());
   }
 
-  // XOSC32K offset component (bits [31:16] of trim word).
-  inline static int16_t xosc32kOffset() {
-    return static_cast<int16_t>(static_cast<int32_t>(xosc32kTrim() << 16) >> 16);
+  inline static uint16_t xosc32kOffset() {
+    return static_cast<uint16_t>((xosc32kTrim() >> 16) & 0x3FFUL);
   }
 
   // ---- Trim configuration (factory-programmed) ----
@@ -205,7 +202,7 @@ class Ficr {
   }
 
  private:
-  static constexpr uint32_t BASE = 0x00FFC000UL;
+  static constexpr uint32_t BASE = nrf54l15::FICR_BASE;
 
   // Register offsets (from datasheet chapter 4.2.4).
   static constexpr uint32_t OFFS_INFO_CONFIGID    = 0x300;
@@ -235,11 +232,17 @@ class Ficr {
   static constexpr uint32_t PART_NRF54L10   = 0x00054B10UL;
   static constexpr uint32_t PART_NRF54L05   = 0x00054B05UL;
   static constexpr uint32_t PART_NRF54LM20A = 0x054BC20AUL;
-  static constexpr uint32_t PART_NRF54LM20B = 0x054BC20AUL;  // same die as LM20A
+  static constexpr uint32_t PART_NRF54LM20B = 0x054BC20BUL;
 
   // Address type constants.
   static constexpr uint32_t ADDR_TYPE_PUBLIC  = 0UL;
   static constexpr uint32_t ADDR_TYPE_RANDOM  = 1UL;
+
+  inline static int16_t decodeSlope(uint32_t trim) {
+    uint16_t value = static_cast<uint16_t>(trim & 0x1FFUL);
+    if ((value & 0x100U) != 0) value |= 0xFE00U;
+    return static_cast<int16_t>(value);
+  }
 
   // Helper: read 4 words and store as 16 bytes in LE.
   inline static void read4WordsLe(uint8_t* out, uint32_t baseOffset) {

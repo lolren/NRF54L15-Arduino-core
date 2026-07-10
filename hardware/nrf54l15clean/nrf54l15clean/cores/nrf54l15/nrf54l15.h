@@ -25,6 +25,8 @@ extern "C" {
 
 #include "nrf54l15_types.h"
 
+#define NRF54_HAS_I2S20 1
+
 // ============================================================================
 // Peripheral base addresses used by this core
 // ============================================================================
@@ -49,7 +51,6 @@ extern "C" {
 #define NRF_CRACENCORE_BASE    0x51800000UL
 #define NRF_KMU_NS_BASE        0x40045000UL
 #define NRF_KMU_S_BASE         0x50045000UL
-#define NRF_RRAMC_NS_BASE      0x4004B000UL
 #define NRF_RRAMC_S_BASE       0x5004B000UL
 #define NRF_SPIS00_NS_BASE     0x4004A000UL
 #define NRF_SPIM00_NS_BASE     0x4004A000UL
@@ -153,6 +154,7 @@ extern "C" {
 #define NRF_REGULATORS_S_BASE  0x50120000UL
 
 #ifdef NRF_TRUSTZONE_NONSECURE
+#define NRF54_RRAMC_DIRECT_ACCESS_AVAILABLE 0
 #define NRF_P0_BASE            NRF_P0_NS_BASE
 #define NRF_P1_BASE            NRF_P1_NS_BASE
 #define NRF_P2_BASE            NRF_P2_NS_BASE
@@ -164,7 +166,7 @@ extern "C" {
 #define NRF_CCM00_BASE         NRF_CCM00_NS_BASE
 #define NRF_ECB00_BASE         NRF_ECB00_NS_BASE
 #define NRF_KMU_BASE           NRF_KMU_NS_BASE
-#define NRF_RRAMC_BASE         NRF_RRAMC_NS_BASE
+#define NRF_RRAMC_BASE         0UL
 #define NRF_SPIS00_BASE        NRF_SPIS00_NS_BASE
 #define NRF_SPIM00_BASE        NRF_SPIM00_NS_BASE
 #define NRF_UARTE00_BASE       NRF_UARTE00_NS_BASE
@@ -214,6 +216,7 @@ extern "C" {
 #define NRF_TAMPC_BASE         0UL
 #define NRF_REGULATORS_BASE    NRF_REGULATORS_NS_BASE
 #else
+#define NRF54_RRAMC_DIRECT_ACCESS_AVAILABLE 1
 #define NRF_P0_BASE            NRF_P0_S_BASE
 #define NRF_P1_BASE            NRF_P1_S_BASE
 #define NRF_P2_BASE            NRF_P2_S_BASE

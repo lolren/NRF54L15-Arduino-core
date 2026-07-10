@@ -12,8 +12,11 @@
 #include "nrf54l15.h"
 
 uint32_t SystemCoreClock = 64000000UL;
-static uint32_t g_idleCpuTargetRaw = OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M;
-static bool g_idleCpuScalingEnabled = false;
+static uint32_t g_resetReasonAtBoot = 0U;
+
+#if defined(NRF54L15_CLEAN_POWER_LOW)
+void nrf54l15_core_bootstrap_low_power_timebase(void);
+#endif
 
 #if !defined(NRF_TRUSTZONE_NONSECURE)
 static const NRF_FICR_Type *const kFicr =
@@ -74,17 +77,6 @@ static uint32_t cpuFrequencyHzFromRaw(uint32_t raw)
     }
     if (raw == OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M) {
         return 64000000UL;
-    }
-    return 0UL;
-}
-
-static uint32_t cpuFrequencyRawFromHz(uint32_t hz)
-{
-    if (hz >= 128000000UL) {
-        return OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK128M;
-    }
-    if (hz >= 64000000UL) {
-        return OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK64M;
     }
     return 0UL;
 }
@@ -166,10 +158,6 @@ static void zephyrApplySystemInitParity(void)
         *reg32(kErrata31Reg1) &= ~(1UL << 19);
     }
 
-    if ((NRF_RESET->RESETREAS & RESET_RESETREAS_RESETPIN_Msk) != 0U) {
-        NRF_RESET->RESETREAS = ~RESET_RESETREAS_RESETPIN_Msk;
-    }
-
     *reg32(kRramcLowPowerConfigReg) = 3U;
     *reg32(kGlitchDetConfigReg) = 0U;
 
@@ -238,6 +226,10 @@ static void zephyrApplyClockTrimParity(void)
 
 void SystemInit(void)
 {
+    /* RESETREAS is cumulative and W1C. Preserve every cause for the sketch;
+     * System OFF entry clears it only after all shutdown prerequisites pass. */
+    g_resetReasonAtBoot = NRF_RESET->RESETREAS;
+
 #if defined(ARDUINO_NRF54_CPU_128M)
     setPllFrequency(OSCILLATORS_PLL_CURRENTFREQ_CURRENTFREQ_CK128M);
 #else
@@ -250,18 +242,22 @@ void SystemInit(void)
 #endif
 
     SystemCoreClockUpdate();
+
+#if defined(NRF54L15_CLEAN_POWER_LOW)
+    /* SystemInit runs before C++ constructors. Restore reset GRTC registers in
+     * the WAKETIME window so constructors cannot observe a stale timebase. */
+    if ((g_resetReasonAtBoot &
+         (RESET_RESETREAS_OFF_Msk | RESET_RESETREAS_GRTC_Msk)) != 0U) {
+        nrf54l15_core_bootstrap_low_power_timebase();
+    }
+#endif
 }
 
 bool nrf54l15_core_set_cpu_frequency_hz(uint32_t hz)
 {
-    const uint32_t raw = cpuFrequencyRawFromHz(hz);
-    if (raw == 0UL) {
-        return false;
-    }
-
-    setPllFrequency(raw);
     SystemCoreClockUpdate();
-    return currentPllFrequencyRaw() == raw;
+    /* PLL selection is a startup-only operation on nRF54L. */
+    return hz == SystemCoreClock;
 }
 
 uint32_t nrf54l15_core_get_cpu_frequency_hz(void)
@@ -272,53 +268,40 @@ uint32_t nrf54l15_core_get_cpu_frequency_hz(void)
 
 bool nrf54l15_core_set_idle_cpu_scaling_hz(uint32_t hz, bool enable)
 {
+    (void)hz;
     if (!enable) {
-        g_idleCpuScalingEnabled = false;
         return true;
     }
-
-    const uint32_t raw = cpuFrequencyRawFromHz(hz);
-    if (raw == 0UL) {
-        return false;
-    }
-
-    g_idleCpuTargetRaw = raw;
-    g_idleCpuScalingEnabled = true;
-    return true;
+    return false;
 }
 
 bool nrf54l15_core_get_idle_cpu_scaling_enabled(void)
 {
-    return g_idleCpuScalingEnabled;
+    return false;
 }
 
 uint32_t nrf54l15_core_get_idle_cpu_frequency_hz(void)
 {
-    return cpuFrequencyHzFromRaw(g_idleCpuTargetRaw);
+    return nrf54l15_core_get_cpu_frequency_hz();
 }
 
 uint32_t nrf54l15_core_enter_idle_cpu_scaling(void)
 {
-    if (!g_idleCpuScalingEnabled) {
-        return 0UL;
-    }
-
-    const uint32_t currentRaw = currentPllFrequencyRaw();
-    if ((currentRaw == 0UL) || (currentRaw == g_idleCpuTargetRaw)) {
-        return 0UL;
-    }
-
-    setPllFrequency(g_idleCpuTargetRaw);
-    SystemCoreClockUpdate();
-    return currentRaw;
+    return 0UL;
 }
 
 void nrf54l15_core_exit_idle_cpu_scaling(uint32_t previousRaw)
 {
-    if (previousRaw == 0UL) {
-        return;
-    }
+    (void)previousRaw;
+}
 
-    setPllFrequency(previousRaw);
-    SystemCoreClockUpdate();
+uint32_t nrf54_core_reset_reason(void)
+{
+    return g_resetReasonAtBoot;
+}
+
+void nrf54_core_clear_reset_reason(uint32_t mask)
+{
+    NRF_RESET->RESETREAS = mask;
+    g_resetReasonAtBoot &= ~mask;
 }

@@ -98,10 +98,8 @@ void setup() {
   Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
   Gpio::write(kPinUserLed, true);
 
-  // Lowering the CPU clock from 128 MHz to 64 MHz reduces dynamic current
-  // during active TX. The BLE radio timing is unaffected because it uses its
-  // own clock source.
-  NRF_OSCILLATORS->PLL.FREQ = OSCILLATORS_PLL_FREQ_FREQ_CK64M;
+  // Select 64 MHz from the board's CPU Frequency menu before uploading to
+  // reduce active current. nRF54L frequency selection is startup-only.
 
   // Keep System ON in low-power latency mode.
   g_power.setLatencyMode(PowerLatencyMode::kLowPower);

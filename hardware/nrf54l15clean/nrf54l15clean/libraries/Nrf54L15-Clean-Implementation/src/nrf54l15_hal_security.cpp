@@ -169,7 +169,21 @@ bool Kmu::enableRramWrite(uint32_t* previousConfig, uint32_t spinLimit) const {
     return false;
   }
   *previousConfig = rramc_->CONFIG;
-  rramc_->CONFIG = *previousConfig | RRAMC_CONFIG_WEN_Msk;
+
+  // Do not switch write-buffer policy with pending bytes. Commit the current
+  // buffer first, then force unbuffered writes for the KMU provisioning task.
+  if ((*previousConfig & RRAMC_CONFIG_WRITEBUFSIZE_Msk) != 0U) {
+    rramc_->EVENTS_READY = 0U;
+    rramc_->TASKS_COMMITWRITEBUF =
+        RRAMC_TASKS_COMMITWRITEBUF_TASKS_COMMITWRITEBUF_Trigger;
+    if (!waitRramcReady(rramc_, spinLimit)) {
+      return false;
+    }
+  }
+
+  rramc_->CONFIG =
+      (*previousConfig & ~RRAMC_CONFIG_WRITEBUFSIZE_Msk) |
+      RRAMC_CONFIG_WEN_Msk;
   return waitRramcReady(rramc_, spinLimit);
 }
 

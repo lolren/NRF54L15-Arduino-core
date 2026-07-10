@@ -28,9 +28,38 @@
  *   https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.characteristic.local_time_information.xml
  */
 
+#include <Arduino.h>
+#include <stdio.h>
 #include <bluefruit.h>
+#if __has_include(<Adafruit_GFX.h>) && __has_include(<Adafruit_SSD1306.h>)
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#define BLUEFRUIT_OLED_AVAILABLE 1
+#else
+#define BLUEFRUIT_OLED_AVAILABLE 0
+#define SSD1306_SWITCHCAPVCC 0
+#define WHITE 1
+class Adafruit_SSD1306 {
+public:
+  explicit Adafruit_SSD1306(int = -1) {}
+  bool begin(uint8_t, uint8_t) { return true; }
+  void display() {}
+  void clearDisplay() {}
+  void setCursor(int16_t, int16_t) {}
+  void setTextColor(uint16_t) {}
+  void setTextSize(uint8_t) {}
+  void print(const char* text) { Serial.print(text); }
+  void println(const char* text) { Serial.println(text); }
+  void println() { Serial.println(); }
+  template <typename T> void print(T value) { Serial.print(value); }
+  template <typename T> void println(T value) { Serial.println(value); }
+  template <typename... Args> void printf(const char* format, Args... args) {
+    char buffer[96];
+    snprintf(buffer, sizeof(buffer), format, args...);
+    Serial.print(buffer);
+  }
+};
+#endif
 
 #define OLED_RESET 4
 Adafruit_SSD1306 oled(OLED_RESET);
@@ -40,6 +69,11 @@ BLEClientCts  bleCTime;
 
 void setup()
 {
+#if !BLUEFRUIT_OLED_AVAILABLE
+  Serial.begin(115200);
+  delay(100);
+#endif
+
   // init with the I2C addr 0x3C (for the 128x32) and show splashscreen
   oled.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   oled.display();

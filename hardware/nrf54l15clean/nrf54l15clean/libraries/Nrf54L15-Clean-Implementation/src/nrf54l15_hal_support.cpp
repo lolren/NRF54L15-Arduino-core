@@ -44,6 +44,8 @@ uint32_t gpioBaseForPort(uint8_t port) {
       return GPIO_P1_BASE;
     case 2:
       return GPIO_P2_BASE;
+    case 3:
+      return GPIO_P3_BASE;
     default:
       return 0;
   }
@@ -184,7 +186,7 @@ uint32_t timerSubscribeCaptureOffset(uint8_t channel) {
 }
 
 uint32_t timerCompareIntMask(uint8_t channel) {
-  return (1UL << (16U + static_cast<uint32_t>(channel)));
+  return 1UL << (16U + static_cast<uint32_t>(channel));
 }
 
 bool computePwmTiming(uint32_t targetHz, PwmTiming* timing) {

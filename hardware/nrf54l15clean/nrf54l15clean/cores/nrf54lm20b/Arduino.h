@@ -28,6 +28,10 @@ extern "C" {
 
 // Forward declaration for SysTick initialization
 void initSysTick(void);
+bool nrf54_core_quiesce_serial_for_system_off(uint32_t spin_limit);
+bool nrf54_core_quiesce_spi_for_system_off(uint32_t spin_limit);
+bool nrf54_core_quiesce_wire_for_system_off(uint32_t spin_limit);
+bool nrf54_core_quiesce_analog_for_system_off(uint32_t spin_limit);
 
 // Arduino type definitions
 typedef bool boolean;
@@ -213,14 +217,19 @@ void analogWrite(uint8_t pin, int value);
 unsigned long millis(void);
 unsigned long micros(void);
 void delay(unsigned long ms);
+// Returning System ON sleep; execution resumes after the requested interval.
 void delayLowPowerIdle(unsigned long ms);
 void delayMicroseconds(unsigned int us);
-void delaySystemOff(unsigned long ms);
-void delaySystemOffNoRetention(unsigned long ms);
+// True timed System OFF. Wake performs a cold reset; these calls never return.
+void delaySystemOff(unsigned long ms) __attribute__((noreturn));
+void delaySystemOffNoRetention(unsigned long ms) __attribute__((noreturn));
 void systemOffWakeReset(unsigned long ms) __attribute__((noreturn));
+// True for either a GPIO/DETECT (OFF) or timed GRTC System OFF wake reset.
 bool wasSystemOffWakeReset(void);
 bool wasSystemOffWakeFromGrtc(void);
 void clearSystemOffWakeResetReason(void);
+uint32_t nrf54ResetReason(void);
+void nrf54ClearResetReason(uint32_t mask);
 
 // Tone generation (noTone is defined in C++ section with overloaded version)
 void tone(uint8_t pin, unsigned int frequency, unsigned long duration);
@@ -255,6 +264,8 @@ uint32_t getFreeHeap(void);
 uint32_t getFreeHeapSize(void);
 int dbgHeapTotal(void);
 int dbgHeapUsed(void);
+// PLL selection is fixed at startup; a runtime setter succeeds only as an
+// idempotent request for the already-selected frequency. Idle scaling is off.
 bool nrf54l15_core_set_cpu_frequency_hz(uint32_t hz);
 uint32_t nrf54l15_core_get_cpu_frequency_hz(void);
 bool nrf54l15_core_set_idle_cpu_scaling_hz(uint32_t hz, bool enable);

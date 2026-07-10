@@ -21,8 +21,6 @@ BLEHidAdafruit blehid;
 #define IDLE_REPORT_INTERVAL_MS 100UL
 
 void connect_callback(uint16_t conn_handle);
-bool pairing_passkey_callback(uint16_t conn_handle, uint8_t const passkey[6],
-                              bool match_request);
 
 void setup() 
 {
@@ -44,8 +42,10 @@ void setup()
 
   Bluefruit.begin();
   Bluefruit.setAppearance(BLE_APPEARANCE_HID_MOUSE);
-  Bluefruit.Security.setIOCaps(true, true, false);
-  Bluefruit.Security.setPairPasskeyCallback(pairing_passkey_callback);
+  // A mouse has no trustworthy display or keyboard. Advertise the matching
+  // NoInputNoOutput capability so every host selects LE Secure Connections
+  // Just Works instead of a manufacturer-specific MITM interaction.
+  Bluefruit.Security.setIOCaps(false, false, false);
 #if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
   // LM20A needs extra event budget for software P-256 during secure pairing.
   Bluefruit.Periph.setConnInterval(24, 40); // 30-50 ms
@@ -102,7 +102,8 @@ void startAdv(void)
 void loop() 
 {    
   static uint32_t lastIdleReportMs = 0;
-  if (Bluefruit.connected() && blehid.mouseNotifyEnabled())
+  if (Bluefruit.connected() && Bluefruit.Security.isEncrypted(0U) &&
+      blehid.mouseNotifyEnabled())
   {
     const uint32_t now = millis();
     if ((now - lastIdleReportMs) >= IDLE_REPORT_INTERVAL_MS)
@@ -181,24 +182,6 @@ void connect_callback(uint16_t conn_handle)
 {
   (void) conn_handle;
   Bluefruit.Security.requestPairing();
-}
-
-bool pairing_passkey_callback(uint16_t conn_handle, uint8_t const passkey[6],
-                              bool match_request)
-{
-  (void) conn_handle;
-
-  Serial.print("Pairing passkey: ");
-  for (uint8_t i = 0; i < 6; ++i) {
-    Serial.write(passkey[i]);
-  }
-  if (match_request) {
-    Serial.println(" - confirm this value on the central");
-  } else {
-    Serial.println();
-  }
-
-  return true;
 }
 
 void set_protocol_mode(uint16_t conn_handle, uint8_t mode)

@@ -23,6 +23,8 @@ extern "C" uint8_t nrf54l15_ble_idle_wake_is_armed(void);
 extern "C" void nrf54l15_ble_idle_wake_set_permit_foreground(uint8_t permit);
 extern "C" void nrf54l15_ble_idle_wake_cancel(void);
 extern "C" uint8_t nrf54l15_ble_idle_wake_consume(void);
+extern "C" void nrf54l15_grtc_irq_observer(void);
+extern "C" bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit);
 
 namespace xiao_nrf54l15 {
 
@@ -56,8 +58,11 @@ class ClockControl {
  public:
   static bool startHfxo(bool waitForTuned = true, uint32_t spinLimit = 1000000UL);
   static void stopHfxo();
+  // PLL frequency is selected by the board profile during SystemInit.
+  // Runtime changes are rejected; requesting the active value is idempotent.
   static bool setCpuFrequency(CpuFrequency frequency);
   static CpuFrequency cpuFrequency();
+  // Runtime idle PLL scaling is unsupported on nRF54L and returns false.
   static bool enableIdleCpuScaling(CpuFrequency idleFrequency = CpuFrequency::k64MHz);
   static void disableIdleCpuScaling();
   static bool idleCpuScalingEnabled();
@@ -367,6 +372,7 @@ class Pwm {
 
   bool start(uint8_t sequence = 0, uint32_t spinLimit = 2000000UL);
   bool stop(uint32_t spinLimit = 2000000UL);
+  bool running() const;
   void end();
 
   bool pollPeriodEnd(bool clearEvent = true);
@@ -403,6 +409,7 @@ class Pwm {
   CounterMode counterMode_;
   bool highLevelManaged_;
   bool configured_;
+  bool running_;
   IrqCallback irqCallback_;
   void* irqContext_;
   alignas(4) uint16_t sequence_[4];
@@ -1389,6 +1396,7 @@ class I2sTx {
   using RefillCallback = void (*)(uint32_t* buffer, uint32_t wordCount,
                                   void* context);
 
+  static constexpr bool supported() { return NRF54_HAS_I2S20 != 0; }
   explicit I2sTx(uint32_t base = nrf54l15::I2S20_BASE);
 
   bool begin(const I2sTxConfig& config, uint32_t* buffer0, uint32_t* buffer1,
@@ -1397,6 +1405,7 @@ class I2sTx {
 
   bool start();
   bool stop();
+  bool quiesce(uint32_t spinLimit = 300000UL);
   void service();
   void onIrq();
 
@@ -1424,6 +1433,7 @@ class I2sTx {
   RefillCallback refillCallback_;
   void* refillContext_;
   uint8_t nextBufferIndex_;
+  bool pointerPrimed_;
   bool configured_;
   bool running_;
   bool restartPending_;
@@ -1455,6 +1465,7 @@ class I2sRx {
   using ReceiveCallback = void (*)(uint32_t* buffer, uint32_t wordCount,
                                    void* context);
 
+  static constexpr bool supported() { return NRF54_HAS_I2S20 != 0; }
   explicit I2sRx(uint32_t base = nrf54l15::I2S20_BASE);
 
   bool begin(const I2sRxConfig& config, uint32_t* buffer0, uint32_t* buffer1,
@@ -1463,6 +1474,7 @@ class I2sRx {
 
   bool start();
   bool stop();
+  bool quiesce(uint32_t spinLimit = 300000UL);
   void service();
   void onIrq();
 
@@ -1490,6 +1502,7 @@ class I2sRx {
   ReceiveCallback receiveCallback_;
   void* receiveContext_;
   uint8_t nextBufferIndex_;
+  bool pointerPrimed_;
   bool configured_;
   bool running_;
   bool restartPending_;
@@ -1523,6 +1536,7 @@ class I2sDuplex {
   using RxReceiveCallback = void (*)(uint32_t* buffer, uint32_t wordCount,
                                      void* context);
 
+  static constexpr bool supported() { return NRF54_HAS_I2S20 != 0; }
   explicit I2sDuplex(uint32_t base = nrf54l15::I2S20_BASE);
 
   bool begin(const I2sDuplexConfig& config, uint32_t* txBuffer0,
@@ -1532,6 +1546,7 @@ class I2sDuplex {
 
   bool start();
   bool stop();
+  bool quiesce(uint32_t spinLimit = 300000UL);
   void service();
   void onIrq();
 
@@ -1567,6 +1582,8 @@ class I2sDuplex {
   void* rxReceiveContext_;
   uint8_t nextTxBufferIndex_;
   uint8_t nextRxBufferIndex_;
+  bool txPointerPrimed_;
+  bool rxPointerPrimed_;
   bool configured_;
   bool running_;
   bool restartPending_;

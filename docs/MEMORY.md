@@ -3,9 +3,9 @@
 Load this at session start after context compaction.
 
 ## Release Process
-- **Script**: `./tools/release.sh [version]` — handles everything
+- **Script**: `./tools/release.sh [version]` builds and verifies artifacts; publishing is explicit.
 - **Archive**: MUST have single root dir. No symlinks (Windows fails).
-- **Index**: 3 toolsDeps: arm-none-eabi-gcc, openocd, nrf54l15hosttools
+- **Index**: tool dependencies are arm-none-eabi-gcc and nrf54l15hosttools.
 - **CDN**: After delete+recreate, CDN caches old file ~5min. Use new version number.
 - **Host tools**: 1.1.4 with pyOCD 0.44.1. Upload for all 5 platforms.
 - **Upload detach**: `pyocd commander -c resume` after flash (AppImage compatible)
@@ -40,9 +40,9 @@ Load this at session start after context compaction.
 - STOP doesn't fire END reliably — use DISABLE instead
 
 ## SPI Frequencies
-- L15: exposed `SPI` and `SPI_HS` share SPIM00 on P2. Default `SPI` reaches 16 MHz at the 64 MHz CPU profile; `SPI_HS` temporarily selects 128 MHz for a 32 MHz transaction and restores the previous CPU clock afterward.
-- LM20B: SPIM22 at 16 MHz serial fabric. Default 4 MHz. Max 8 MHz.
-- LM20B HS-SPI: SPIM00 on QSPI pads, 32 MHz at 128 MHz CPU.
+- L15: exposed `SPI` and `SPI_HS` share SPIM00 on P2. Its peripheral source is fixed at 128 MHz, so 32 MHz transfers do not alter the CPU clock profile.
+- LM20A: header SPI uses SPIM23 on the 16 MHz serial fabric. Default 4 MHz. Max 8 MHz.
+- LM20A HS-SPI: SPIM00 on QSPI pads, using its fixed 128 MHz source for up to 32 MHz.
 
 ## udev Rules
 - Must include BOTH 0066 (L15) AND 0068 (LM20B)

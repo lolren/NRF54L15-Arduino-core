@@ -42,7 +42,7 @@ class Secp256r1 {
   static void bnModAddN(const BigNum256& a, const BigNum256& b, BigNum256* out);
 
   // Point operations
-  static void generateRandomScalar(Secp256r1Scalar* outScalar);
+  static bool generateRandomScalar(Secp256r1Scalar* outScalar);
   static bool scalarMultiply(const Secp256r1Scalar& k, const Secp256r1Point& P, Secp256r1Point* outR);
   static bool scalarMultiplyBase(const Secp256r1Scalar& k, Secp256r1Point* outR);
   static bool pointAdd(const Secp256r1Point& P, const Secp256r1Point& Q, Secp256r1Point* outR);
@@ -58,7 +58,7 @@ class Secp256r1 {
   static bool modInverseN(const Secp256r1Scalar& a, Secp256r1Scalar* outInv);
 
   // ECDSA
-  static void generateKeyPair(Secp256r1Scalar* outPriv, Secp256r1Point* outPub);
+  static bool generateKeyPair(Secp256r1Scalar* outPriv, Secp256r1Point* outPub);
   static bool ecdsaSign(const Secp256r1Scalar& priv, const uint8_t hash[32], uint8_t r[32], uint8_t s[32]);
   static bool ecdsaVerify(const Secp256r1Point& pub, const uint8_t hash[32], const uint8_t r[32], const uint8_t s[32]);
 
@@ -67,8 +67,7 @@ class Secp256r1 {
   static BigNum256 basePointY();
   static void bnToMont(const BigNum256& x, BigNum256* out);
   static void bnFromMont(const BigNum256& x, BigNum256* out);
-  static void randomBytes(uint8_t* out, size_t length);
-  static uint32_t randomWord();
+  static bool randomBytes(uint8_t* out, size_t length);
   static void pointToAffine(const BigNum256& x, const BigNum256& y, Secp256r1Point* out);
   static void pointFromAffine(const Secp256r1Point& point, BigNum256* outX, BigNum256* outY);
   

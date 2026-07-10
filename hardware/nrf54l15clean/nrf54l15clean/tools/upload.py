@@ -341,20 +341,6 @@ def install_pyocd(host_tools_path: Optional[Path] = None) -> bool:
     print_result(verify)
     return verify.returncode == 0
 
-def resolve_tool(path_or_name: str) -> Optional[str]:
-    if not path_or_name:
-        return None
-
-    if "{" in path_or_name and "}" in path_or_name:
-        # Unresolved Arduino property placeholder, fall back to PATH lookup.
-        return shutil.which("openocd")
-
-    candidate = Path(path_or_name)
-    if candidate.is_file():
-        return str(candidate)
-
-    return shutil.which(path_or_name)
-
 def normalize_uid(requested_uid: Optional[str]) -> Optional[str]:
     if requested_uid is None:
         return None
@@ -1037,20 +1023,47 @@ def recover_target(
     print_result(result)
     return result
 
+def recover_target_with_retries(
+    pyocd_cmd: List[str], target: str, uid: Optional[str], *,
+    connect_mode: Optional[str] = None, safe_mode: bool = False,
+    attempts: int = 2, retry_delay: float = 1.0
+) -> subprocess.CompletedProcess:
+    """Retry CTRL-AP recovery because the first erase can drop the probe link."""
+    attempts = max(1, attempts)
+    result = subprocess.CompletedProcess(
+        args=[*pyocd_cmd, "erase"], returncode=1, stdout="", stderr=""
+    )
+    for attempt in range(1, attempts + 1):
+        print(f"Protected-target recovery attempt {attempt}/{attempts}")
+        result = recover_target(
+            pyocd_cmd,
+            target,
+            uid,
+            connect_mode=connect_mode,
+            safe_mode=safe_mode,
+        )
+        if result.returncode == 0:
+            break
+        maybe_wait_before_retry(attempt, attempts, retry_delay)
+    return result
+
 def choose_runner(requested: str, openocd_bin: str, host_tools_path: Optional[Path]) -> str:
     normalized = requested.strip().lower()
+    if normalized == "openocd":
+        raise RuntimeError(
+            "OpenOCD does not provide a verified nRF54 target in this package; "
+            "use pyocd or nrf_ocd"
+        )
     if normalized != "auto":
         return normalized
 
     return choose_recovery_runner(openocd_bin, host_tools_path)
 
 def choose_recovery_runner(openocd_bin: str, host_tools_path: Optional[Path]) -> str:
+    del openocd_bin
     if detect_pyocd_command(host_tools_path) is not None or host_tools_path is not None:
         return "pyocd"
-    if resolve_tool(openocd_bin):
-        return "openocd"
-
-    raise RuntimeError("No supported uploader found (need pyocd or openocd in PATH)")
+    raise RuntimeError("No supported recovery uploader found (pyOCD is required)")
 
 def _ensure_lm20b_target():
     """Re-apply LM20B target patch if needed."""
@@ -1113,12 +1126,13 @@ def upload_pyocd(
             safe_mode=safe_mode,
         )
         if load_result.returncode != 0 and looks_like_locked_target(load_result):
-            erase_result = recover_target(
+            erase_result = recover_target_with_retries(
                 pyocd_cmd,
                 target,
                 uid,
                 connect_mode=connect_mode,
                 safe_mode=safe_mode,
+                retry_delay=retry_delay,
             )
             if erase_result.returncode == 0:
                 load_result = flash_hex(
@@ -1427,7 +1441,7 @@ def main() -> int:
     parser.add_argument(
         "--runner",
         default="auto",
-        help="Upload runner: uf2, auto, pyocd, openocd, nrf_ocd",
+        help="Upload runner: uf2, auto, pyocd, or nrf_ocd",
     )
     parser.add_argument(
         "--openocd-script",

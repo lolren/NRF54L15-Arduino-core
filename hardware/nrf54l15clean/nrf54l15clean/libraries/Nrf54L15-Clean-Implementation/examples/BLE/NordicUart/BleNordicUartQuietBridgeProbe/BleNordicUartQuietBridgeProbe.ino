@@ -38,7 +38,7 @@ constexpr uint16_t kBleToUsbBufferSize = 2048U;
 // NUS payload limit. Standard BLE 4.x MTU yields 20 bytes of usable payload.
 // Larger MTU can be negotiated with BLE 5 centrals, but 20 is a safe default.
 constexpr uint16_t kBlePumpBurstBytes = 512U;
-constexpr uint8_t kBleChunkBytes = BleNordicUart::kMaxPayloadLength;
+constexpr size_t kBleChunkBytes = BleNordicUart::kMaxPayloadLength;
 constexpr bool kEnableBleBgService = true;
 // How long to wait for a BLE connection event anchor before giving up (us).
 // 2000 us is very short; the main loop spins tightly to avoid missed anchors.

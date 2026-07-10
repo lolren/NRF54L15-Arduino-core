@@ -6,6 +6,10 @@
 
 #include <nrf54l15.h>
 
+#if !NRF54_RRAMC_DIRECT_ACCESS_AVAILABLE
+#error "Preferences requires secure RRAMC access; use a secure service in non-secure builds"
+#endif
+
 #include <string.h>
 
 namespace {

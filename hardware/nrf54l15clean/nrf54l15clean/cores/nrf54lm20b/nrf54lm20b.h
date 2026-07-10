@@ -25,6 +25,8 @@ extern "C" {
 
 #include "nrf54lm20b_types.h"
 
+#define NRF54_HAS_I2S20 0
+
 // ============================================================================
 // Peripheral base addresses used by this core
 // ============================================================================
@@ -49,7 +51,6 @@ extern "C" {
 #define NRF_CRACENCORE_BASE    0x50010000UL
 #define NRF_KMU_NS_BASE        0x50049000UL
 #define NRF_KMU_S_BASE         0x50049000UL
-#define NRF_RRAMC_NS_BASE      0x4004E000UL
 #define NRF_RRAMC_S_BASE       0x5004E000UL
 #define NRF_SPIS00_NS_BASE     0x4004D000UL
 #define NRF_SPIM00_NS_BASE     0x4004D000UL
@@ -60,15 +61,9 @@ extern "C" {
 #define NRF_EGU10_NS_BASE      0x40087000UL
 #define NRF_EGU10_S_BASE       0x50087000UL
 
-// nRF54LM20B additional GPIO port (not present on nRF54L15)
+// nRF54LM20 additional GPIO port (not present on nRF54L15).
 #define NRF_P3_NS_BASE         0x400D8600UL
 #define NRF_P3_S_BASE          0x500D8600UL
-
-// nRF54LM20B additional GPIO port (not present on nRF54L15)
-#if defined(NRF54LM20B_XXAA)
-#define NRF_P3_NS_BASE         0x400D8600UL
-#define NRF_P3_S_BASE          0x500D8600UL
-#endif
 #define NRF_SPIS20_NS_BASE     0x400C6000UL
 #define NRF_SPIM20_NS_BASE     0x400C6000UL
 #define NRF_TWIM20_NS_BASE     0x400C6000UL
@@ -99,6 +94,8 @@ extern "C" {
 #define NRF_TWIM22_S_BASE      0x500C8000UL
 #define NRF_TWIS22_S_BASE      0x500C8000UL
 #define NRF_UARTE22_S_BASE     0x500C8000UL
+#define NRF_SPIM23_NS_BASE     0x400ED000UL
+#define NRF_SPIM23_S_BASE      0x500ED000UL
 #define NRF_EGU20_NS_BASE      0x400C9000UL
 #define NRF_EGU20_S_BASE       0x500C9000UL
 #define NRF_TIMER20_NS_BASE    0x400CA000UL
@@ -134,7 +131,6 @@ extern "C" {
 #define NRF_QDEC20_S_BASE      0x500E0000UL
 #define NRF_QDEC21_NS_BASE     0x400E1000UL
 #define NRF_QDEC21_S_BASE      0x500E1000UL
-#define NRF_I2S20_NS_BASE      0x400DD000UL
 #define NRF_PWM22_S_BASE       0x500D4000UL
 #define NRF_COMP_NS_BASE       0x40106000UL
 #define NRF_COMP_S_BASE        0x50106000UL
@@ -145,7 +141,6 @@ extern "C" {
 #define NRF_PWM21_S_BASE       0x500D3000UL
 #define NRF_SAADC_S_BASE       0x500D5000UL
 #define NRF_NFCT_S_BASE        0x500D6000UL
-#define NRF_I2S20_S_BASE       0x500DD000UL
 #define NRF_OSCILLATORS_S_BASE  0x50120000UL
 #define NRF_P1_NS_BASE         0x400D8200UL
 #define NRF_P1_S_BASE          0x500D8200UL
@@ -157,11 +152,12 @@ extern "C" {
 #define NRF_POWER_S_BASE       0x5010E000UL
 #define NRF_RESET_NS_BASE      0x4010E000UL
 #define NRF_RESET_S_BASE       0x5010E000UL
-#define NRF_TAMPC_S_BASE       0x500DC000UL
+#define NRF_TAMPC_S_BASE       0x500EF000UL
 #define NRF_REGULATORS_NS_BASE 0x40120000UL
 #define NRF_REGULATORS_S_BASE  0x50120000UL
 
 #ifdef NRF_TRUSTZONE_NONSECURE
+#define NRF54_RRAMC_DIRECT_ACCESS_AVAILABLE 0
 #define NRF_P0_BASE            NRF_P0_NS_BASE
 #define NRF_P1_BASE            NRF_P1_NS_BASE
 #define NRF_P2_BASE            NRF_P2_NS_BASE
@@ -174,7 +170,7 @@ extern "C" {
 #define NRF_CCM00_BASE         NRF_CCM00_NS_BASE
 #define NRF_ECB00_BASE         NRF_ECB00_NS_BASE
 #define NRF_KMU_BASE           NRF_KMU_NS_BASE
-#define NRF_RRAMC_BASE         NRF_RRAMC_NS_BASE
+#define NRF_RRAMC_BASE         0UL
 #define NRF_SPIS00_BASE        NRF_SPIS00_NS_BASE
 #define NRF_SPIM00_BASE        NRF_SPIM00_NS_BASE
 #define NRF_UARTE00_BASE       NRF_UARTE00_NS_BASE
@@ -189,6 +185,7 @@ extern "C" {
 #define NRF_TWIS21_BASE        NRF_TWIS21_NS_BASE
 #define NRF_SPIS22_BASE        NRF_SPIS22_NS_BASE
 #define NRF_SPIM22_BASE        NRF_SPIM22_NS_BASE
+#define NRF_SPIM23_BASE        NRF_SPIM23_NS_BASE
 #define NRF_TWIM22_BASE        NRF_TWIM22_NS_BASE
 #define NRF_TWIS22_BASE        NRF_TWIS22_NS_BASE
 #define NRF_TWIM30_BASE        NRF_TWIM30_NS_BASE
@@ -214,7 +211,6 @@ extern "C" {
 #define NRF_NFCT_BASE          NRF_NFCT_NS_BASE
 #define NRF_QDEC20_BASE        NRF_QDEC20_NS_BASE
 #define NRF_QDEC21_BASE        NRF_QDEC21_NS_BASE
-#define NRF_I2S20_BASE         NRF_I2S20_NS_BASE
 #define NRF_COMP_BASE          NRF_COMP_NS_BASE
 #define NRF_LPCOMP_BASE        NRF_LPCOMP_NS_BASE
 #define NRF_CLOCK_BASE         NRF_CLOCK_NS_BASE
@@ -224,6 +220,7 @@ extern "C" {
 #define NRF_TAMPC_BASE         0UL
 #define NRF_REGULATORS_BASE    NRF_REGULATORS_NS_BASE
 #else
+#define NRF54_RRAMC_DIRECT_ACCESS_AVAILABLE 1
 #define NRF_P0_BASE            NRF_P0_S_BASE
 #define NRF_P1_BASE            NRF_P1_S_BASE
 #define NRF_P2_BASE            NRF_P2_S_BASE
@@ -251,6 +248,7 @@ extern "C" {
 #define NRF_TWIS21_BASE        NRF_TWIS21_S_BASE
 #define NRF_SPIS22_BASE        NRF_SPIS22_S_BASE
 #define NRF_SPIM22_BASE        NRF_SPIM22_S_BASE
+#define NRF_SPIM23_BASE        NRF_SPIM23_S_BASE
 #define NRF_TWIM22_BASE        NRF_TWIM22_S_BASE
 #define NRF_TWIS22_BASE        NRF_TWIS22_S_BASE
 #define NRF_TWIM30_BASE        NRF_TWIM30_S_BASE
@@ -276,7 +274,6 @@ extern "C" {
 #define NRF_NFCT_BASE          NRF_NFCT_S_BASE
 #define NRF_QDEC20_BASE        NRF_QDEC20_S_BASE
 #define NRF_QDEC21_BASE        NRF_QDEC21_S_BASE
-#define NRF_I2S20_BASE         NRF_I2S20_S_BASE
 #define NRF_COMP_BASE          NRF_COMP_S_BASE
 #define NRF_LPCOMP_BASE        NRF_LPCOMP_S_BASE
 #define NRF_CLOCK_BASE         NRF_CLOCK_S_BASE
@@ -321,6 +318,7 @@ extern "C" {
 #define NRF_TWIS21    ((NRF_TWIS_Type *)NRF_TWIS21_BASE)
 #define NRF_SPIS22    ((NRF_SPIS_Type *)NRF_SPIS22_BASE)
 #define NRF_SPIM22    ((NRF_SPIM_Type *)NRF_SPIM22_BASE)
+#define NRF_SPIM23    ((NRF_SPIM_Type *)NRF_SPIM23_BASE)
 #define NRF_TWIM22    ((NRF_TWIM_Type *)NRF_TWIM22_BASE)
 #define NRF_TWIS22    ((NRF_TWIS_Type *)NRF_TWIS22_BASE)
 #define NRF_TWIM30    ((NRF_TWIM_Type *)NRF_TWIM30_BASE)
@@ -346,7 +344,6 @@ extern "C" {
 #define NRF_NFCT      ((NRF_NFCT_Type *)NRF_NFCT_BASE)
 #define NRF_QDEC20    ((NRF_QDEC_Type *)NRF_QDEC20_BASE)
 #define NRF_QDEC21    ((NRF_QDEC_Type *)NRF_QDEC21_BASE)
-#define NRF_I2S20     ((NRF_I2S_Type *)NRF_I2S20_BASE)
 #define NRF_COMP      ((NRF_COMP_Type *)NRF_COMP_BASE)
 #define NRF_LPCOMP    ((NRF_LPCOMP_Type *)NRF_LPCOMP_BASE)
 #define NRF_CLOCK     ((NRF_CLOCK_Type *)NRF_CLOCK_BASE)
@@ -357,8 +354,6 @@ extern "C" {
 #define NRF_REGULATORS ((NRF_REGULATORS_Type *)NRF_REGULATORS_BASE)
 
 // Compatibility aliases used by Nordic HALs and low-level external libraries.
-#define NRF_I2S0      NRF_I2S20
-#define NRF_I2S       NRF_I2S20
 
 // ============================================================================
 // GRTC domain helpers

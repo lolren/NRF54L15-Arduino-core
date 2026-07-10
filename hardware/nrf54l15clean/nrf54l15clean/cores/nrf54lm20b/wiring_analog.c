@@ -85,6 +85,8 @@ extern void nrf54l15_pwm22_irq_service(void) __attribute__((weak));
 #define TIMER_EVENTS_COMPARE0             0x140UL
 #define TIMER_EVENTS_COMPARE_STRIDE       0x004UL
 #define TIMER_SHORTS                      0x200UL
+#define TIMER_INTENSET                    0x304UL
+#define TIMER_INTENCLR                    0x308UL
 #define TIMER_MODE                        0x504UL
 #define TIMER_BITMODE                     0x508UL
 #define TIMER_PRESCALER                   0x510UL
@@ -96,6 +98,8 @@ extern void nrf54l15_pwm22_irq_service(void) __attribute__((weak));
 #define TIMER_MODE_TIMER                  0UL
 #define TIMER_BITMODE_32                  3UL
 #define TIMER_SHORT_COMPARE0_CLEAR        (1UL << 0U)
+#define TIMER_INT_COMPARE0                (1UL << 16U)
+#define TIMER_INT_COMPARE1                (1UL << 17U)
 
 #define GPIOTE_TASKS_OUT0                 0x000UL
 #define GPIOTE_TASKS_SET0                 0x030UL
@@ -121,7 +125,7 @@ extern void nrf54l15_pwm22_irq_service(void) __attribute__((weak));
 #define ANALOG_PWM_CHANNELS_PER_INSTANCE  4U
 #define ANALOG_PWM_INSTANCES              3U
 #define ANALOG_PWM_PIN_COUNT              19U
-#define ANALOG_TIMER_PWM_SLOT_COUNT       6U
+#define ANALOG_TIMER_PWM_SLOT_COUNT       5U
 #define ANALOG_TIMER_PWM_PIN_COUNT        6U
 #define ANALOG_TIMER_PWM_PERIOD_CHANNEL   0U
 #define ANALOG_TIMER_PWM_CAPTURE_CHANNEL  7U
@@ -136,14 +140,17 @@ extern void nrf54l15_pwm22_irq_service(void) __attribute__((weak));
 #define ANALOG_PWM_NO_SLOT                0xFFU
 #define ANALOG_PWM_DEFAULT_HZ             1000UL
 #define ANALOG_SOFT_PWM_DEFAULT_PERIOD_US 1000UL
+#define TONE_TIMER_HZ                     16000000ULL
+#define TONE_TIMER_MAX_INTERVAL_TICKS     0x7FFFFFFFUL
 
 extern uint8_t nrf54l15_gpiote20_acquire_task_channel(uint8_t* channel);
 extern void nrf54l15_gpiote20_release_task_channel(uint8_t channel);
 
 static uint8_t pwm_instance_any_dynamic_channel(uint8_t instance);
 static void pwm_apply_outputs(uint8_t instance);
-static void pwm_stop_instance(uint8_t instance);
+static uint8_t pwm_stop_instance(uint8_t instance);
 static void timer_pwm_release_pin(uint8_t index);
+static void gpio_write_raw(uint8_t port, uint8_t pin, uint8_t high);
 
 static inline volatile uint32_t* regptr(uintptr_t base, uintptr_t off)
 {
@@ -237,6 +244,14 @@ static uint8_t g_soft_pwm_output_high[ANALOG_PWM_PIN_COUNT] = {
     0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
     0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U
 };
+static volatile uint8_t g_tone_pin = 0xFFU;
+static volatile uint8_t g_tone_port = 0xFFU;
+static volatile uint8_t g_tone_pin_in_port = 0xFFU;
+static volatile uint8_t g_tone_active = 0U;
+static volatile uint8_t g_tone_output_high = 0U;
+static volatile uint32_t g_tone_half_period_ticks = 0UL;
+static volatile uint64_t g_tone_deadline_ticks_remaining = 0ULL;
+static volatile uint32_t g_tone_deadline_chunk_ticks = 0UL;
 static uint8_t g_pwm_pin_timer_slot[ANALOG_PWM_PIN_COUNT] = {
     ANALOG_PWM_NO_SLOT, ANALOG_PWM_NO_SLOT, ANALOG_PWM_NO_SLOT,
     ANALOG_PWM_NO_SLOT, ANALOG_PWM_NO_SLOT, ANALOG_PWM_NO_SLOT,
@@ -247,19 +262,19 @@ static uint8_t g_pwm_pin_timer_slot[ANALOG_PWM_PIN_COUNT] = {
     ANALOG_PWM_NO_SLOT
 };
 static uint8_t g_timer_pwm_slot_member_mask[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0U, 0U, 0U, 0U, 0U, 0U
+    0U, 0U, 0U, 0U, 0U
 };
 static uint8_t g_timer_pwm_slot_set_dppi_channel[ANALOG_TIMER_PWM_SLOT_COUNT] = {
     ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL,
-    ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL
+    ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL
 };
 static uint8_t g_timer_pwm_slot_set_source_channel[ANALOG_TIMER_PWM_SLOT_COUNT] = {
     ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL,
-    ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL
+    ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL
 };
 static uint8_t g_timer_pwm_slot_set_ppib_channel[ANALOG_TIMER_PWM_SLOT_COUNT] = {
     ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL,
-    ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL
+    ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL
 };
 static uint8_t g_timer_pwm_pin_gpiote_channel[ANALOG_PWM_PIN_COUNT] = {
     ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL, ANALOG_PWM_NO_CHANNEL,
@@ -307,16 +322,16 @@ static uint8_t g_timer_pwm_pin_compare_channel[ANALOG_PWM_PIN_COUNT] = {
     ANALOG_PWM_NO_CHANNEL
 };
 static uint8_t g_timer_pwm_slot_prescaler[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0U, 0U, 0U, 0U, 0U, 0U
+    0U, 0U, 0U, 0U, 0U
 };
 static uint32_t g_timer_pwm_slot_frequency_hz[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0UL, 0UL, 0UL, 0UL, 0UL, 0UL
+    0UL, 0UL, 0UL, 0UL, 0UL
 };
 static uint32_t g_timer_pwm_slot_period_ticks[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0UL, 0UL, 0UL, 0UL, 0UL, 0UL
+    0UL, 0UL, 0UL, 0UL, 0UL
 };
 static uint8_t g_timer_pwm_slot_active[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0U, 0U, 0U, 0U, 0U, 0U
+    0U, 0U, 0U, 0U, 0U
 };
 static uint32_t g_timer_pwm_pin_high_ticks[ANALOG_PWM_PIN_COUNT] = {
     0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL,
@@ -348,8 +363,7 @@ static const uintptr_t k_pwm_base[ANALOG_PWM_INSTANCES] = {
 };
 #ifdef NRF_TRUSTZONE_NONSECURE
 static const uintptr_t k_timer_pwm_base[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0x400CA000UL, 0x400CB000UL, 0x400CC000UL, 0x400CD000UL, 0x400CE000UL,
-    0x40085000UL
+    0x400CA000UL, 0x400CB000UL, 0x400CC000UL, 0x400CD000UL, 0x40085000UL
 };
 static const uintptr_t k_timer_pwm_gpiote_base = 0x400DA000UL;
 static const uintptr_t k_timer_pwm_peri_dppic_base = 0x400C2000UL;
@@ -358,8 +372,7 @@ static const uintptr_t k_timer_pwm_ppib11_base = 0x40084000UL;
 static const uintptr_t k_timer_pwm_ppib21_base = 0x400C4000UL;
 #else
 static const uintptr_t k_timer_pwm_base[ANALOG_TIMER_PWM_SLOT_COUNT] = {
-    0x500CA000UL, 0x500CB000UL, 0x500CC000UL, 0x500CD000UL, 0x500CE000UL,
-    0x50085000UL
+    0x500CA000UL, 0x500CB000UL, 0x500CC000UL, 0x500CD000UL, 0x50085000UL
 };
 static const uintptr_t k_timer_pwm_gpiote_base = 0x500DA000UL;
 static const uintptr_t k_timer_pwm_peri_dppic_base = 0x500C2000UL;
@@ -477,6 +490,69 @@ static void gpio_write_raw(uint8_t port, uint8_t pin, uint8_t high)
         gpio->OUTSET = bit;
     } else {
         gpio->OUTCLR = bit;
+    }
+}
+
+static void tone_stop_hardware(void)
+{
+    const uintptr_t base = (uintptr_t)NRF_TIMER24;
+    *regptr(base, TIMER_TASKS_STOP) = 1U;
+    *regptr(base, TIMER_INTENCLR) = TIMER_INT_COMPARE0 | TIMER_INT_COMPARE1;
+    *regptr(base, TIMER_EVENTS_COMPARE0) = 0U;
+    *regptr(base, TIMER_EVENTS_COMPARE0 + TIMER_EVENTS_COMPARE_STRIDE) = 0U;
+    if (g_tone_port != 0xFFU && g_tone_pin_in_port != 0xFFU) {
+        gpio_write_raw(g_tone_port, g_tone_pin_in_port, 0U);
+    }
+    g_tone_pin = 0xFFU;
+    g_tone_port = 0xFFU;
+    g_tone_pin_in_port = 0xFFU;
+    g_tone_active = 0U;
+    g_tone_output_high = 0U;
+    g_tone_half_period_ticks = 0UL;
+    g_tone_deadline_ticks_remaining = 0ULL;
+    g_tone_deadline_chunk_ticks = 0UL;
+}
+
+static void tone_schedule_deadline_chunk(uint32_t from_ticks)
+{
+    uint64_t remaining = g_tone_deadline_ticks_remaining;
+    uint32_t chunk = (remaining > TONE_TIMER_MAX_INTERVAL_TICKS)
+                         ? TONE_TIMER_MAX_INTERVAL_TICKS
+                         : (uint32_t)remaining;
+    if (chunk == 0U) {
+        chunk = 1U;
+    }
+    g_tone_deadline_chunk_ticks = chunk;
+    *regptr((uintptr_t)NRF_TIMER24,
+            TIMER_CC0 + TIMER_CC_STRIDE) = from_ticks + chunk;
+}
+
+void TIMER24_IRQHandler(void)
+{
+    const uintptr_t base = (uintptr_t)NRF_TIMER24;
+    volatile uint32_t* deadline_event =
+        regptr(base, TIMER_EVENTS_COMPARE0 + TIMER_EVENTS_COMPARE_STRIDE);
+    if (*deadline_event != 0U) {
+        *deadline_event = 0U;
+        if (g_tone_active != 0U && g_tone_deadline_ticks_remaining != 0ULL) {
+            if (g_tone_deadline_ticks_remaining <= g_tone_deadline_chunk_ticks) {
+                tone_stop_hardware();
+                return;
+            }
+            g_tone_deadline_ticks_remaining -= g_tone_deadline_chunk_ticks;
+            tone_schedule_deadline_chunk(
+                *regptr(base, TIMER_CC0 + TIMER_CC_STRIDE));
+        }
+    }
+
+    volatile uint32_t* edge_event = regptr(base, TIMER_EVENTS_COMPARE0);
+    if (*edge_event != 0U) {
+        *edge_event = 0U;
+        if (g_tone_active != 0U) {
+            g_tone_output_high ^= 1U;
+            gpio_write_raw(g_tone_port, g_tone_pin_in_port, g_tone_output_high);
+            *regptr(base, TIMER_CC0) += g_tone_half_period_ticks;
+        }
     }
 }
 
@@ -1704,6 +1780,8 @@ static void pwm_apply_outputs(uint8_t instance)
         if (resolve_pwm_gpio(owner, &port, &pin) == 0U) {
             continue;
         }
+        // Match the GPIO latch to PWM.IDLEOUT before handing the pin to PWM.
+        gpio_write_raw(port, pin, 0U);
         *regptr(base, PWM_PSEL_OUT0 + ((uintptr_t)ch * PWM_PSEL_OUT_STRIDE)) =
             make_gpio_psel(port, pin);
     }
@@ -1826,19 +1904,22 @@ static void pwm_start_if_needed(uint8_t instance)
     g_pwm_running[instance] = 1U;
 }
 
-static void pwm_stop_instance(uint8_t instance)
+static uint8_t pwm_stop_instance(uint8_t instance)
 {
     if (instance >= ANALOG_PWM_INSTANCES || g_pwm_initialized[instance] == 0U) {
-        return;
+        return 1U;
     }
 
     const uintptr_t base = k_pwm_base[instance];
+    uint8_t stopped = 1U;
 
     if (g_pwm_running[instance] != 0U) {
+        stopped = 0U;
         *regptr(base, PWM_EVENTS_STOPPED) = 0U;
         *regptr(base, PWM_TASKS_STOP) = 1U;
         for (uint32_t guard = 0UL; guard < 200000UL; ++guard) {
             if (*regptr(base, PWM_EVENTS_STOPPED) != 0U) {
+                stopped = 1U;
                 break;
             }
         }
@@ -1851,10 +1932,15 @@ static void pwm_stop_instance(uint8_t instance)
 
     g_pwm_running[instance] = 0U;
     g_pwm_initialized[instance] = 0U;
+    return (stopped != 0U &&
+            *regptr(base, PWM_ENABLE) == PWM_ENABLE_DISABLED) ? 1U : 0U;
 }
 
 void analogWriteDisable(uint8_t pin)
 {
+    if (g_tone_active != 0U && g_tone_pin == pin) {
+        noTone(pin);
+    }
     uint8_t pwm_pin = 0U;
     if (!pwm_pin_index_for_pin(pin, &pwm_pin)) {
         return;
@@ -2232,6 +2318,10 @@ int analogRead(uint8_t pin)
 
 void analogWrite(uint8_t pin, int value)
 {
+    if (g_tone_active != 0U && g_tone_pin == pin) {
+        noTone(pin);
+    }
+
     int max_value;
     if (g_analog_write_resolution >= 16U) {
         max_value = 65535;
@@ -2273,26 +2363,110 @@ void analogWrite(uint8_t pin, int value)
 void tone(uint8_t pin, unsigned int frequency, unsigned long duration)
 {
     if (frequency == 0U) {
+        noTone(pin);
         return;
     }
 
-    const unsigned long period_us = 1000000UL / frequency;
-    const unsigned long half = (period_us > 1UL) ? (period_us / 2UL) : 1UL;
-
-    if (duration == 0UL) {
-        duration = period_us * 8UL;
+    uint8_t port = 0U;
+    uint8_t pin_in_port = 0U;
+    if (!pinToPortPin(pin, &port, &pin_in_port) || gpio_for_port(port) == 0) {
+        return;
     }
 
-    const unsigned long start = millis();
-    while ((millis() - start) < duration) {
-        digitalWrite(pin, HIGH);
-        delayMicroseconds((unsigned int)half);
-        digitalWrite(pin, LOW);
-        delayMicroseconds((unsigned int)half);
+    if (g_tone_active != 0U) {
+        noTone(g_tone_pin);
     }
+
+    pinMode(pin, OUTPUT);
+    gpio_write_raw(port, pin_in_port, 0U);
+
+    const uint64_t divisor = 2ULL * (uint64_t)frequency;
+    uint64_t half_period_ticks = (TONE_TIMER_HZ + (divisor / 2ULL)) / divisor;
+    if (half_period_ticks == 0ULL) {
+        half_period_ticks = 1ULL;
+    }
+    if (half_period_ticks > TONE_TIMER_MAX_INTERVAL_TICKS) {
+        half_period_ticks = TONE_TIMER_MAX_INTERVAL_TICKS;
+    }
+
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const uintptr_t base = (uintptr_t)NRF_TIMER24;
+    NVIC_DisableIRQ(TIMER24_IRQn);
+    *regptr(base, TIMER_TASKS_STOP) = 1U;
+    *regptr(base, TIMER_INTENCLR) = TIMER_INT_COMPARE0 | TIMER_INT_COMPARE1;
+    *regptr(base, TIMER_SHORTS) = 0U;
+    *regptr(base, TIMER_EVENTS_COMPARE0) = 0U;
+    *regptr(base, TIMER_EVENTS_COMPARE0 + TIMER_EVENTS_COMPARE_STRIDE) = 0U;
+    *regptr(base, TIMER_TASKS_CLEAR) = 1U;
+    *regptr(base, TIMER_MODE) = TIMER_MODE_TIMER;
+    *regptr(base, TIMER_BITMODE) = TIMER_BITMODE_32;
+    *regptr(base, TIMER_PRESCALER) = 0U;
+    *regptr(base, TIMER_CC0) = (uint32_t)half_period_ticks;
+    g_tone_pin = pin;
+    g_tone_port = port;
+    g_tone_pin_in_port = pin_in_port;
+    g_tone_active = 1U;
+    g_tone_output_high = 0U;
+    g_tone_half_period_ticks = (uint32_t)half_period_ticks;
+    g_tone_deadline_ticks_remaining = (uint64_t)duration * (TONE_TIMER_HZ / 1000ULL);
+    g_tone_deadline_chunk_ticks = 0UL;
+    uint32_t interrupt_mask = TIMER_INT_COMPARE0;
+    if (g_tone_deadline_ticks_remaining != 0ULL) {
+        tone_schedule_deadline_chunk(0U);
+        interrupt_mask |= TIMER_INT_COMPARE1;
+    }
+    NVIC_ClearPendingIRQ(TIMER24_IRQn);
+    NVIC_SetPriority(TIMER24_IRQn, 3U);
+    NVIC_EnableIRQ(TIMER24_IRQn);
+    *regptr(base, TIMER_INTENSET) = interrupt_mask;
+    *regptr(base, TIMER_TASKS_START) = 1U;
+    __set_PRIMASK(primask);
 }
 
 void noTone(uint8_t pin)
 {
-    digitalWrite(pin, LOW);
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (g_tone_active != 0U && g_tone_pin == pin) {
+        tone_stop_hardware();
+        NVIC_DisableIRQ(TIMER24_IRQn);
+        NVIC_ClearPendingIRQ(TIMER24_IRQn);
+    }
+    __set_PRIMASK(primask);
+}
+
+bool nrf54_core_quiesce_analog_for_system_off(uint32_t spin_limit)
+{
+    if (g_tone_active != 0U) {
+        noTone(g_tone_pin);
+    }
+
+    for (uint8_t i = 0U; i < ANALOG_PWM_PIN_COUNT; ++i) {
+        if (g_pwm_pin_used[i] != 0U) {
+            analogWriteDisable(k_pwm_pin_desc[i].arduino_pin);
+        }
+    }
+
+    for (uint8_t instance = 0U; instance < ANALOG_PWM_INSTANCES; ++instance) {
+        if (pwm_stop_instance(instance) == 0U) {
+            return false;
+        }
+    }
+
+    const uintptr_t saadc_base = (uintptr_t)NRF_SAADC;
+    if (*regptr(saadc_base, SAADC_ENABLE) != SAADC_ENABLE_DISABLED) {
+        *regptr(saadc_base, SAADC_EVENTS_STOPPED) = 0U;
+        *regptr(saadc_base, SAADC_TASKS_STOP) = 1U;
+        uint32_t remaining = spin_limit;
+        while (*regptr(saadc_base, SAADC_EVENTS_STOPPED) == 0U && remaining > 0U) {
+            --remaining;
+        }
+        if (*regptr(saadc_base, SAADC_EVENTS_STOPPED) == 0U) {
+            return false;
+        }
+        *regptr(saadc_base, SAADC_ENABLE) = SAADC_ENABLE_DISABLED;
+        saadc_disconnect_all_channels(saadc_base);
+    }
+    return true;
 }

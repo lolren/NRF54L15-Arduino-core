@@ -21,14 +21,10 @@ SchedulerClass Scheduler;
 HwPWMCompat HwPWM0;
 HwPWMCompat HwPWM1;
 
+extern "C" [[noreturn]] void nrf54_core_system_off(uint8_t disableRamRetention);
+
 extern "C" void sd_power_system_off(void) {
-  // nRF52 sd_power_system_off() expects immediate power-off.
-  // On nRF54L, use WFI sleep since true SYSTEM OFF needs LFXO.
-  // Loop in WFI until next reset.
-  __disable_irq();
-  while (1) {
-    __WFI();
-  }
+  nrf54_core_system_off(0U);
 }
 
 extern "C" void NVIC_SystemReset(void) {

@@ -2,7 +2,7 @@
 #include <nrf54l15_hal.h>
 #include <variant.h>
 
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(NRF54LM20_FAMILY)
 #include "npm1300.h"
 #endif
 
@@ -29,8 +29,8 @@ constexpr uint32_t kSystemOffUs = 1000000UL;
 constexpr uint32_t kPostUploadGraceMs = 400UL;
 constexpr uint32_t kPostUploadVisibleBlinkUs = 30000UL;
 constexpr uint8_t kLedPin =
-#if defined(ARDUINO_NRF54LM20B)
-    22U;  // XIAO nRF54LM20B LED = P1.22 (red), active low.
+#if defined(NRF54LM20_FAMILY)
+    22U;  // XIAO nRF54LM20A LED = P1.22 (red), active low.
 #else
     0U;   // XIAO nRF54L15 LED = P2.0, active low.
 #endif
@@ -38,7 +38,7 @@ constexpr uint8_t kLedPin =
 PowerManager gPower;
 
 void ledInit() {
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(NRF54LM20_FAMILY)
   NRF_P1->DIRSET = (1UL << kLedPin);
   NRF_P1->OUTSET = (1UL << kLedPin);
 #else
@@ -48,7 +48,7 @@ void ledInit() {
 }
 
 void ledOn() {
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(NRF54LM20_FAMILY)
   NRF_P1->OUTCLR = (1UL << kLedPin);
 #else
   NRF_P2->OUTCLR = (1UL << kLedPin);
@@ -56,7 +56,7 @@ void ledOn() {
 }
 
 void ledOff() {
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(NRF54LM20_FAMILY)
   NRF_P1->OUTSET = (1UL << kLedPin);
 #else
   NRF_P2->OUTSET = (1UL << kLedPin);
@@ -94,7 +94,7 @@ void setup() {
     ledOff();
     busyWaitMs(kPostUploadGraceMs);
 
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(NRF54LM20_FAMILY)
     // Enable buck hysteretic mode for lowest system-off quiescent current.
     // The PMIC register settings persist across MCU SYSTEM OFF.
     npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
@@ -108,7 +108,7 @@ void loop() {
   ledOff();
 
   xiaoNrf54l15EnterLowestPowerBoardState();
-#if defined(ARDUINO_NRF54LM20B)
+#if defined(NRF54LM20_FAMILY)
   // Re-apply hysteretic mode before each SYSTEM OFF.
   // Safe to call repeatedly — PMIC ignores no-op writes.
   npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);

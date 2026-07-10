@@ -191,16 +191,111 @@ jobs:
 
       - name: Register local clean core
         run: |
-          mkdir -p "${HOME}/Arduino/hardware/nrf54l15clean"
+          mkdir -p "${HOME}/Arduino/hardware/localnrf54"
           ln -sfn "${GITHUB_WORKSPACE}/hardware/nrf54l15clean/nrf54l15clean" \
-            "${HOME}/Arduino/hardware/nrf54l15clean/nrf54l15clean"
-          arduino-cli board listall | grep "nrf54l15clean"
+            "${HOME}/Arduino/hardware/localnrf54/nrf54l15clean"
+          arduino-cli board details --fqbn "localnrf54:nrf54l15clean:xiao_nrf54l15" | \
+            grep -F "localnrf54:nrf54l15clean:xiao_nrf54l15"
 
       - name: Compile ${{ matrix.sketch }}
         run: |
           arduino-cli compile \
-            --fqbn "nrf54l15clean:nrf54l15clean:xiao_nrf54l15:${{ matrix.options }}" \
+            --fqbn "localnrf54:nrf54l15clean:xiao_nrf54l15:${{ matrix.options }}" \
             "${GITHUB_WORKSPACE}/${{ matrix.sketch }}"
+
+  host-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Core I/O sanitizer and vector contracts
+        run: python3 ./scripts/test_core_io_regressions.py
+
+      - name: Upload recovery and platform recipe contracts
+        run: python3 ./scripts/test_upload_helper.py
+
+  audit-contract-compiles:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: xiao_nrf54l15
+            options: cpu_freq=64m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Diagnostics/HalRegisterContracts
+          - board: xiao_nrf54lm20b
+            options: cpu_freq=128m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Diagnostics/HalRegisterContracts
+          - board: xiao_nrf54l15
+            options: cpu_freq=64m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Power/SystemOffWakeDiag
+          - board: xiao_nrf54lm20b
+            options: cpu_freq=128m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Power/SystemOffWakeDiag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install compiler dependency
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_nano
+
+      - name: Register isolated local core
+        run: |
+          mkdir -p "${HOME}/Arduino/hardware/localnrf54"
+          ln -sfn "${GITHUB_WORKSPACE}/hardware/nrf54l15clean/nrf54l15clean" \
+            "${HOME}/Arduino/hardware/localnrf54/nrf54l15clean"
+
+      - name: Compile audit contract
+        run: |
+          arduino-cli compile \
+            --fqbn "localnrf54:nrf54l15clean:${{ matrix.board }}:${{ matrix.options }}" \
+            "${GITHUB_WORKSPACE}/${{ matrix.sketch }}"
+
+  windows-native-tooling:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install compiler dependency
+        shell: powershell
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_nano
+
+      - name: Register isolated local core
+        shell: powershell
+        run: |
+          arduino-cli config set directories.user "$env:RUNNER_TEMP/Arduino"
+          $hardware = Join-Path $env:RUNNER_TEMP "Arduino/hardware/localnrf54/nrf54l15clean"
+          New-Item -ItemType Directory -Path $hardware -Force | Out-Null
+          Copy-Item -Path "hardware/nrf54l15clean/nrf54l15clean/*" -Destination $hardware -Recurse -Force
+
+      - name: Compile through native Windows UF2 recipe
+        shell: powershell
+        run: |
+          arduino-cli compile `
+            --fqbn "localnrf54:nrf54l15clean:xiao_nrf54l15" `
+            --build-path "$env:RUNNER_TEMP/nrf54-windows-build" `
+            "hardware/nrf54l15clean/nrf54l15clean/examples/CoreVersionProbe"
+          $uf2 = Get-Item "$env:RUNNER_TEMP/nrf54-windows-build/*.uf2"
+          if ($uf2.Length -le 0) { throw "Windows compile did not emit UF2" }
+
+      - name: Test Windows native tools
+        shell: powershell
+        run: ./tests/windows_native_tools.ps1
 
   package-consistency:
     runs-on: ubuntu-latest
@@ -212,6 +307,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install compiler dependency
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_nano
 
       - name: Build release artifacts
         run: |
@@ -227,7 +330,6 @@ jobs:
             --source-version "${SOURCE_VERSION}" \
             --repo-url "https://github.com/${GITHUB_REPOSITORY}" \
             --release-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v{version}" \
-            --include-openthread-core \
             --reuse-existing-hosttools
 
       - name: Ensure checked-in index matches generated index
@@ -245,6 +347,22 @@ jobs:
           print(manifest['platform']['archivePath'])
           PY
           )"
-          python3 ./scripts/verify_package_index.py \
-            --index dist/package_nrf54l15clean_index.json \
-            --archive "${PLATFORM_ARCHIVE}"
+          for INDEX in \
+            dist/package_nrf54l15clean_index.json \
+            dist/package_nrf54l15clean_stable_index.json \
+            dist/package_nrf54l15clean_archive_index.json; do
+            python3 ./scripts/verify_package_index.py \
+              --index "${INDEX}" \
+              --archive "${PLATFORM_ARCHIVE}"
+          done
+
+      - name: Compile advertised features from exact archive
+        run: |
+          PLATFORM_ARCHIVE="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('dist/release-manifest.json').read_text())
+          print(manifest['platform']['archivePath'])
+          PY
+          )"
+          python3 ./scripts/verify_release_archive.py --archive "${PLATFORM_ARCHIVE}"

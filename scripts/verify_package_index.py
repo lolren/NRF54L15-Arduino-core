@@ -12,7 +12,6 @@ from pathlib import Path
 
 REQUIRED_PLATFORM_TOOL_DEPENDENCIES = {
     ("arduino", "arm-none-eabi-gcc", "7-2017q4"),
-    ("arduino", "openocd", "0.11.0-arduino2"),
 }
 
 
@@ -57,6 +56,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def validate_unique_platform_versions(index: dict) -> None:
+    for package in index.get("packages", []):
+        if not isinstance(package, dict):
+            continue
+        seen: dict[tuple[str, str], str] = {}
+        for platform in package.get("platforms", []):
+            if not isinstance(platform, dict):
+                continue
+            key = (
+                str(platform.get("architecture", "")),
+                str(platform.get("version", "")),
+            )
+            archive_name = str(platform.get("archiveFileName", ""))
+            previous = seen.get(key)
+            if previous is not None:
+                raise SystemExit(
+                    "duplicate platform architecture/version: "
+                    f"{key[0]}@{key[1]} maps to both {previous!r} and {archive_name!r}"
+                )
+            seen[key] = archive_name
+
+
 def main() -> int:
     args = parse_args()
     index_path = args.index.resolve()
@@ -68,6 +89,7 @@ def main() -> int:
         raise SystemExit(f"Archive file not found: {archive_path}")
 
     index = json.loads(index_path.read_text(encoding="utf-8"))
+    validate_unique_platform_versions(index)
 
     try:
         platforms = index["packages"][0]["platforms"]

@@ -792,7 +792,15 @@ bool BleRadio::ensureSecureConnectionsLocalKeypair() {
   const uint32_t startUs = micros();
   Secp256r1Scalar priv{};
   Secp256r1Point pub{};
-  Secp256r1::generateKeyPair(&priv, &pub);
+  if (!Secp256r1::generateKeyPair(&priv, &pub)) {
+    memset(smpSecureConnectionsPrivateKey_, 0,
+           sizeof(smpSecureConnectionsPrivateKey_));
+    memset(smpSecureConnectionsPublicKey_, 0,
+           sizeof(smpSecureConnectionsPublicKey_));
+    smpSecureConnectionsLocalKeypairTimeUs_ = micros() - startUs;
+    smpSecureConnectionsLocalKeyInProgress_ = false;
+    return false;
+  }
   smpSecureConnectionsLocalKeypairTimeUs_ = micros() - startUs;
   memcpy(smpSecureConnectionsPrivateKey_, priv.bytes,
          sizeof(smpSecureConnectionsPrivateKey_));

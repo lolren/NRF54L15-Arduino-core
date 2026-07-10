@@ -300,7 +300,8 @@ size_t Print::printSigned(long value, uint8_t base)
 {
     if (base == 10 && value < 0) {
         size_t count = write('-');
-        count += printNumber(static_cast<unsigned long>(-value), base);
+        const unsigned long magnitude = 0UL - static_cast<unsigned long>(value);
+        count += printNumber(magnitude, base);
         return count;
     }
 

@@ -286,6 +286,6 @@ extern "C" void xiaoNrf54l15EnterLowestPowerBoardState(void) {
     gpioSetInputHighZ(kMicClkPort, kMicClkPin);
     gpioSetInputHighZ(kMicDataPort, kMicDataPin);
     gpioSetInputHighZ(kRfSwitchCtlPort, kRfSwitchCtlPin);
-    gpioSetInputHighZ(kSamd11TxPort, kSamd11TxPin);
-    gpioSetInputHighZ(kSamd11RxPort, kSamd11RxPin);
+    // Keep the SAMD11 bridge pins under UARTE ownership so wake/reset
+    // diagnostics can print immediately after a timed SYSTEM OFF wake.
 }

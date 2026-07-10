@@ -411,19 +411,11 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       }
       return false;
     }
-    const bool lastTxWasSmpDhKeyCheckEarly =
-        connectionTxHistoryValid_ &&
-        (connectionLastTxPlainLlid_ == kBlePduDataStartOrComplete) &&
-        (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
-        (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidSmp) &&
-        (connectionLastTxPlainPayload_[4] == kSmpCodeDhKeyCheck);
-    const bool securityProgressAckEarly =
-        !peerAckedLastTxEarly && packetIsNewEarly && lastTxWasSmpDhKeyCheckEarly;
     const bool canSendNewPayloadEarly =
-        !connectionTxHistoryValid_ || peerAckedLastTxEarly || securityProgressAckEarly;
+        !connectionTxHistoryValid_ || peerAckedLastTxEarly;
     encDebug_.fastEncLastPeerAcked = peerAckedLastTxEarly ? 1U : 0U;
     encDebug_.fastEncLastPacketNew = packetIsNewEarly ? 1U : 0U;
-    encDebug_.fastEncLastSmpProgressAck = securityProgressAckEarly ? 1U : 0U;
+    encDebug_.fastEncLastSmpProgressAck = 0U;
     if (!retransmitPreviousEncRsp &&
         (!packetIsNewEarly || !canSendNewPayloadEarly)) {
       ++encDebug_.fastEncRejectAck;
@@ -523,10 +515,9 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       emitBleTrace("LL_ENC_REQ_ACCEPTED_FAST");
 
       expectedRxSnAfter = static_cast<uint8_t>(connectionExpectedRxSn_ ^ 0x01U);
-      txSnAfter =
-          (peerAckedLastTxEarly || securityProgressAckEarly)
-              ? static_cast<uint8_t>(connectionTxSn_ ^ 0x01U)
-              : connectionTxSn_;
+      txSnAfter = peerAckedLastTxEarly
+                      ? static_cast<uint8_t>(connectionTxSn_ ^ 0x01U)
+                      : connectionTxSn_;
       txPayloadIsFreshFast = true;
     }
     const uint8_t txLlidFast = kBlePduLlControl;
@@ -706,8 +697,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       encDebug_.fastEncFirstTxHdr = txPacket_[0];
       encDebug_.fastEncFirstPeerAcked = peerAckedLastTxEarly ? 1U : 0U;
       encDebug_.fastEncFirstPacketNew = packetIsNewEarly ? 1U : 0U;
-      encDebug_.fastEncFirstSmpProgressAck =
-          securityProgressAckEarly ? 1U : 0U;
+      encDebug_.fastEncFirstSmpProgressAck = 0U;
     } else {
       ++encDebug_.fastEncRspRetxTxOk;
     }
@@ -1736,77 +1726,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       (rxPacket_[2] == kBleLlCtrlChannelMapInd)) {
     ++encDebug_.connChannelMapDuplicateCount;
   }
-  bool implicitEmptyAck = false;
-  const bool lastTxWasEarlyLlControlResponse =
-      !connectionEncSessionValid_ &&
-      connectionTxHistoryValid_ &&
-      (connectionLastTxLlid_ == kBlePduLlControl) &&
-      (connectionLastTxPlainLength_ >= 1U) &&
-      ((connectionLastTxPlainPayload_[0] == kBleLlCtrlFeatureRsp) ||
-       (connectionLastTxPlainPayload_[0] == kBleLlCtrlVersionInd) ||
-       (connectionLastTxPlainPayload_[0] == kBleLlCtrlLengthRsp) ||
-       (connectionLastTxPlainPayload_[0] == kBleLlCtrlPhyRsp) ||
-       (connectionLastTxPlainPayload_[0] == kBleLlCtrlPingRsp) ||
-       (connectionLastTxPlainPayload_[0] == kBleLlCtrlConnectionParamRsp));
-  const bool lastTxWasAttServerResponse =
-      connectionTxHistoryValid_ &&
-      (connectionLastTxLlid_ == kBlePduDataStartOrComplete) &&
-      (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
-      (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidAtt) &&
-      attOpcodeIsServerResponsePdu(connectionLastTxPlainPayload_[4]);
-  const bool lastTxHadAttPayload =
-      connectionTxHistoryValid_ &&
-      (connectionLastTxLlid_ == kBlePduDataStartOrComplete) &&
-      (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
-      (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidAtt);
-  const bool lastTxWasEncryptedEmptyAck =
-      connectionEncSessionValid_ &&
-      connectionTxHistoryValid_ &&
-      connectionLastTxWasEncrypted_ &&
-      (connectionLastTxLlid_ == 0x01U) &&
-      (connectionLastTxLength_ == 0U);
-  const bool lastTxWasSmpDhKeyCheck =
-      connectionTxHistoryValid_ &&
-      (connectionLastTxPlainLlid_ == kBlePduDataStartOrComplete) &&
-      (connectionLastTxPlainLength_ >= (kBleL2capHeaderLen + 1U)) &&
-      (readLe16(&connectionLastTxPlainPayload_[2]) == kBleL2capCidSmp) &&
-      (connectionLastTxPlainPayload_[4] == kSmpCodeDhKeyCheck);
-  const bool peerAdvancedToEncryptionStartAfterSmp =
-      packetIsNew &&
-      (llid == kBlePduLlControl) &&
-      (rxLengthRaw >= 1U) &&
-      (rxPacket_[2] == kBleLlCtrlEncReq) &&
-      lastTxWasSmpDhKeyCheck;
-  const bool peerAdvancedToNewUnencryptedAttProcedure =
-      packetIsNew &&
-      (llid == kBlePduDataStartOrComplete) &&
-      (rxLengthRaw >= (kBleL2capHeaderLen + 1U)) &&
-      (readLe16(&rxPacket_[4]) == kBleL2capCidAtt) &&
-      attOpcodeIsClientProgressPdu(rxPacket_[2 + kBleL2capHeaderLen]);
-  const bool peerAdvancedToNewEncryptedDataProcedure =
-      connectionEncSessionValid_ &&
-      connectionEncRxEnabled_ &&
-      packetIsNew &&
-      (llid == kBlePduDataStartOrComplete) &&
-      (rxLengthRaw >= kBleMicLen);
-  const bool pendingTxIsRetryableL2capResponse =
-      connectionPendingTxValid_ &&
-      (connectionPendingTxLlid_ == kBlePduDataStartOrComplete) &&
-      (connectionPendingTxLength_ >= kBleL2capHeaderLen) &&
-      (((readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidAtt) &&
-        (connectionPendingTxLength_ >= (kBleL2capHeaderLen + 1U)) &&
-        attOpcodeIsServerResponsePdu(connectionPendingTxPayload_[4])) ||
-       (readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidSmp) ||
-       (readLe16(&connectionPendingTxPayload_[2]) == kBleL2capCidLeSignaling));
-  const bool firstEncryptedDataAfterStartRsp =
-      connectionEncSessionValid_ &&
-      packetIsNew &&
-      (llid == kBlePduDataStartOrComplete) &&
-      (rxLengthRaw >= kBleMicLen) &&
-      connectionTxHistoryValid_ &&
-      (connectionLastTxLlid_ == kBlePduLlControl) &&
-      (connectionLastTxPlainLength_ == 1U) &&
-      (connectionLastTxPlainPayload_[0] == kBleLlCtrlStartEncRsp);
   const bool earlyEncryptedDataAfterStartTransition =
       connectionEncSessionValid_ &&
       connectionEncRxEnabled_ &&
@@ -1814,37 +1733,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       (llid == kBlePduDataStartOrComplete) &&
       (rxLengthRaw >= kBleMicLen) &&
       (connectionEncRxCounter_ <= 1ULL);
-  const bool peerAdvancedToEncryptedDataAfterStartRsp =
-      firstEncryptedDataAfterStartRsp;
-  if (!peerAckedLastTx &&
-      connectionTxHistoryValid_ &&
-      packetIsNew &&
-       (lastTxWasEarlyLlControlResponse ||
-       peerAdvancedToEncryptedDataAfterStartRsp ||
-       (lastTxWasEncryptedEmptyAck &&
-        peerAdvancedToNewEncryptedDataProcedure) ||
-       peerAdvancedToEncryptionStartAfterSmp ||
-       (lastTxWasAttServerResponse &&
-        (peerAdvancedToNewUnencryptedAttProcedure ||
-         peerAdvancedToNewEncryptedDataProcedure)) ||
-       pendingTxIsRetryableL2capResponse)) {
-    // Interop guard: some centrals advance SN while holding NESN stable after
-    // immediate early LL control responses or queued L2CAP replies. Some
-    // centrals also issue the next ATT procedure before updating NESN for the
-    // prior response. Once ATT traffic is encrypted, the decrypted payload is
-    // not available yet at this point in the timing path, so treat any new
-    // encrypted data PDU as higher-layer progress as well. That keeps
-    // encrypted ATT writes from deadlocking on a stale NESN bit.
-    peerAckedLastTx = true;
-    implicitEmptyAck = true;
-    if (peerAdvancedToEncryptedDataAfterStartRsp ||
-        peerAdvancedToEncryptionStartAfterSmp ||
-        (lastTxWasAttServerResponse &&
-         (peerAdvancedToNewUnencryptedAttProcedure ||
-          peerAdvancedToNewEncryptedDataProcedure))) {
-      ++encDebug_.connImplicitAttProgressAckCount;
-    }
-  }
   if (peerAckedLastTx) {
     connectionTxSn_ ^= 0x01U;
     connectionFreshTxAllowed_ = true;
@@ -1973,15 +1861,8 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
              connectionEncStartReqTxPending_ ||
              finalStartRspQueued) &&
             (connectionEncRxCounter_ <= 1ULL);
-        // Encrypted empty data-channel PDUs carry no MIC and do not consume an
-        // encryption packet counter. Treat them as valid ACK/poll traffic.
-        const bool allowEncryptedEmptyPdu =
-            connectionEncRxEnabled_ &&
-            (rxLengthRaw == 0U) &&
-            ((llid == kBlePduDataStartOrComplete) || (llid == 0x01U));
         if (connectionEncRxEnabled_ &&
-            !allowStartProcedurePlainZeroLen &&
-            !allowEncryptedEmptyPdu) {
+            !allowStartProcedurePlainZeroLen) {
           terminateInd = true;
           terminateMicFailure = true;
           ++encDebug_.encRxShortPduCount;

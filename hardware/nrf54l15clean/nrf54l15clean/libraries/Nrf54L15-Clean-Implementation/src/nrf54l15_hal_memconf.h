@@ -6,121 +6,130 @@
 
 namespace xiao_nrf54l15 {
 
-// Memory Configuration (MEMCONF)
-// Controls RAM section power/retention and RRAM region security attributes.
-// Datasheet chapter 4.3.6 (MEMCONF — Memory configuration).
+// MEMCONF controls each RAM section through POWER[n].CONTROL and POWER[n].RET.
+// It does not expose task, event, interrupt, status, or RRAM protection blocks.
 class Memconf {
  public:
-  // ---- RAM section control ----
+  static constexpr uint32_t kUnsupportedProtectionStatus = 0xFFFFFFFFUL;
 
-  // Power on a specific RAM section (0..7 on nRF54L15).
-  // The section is powered from the main supply rail.
   inline static bool powerOnRamSection(uint8_t section) {
-    if (section >= 8) return false;
-    // RAM section power-on is via the RAM section power register.
-    // Each section has a separate TASKS_RAMON[n] and EVENTS_RAMON[n].
-    writeReg(MEMCONF_TASKS_RAMON0 + section * 4, 1);
-    return true;
+    return setPower(section, true);
   }
 
-  // Power off a specific RAM section (0..7 on nRF54L15).
-  // Contents are NOT retained unless retention was enabled before power-off.
   inline static bool powerOffRamSection(uint8_t section) {
-    if (section >= 8) return false;
-    writeReg(MEMCONF_TASKS_RAMOFF0 + section * 4, 1);
+    return setPower(section, false);
+  }
+
+  // Retained for source compatibility. Since MEMCONF has no transition events,
+  // these methods report the current configured state and never clear hardware.
+  inline static bool ramOnEvent(uint8_t section, bool clear = true) {
+    (void)clear;
+    return isRamSectionPowered(section);
+  }
+
+  inline static bool ramOffEvent(uint8_t section, bool clear = true) {
+    (void)clear;
+    return validSection(section) && !isRamSectionPowered(section);
+  }
+
+  inline static uint32_t ramSectionStatus() {
+    uint32_t mask = 0;
+    for (uint8_t section = 0; section < kRamSectionCount; ++section) {
+      if ((readReg(kPower0Control) & sectionMask(section)) != 0) {
+        mask |= 1UL << section;
+      }
+    }
+    return mask;
+  }
+
+  inline static bool isRamSectionPowered(uint8_t section) {
+    return validSection(section) &&
+           ((readReg(kPower0Control) & sectionMask(section)) != 0);
+  }
+
+  inline static bool setRamSectionRetention(uint8_t section, bool retain) {
+    if (!validSection(section)) return false;
+    const uint32_t mask = sectionMask(section);
+    updateBits(kPower0Retention, mask, retain);
+    if (sectionHasSecondRetentionBank(section)) {
+      updateBits(kPower0Retention2, mask, retain);
+    }
     return true;
   }
 
-  // Check if a RAM section power-on event has fired.
-  inline static bool ramOnEvent(uint8_t section, bool clear = true) {
-    if (section >= 8) return false;
-    uint32_t ev = readReg(MEMCONF_EVENTS_RAMON0 + section * 4);
-    if (clear) writeReg(MEMCONF_EVENTS_RAMON0 + section * 4, 0);
-    return ev != 0;
+  inline static bool ramSectionRetentionEnabled(uint8_t section) {
+    if (!validSection(section)) return false;
+    const uint32_t mask = sectionMask(section);
+    if ((readReg(kPower0Retention) & mask) == 0) return false;
+    return !sectionHasSecondRetentionBank(section) ||
+           (readReg(kPower0Retention2) & mask) != 0;
   }
 
-  // Check if a RAM section power-off event has fired.
-  inline static bool ramOffEvent(uint8_t section, bool clear = true) {
-    if (section >= 8) return false;
-    uint32_t ev = readReg(MEMCONF_EVENTS_RAMOFF0 + section * 4);
-    if (clear) writeReg(MEMCONF_EVENTS_RAMOFF0 + section * 4, 0);
-    return ev != 0;
-  }
-
-  // Check if a RAM section is powered on (from STATUS register).
-  // Returns bitmask of powered-on sections (bit 0 = section 0, etc.).
-  inline static uint32_t ramSectionStatus() {
-    return readReg(MEMCONF_RAMSTATUS);
-  }
-
-  // Returns true if the specified section is powered on.
-  inline static bool isRamSectionPowered(uint8_t section) {
-    if (section >= 8) return false;
-    return (ramSectionStatus() & (1U << section)) != 0;
-  }
-
-  // ---- RRAM (NVM) security control ----
-
-  // Get the current RRAM region security configuration.
-  // Returns the value of the NVMC read-protection and write-protection registers.
+  // RRAM access protection belongs to RRAMC/KMU, not MEMCONF.
   inline static uint32_t nvmcReadProtection() {
-    return readReg(NVMC_READPROTECTED);
+    return kUnsupportedProtectionStatus;
   }
-
   inline static uint32_t nvmcWriteProtection() {
-    return readReg(NVMC_WRITEPROTECTED);
+    return kUnsupportedProtectionStatus;
   }
 
-  // ---- Interrupts ----
-
-  inline static void enableRamOnInterrupt(uint8_t section, bool enable = true) {
-    if (section >= 8) return;
-    volatile uint32_t* base = reinterpret_cast<volatile uint32_t*>(BASE);
-    if (enable) {
-      base[INTENSET_OFFSET / 4] |= (1U << (16 + section));
-    } else {
-      base[INTENCLR_OFFSET / 4] |= (1U << (16 + section));
-    }
+  inline static constexpr bool ramTransitionInterruptsSupported() {
+    return false;
   }
 
-  inline static void enableRamOffInterrupt(uint8_t section, bool enable = true) {
-    if (section >= 8) return;
-    volatile uint32_t* base = reinterpret_cast<volatile uint32_t*>(BASE);
-    if (enable) {
-      base[INTENSET_OFFSET / 4] |= (1U << section);
-    } else {
-      base[INTENCLR_OFFSET / 4] |= (1U << section);
-    }
+  inline static bool enableRamOnInterrupt(uint8_t, bool = true) {
+    return false;
   }
-
-  // ---- Low-level raw access ----
+  inline static bool enableRamOffInterrupt(uint8_t, bool = true) {
+    return false;
+  }
 
   inline static uint32_t readReg(uint32_t offset) {
-    return *reinterpret_cast<const volatile uint32_t*>(BASE + offset);
+    return *reinterpret_cast<const volatile uint32_t*>(kBase + offset);
   }
 
   inline static void writeReg(uint32_t offset, uint32_t value) {
-    *reinterpret_cast<volatile uint32_t*>(BASE + offset) = value;
+    *reinterpret_cast<volatile uint32_t*>(kBase + offset) = value;
   }
 
  private:
-  static constexpr uint32_t BASE = 0x400CF000UL;  // MEMCONF base (PERI domain)
+  static constexpr uintptr_t kBase = nrf54l15::MEMCONF_BASE;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  static constexpr uint8_t kRamSectionCount = 16;
+#else
+  static constexpr uint8_t kRamSectionCount = 8;
+#endif
+  static constexpr uint32_t kPower0Control = 0x500;
+  static constexpr uint32_t kPower0Retention = 0x508;
+  static constexpr uint32_t kPower0Retention2 = 0x50C;
 
-  // Register offsets.
-  // Tasks: RAMON[0..7], RAMOFF[0..7]
-  static constexpr uint32_t MEMCONF_TASKS_RAMON0  = 0x000;
-  static constexpr uint32_t MEMCONF_TASKS_RAMOFF0 = 0x020;
-  // Events: RAMON[0..7], RAMOFF[0..7]
-  static constexpr uint32_t MEMCONF_EVENTS_RAMON0  = 0x100;
-  static constexpr uint32_t MEMCONF_EVENTS_RAMOFF0 = 0x120;
-  // Status
-  static constexpr uint32_t MEMCONF_RAMSTATUS = 0x400;
-  // NVMC
-  static constexpr uint32_t NVMC_READPROTECTED  = 0x530;
-  static constexpr uint32_t NVMC_WRITEPROTECTED = 0x534;
-  // Interrupt enable
-  static constexpr uint32_t INTENSET_OFFSET = 0x304;
-  static constexpr uint32_t INTENCLR_OFFSET = 0x308;
+  inline static bool validSection(uint8_t section) {
+    return kBase != 0 && section < kRamSectionCount;
+  }
+
+  inline static uint32_t sectionMask(uint8_t section) {
+    return 1UL << section;
+  }
+
+  inline static bool sectionHasSecondRetentionBank(uint8_t section) {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+    (void)section;
+    return false;
+#else
+    return section == 7U;
+#endif
+  }
+
+  inline static void updateBits(uint32_t offset, uint32_t mask, bool set) {
+    const uint32_t value = readReg(offset);
+    writeReg(offset, set ? (value | mask) : (value & ~mask));
+  }
+
+  inline static bool setPower(uint8_t section, bool enabled) {
+    if (!validSection(section)) return false;
+    updateBits(kPower0Control, sectionMask(section), enabled);
+    return true;
+  }
 };
 
 }  // namespace xiao_nrf54l15

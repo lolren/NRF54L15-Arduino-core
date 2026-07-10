@@ -10,6 +10,8 @@
 #include "variant.h"
 
 extern "C" uint8_t nrf54l15_constlat_users_active(void) __attribute__((weak));
+extern "C" void nrf54l15_grtc_irq_observer(void) __attribute__((weak));
+extern "C" void nrf54l15_grtc_irq_observer(void) {}
 namespace xiao_nrf54l15 {
 class I2sTx;
 class I2sRx;
@@ -85,6 +87,57 @@ namespace {
 constexpr uint32_t kBleSecp256r1BackgroundCooperateSpinLimit = 0UL;
 constexpr uint32_t kBleSecp256r1ForegroundCooperateSpinLimit = 2500UL;
 
+bool quiesceSharedRadioForSystemOff(uint32_t spinLimit) {
+  NRF_RADIO_Type* const radio = NRF_RADIO;
+  if (radio == nullptr) return true;
+
+  // Prevent DPPI or local shortcuts from restarting the radio after DISABLE.
+  radio->SUBSCRIBE_TXEN = 0U;
+  radio->SUBSCRIBE_RXEN = 0U;
+  radio->SUBSCRIBE_START = 0U;
+  radio->SUBSCRIBE_STOP = 0U;
+  radio->SUBSCRIBE_DISABLE = 0U;
+  radio->SUBSCRIBE_RSSISTART = 0U;
+  radio->SUBSCRIBE_BCSTART = 0U;
+  radio->SUBSCRIBE_BCSTOP = 0U;
+  radio->SUBSCRIBE_EDSTART = 0U;
+  radio->SUBSCRIBE_EDSTOP = 0U;
+  radio->SUBSCRIBE_CCASTART = 0U;
+  radio->SUBSCRIBE_CCASTOP = 0U;
+  radio->SUBSCRIBE_AUXDATADMASTART = 0U;
+  radio->SUBSCRIBE_AUXDATADMASTOP = 0U;
+  radio->SUBSCRIBE_PLLEN = 0U;
+  radio->SUBSCRIBE_CSTONESSTART = 0U;
+  radio->SUBSCRIBE_SOFTRESET = 0U;
+  radio->SHORTS = 0U;
+  radio->INTENCLR00 = 0xFFFFFFFFUL;
+  radio->INTENCLR01 = 0xFFFFFFFFUL;
+  radio->INTENCLR10 = 0xFFFFFFFFUL;
+  radio->INTENCLR11 = 0xFFFFFFFFUL;
+  radio->TASKS_AUXDATADMASTOP =
+      RADIO_TASKS_AUXDATADMASTOP_TASKS_AUXDATADMASTOP_Trigger;
+
+  const uint32_t state =
+      (radio->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
+  bool disabled = (state == RADIO_STATE_STATE_Disabled);
+  if (!disabled) {
+    radio->EVENTS_DISABLED = 0U;
+    radio->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    disabled = waitRadioDisabledBudgeted(radio, 0U, spinLimit);
+  }
+  if (!disabled) return false;
+
+  radio->AUXDATADMA[0].ENABLE = 0U;
+  radio->AUXDATADMA[0].PTR = 0U;
+  radio->AUXDATADMA[0].MAXCNT = 0U;
+  radio->AUXDATADMA[1].ENABLE = 0U;
+  radio->AUXDATADMA[1].PTR = 0U;
+  radio->AUXDATADMA[1].MAXCNT = 0U;
+  radio->PACKETPTR = 0U;
+  clearRadioCoreEvents(radio);
+  return true;
+}
+
 void clearUnownedBleBackgroundGrtcCompares() {
   static constexpr uint8_t kChannels[] = {
       kBleBackgroundAdvPrewarmCompareChannel,
@@ -135,6 +188,48 @@ extern "C" void nrf54l15_secp256r1_cooperate_hook(void) {
   }
 }
 
+extern "C" bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit) {
+  bool ok = true;
+
+  xiao_nrf54l15::BleRadio* const activeBle = g_activeBleRadio;
+  xiao_nrf54l15::BleRadio* const backgroundBle = g_bleBackgroundRadio;
+  if (activeBle != nullptr) {
+    activeBle->end();
+  }
+  if (backgroundBle != nullptr && backgroundBle != activeBle) {
+    backgroundBle->end();
+  }
+  if (g_activeZigbeeRadioIrq != nullptr) {
+    g_activeZigbeeRadioIrq->end();
+  }
+  if (!quiesceSharedRadioForSystemOff(spinLimit)) {
+    ok = false;
+  }
+
+  xiao_nrf54l15::Pwm* const pwms[] = {
+      g_activePwm20, g_activePwm21, g_activePwm22};
+  for (xiao_nrf54l15::Pwm* pwm : pwms) {
+    if (pwm != nullptr) {
+      pwm->enableInterruptMask(xiao_nrf54l15::Pwm::irqSupportedMask(), false);
+      if (pwm->running() && !pwm->stop(spinLimit)) {
+        ok = false;
+      }
+    }
+  }
+
+  if (g_activeI2sTx != nullptr && !g_activeI2sTx->quiesce(spinLimit)) {
+    ok = false;
+  }
+  if (g_activeI2sRx != nullptr && !g_activeI2sRx->quiesce(spinLimit)) {
+    ok = false;
+  }
+  if (g_activeI2sDuplex != nullptr &&
+      !g_activeI2sDuplex->quiesce(spinLimit)) {
+    ok = false;
+  }
+  return ok;
+}
+
 extern "C" void nrf54l15_ble_grtc_irq_service(void) {
   bleScanSleepWaitHandleTimeoutIrq();
   if (!bleBackgroundOwnerBlocksIdleWake() &&
@@ -161,6 +256,7 @@ extern "C" void nrf54l15_ble_grtc_irq_service(void) {
   } else {
     clearUnownedBleBackgroundGrtcCompares();
   }
+  nrf54l15_grtc_irq_observer();
 }
 
 extern "C" void RADIO_0_IRQHandler(void) {

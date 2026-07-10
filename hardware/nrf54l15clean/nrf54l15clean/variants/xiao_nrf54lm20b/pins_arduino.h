@@ -310,9 +310,8 @@ static inline int digitalPinToInterrupt(uint8_t pin)
 {
     uint8_t port = 0;
     uint8_t pinInPort = 0;
-    // Ports 2 and 3 are dedicated/internal pads in this core and are not
-    // routed through the Arduino interrupt helper.
-    if (!pinToPortPin(pin, &port, &pinInPort) || port == 2U || port == 3U) {
+    // P1 and P3 are served by GPIOTE20; P0 is served by GPIOTE30.
+    if (!pinToPortPin(pin, &port, &pinInPort) || port == 2U) {
         return NOT_AN_INTERRUPT;
     }
     return pin;
@@ -325,7 +324,7 @@ static inline uint8_t analogInputToDigitalPin(uint8_t p)
         case 1: return PIN_A1;
         case 2: return PIN_A2;
         case 3: return PIN_A3;
-        case 7: return PIN_A4;
+        case 4: return PIN_A4;
         default: return 0xFF;
     }
 }

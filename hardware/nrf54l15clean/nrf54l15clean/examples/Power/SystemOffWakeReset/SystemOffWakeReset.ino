@@ -8,8 +8,8 @@
     1 blink = normal boot or external reset
     2 blinks = woke from SYSTEMOFF by the GRTC wake timer
 
-  For "sleep then continue" behavior, use delaySystemOff() or
-  delaySystemOffNoRetention() instead.
+  For "sleep then continue" behavior, use delayLowPowerIdle(). The
+  delaySystemOff* APIs are also true SYSTEMOFF calls and never return.
 */
 
 #include <Arduino.h>

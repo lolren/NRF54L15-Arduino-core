@@ -18,7 +18,6 @@ static constexpr uint32_t SPIM_EVENTS_DMA_TX_BUSERROR = 0x170UL;
 
 static constexpr uint32_t SPIM_ENABLE           = 0x500UL;
 static constexpr uint32_t SPIM_PRESCALER        = 0x52CUL;
-static constexpr uint32_t SPIM_FREQUENCY       = 0x524UL;
 static constexpr uint32_t SPIM_CONFIG           = 0x554UL;
 static constexpr uint32_t SPIM_ORC              = 0x5C0UL;
 
@@ -69,11 +68,25 @@ static bool is_hs_spim(NRF_SPIM_Type* spim) {
 }
 
 static uint32_t spim_core_hz(NRF_SPIM_Type* spim) {
-    return is_hs_spim(spim) ? F_CPU : 16000000UL;
+    return is_hs_spim(spim) ? 128000000UL : 16000000UL;
 }
 
 static uint32_t spim_min_divisor(NRF_SPIM_Type* spim) {
     return is_hs_spim(spim) ? 4UL : 2UL;
+}
+
+static bool spim_route_valid(NRF_SPIM_Type* spim,
+                             uint8_t sckPort, uint8_t misoPort, uint8_t mosiPort) {
+    if (spim == nullptr || sckPort != misoPort || sckPort != mosiPort) {
+        return false;
+    }
+    if (is_hs_spim(spim)) {
+        return sckPort == 2U;
+    }
+    if (reinterpret_cast<uintptr_t>(spim) == reinterpret_cast<uintptr_t>(NRF_SPIM30)) {
+        return sckPort == 0U;
+    }
+    return sckPort == 1U || sckPort == 3U;
 }
 
 static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
@@ -134,7 +147,7 @@ static uint32_t compute_prescaler(NRF_SPIM_Type* spim, uint32_t target_hz) {
 
 }  // namespace
 
-SPIClass SPI(NRF_SPIM21, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
+SPIClass SPI(NRF_SPIM23, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);
 SPIClass SPI_HS(NRF_SPIM00, PIN_HSPI_MOSI, PIN_HSPI_MISO, PIN_HSPI_SCK, PIN_HSPI_SS);
 
 SPIClass::SPIClass(NRF_SPIM_Type* spim, uint8_t mosi, uint8_t miso, uint8_t sck, uint8_t cs)
@@ -151,7 +164,8 @@ void SPIClass::begin() {
     uint8_t sckPort = 0, sckPin = 0, mosiPort = 0, mosiPin = 0, misoPort = 0, misoPin = 0;
     if (!decode_pin(_sck, &sckPort, &sckPin) ||
         !decode_pin(_mosi, &mosiPort, &mosiPin) ||
-        !decode_pin(_miso, &misoPort, &misoPin)) {
+        !decode_pin(_miso, &misoPort, &misoPin) ||
+        !spim_route_valid(_spim, sckPort, misoPort, mosiPort)) {
         return;
     }
 
@@ -196,7 +210,8 @@ bool SPIClass::setPins(int8_t sck, int8_t miso, int8_t mosi, int8_t ss) {
     uint8_t mosiPin = 0;
     if (!decode_pin(nextSck, &sckPort, &sckPin) ||
         !decode_pin(nextMiso, &misoPort, &misoPin) ||
-        !decode_pin(nextMosi, &mosiPort, &mosiPin)) {
+        !decode_pin(nextMosi, &mosiPort, &mosiPin) ||
+        !spim_route_valid(_spim, sckPort, misoPort, mosiPort)) {
         return false;
     }
 
@@ -236,10 +251,14 @@ void SPIClass::end() {
 }
 
 void SPIClass::beginTransaction(SPISettings settings) {
+    _settings = settings;
     if (!_initialized) {
         begin();
     }
-    _settings = settings;
+    if (!_initialized || _spim == nullptr) {
+        _inTransaction = false;
+        return;
+    }
     applySettings();
     _inTransaction = true;
     _lastActivityUs = micros();
@@ -417,20 +436,7 @@ void SPIClass::applySettings() {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_spim);
 
-    if (is_hs_spim(_spim)) {
-        uint32_t freq_val = SPIM_FREQUENCY_M1;
-        uint32_t target = _settings.clock();
-        if (target >= 8000000UL)      freq_val = SPIM_FREQUENCY_M8;
-        else if (target >= 4000000UL) freq_val = SPIM_FREQUENCY_M4;
-        else if (target >= 2000000UL) freq_val = SPIM_FREQUENCY_M2;
-        else if (target >= 1000000UL) freq_val = SPIM_FREQUENCY_M1;
-        else if (target >= 500000UL)  freq_val = SPIM_FREQUENCY_K500;
-        else if (target >= 250000UL)  freq_val = SPIM_FREQUENCY_K250;
-        else                          freq_val = SPIM_FREQUENCY_K125;
-        reg32(base + SPIM_FREQUENCY) = freq_val;
-    } else {
-        reg32(base + SPIM_PRESCALER) = compute_prescaler(_spim, _settings.clock());
-    }
+    reg32(base + SPIM_PRESCALER) = compute_prescaler(_spim, _settings.clock());
 
     uint32_t cfg = 0U;
     if (_settings.bitOrder() == LSBFIRST) {
@@ -450,4 +456,18 @@ void SPIClass::applySettings() {
 
 uint32_t SPIClass::getFrequencyValue(uint32_t clockHz) {
     return clockHz;
+}
+
+bool SPIClass::quiesceForSystemOff(uint32_t spinLimit) {
+    (void)spinLimit;
+    if (!_initialized || _spim == nullptr) {
+        return true;
+    }
+    end();
+    return reg32(reinterpret_cast<uintptr_t>(_spim) + SPIM_ENABLE) == SPIM_ENABLE_DISABLED;
+}
+
+extern "C" bool nrf54_core_quiesce_spi_for_system_off(uint32_t spin_limit) {
+    return SPI.quiesceForSystemOff(spin_limit) &&
+           SPI_HS.quiesceForSystemOff(spin_limit);
 }

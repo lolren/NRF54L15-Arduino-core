@@ -1,5 +1,4 @@
 #include "matter_secp256r1.h"
-#include <Arduino.h>
 #include <string.h>
 
 #include "nrf54l15_hal.h"
@@ -15,39 +14,6 @@ namespace {
 static inline void maybeCooperateWithBle(uint32_t counter) {
   (void)counter;
   nrf54l15_secp256r1_cooperate_hook();
-}
-
-static uint64_t mixEntropy64(uint64_t state, uint64_t value) {
-  state ^= value + 0x9E3779B97F4A7C15ULL + (state << 6U) + (state >> 2U);
-  return state;
-}
-
-static uint64_t fallbackEccEntropySeed(size_t extra) {
-  uint64_t seed = 0xD1B54A32D192ED03ULL;
-  seed = mixEntropy64(seed, hardwareUniqueId64());
-  seed = mixEntropy64(seed, zigbeeFactoryEui64());
-  seed = mixEntropy64(seed, static_cast<uint64_t>(micros()));
-  seed = mixEntropy64(seed, static_cast<uint64_t>(millis()) << 32U);
-  seed = mixEntropy64(seed, static_cast<uint64_t>(extra));
-  seed = mixEntropy64(seed,
-                      static_cast<uint64_t>(
-                          reinterpret_cast<uintptr_t>(&seed)));
-  if (seed == 0ULL) {
-    seed = 0xA0761D6478BD642FULL;
-  }
-  return seed;
-}
-
-static uint64_t nextFallbackEntropyWord(uint64_t* state) {
-  if (state == nullptr) {
-    return 0ULL;
-  }
-  uint64_t x = *state;
-  x ^= x >> 12U;
-  x ^= x << 25U;
-  x ^= x >> 27U;
-  *state = x;
-  return x * 0x2545F4914F6CDD1DULL;
 }
 
 constexpr size_t kBnWordCount = 8U;
@@ -886,73 +852,57 @@ bool Secp256r1::modInverseN(const Secp256r1Scalar& a, Secp256r1Scalar* outInv) {
 
 // ─── Random generation ────────────────────────────────────────────────────
 
-void Secp256r1::generateRandomScalar(Secp256r1Scalar* outScalar) {
-  if(!outScalar)return;
-  randomBytes(outScalar->bytes,32);
-  BigNum256 s; bnFromBytes(outScalar->bytes,&s); if(bnIsZero(s))bnSetOne(&s);
-  BigNum256 n=orderN(); if(bnCompare(s,n)>=0)bnSub(s,n,&s); bnToBytes(s,outScalar->bytes);
+bool Secp256r1::generateRandomScalar(Secp256r1Scalar* outScalar) {
+  if (outScalar == nullptr) return false;
+  memset(outScalar, 0, sizeof(*outScalar));
+  const BigNum256 n = orderN();
+  for (uint8_t attempt = 0U; attempt < 32U; ++attempt) {
+    if (!randomBytes(outScalar->bytes, sizeof(outScalar->bytes))) return false;
+    BigNum256 scalar = {};
+    bnFromBytes(outScalar->bytes, &scalar);
+    if (!bnIsZero(scalar) && bnCompare(scalar, n) < 0) return true;
+  }
+  memset(outScalar, 0, sizeof(*outScalar));
+  return false;
 }
 
-void Secp256r1::randomBytes(uint8_t* out, size_t len) {
+bool Secp256r1::randomBytes(uint8_t* out, size_t len) {
   if (!out || len == 0U) {
-    return;
+    return len == 0U;
   }
-
-  static uint64_t fallbackState = 0ULL;
-  if (fallbackState == 0ULL) {
-    fallbackState = fallbackEccEntropySeed(len);
-  } else {
-    fallbackState = mixEntropy64(fallbackState, static_cast<uint64_t>(len));
-    fallbackState = mixEntropy64(fallbackState,
-                                 static_cast<uint64_t>(micros()));
-  }
-
+  memset(out, 0, len);
   CracenRng rng;
-  const bool haveHardwareEntropy = rng.fill(out, len, 500000UL);
-  if (!haveHardwareEntropy) {
+  const bool ok = rng.fill(out, len, 500000UL);
+  if (!ok) {
     memset(out, 0, len);
   }
-
-  size_t produced = 0U;
-  while (produced < len) {
-    const uint64_t word = nextFallbackEntropyWord(&fallbackState);
-    for (uint8_t i = 0U; i < 8U && produced < len; ++i) {
-      out[produced] ^= static_cast<uint8_t>(word >> (i * 8U));
-      ++produced;
-    }
-  }
-}
-
-uint32_t Secp256r1::randomWord() {
-  static uint64_t fallbackState = 0ULL;
-  if (fallbackState == 0ULL) {
-    fallbackState = fallbackEccEntropySeed(4U);
-  }
-  fallbackState = mixEntropy64(fallbackState, static_cast<uint64_t>(micros()));
-  const uint32_t mixedWord =
-      static_cast<uint32_t>(nextFallbackEntropyWord(&fallbackState) >> 32U);
-
-  uint32_t hardwareWord = 0U;
-  CracenRng rng;
-  if (rng.randomWord(&hardwareWord, 500000UL)) {
-    return hardwareWord ^ mixedWord;
-  }
-  return mixedWord;
+  return ok;
 }
 
 // ─── ECDSA ─────────────────────────────────────────────────────────────────
 
-void Secp256r1::generateKeyPair(Secp256r1Scalar* outPriv, Secp256r1Point* outPub) {
-  if(!outPriv||!outPub) return;
-  generateRandomScalar(outPriv);
-  scalarMultiplyBase(*outPriv,outPub);
+bool Secp256r1::generateKeyPair(Secp256r1Scalar* outPriv,
+                                Secp256r1Point* outPub) {
+  if (outPriv == nullptr || outPub == nullptr) return false;
+  memset(outPriv, 0, sizeof(*outPriv));
+  setInfinity(outPub);
+  if (!generateRandomScalar(outPriv) ||
+      !scalarMultiplyBase(*outPriv, outPub) || isInfinity(*outPub) ||
+      !isOnCurve(*outPub)) {
+    memset(outPriv, 0, sizeof(*outPriv));
+    setInfinity(outPub);
+    return false;
+  }
+  return true;
 }
 
 bool Secp256r1::ecdsaSign(const Secp256r1Scalar& priv, const uint8_t hash[32], uint8_t r[32], uint8_t s[32]) {
   if(!hash||!r||!s)return false;
   Secp256r1Scalar k; Secp256r1Point R; BigNum256 n=orderN();
   for(int attempt=0;attempt<32;attempt++){
-    generateRandomScalar(&k); if(!scalarMultiplyBase(k,&R))continue; if(isInfinity(R))continue;
+    if (!generateRandomScalar(&k)) return false;
+    if (!scalarMultiplyBase(k, &R)) continue;
+    if (isInfinity(R)) continue;
     BigNum256 rBn; bnFromBytes(R.x,&rBn); if(bnCompare(rBn,n)>=0)bnSub(rBn,n,&rBn); if(bnIsZero(rBn))continue;
     BigNum256 hBn,dBn,kBn; bnFromBytes(hash,&hBn); bnFromBytes(priv.bytes,&dBn); bnFromBytes(k.bytes,&kBn);
     BigNum256 rd,hrd; bnModMulN(rBn,dBn,&rd); bnModAddN(hBn,rd,&hrd);

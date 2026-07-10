@@ -34,6 +34,7 @@ bool MatterRng::getRandomBytes(uint8_t* buffer, size_t length,
   if (buffer == nullptr) {
     return false;
   }
+  memset(buffer, 0, length);
 
   CracenRng rng;
   if (!rng.begin(spinLimit)) {
@@ -43,32 +44,45 @@ bool MatterRng::getRandomBytes(uint8_t* buffer, size_t length,
 
   const bool ok = rng.fill(buffer, length, spinLimit);
   rng.end();
+  if (!ok) memset(buffer, 0, length);
   return ok;
 }
 
 uint32_t MatterRng::getRandomUint32(uint32_t spinLimit) {
-  CracenRng rng;
   uint32_t word = 0U;
-
-  if (rng.begin(spinLimit)) {
-    rng.randomWord(&word, spinLimit);
-    rng.end();
-  }
-
+  (void)getRandomUint32(&word, spinLimit);
   return word;
 }
 
-uint64_t MatterRng::getRandomUint64(uint32_t spinLimit) {
-  uint8_t bytes[8] = {0};
-  if (!getRandomBytes(bytes, sizeof(bytes), spinLimit)) {
-    return 0ULL;
+bool MatterRng::getRandomUint32(uint32_t* outValue, uint32_t spinLimit) {
+  if (outValue == nullptr) return false;
+  *outValue = 0U;
+  CracenRng rng;
+  if (!rng.begin(spinLimit)) {
+    rng.end();
+    return false;
   }
+  const bool ok = rng.randomWord(outValue, spinLimit);
+  rng.end();
+  if (!ok) *outValue = 0U;
+  return ok;
+}
 
+uint64_t MatterRng::getRandomUint64(uint32_t spinLimit) {
   uint64_t value = 0ULL;
-  for (size_t i = 0; i < 8; ++i) {
-    value |= static_cast<uint64_t>(bytes[i]) << (i * 8U);
-  }
+  (void)getRandomUint64(&value, spinLimit);
   return value;
+}
+
+bool MatterRng::getRandomUint64(uint64_t* outValue, uint32_t spinLimit) {
+  if (outValue == nullptr) return false;
+  *outValue = 0ULL;
+  uint8_t bytes[8] = {0};
+  if (!getRandomBytes(bytes, sizeof(bytes), spinLimit)) return false;
+  for (size_t i = 0; i < 8; ++i) {
+    *outValue |= static_cast<uint64_t>(bytes[i]) << (i * 8U);
+  }
+  return true;
 }
 
 bool MatterRng::isReady() const {

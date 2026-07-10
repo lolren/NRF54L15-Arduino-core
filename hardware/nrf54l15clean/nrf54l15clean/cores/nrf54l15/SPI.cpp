@@ -77,13 +77,27 @@ static bool is_hs_spim(NRF_SPIM_Type* spim) {
 
 static uint32_t spim_core_hz(NRF_SPIM_Type* spim) {
     if (is_hs_spim(spim)) {
-        return nrf54l15_core_get_cpu_frequency_hz();
+        return 128000000UL;
     }
     return 16000000UL;
 }
 
 static uint32_t spim_min_divisor(NRF_SPIM_Type* spim) {
     return is_hs_spim(spim) ? 4UL : 2UL;
+}
+
+static bool spim_route_valid(NRF_SPIM_Type* spim,
+                             uint8_t sckPort, uint8_t misoPort, uint8_t mosiPort) {
+    if (spim == nullptr || sckPort != misoPort || sckPort != mosiPort) {
+        return false;
+    }
+    if (is_hs_spim(spim)) {
+        return sckPort == 2U;
+    }
+    if (reinterpret_cast<uintptr_t>(spim) == reinterpret_cast<uintptr_t>(NRF_SPIM30)) {
+        return sckPort == 0U;
+    }
+    return sckPort == 1U;
 }
 
 static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
@@ -203,7 +217,8 @@ bool SPIClass::setPins(int8_t sck, int8_t miso, int8_t mosi, int8_t ss) {
     uint8_t mosiPin = 0;
     if (!decode_pin(nextSck, &sckPort, &sckPin) ||
         !decode_pin(nextMiso, &misoPort, &misoPin) ||
-        !decode_pin(nextMosi, &mosiPort, &mosiPin)) {
+        !decode_pin(nextMosi, &mosiPort, &mosiPin) ||
+        !spim_route_valid(_spim, sckPort, misoPort, mosiPort)) {
         return false;
     }
 
@@ -463,7 +478,8 @@ bool SPIClass::claimHardware() {
     uint8_t misoPin = 0;
     if (!decode_pin(_sck, &sckPort, &sckPin) ||
         !decode_pin(_mosi, &mosiPort, &mosiPin) ||
-        !decode_pin(_miso, &misoPort, &misoPin)) {
+        !decode_pin(_miso, &misoPort, &misoPin) ||
+        !spim_route_valid(_spim, sckPort, misoPort, mosiPort)) {
         return false;
     }
 
@@ -497,23 +513,10 @@ bool SPIClass::ownsHardware() const {
 
 void SPIClass::prepareTransactionClock() {
     _restoreCpuHz = 0U;
-    if (!_allowCpuBoost || !is_hs_spim(_spim)) {
-        return;
-    }
-
-    const uint32_t currentCpuHz = nrf54l15_core_get_cpu_frequency_hz();
-    const uint32_t maximumSckHz = currentCpuHz / spim_min_divisor(_spim);
-    if (_settings.clock() > maximumSckHz && currentCpuHz < 128000000UL &&
-        nrf54l15_core_set_cpu_frequency_hz(128000000UL)) {
-        _restoreCpuHz = currentCpuHz;
-    }
 }
 
 void SPIClass::restoreTransactionClock() {
-    if (_restoreCpuHz != 0U) {
-        (void)nrf54l15_core_set_cpu_frequency_hz(_restoreCpuHz);
-        _restoreCpuHz = 0U;
-    }
+    _restoreCpuHz = 0U;
 }
 
 void SPIClass::applySettings() {
@@ -562,4 +565,18 @@ void SPIClass::applySettings() {
 
 uint32_t SPIClass::getFrequencyValue(uint32_t clockHz) {
     return clockHz;
+}
+
+bool SPIClass::quiesceForSystemOff(uint32_t spinLimit) {
+    (void)spinLimit;
+    if (!_initialized || _spim == nullptr) {
+        return true;
+    }
+    end();
+    return reg32(reinterpret_cast<uintptr_t>(_spim) + SPIM_ENABLE) == SPIM_ENABLE_DISABLED;
+}
+
+extern "C" bool nrf54_core_quiesce_spi_for_system_off(uint32_t spin_limit) {
+    return SPI.quiesceForSystemOff(spin_limit) &&
+           SPI_HS.quiesceForSystemOff(spin_limit);
 }

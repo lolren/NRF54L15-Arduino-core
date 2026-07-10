@@ -105,8 +105,8 @@ void setup() {
   (void)Gpio::configure(kPinUserButton, GpioDirection::kInput, GpioPull::kPullUp);
   (void)Gpio::write(kPinUserLed, true);  // LED off (active-low)
 
-  // Keep CPU at 64 MHz for this telemetry workload.
-  NRF_OSCILLATORS->PLL.FREQ = OSCILLATORS_PLL_FREQ_FREQ_CK64M;
+  // Select 64 MHz from the board's CPU Frequency menu before uploading when
+  // measuring this workload. nRF54L frequency selection is startup-only.
   g_power.setLatencyMode(PowerLatencyMode::kLowPower);
 
   const uint32_t now = millis();

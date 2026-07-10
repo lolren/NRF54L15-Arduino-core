@@ -179,14 +179,15 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 
 | Board family | External Arduino `SPI` pins | Implemented max on exposed pins | `SPI_HS` / 32 MHz status |
 |---|---|---|---|
-| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the dedicated P2 `SPIM00` route | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical pins and automatically selects 128 MHz only while a 32 MHz transaction is active |
-| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` route on dedicated P2 `SPIM00` | `SPI` reaches 16 MHz with the default 64 MHz CPU profile, or 32 MHz with the 128 MHz profile | `SPI_HS` uses the same physical P2.01/P2.04/P2.02 route and automatically enables 32 MHz transactions |
+| **XIAO nRF54L15 / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on the dedicated P2 `SPIM00` route | Up to 32 MHz from SPIM00's fixed 128 MHz source | `SPI_HS` uses the same physical pins and does not change the CPU clock profile |
+| **HOLYIOT-25007 / 25008 / nRF54L15 module boards** | Board/module `D8/D9/D10/D2` route on dedicated P2 `SPIM00` | Up to 32 MHz from SPIM00's fixed 128 MHz source | `SPI_HS` uses the same physical P2.01/P2.04/P2.02 route without changing the CPU clock profile |
 | **XIAO nRF54LM20A / Sense** | `D8=SCK`, `D9=MISO`, `D10=MOSI`, `D2=SS` on a serial-fabric SPIM | 8 MHz on the exposed XIAO header pins | `SPI_HS` uses `SPIM00`, but those pins are the onboard PY25Q64 QSPI flash bus, not the XIAO header |
 
 Notes:
 
 - On **nRF54L15**, the exposed Arduino SPI pins can only use `SPIM00`. `SPI` and `SPI_HS` are separate logical objects that retain separate settings, but share that one physical controller and must be used sequentially.
-- On **nRF54L15**, `SPI_HS` temporarily raises the CPU/peripheral clock to 128 MHz for a 32 MHz request and restores the previous CPU clock at `endTransaction()`. Normal `SPI` never changes the CPU profile.
+- On **nRF54L15**, SPIM00 has a fixed 128 MHz peripheral source, so `SPI_HS` can request 32 MHz without changing the CPU clock profile.
+- L15 SPIM00 cannot clock below about 1.016 MHz; lower requests clamp to that documented minimum rather than using nonexistent divider values.
 - On **LM20A**, external BMP388/SD/MCP2515-style devices should use normal `SPI` on `D8/D9/D10`; that path is working but is limited to 8 MHz by the board/peripheral route.
 - On **L15**, `SPI_HS` is plain 1-bit SPI on the P2 high-speed route, not Quad SPI.
 - On **XIAO L15**, `SPI_HS` defaults to `D2` for software-controlled chip select. P2.05 remains reserved for the RF switch.
@@ -214,9 +215,11 @@ Examples:
 
 ## Timed System Off APIs
 
-- `delaySystemOff(ms)` and `delaySystemOffNoRetention(ms)` are Arduino-style timed sleeps: the sketch continues at the next statement after the timer expires.
-- `systemOffWakeReset(ms)` enters real no-retention `SYSTEMOFF`: the GRTC wake timer restarts the chip, so execution begins again from `setup()`.
-- `wasSystemOffWakeReset()`, `wasSystemOffWakeFromGrtc()`, and `clearSystemOffWakeResetReason()` are available for boot diagnostics. See `File > Examples > Power > SystemOffWakeReset`.
+- `delayLowPowerIdle(ms)` is the returning System ON sleep API; the sketch continues at the next statement.
+- `delaySystemOff(ms)` enters real timed `SYSTEMOFF` with RAM retention enabled. Wake is a cold reset, so only explicitly retained data such as `.noinit` can survive and execution starts again from `setup()`.
+- `delaySystemOffNoRetention(ms)` enters real timed `SYSTEMOFF` after disabling RAM retention. It also cold-resets and never returns.
+- `systemOffWakeReset(ms)` is the compatibility spelling for timed no-retention System OFF.
+- `nrf54ResetReason()`, `nrf54ClearResetReason(mask)`, `wasSystemOffWakeReset()`, `wasSystemOffWakeFromGrtc()`, and `clearSystemOffWakeResetReason()` expose the reset-cause snapshot captured before constructors. See `File > Examples > Power > SystemOffWakeReset`.
 
 ## XIAO nRF54LM20A nPM1300 Charging Notes
 

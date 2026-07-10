@@ -23,7 +23,7 @@ static constexpr uint32_t U_EVENTS_RXTO        = 0x124UL;
 static constexpr uint32_t U_EVENTS_TXSTOPPED   = 0x130UL;
 static constexpr uint32_t U_EVENTS_DMA_RX_END  = 0x14CUL;
 static constexpr uint32_t U_EVENTS_DMA_RX_READY = 0x150UL;
-static constexpr uint32_t U_EVENTS_DMA_TX_READY = 0x164UL;
+static constexpr uint32_t U_EVENTS_DMA_TX_READY = 0x16CUL;
 static constexpr uint32_t U_EVENTS_DMA_TX_END  = 0x168UL;
 static constexpr uint32_t U_EVENTS_DMA_TX_BUSERROR = 0x170UL;
 static constexpr uint32_t U_EVENTS_FRAMETIMEOUT = 0x174UL;
@@ -106,7 +106,7 @@ static void configure_pin_input(uint8_t port, uint8_t pin, bool pullup) {
 /* Convert baud rate to the nearest supported UARTE BAUDRATE preset.
  * The nRF54L15 UARTE exposes fixed presets rather than a general divisor.
  */
-static uint32_t baud_to_reg(unsigned long baud) {
+static uint32_t baud_to_reg(const NRF_UARTE_Type* uart, unsigned long baud) {
     if (baud <= 0U) {
         return UARTE_BAUDRATE_BAUDRATE_Baud9600;
     }
@@ -150,7 +150,19 @@ static uint32_t baud_to_reg(unsigned long baud) {
         }
     }
 
-    return kPresets[bestIndex].reg;
+    const uint32_t preset = kPresets[bestIndex].reg;
+    if (reinterpret_cast<uintptr_t>(uart) != reinterpret_cast<uintptr_t>(NRF_UARTE00)) {
+        return preset;
+    }
+
+    const uint64_t source_hz = (F_CPU >= 128000000UL) ? 128000000ULL : 64000000ULL;
+    uint64_t scaled =
+        ((static_cast<uint64_t>(baud) << 32U) + (source_hz / 2ULL)) / source_hz;
+    scaled = (scaled + 0x800ULL) & ~0xFFFULL;
+    if (scaled > 0x10000000ULL) {
+        scaled = 0x10000000ULL;
+    }
+    return static_cast<uint32_t>(scaled);
 }
 
 struct UarteFormat {
@@ -170,6 +182,12 @@ static UarteFormat decode_serial_format(uint16_t config) {
     if (dataBits < 8U) {
         fmt.dataMask = static_cast<uint8_t>((1U << dataBits) - 1U);
     }
+    const uint32_t frameSize = (dataBits == 5U) ? UARTE_CONFIG_FRAMESIZE_5bit
+                              : (dataBits == 6U) ? UARTE_CONFIG_FRAMESIZE_6bit
+                              : (dataBits == 7U) ? UARTE_CONFIG_FRAMESIZE_7bit
+                                                : UARTE_CONFIG_FRAMESIZE_8bit;
+    fmt.configReg &= ~UARTE_CONFIG_FRAMESIZE_Msk;
+    fmt.configReg |= (frameSize << UARTE_CONFIG_FRAMESIZE_Pos);
 
     const uint8_t paritySel = static_cast<uint8_t>(config & 0x30U);
     if (paritySel == 0x20U || paritySel == 0x30U) {
@@ -258,6 +276,23 @@ static bool uart_try_irqn_for_instance(const NRF_UARTE_Type* uart, IRQn_Type* ir
     return false;
 }
 
+static bool uart_route_valid(const NRF_UARTE_Type* uart,
+                             uint8_t txPort, uint8_t tx,
+                             uint8_t rxPort, uint8_t rx) {
+    if (uart == nullptr || txPort != rxPort) {
+        return false;
+    }
+    const uintptr_t base = reinterpret_cast<uintptr_t>(uart);
+    if (base == reinterpret_cast<uintptr_t>(NRF_UARTE30)) {
+        return txPort == 0U;
+    }
+    if (base == reinterpret_cast<uintptr_t>(NRF_UARTE00)) {
+        return txPort == 2U &&
+               ((tx == 2U && rx == 0U) || (tx == 8U && rx == 7U));
+    }
+    return txPort == 1U || txPort == 3U;
+}
+
 static HardwareSerial* g_uarte00Owner = nullptr;
 static HardwareSerial* g_uarte20Owner = nullptr;
 static HardwareSerial* g_uarte21Owner = nullptr;
@@ -297,12 +332,14 @@ extern "C" void SPIM20_IRQHandler(void) {
     if (g_uarte20Owner != nullptr) {
         g_uarte20Owner->handleIrq();
     }
+    nrf54l15_wire_handle_shared_irq(NRF_TWIM20);
 }
 
 extern "C" void SPIM21_IRQHandler(void) {
     if (g_uarte21Owner != nullptr) {
         g_uarte21Owner->handleIrq();
     }
+    nrf54l15_wire_handle_shared_irq(NRF_TWIM21);
 }
 
 extern "C" void SPIM22_IRQHandler(void) {
@@ -325,6 +362,7 @@ HardwareSerial::HardwareSerial(NRF_UARTE_Type* uart, uint8_t txPin, uint8_t rxPi
       _rxPin(rxPin),
       _configured(false),
       _constlatOwned(false),
+      _lastShutdownClean(true),
       _baud(9600UL),
       _config(0U),
       _rxHead(0U),
@@ -381,7 +419,8 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
     }
 
     uint8_t txPort = 0, tx = 0, rxPort = 0, rx = 0;
-    if (!decode_pin(_txPin, &txPort, &tx) || !decode_pin(_rxPin, &rxPort, &rx)) {
+    if (!decode_pin(_txPin, &txPort, &tx) || !decode_pin(_rxPin, &rxPort, &rx) ||
+        !uart_route_valid(_uart, txPort, tx, rxPort, rx)) {
         return;
     }
 
@@ -397,18 +436,11 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
     reg32(base + U_PSEL_CTS) = kPselDisconnected;
     reg32(base + U_PSEL_RTS) = kPselDisconnected;
 
-    /* nRF54L serial fabric: writing to the shared SPIM PSEL registers
-     * (0x51C/0x520) enables the serial fabric routing. Without this,
-     * the UARTE PSEL config is ignored and no data reaches the GPIO pins.
-     * Bit 31 must be set to actually trigger the fabric state change. */
-    reg32(base + 0x51CUL) = 0x80000000UL | ((uint32_t)txPort << 5) | tx;
-    reg32(base + 0x520UL) = 0x80000000UL | ((uint32_t)rxPort << 5) | rx;
-
     const UarteFormat fmt = decode_serial_format(config);
     _dataMask = fmt.dataMask;
     reg32(base + U_CONFIG) = fmt.configReg |
                              (UARTE_CONFIG_FRAMETIMEOUT_Enabled << UARTE_CONFIG_FRAMETIMEOUT_Pos);
-    reg32(base + U_BAUDRATE) = baud_to_reg(baud);
+    reg32(base + U_BAUDRATE) = baud_to_reg(_uart, baud);
     reg32(base + U_ADDRESS) = 0U;
     reg32(base + U_FRAMETIMEOUT) = kRxFrameTimeoutBits;
     reg32(base + U_SHORTS) |= UARTE_SHORTS_DMA_TX_END_DMA_TX_STOP_Msk;
@@ -459,14 +491,20 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
 
 void HardwareSerial::end() {
     if (_uart == nullptr) {
+        _lastShutdownClean = true;
         return;
     }
-    stopRxDma();
+    const bool txDrained = drainTxForShutdown();
+    const bool rxStopped = stopRxDma();
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_uart);
     reg32(base + U_INTENCLR) = kUarteRxInterruptMask | kUarteTxInterruptMask;
     reg32(base + U_SHORTS) &= ~UARTE_SHORTS_DMA_TX_END_DMA_TX_STOP_Msk;
+    reg32(base + U_EVENTS_TXSTOPPED) = 0U;
     reg32(base + U_TASKS_DMA_TX_STOP) = UARTE_TASKS_DMA_TX_STOP_STOP_Trigger;
+    const bool txStopped = wait_event_timeout_us(
+        base, U_EVENTS_TXSTOPPED, serial_byte_timeout_us(_baud, _txDmaCount + 1U));
+    _lastShutdownClean = txDrained && rxStopped && txStopped;
     reg32(base + U_ENABLE) = UARTE_ENABLE_ENABLE_Disabled;
 
     reg32(base + U_PSEL_TXD) = kPselDisconnected;
@@ -508,7 +546,8 @@ bool HardwareSerial::setPins(int8_t rxPin, int8_t txPin) {
     uint8_t tx = 0;
     uint8_t rxPort = 0;
     uint8_t rx = 0;
-    if (!decode_pin(nextTxPin, &txPort, &tx) || !decode_pin(nextRxPin, &rxPort, &rx)) {
+    if (!decode_pin(nextTxPin, &txPort, &tx) || !decode_pin(nextRxPin, &rxPort, &rx) ||
+        !uart_route_valid(_uart, txPort, tx, rxPort, rx)) {
         return false;
     }
 
@@ -571,7 +610,7 @@ void HardwareSerial::forceReInit() {
     _txHead = 0U; _txTail = 0U; _txCount = 0U; _txDmaCount = 0U;
     _txDmaRunning = false;
 
-    reg32(base + U_BAUDRATE) = baud_to_reg(_baud);
+    reg32(base + U_BAUDRATE) = baud_to_reg(_uart, _baud);
     UarteFormat fmt = decode_serial_format(_config);
     _dataMask = fmt.dataMask;
     reg32(base + U_CONFIG) = fmt.configReg |
@@ -656,12 +695,12 @@ void HardwareSerial::startRxDma() {
     reg32(base + U_INTENSET) = kUarteRxInterruptMask;
 }
 
-void HardwareSerial::stopRxDma() {
+bool HardwareSerial::stopRxDma() {
     if (_uart == nullptr) {
-        return;
+        return true;
     }
     if (!_rxDmaRunning) {
-        return;
+        return true;
     }
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_uart);
@@ -671,9 +710,11 @@ void HardwareSerial::stopRxDma() {
     reg32(base + U_EVENTS_RXTO) = 0U;
     reg32(base + U_EVENTS_FRAMETIMEOUT) = 0U;
     reg32(base + U_TASKS_DMA_RX_STOP) = UARTE_TASKS_DMA_RX_STOP_STOP_Trigger;
-    wait_event_timeout_us(base, U_EVENTS_RXTO, serial_byte_timeout_us(_baud, 2U));
+    const bool stopped =
+        wait_event_timeout_us(base, U_EVENTS_RXTO, serial_byte_timeout_us(_baud, 2U));
     reg32(base + U_ERRORSRC) = 0xFFFFFFFFUL;
     _rxDmaRunning = false;
+    return stopped;
 }
 
 void HardwareSerial::flushPartialRxDma(uintptr_t base) {
@@ -849,6 +890,33 @@ void HardwareSerial::serviceTxDma() {
     __disable_irq();
     processTxDmaEvents(base);
     __set_PRIMASK(primask);
+}
+
+bool HardwareSerial::drainTxForShutdown() {
+    if (!_configured || _uart == nullptr) {
+        return true;
+    }
+
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    const uint16_t pending = _txCount;
+    __set_PRIMASK(primask);
+
+    const uint32_t timeoutUs = serial_byte_timeout_us(_baud, pending + 1U);
+    const uint32_t startedUs = micros();
+    while (static_cast<uint32_t>(micros() - startedUs) < timeoutUs) {
+        serviceTxDma();
+
+        const uint32_t statePrimask = __get_PRIMASK();
+        __disable_irq();
+        const bool idle = (_txCount == 0U) && !_txDmaRunning;
+        __set_PRIMASK(statePrimask);
+        if (idle) {
+            return true;
+        }
+    }
+    serviceTxDma();
+    return (_txCount == 0U) && !_txDmaRunning;
 }
 
 size_t HardwareSerial::writeBlocking(const uint8_t* buffer, size_t size, bool waitStopped) {
@@ -1036,9 +1104,6 @@ size_t HardwareSerial::write(const uint8_t* buffer, size_t size) {
         const bool txIdle = (_txCount == 0U) && !_txDmaRunning;
         __set_PRIMASK(primask);
         if (txIdle) {
-            if (_dataMask == 0xFFU) {
-                return writeBlocking(buffer, size, true);
-            }
             for (size_t i = 0U; i < size; ++i) {
                 _txBuffer[i] = static_cast<uint8_t>(buffer[i] & _dataMask);
             }
@@ -1101,6 +1166,24 @@ bool HardwareSerial::usesPins(uint8_t txPin, uint8_t rxPin) const {
     return (_txPin == txPin) && (_rxPin == rxPin);
 }
 
+bool HardwareSerial::quiesceForSystemOff(uint32_t spinLimit) {
+    if (!_configured || _uart == nullptr) {
+        return true;
+    }
+
+    uint32_t remaining = spinLimit;
+    while ((_txCount != 0U || _txDmaRunning) && remaining > 0U) {
+        serviceTxDma();
+        --remaining;
+    }
+    if (_txCount != 0U || _txDmaRunning) {
+        return false;
+    }
+
+    end();
+    return !_configured && _lastShutdownClean;
+}
+
 extern "C" void nrf54l15_serial_prepare_idle_sleep(void) {
     if (g_ownedConstlatUsers != 0U) {
         NRF_POWER->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
@@ -1148,4 +1231,10 @@ extern "C" uint8_t nrf54l15_bridge_serial_active(void) {
 extern "C" void nrf54l15_serial_idle_service(void) {
     Serial.serviceTxDma();
     Serial1.serviceTxDma();
+}
+
+extern "C" bool nrf54_core_quiesce_serial_for_system_off(uint32_t spin_limit) {
+    const bool serialOk = Serial.quiesceForSystemOff(spin_limit);
+    const bool serial1Ok = Serial1.quiesceForSystemOff(spin_limit);
+    return serialOk && serial1Ok;
 }

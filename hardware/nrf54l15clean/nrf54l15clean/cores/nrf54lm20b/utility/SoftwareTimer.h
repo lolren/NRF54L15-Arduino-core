@@ -36,6 +36,7 @@ class SoftwareTimer {
   void* timer_id_;
   bool repeating_;
   bool active_;
+  uint32_t service_epoch_;
 
   void serviceOne(uint32_t now_ms);
 };

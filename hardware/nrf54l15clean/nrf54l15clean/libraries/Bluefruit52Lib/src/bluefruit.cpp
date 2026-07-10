@@ -6194,7 +6194,9 @@ bool BLEHidAdafruit::mouseScroll(int8_t scroll) {
 bool BLEHidAdafruit::mousePan(int8_t pan) { return mousePan(BLE_CONN_HANDLE_INVALID, pan); }
 
 bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, hid_mouse_report_t* report) {
-  if (report == nullptr || !Bluefruit.connected()) {
+  if (report == nullptr || !Bluefruit.connected() ||
+      !Bluefruit.Security.isEncrypted(
+          (conn_hdl == BLE_CONN_HANDLE_INVALID) ? 0U : conn_hdl)) {
     return false;
   }
   if (zephyr_compatible_mouse_) {

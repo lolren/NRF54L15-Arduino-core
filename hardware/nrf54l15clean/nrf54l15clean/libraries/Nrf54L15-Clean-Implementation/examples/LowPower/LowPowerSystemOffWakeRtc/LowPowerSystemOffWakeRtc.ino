@@ -44,14 +44,9 @@ static inline void cpuIdleWfi() {
   __asm volatile("wfi");
 }
 
-static bool setCpuFreqRaw(uint32_t raw, uint32_t spinLimit = 500000UL) {
-  NRF_OSCILLATORS->PLL.FREQ = raw;
-  while (spinLimit-- > 0U) {
-    if ((NRF_OSCILLATORS->PLL.CURRENTFREQ & 0x3UL) == raw) {
-      return true;
-    }
-  }
-  return false;
+static bool cpuIs64MHz() {
+  return (NRF_OSCILLATORS->PLL.CURRENTFREQ & 0x3UL) ==
+         OSCILLATORS_PLL_FREQ_FREQ_CK64M;
 }
 
 static void requestLowPowerLatencyMode() {
@@ -161,12 +156,12 @@ void setup() {
   g_reset->RESETREAS = resetReason;
   writeGpregret0(0U);
 
-  const bool freqOk = setCpuFreqRaw(OSCILLATORS_PLL_FREQ_FREQ_CK64M);
+  const bool freqOk = cpuIs64MHz();
   requestLowPowerLatencyMode();
 
   Serial.println("LowPowerSystemOffWakeRtc: started");
-  Serial.print("cpu64=");
-  Serial.println(freqOk ? "OK" : "FAIL");
+  Serial.print("cpu64_selected_at_boot=");
+  Serial.println(freqOk ? "yes" : "no");
   printResetSummary(resetReason, gpregret0);
   Serial.print("Will enter SYSTEM OFF in ");
   Serial.print(kEnterSystemOffAfterMs);

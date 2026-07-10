@@ -3994,27 +3994,29 @@ typedef struct {
   __IOM uint32_t  KEY[4];                            /*!< (@ 0x00000010) Key register.                                         */
   __IOM uint32_t  TESTDATA;                          /*!< (@ 0x00000020) Test data register.                                   */
   __IOM uint32_t  REPEATTHRESHOLD;                   /*!< (@ 0x00000024) Repetition Test Count Cut-Off value.                  */
-  __IOM uint32_t  PROPTHRESHOLD;                     /*!< (@ 0x00000028) Adaptive Proportion Test (1024-sample window) Cut-Off
-                                                                         value.*/
-  __IM  uint32_t  RESERVED;
+  __IOM uint32_t  PROPTHRESHOLD;                     /*!< (@ 0x00000028) Adaptive Proportion Test Cut-Off value.               */
+  __IOM uint32_t  LFSRSEED;                          /*!< (@ 0x0000002C) Test LFSR seed.                                       */
   __IOM uint32_t  STATUS;                            /*!< (@ 0x00000030) Status register.                                      */
-  __IOM uint32_t  INITWAITVAL;                       /*!< (@ 0x00000034) Initial wait counter value.                           */
-  __IOM uint32_t  DISABLEOSC[2];                     /*!< (@ 0x00000038) Disable oscillator rings #n*32 to #((n+1)*32)-1.      */
-  __IOM uint32_t  SWOFFTMRVAL;                       /*!< (@ 0x00000040) Switch off timer value.                               */
-  __IOM uint32_t  CLKDIV;                            /*!< (@ 0x00000044) Sample clock divider.                                 */
-  __IOM uint32_t  AIS31CONF0;                        /*!< (@ 0x00000048) AIS31 configuration register 0.                       */
-  __IOM uint32_t  AIS31CONF1;                        /*!< (@ 0x0000004C) AIS31 configuration register 1.                       */
-  __IOM uint32_t  AIS31CONF2;                        /*!< (@ 0x00000050) AIS31 configuration register 2.                       */
-  __IOM uint32_t  AIS31STATUS;                       /*!< (@ 0x00000054) AIS31 status register.                                */
+  __IOM uint32_t  WARMUPPERIOD;                      /*!< (@ 0x00000034) Warm-up period.                                       */
+  __IOM uint32_t  DISABLEOSC;                        /*!< (@ 0x00000038) Oscillator disable mask.                              */
+  __IM  uint32_t  RESERVED0[2];
+  __IOM uint32_t  SAMPLINGPERIOD;                    /*!< (@ 0x00000044) Sampling period.                                      */
+  __IM  uint32_t  RESERVED1[4];
   __IOM uint32_t  HWCONFIG;                          /*!< (@ 0x00000058) Hardware configuration register.                      */
-  __IM  uint32_t  RESERVED1[9];
-  __IM  uint32_t  FIFO[16];                          /*!< (@ 0x00000080) FIFO data                                             */
-} NRF_CRACENCORE_RNGCONTROL_Type;                    /*!< Size = 192 (0x0C0)                                                   */
+  __IOM uint32_t  COOLDOWNPERIOD;                    /*!< (@ 0x0000005C) Cooldown period.                                      */
+  __IOM uint32_t  AUTOCORRTESTCUTOFF[2];             /*!< (@ 0x00000060) Autocorrelation test cutoffs.                         */
+  __IOM uint32_t  CORRTESTCUTOFF[2];                 /*!< (@ 0x00000068) Correlation test cutoffs.                             */
+  __IM  uint32_t  AUTOCORRTESTFAILED;                /*!< (@ 0x00000070) Autocorrelation failure status.                       */
+  __IM  uint32_t  CORRTESTFAILED;                    /*!< (@ 0x00000074) Correlation failure status.                           */
+  __IM  uint32_t  RESERVED2;
+  __IM  uint32_t  HWVERSION;                         /*!< (@ 0x0000007C) Hardware version.                                     */
+  __IM  uint32_t  FIFO[32];                          /*!< (@ 0x00000080) FIFO data                                             */
+} NRF_CRACENCORE_RNGCONTROL_Type;                    /*!< Size = 256 (0x100)                                                   */
 
 /* CRACENCORE_RNGCONTROL_CONTROL: Control register */
   #define CRACENCORE_RNGCONTROL_CONTROL_ResetValue (0x00040000UL) /*!< Reset value of CONTROL register.                        */
 
-/* ENABLE @Bit 0 : Enable the RNG. Clearing this bit resets the RNG FSM. */
+/* ENABLE @Bit 0 : Write one to start the RNG. The bit self-clears. */
   #define CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Pos (0UL) /*!< Position of ENABLE field.                                        */
   #define CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Pos) /*!< Bit mask of ENABLE
                                                                             field.*/
@@ -4226,19 +4228,13 @@ typedef struct {
   #define CRACENCORE_RNGCONTROL_STATUS_PROPFAIL_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_PROPFAIL_Pos) /*!< Bit mask of
                                                                             PROPFAIL field.*/
 
+/* ANYHEALTHTESTFAIL @Bit 6 : One or more health tests failed. */
+  #define CRACENCORE_RNGCONTROL_STATUS_ANYHEALTHTESTFAIL_Pos (6UL)
+  #define CRACENCORE_RNGCONTROL_STATUS_ANYHEALTHTESTFAIL_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_ANYHEALTHTESTFAIL_Pos)
+
 /* FULLINT @Bit 7 : FIFO full status. */
   #define CRACENCORE_RNGCONTROL_STATUS_FULLINT_Pos (7UL) /*!< Position of FULLINT field.                                       */
   #define CRACENCORE_RNGCONTROL_STATUS_FULLINT_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_FULLINT_Pos) /*!< Bit mask of FULLINT
-                                                                            field.*/
-
-/* PREINT @Bit 8 : AIS31 preliminary noise alarm interrupt status. */
-  #define CRACENCORE_RNGCONTROL_STATUS_PREINT_Pos (8UL) /*!< Position of PREINT field.                                         */
-  #define CRACENCORE_RNGCONTROL_STATUS_PREINT_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_PREINT_Pos) /*!< Bit mask of PREINT
-                                                                            field.*/
-
-/* ALMINT @Bit 9 : AIS31 noise alarm interrupt status. */
-  #define CRACENCORE_RNGCONTROL_STATUS_ALMINT_Pos (9UL) /*!< Position of ALMINT field.                                         */
-  #define CRACENCORE_RNGCONTROL_STATUS_ALMINT_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_ALMINT_Pos) /*!< Bit mask of ALMINT
                                                                             field.*/
 
 /* STARTUPFAIL @Bit 10 : Start-up test failure. */
@@ -4246,12 +4242,17 @@ typedef struct {
   #define CRACENCORE_RNGCONTROL_STATUS_STARTUPFAIL_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_STARTUPFAIL_Pos) /*!< Bit mask of
                                                                             STARTUPFAIL field.*/
 
-/* FIFOACCFAIL @Bit 11 : Set when a FIFO data read is performed while the NDRNG is disabled AND has its FIFO empty (FIFOLevel =
-                         0). */
+/* Per-share repetition/proportion failures occupy bits 12..19. */
+  #define CRACENCORE_RNGCONTROL_STATUS_REPTESTFAILPERSHARE_Pos (12UL)
+  #define CRACENCORE_RNGCONTROL_STATUS_REPTESTFAILPERSHARE_Msk (0xFUL << CRACENCORE_RNGCONTROL_STATUS_REPTESTFAILPERSHARE_Pos)
+  #define CRACENCORE_RNGCONTROL_STATUS_PROPTESTFAILPERSHARE_Pos (16UL)
+  #define CRACENCORE_RNGCONTROL_STATUS_PROPTESTFAILPERSHARE_Msk (0xFUL << CRACENCORE_RNGCONTROL_STATUS_PROPTESTFAILPERSHARE_Pos)
 
-  #define CRACENCORE_RNGCONTROL_STATUS_FIFOACCFAIL_Pos (11UL) /*!< Position of FIFOACCFAIL field.                              */
-  #define CRACENCORE_RNGCONTROL_STATUS_FIFOACCFAIL_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_FIFOACCFAIL_Pos) /*!< Bit mask of
-                                                                            FIFOACCFAIL field.*/
+/* CONDITIONINGISTOOSLOW @Bit 20 : Conditioning cannot keep up with entropy. */
+  #define CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Pos (20UL)
+  #define CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Msk (0x1UL << CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Pos)
+  #define CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGTOOSLOW_Pos CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Pos
+  #define CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGTOOSLOW_Msk CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Msk
 
 
 /* CRACENCORE_RNGCONTROL_INITWAITVAL: Initial wait counter value. */
@@ -4374,10 +4375,10 @@ typedef struct {
 
 
 /* CRACENCORE_RNGCONTROL_FIFO: FIFO data */
-  #define CRACENCORE_RNGCONTROL_FIFO_MaxCount (16UL) /*!< Max size of FIFO[16] array.                                          */
-  #define CRACENCORE_RNGCONTROL_FIFO_MaxIndex (15UL) /*!< Max index of FIFO[16] array.                                         */
-  #define CRACENCORE_RNGCONTROL_FIFO_MinIndex (0UL)  /*!< Min index of FIFO[16] array.                                         */
-  #define CRACENCORE_RNGCONTROL_FIFO_ResetValue (0x00000000UL) /*!< Reset value of FIFO[16] register.                          */
+  #define CRACENCORE_RNGCONTROL_FIFO_MaxCount (32UL) /*!< Max size of FIFO[32] array.                                          */
+  #define CRACENCORE_RNGCONTROL_FIFO_MaxIndex (31UL) /*!< Max index of FIFO[32] array.                                         */
+  #define CRACENCORE_RNGCONTROL_FIFO_MinIndex (0UL)  /*!< Min index of FIFO[32] array.                                         */
+  #define CRACENCORE_RNGCONTROL_FIFO_ResetValue (0x00000000UL) /*!< Reset value of FIFO[32] register.                          */
 
 /* DATA @Bits 0..31 : FIFO data */
   #define CRACENCORE_RNGCONTROL_FIFO_DATA_Pos (0UL)  /*!< Position of DATA field.                                              */
@@ -4935,7 +4936,7 @@ typedef struct {
     __IOM NRF_CRACENCORE_CRYPTMSTRHW_Type CRYPTMSTRHW; /*!< (@ 0x00000400) (unspecified)                                       */
     __IM uint32_t RESERVED1[761];
     __IOM NRF_CRACENCORE_RNGCONTROL_Type RNGCONTROL; /*!< (@ 0x00001000) (unspecified)                                         */
-    __IM uint32_t RESERVED2[976];
+    __IM uint32_t RESERVED2[960];
     __IOM NRF_CRACENCORE_PK_Type PK;                 /*!< (@ 0x00002000) (unspecified)                                         */
     __IM uint32_t RESERVED3[1006];
     __IOM NRF_CRACENCORE_IKG_Type IKG;               /*!< (@ 0x00003000) (unspecified)                                         */
@@ -17487,7 +17488,7 @@ typedef struct {
   __IOM uint32_t  CONTROL;                           /*!< (@ 0x00000000) Control memory block power.                           */
   __IM  uint32_t  RESERVED;
   __IOM uint32_t  RET;                               /*!< (@ 0x00000008) RAM retention for RAM [n].                            */
-  __IOM uint32_t  RET2;                              /*!< (@ 0x0000000C) RAM retention for the second bank in the RAM block    */
+  __IM  uint32_t  RESERVED1;
 } NRF_MEMCONF_POWER_Type;                            /*!< Size = 16 (0x010)                                                    */
   #define MEMCONF_POWER_MaxCount (2UL)               /*!< Size of POWER[2] array.                                              */
   #define MEMCONF_POWER_MaxIndex (1UL)               /*!< Max index of POWER[2] array.                                         */
@@ -48736,4 +48737,3 @@ typedef struct {
 }
 #endif
 #endif /* NRF54L15_TYPES_H */
-

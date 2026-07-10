@@ -63,6 +63,7 @@
 #define PIN_ACCEL_INT1  (30)  /* P2.00 / LIS2DH12 INT1 */
 #define PIN_ACCEL_INT2  (31)  /* P2.03 / LIS2DH12 INT2 */
 #define PIN_ACCEL_CS    (32)  /* P2.05 / LIS2DH12 CS */
+#define ACCEL_INTERRUPTS_POLL_ONLY 1
 
 #define PIN_PDM_DATA    (PIN_A6)
 #define PIN_VBAT_READ   (PIN_A7)
@@ -98,7 +99,7 @@
 #define PIN_A1 (PIN_D1)
 #define PIN_A2 (PIN_D2)
 #define PIN_A3 (PIN_D3)
-#define PIN_A4 (PIN_D4)
+#define PIN_A4 (0xFFU)  /* P1.10 has no SAADC input */
 #define PIN_A5 (PIN_D5)
 
 enum {
@@ -263,7 +264,7 @@ static inline uint8_t analogInputToDigitalPin(uint8_t p)
         case 1: return PIN_A1;
         case 2: return PIN_A2;
         case 3: return PIN_A3;
-        case 4: return PIN_A4;
+        case 4: return 0xFFU;
         case 5: return PIN_A5;
         case 6: return PIN_A6;
         case 7: return PIN_A7;

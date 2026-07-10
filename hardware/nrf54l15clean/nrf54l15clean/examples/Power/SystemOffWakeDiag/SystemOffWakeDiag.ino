@@ -63,7 +63,7 @@ static void printResetSummary(uint32_t resetReason, uint8_t wakeMarker,
   Serial.print("woke_from_grtc=");
   Serial.println(wokeFromGrtc ? "yes" : "no");
 
-  if (wokeFromOff && wokeFromGrtc && wakeMarker == kWakeMagic) {
+  if (wokeFromGrtc && wakeMarker == kWakeMagic) {
     Serial.println("status=timed_system_off_wake_ok");
     blinkCode(2);
     return;
@@ -72,12 +72,6 @@ static void printResetSummary(uint32_t resetReason, uint8_t wakeMarker,
   if (wokeFromOff && wakeMarker == kWakeMagic) {
     Serial.println("status=system_off_without_grtc_flag");
     blinkCode(3);
-    return;
-  }
-
-  if (wokeFromGrtc && wakeMarker == kWakeMagic) {
-    Serial.println("status=grtc_without_off_flag");
-    blinkCode(4);
     return;
   }
 
@@ -98,7 +92,7 @@ void setup() {
   Serial.begin(115200);
   delay(300);
 
-  const uint32_t resetReason = NRF_RESET->RESETREAS;
+  const uint32_t resetReason = nrf54ResetReason();
   const uint8_t wakeMarker = readGpregret(0U);
   uint8_t bootCount = readGpregret(1U);
   bootCount = static_cast<uint8_t>(bootCount + 1U);
@@ -106,7 +100,7 @@ void setup() {
   // Preserve a simple boot counter across timed SYSTEM OFF cycles.
   writeGpregret(1U, bootCount);
   // Clear consumed diagnostics so the next boot shows the new wake state.
-  NRF_RESET->RESETREAS = resetReason;
+  nrf54ClearResetReason(resetReason);
   writeGpregret(0U, 0U);
 
   printResetSummary(resetReason, wakeMarker, bootCount);

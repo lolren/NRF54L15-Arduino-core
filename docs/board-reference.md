@@ -15,7 +15,7 @@ For the module boards, use:
 | `Wire1` | `SDA=D12(P0.04)`, `SCL=D11(P0.03)` | Dedicated `TWIM30` controller |
 | `SPI` | `MOSI=D10(P2.02)`, `MISO=D9(P2.04)`, `SCK=D8(P2.01)`, `SS=D2(P1.06)` | Runtime clock via `SPISettings` |
 | `Serial1` / `Serial2` | `TX=D6(P2.08)`, `RX=D7(P2.07)` | `Serial2` is alias of `Serial1` |
-| `Serial` | USB bridge by default | Can be switched to header UART via Tools |
+| `Serial` | USB bridge on `P1.09/P1.08` | Fixed bridge route; use `Serial1` for the header UART |
 
 ## Arduino Pin Map
 
@@ -25,7 +25,7 @@ For the module boards, use:
 | `D1` / `A1` | `P1.05` | `AIN1` | GPIO / ADC |
 | `D2` / `A2` | `P1.06` | `AIN2` | GPIO / ADC / `SS` |
 | `D3` / `A3` | `P1.07` | `AIN3` | GPIO / ADC |
-| `D4` / `A4` | `P1.10` | N/A | `Wire SDA` |
+| `D4` | `P1.10` | N/A | `Wire SDA`; `A4` is `NOT_A_PIN` on this board |
 | `D5` / `A5` | `P1.11` | `AIN4` | `Wire SCL` |
 | `D6` | `P2.08` | N/A | `Serial1/2 TX` |
 | `D7` | `P2.07` | N/A | `Serial1/2 RX` |
@@ -152,4 +152,4 @@ Current Sense examples:
 - BLE trace: Off / On
 - Zigbee support: On / Off
 - Antenna route: Ceramic / External U.FL
-- Serial routing: USB bridge / Header UART
+- Serial routing is fixed: `Serial` uses the USB bridge and `Serial1` uses the header pins

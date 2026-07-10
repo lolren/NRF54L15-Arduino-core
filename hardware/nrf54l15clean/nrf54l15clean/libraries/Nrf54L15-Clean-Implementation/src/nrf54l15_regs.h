@@ -13,6 +13,11 @@ inline volatile uint32_t& reg32(uint32_t addr) {
 constexpr uint32_t GPIO_P0_BASE = static_cast<uint32_t>(NRF_P0_BASE);
 constexpr uint32_t GPIO_P1_BASE = static_cast<uint32_t>(NRF_P1_BASE);
 constexpr uint32_t GPIO_P2_BASE = static_cast<uint32_t>(NRF_P2_BASE);
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+constexpr uint32_t GPIO_P3_BASE = static_cast<uint32_t>(NRF_P3_BASE);
+#else
+constexpr uint32_t GPIO_P3_BASE = 0UL;
+#endif
 
 constexpr uint32_t KMU_BASE = static_cast<uint32_t>(NRF_KMU_BASE);
 constexpr uint32_t RRAMC_BASE = static_cast<uint32_t>(NRF_RRAMC_BASE);
@@ -40,7 +45,11 @@ constexpr uint32_t UARTE30_BASE = static_cast<uint32_t>(NRF_UARTE30_BASE);
 constexpr uint32_t EGU10_BASE = static_cast<uint32_t>(NRF_EGU10_BASE);
 constexpr uint32_t EGU20_BASE = static_cast<uint32_t>(NRF_EGU20_BASE);
 constexpr uint32_t SAADC_BASE = static_cast<uint32_t>(NRF_SAADC_BASE);
+#if NRF54_HAS_I2S20
 constexpr uint32_t I2S20_BASE = static_cast<uint32_t>(NRF_I2S20_BASE);
+#else
+constexpr uint32_t I2S20_BASE = 0UL;
+#endif
 constexpr uint32_t PDM20_BASE = static_cast<uint32_t>(NRF_PDM20_BASE);
 constexpr uint32_t PDM21_BASE = static_cast<uint32_t>(NRF_PDM21_BASE);
 constexpr uint32_t PWM20_BASE = static_cast<uint32_t>(NRF_PWM20_BASE);
@@ -82,9 +91,9 @@ constexpr uint32_t GPIOTE20_BASE = 0x400DA000UL;
 constexpr uint32_t GPIOTE30_BASE = 0x4010C000UL;
 constexpr uint32_t TEMP_BASE = 0x400D7000UL;
 constexpr uint32_t RADIO_BASE = 0x4008A000UL;
-constexpr uint32_t MEMCONF_BASE = 0x400CF000UL;
+constexpr uint32_t MEMCONF_BASE = static_cast<uint32_t>(NRF_MEMCONF_BASE);
 constexpr uint32_t GRTC_BASE = 0x400E2000UL;
-constexpr uint32_t TAMPC_BASE = 0x00000000UL;
+constexpr uint32_t TAMPC_BASE = static_cast<uint32_t>(NRF_TAMPC_BASE);
 constexpr uint32_t WDT31_BASE = 0x40109000UL;
 constexpr uint32_t POWER_BASE = 0x4010E000UL;
 constexpr uint32_t RESET_BASE = 0x4010E000UL;
@@ -120,9 +129,9 @@ constexpr uint32_t GPIOTE20_BASE = 0x500DA000UL;
 constexpr uint32_t GPIOTE30_BASE = 0x5010C000UL;
 constexpr uint32_t TEMP_BASE = 0x500D7000UL;
 constexpr uint32_t RADIO_BASE = 0x5008A000UL;
-constexpr uint32_t MEMCONF_BASE = 0x500CF000UL;
+constexpr uint32_t MEMCONF_BASE = static_cast<uint32_t>(NRF_MEMCONF_BASE);
 constexpr uint32_t GRTC_BASE = 0x500E2000UL;
-constexpr uint32_t TAMPC_BASE = 0x500DC000UL;
+constexpr uint32_t TAMPC_BASE = static_cast<uint32_t>(NRF_TAMPC_BASE);
 constexpr uint32_t WDT31_BASE = 0x50109000UL;
 constexpr uint32_t POWER_BASE = 0x5010E000UL;
 constexpr uint32_t RESET_BASE = 0x5010E000UL;
@@ -433,6 +442,7 @@ constexpr uint32_t LOOP = 0x514;
 constexpr uint32_t IDLEOUT = 0x518;
 constexpr uint32_t SEQ_REFRESH = 0x528;
 constexpr uint32_t SEQ_ENDDELAY = 0x52C;
+constexpr uint32_t SEQ_CONFIG_STRIDE = 0x020;
 constexpr uint32_t PSEL_OUT = 0x560;
 constexpr uint32_t DMA_SEQ_PTR = 0x704;
 constexpr uint32_t DMA_SEQ_MAXCNT = 0x708;

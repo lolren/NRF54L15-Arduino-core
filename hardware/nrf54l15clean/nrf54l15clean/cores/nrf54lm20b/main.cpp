@@ -13,8 +13,6 @@ extern "C" size_t nrf54l15_heap_used_bytes(void);
 extern "C" size_t nrf54l15_heap_free_bytes(void);
 #if defined(NRF54L15_CLEAN_POWER_LOW)
 extern "C" void nrf54lm20b_core_bootstrap_low_power_timebase(void);
-extern "C" uint32_t nrf54lm20b_core_enter_idle_cpu_scaling(void);
-extern "C" void nrf54lm20b_core_exit_idle_cpu_scaling(uint32_t previousRaw);
 #endif
 
 namespace {
@@ -46,12 +44,10 @@ void yieldWfiOnceIfAllowed() {
         return;
     }
 
-    const uint32_t restoreRaw = nrf54lm20b_core_enter_idle_cpu_scaling();
     *kScbScr &= ~(kScbScrSleepDeep_Msk | kScbScrSleepOnExit_Msk);
     __asm volatile("dsb 0xF" ::: "memory");
     __asm volatile("isb 0xF" ::: "memory");
     __asm volatile("wfi");
-    nrf54lm20b_core_exit_idle_cpu_scaling(restoreRaw);
 }
 #endif
 }  // namespace

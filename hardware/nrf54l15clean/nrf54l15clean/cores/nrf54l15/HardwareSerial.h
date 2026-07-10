@@ -46,6 +46,7 @@ public:
     // Used after clock-domain transitions (e.g. HFXO start) to recover the
     // SAMD11 bridge UART on nRF54L15.
     void forceReInit();
+    bool quiesceForSystemOff(uint32_t spinLimit);
 
 private:
     friend void SPIM00_IRQHandler(void);
@@ -56,13 +57,14 @@ private:
     friend void nrf54l15_serial_idle_service(void);
 
     void startRxDma();
-    void stopRxDma();
+    bool stopRxDma();
     void serviceRxDma();
     void serviceTxDma();
     void handleIrq();
     void processRxDmaEvents();
     void processTxDmaEvents(uintptr_t base);
     void startNextTxDmaLocked(uintptr_t base);
+    bool drainTxForShutdown();
     size_t writeBlocking(const uint8_t* buffer, size_t size, bool waitStopped = false);
     bool usesBridgePins() const;
     void commitRxBytes(const uint8_t* data, uint32_t amount);
@@ -84,6 +86,7 @@ private:
     uint8_t _rxPin;
     bool _configured;
     bool _constlatOwned;
+    bool _lastShutdownClean;
     unsigned long _baud;
     uint16_t _config;
 

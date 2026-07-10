@@ -54,13 +54,13 @@ bool MatterDeviceAttestation::generateTestChain(
     const uint8_t serialNumber[32]) {
 
   // Generate PAA key pair (root CA)
-  Secp256r1::generateKeyPair(&paaPrivateKey_, &paaPublicKey_);
+  if (!Secp256r1::generateKeyPair(&paaPrivateKey_, &paaPublicKey_)) return false;
 
   // Generate PAI key pair (intermediate)
-  Secp256r1::generateKeyPair(&paiPrivateKey_, &paiPublicKey_);
+  if (!Secp256r1::generateKeyPair(&paiPrivateKey_, &paiPublicKey_)) return false;
 
   // Generate DAC key pair (device)
-  Secp256r1::generateKeyPair(&dacPrivateKey_, &dacPublicKey_);
+  if (!Secp256r1::generateKeyPair(&dacPrivateKey_, &dacPublicKey_)) return false;
 
   // Create PAA certificate (self-signed root)
   {

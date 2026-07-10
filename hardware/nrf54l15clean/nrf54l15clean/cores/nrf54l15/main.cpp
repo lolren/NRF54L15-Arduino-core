@@ -44,12 +44,10 @@ void yieldWfiOnceIfAllowed() {
         return;
     }
 
-    const uint32_t restoreRaw = nrf54l15_core_enter_idle_cpu_scaling();
     *kScbScr &= ~(kScbScrSleepDeep_Msk | kScbScrSleepOnExit_Msk);
     __asm volatile("dsb 0xF" ::: "memory");
     __asm volatile("isb 0xF" ::: "memory");
     __asm volatile("wfi");
-    nrf54l15_core_exit_idle_cpu_scaling(restoreRaw);
 }
 #endif
 }  // namespace

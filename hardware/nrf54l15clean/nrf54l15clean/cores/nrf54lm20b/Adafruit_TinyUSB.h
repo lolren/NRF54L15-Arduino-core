@@ -3,7 +3,8 @@
 
 // TinyUSB compatibility stub for nRF54L15 Clean Arduino Core.
 // nRF54L15 uses the SAMD11 bridge for USB, not TinyUSB.
-// This header provides stubs so nRF52840 sketches compile without changes.
+// This header provides compile-time compatibility only. No USB device stack
+// is present, so status and transfer calls report the unsupported state.
 
 #include "Arduino.h"
 
@@ -17,36 +18,38 @@
 
 // TinyUSB constants for sketch compatibility
 #define TUD_OPT_RHPORT   0
-#define TUSB_OPT_DEVICE_ENABLED 1
+#define TUSB_OPT_DEVICE_ENABLED 0
+#define NRF54_TINYUSB_DEVICE_SUPPORTED 0
 #define BOARD_TUD_RHPORT 0
 #define CFG_TUSB_RHPORT0_MODE OPT_MODE_DEVICE
 
 // TinyUSB device stub
 class TinyUSBDeviceClass {
 public:
-  void begin() {}
-  void attach() {}  
-  void detach() {}
+  bool begin(uint8_t rhport = 0) { (void)rhport; return false; }
+  bool attach() { return false; }
+  bool detach() { return false; }
   void setID(uint16_t vid, uint16_t pid) { (void)vid; (void)pid; }
   void setManufacturerDescriptor(const char* s) { (void)s; }
   void setProductDescriptor(const char* s) { (void)s; }
   void setSerialDescriptor(const char* s) { (void)s; }
-  void setUSBVersion(uint16_t v) { (void)v; }
+  void setVersion(uint16_t v) { (void)v; }
+  void setUSBVersion(uint16_t v) { setVersion(v); }
   void setDeviceVersion(uint16_t v) { (void)v; }
-  bool ready() { return true; }
-  bool mounted() { return true; }
-  bool suspended() { return false; }
+  bool ready() const { return false; }
+  bool mounted() const { return false; }
+  bool suspended() const { return false; }
   void setStringDescriptor(uint8_t idx, const char* s) { (void)idx; (void)s; }
 };
 
 extern TinyUSBDeviceClass TinyUSBDevice;
 
 // tusb static inline stubs
-static inline bool tud_cdc_connected(void) { return true; }
+static inline bool tud_cdc_connected(void) { return false; }
 static inline bool tud_cdc_available(void) { return false; }
 static inline int tud_cdc_read_char(void) { return -1; }
-static inline void tud_cdc_write_char(char c) { (void)c; }
-static inline void tud_cdc_write_flush(void) {}
+static inline uint32_t tud_cdc_write_char(char c) { (void)c; return 0U; }
+static inline uint32_t tud_cdc_write_flush(void) { return 0U; }
 
 // USB HID support (minimal stubs)
 #include "class/hid/hid.h"

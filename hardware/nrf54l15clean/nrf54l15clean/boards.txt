@@ -170,7 +170,7 @@ xiao_nrf54lm20b.upload.tool=nrf54ocd
 xiao_nrf54lm20b.upload.tool.serial=nrf54ocd
 xiao_nrf54lm20b.upload.protocol=cmsis-dap
 xiao_nrf54lm20b.upload.maximum_size=2080768
-xiao_nrf54lm20b.upload.maximum_data_size=458752
+xiao_nrf54lm20b.upload.maximum_data_size=523584
 xiao_nrf54lm20b.upload.wait_for_upload_port=false
 xiao_nrf54lm20b.upload.use_1200bps_touch=false
 xiao_nrf54lm20b.upload.disable_flushing=true
@@ -216,7 +216,7 @@ xiao_nrf54lm20b.menu.cpu_freq.128m=128 MHz
 xiao_nrf54lm20b.menu.cpu_freq.128m.build.f_cpu=128000000L
 xiao_nrf54lm20b.menu.cpu_freq.128m.build.cpu_flags=-DARDUINO_NRF54_CPU_128M
 
-xiao_nrf54lm20b.build.extra_flags=-DARDUINO_NRF54LM20A -DARDUINO_NRF54LM20B -DNRF54LM20A_XXAA -DNRF54LM20B_XXAA {build.cpu_flags} {build.power_flags} {build.boot_flags} {build.auto_gate_flags} {build.security_flags} {build.ble_flags} {build.ble_tx_flags} {build.ble_timing_flags} {build.ble_trace_flags} {build.vpr_flags} {build.zigbee_flags} {build.zigbee_channel_flags} {build.zigbee_pan_flags} {build.thread_flags} {build.thread_seam_flags} {build.thread_crypto_flags} {build.matter_flags} {build.matter_seam_flags} {build.antenna_flags} {build.serial_flags}
+xiao_nrf54lm20b.build.extra_flags=-DARDUINO_NRF54LM20A -DNRF54LM20A_XXAA -DNRF54LM20_FAMILY {build.cpu_flags} {build.power_flags} {build.boot_flags} {build.auto_gate_flags} {build.security_flags} {build.ble_flags} {build.ble_tx_flags} {build.ble_timing_flags} {build.ble_trace_flags} {build.vpr_flags} {build.zigbee_flags} {build.zigbee_channel_flags} {build.zigbee_pan_flags} {build.thread_flags} {build.thread_seam_flags} {build.thread_crypto_flags} {build.matter_flags} {build.matter_seam_flags} {build.antenna_flags} {build.serial_flags}
 
 xiao_nrf54lm20b.menu.clean_ble.on=Enabled (Default)
 xiao_nrf54lm20b.menu.clean_ble.on.build.ble_flags=-DNRF54L15_CLEAN_BLE_ENABLED=1
@@ -318,7 +318,7 @@ holyiot_25007_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 holyiot_25007_nrf54l15.build.zigbee_channel_flags=
 holyiot_25007_nrf54l15.build.zigbee_pan_flags=
 holyiot_25007_nrf54l15.build.antenna_flags=
-holyiot_25007_nrf54l15.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER -DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER_SWAP_INSTANCES
+holyiot_25007_nrf54l15.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER
 
 holyiot_25007_nrf54l15.menu.cpu_freq.64m=64 MHz (Default)
 holyiot_25007_nrf54l15.menu.cpu_freq.64m.build.f_cpu=64000000L
@@ -592,7 +592,7 @@ generic_nrf54l15_module_36pin.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED
 generic_nrf54l15_module_36pin.build.zigbee_channel_flags=
 generic_nrf54l15_module_36pin.build.zigbee_pan_flags=
 generic_nrf54l15_module_36pin.build.antenna_flags=
-generic_nrf54l15_module_36pin.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER -DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER_SWAP_INSTANCES
+generic_nrf54l15_module_36pin.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER
 
 generic_nrf54l15_module_36pin.menu.cpu_freq.64m=64 MHz (Default)
 generic_nrf54l15_module_36pin.menu.cpu_freq.64m.build.f_cpu=64000000L
@@ -726,7 +726,7 @@ nrf54l15dk_pca10156.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 nrf54l15dk_pca10156.build.zigbee_channel_flags=
 nrf54l15dk_pca10156.build.zigbee_pan_flags=
 nrf54l15dk_pca10156.build.antenna_flags=
-nrf54l15dk_pca10156.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER -DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER_SWAP_INSTANCES
+nrf54l15dk_pca10156.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER
 nrf54l15dk_pca10156.build.extra_flags=-DARDUINO_NRF54L15 -DNRF54L15_XXAA {build.cpu_flags} {build.power_flags} {build.boot_flags} {build.auto_gate_flags} {build.security_flags} {build.ble_flags} {build.ble_tx_flags} {build.ble_timing_flags} {build.ble_trace_flags} {build.vpr_flags} {build.zigbee_flags} {build.zigbee_channel_flags} {build.zigbee_pan_flags} {build.thread_flags} {build.thread_seam_flags} {build.thread_crypto_flags} {build.matter_flags} {build.matter_seam_flags} {build.antenna_flags} {build.serial_flags}
 
 nrf54l15dk_pca10156.menu.clean_ble.on=Enabled (Default)
@@ -776,7 +776,7 @@ nrf54l15dk_pca10156.menu.clean_matter.stage.build.matter_flags=-DNRF54L15_CLEAN_
 nrf54l15dk_pca10156.menu.clean_matter.stage.build.matter_seam_flags=-DNRF54L15_CLEAN_MATTER_HEADER_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_SUPPORT_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_ERROR_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_CORE_KEY_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_TIME_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_HEX_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_THREAD_DATASET_SEED_AVAILABLE=1 -DNRF54L15_CLEAN_MATTER_DATA_MODEL_SEED_AVAILABLE=1 -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/matter_core_stage -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/config/arduino -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/core -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/lib/support -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/system -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/inet -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/crypto -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/protocols -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/transport -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src/messaging -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/third_party/connectedhomeip/src -I{runtime.platform.path}/libraries/Nrf54L15-Clean-Implementation/src/platform/arduino
 
 nrf54l15dk_pca10156.menu.clean_serial.header=VCOM1 on P1.04/P1.05 (Default)
-nrf54l15dk_pca10156.menu.clean_serial.header.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER -DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER_SWAP_INSTANCES
+nrf54l15dk_pca10156.menu.clean_serial.header.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER
 
 nrf54l15dk_pca10156.menu.clean_serial.altuart=Alternate UART on P0.00/P0.01
 nrf54l15dk_pca10156.menu.clean_serial.altuart.build.serial_flags=
