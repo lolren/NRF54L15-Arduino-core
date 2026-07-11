@@ -970,7 +970,7 @@ uint32_t bleDataPduAirTimeUs(uint8_t payloadLength) {
   return bleDataPduAirTimeUsOnPhy(payloadLength, kBlePhy1M);
 }
 
-uint32_t bleConnectionTxEndBudgetUs(uint8_t payloadLength) {
+[[maybe_unused]] uint32_t bleConnectionTxEndBudgetUs(uint8_t payloadLength) {
   return bleConnectionTxEndBudgetUsOnPhy(payloadLength, kBlePhy1M);
 }
 
@@ -1446,7 +1446,8 @@ bool waitRadioDisabledBudgeted(NRF_RADIO_Type* radio, uint32_t budgetUs, uint32_
   return (state == RADIO_STATE_STATE_Disabled);
 }
 
-bool waitRadioDisabledBudgetedSleep(NRF_RADIO_Type* radio, uint32_t budgetUs) {
+[[maybe_unused]] bool waitRadioDisabledBudgetedSleep(NRF_RADIO_Type* radio,
+                                                     uint32_t budgetUs) {
   if (radio == nullptr) {
     return false;
   }
@@ -1695,12 +1696,13 @@ uint16_t bleUuidRead16(const uint8_t* uuid, uint8_t uuidSize) {
   return bleUuidIs16(uuid, uuidSize) ? readLe16(uuid) : 0U;
 }
 
-bool bleUuidMatches16(const uint8_t* uuid, uint8_t uuidSize, uint16_t uuid16) {
+[[maybe_unused]] bool bleUuidMatches16(const uint8_t* uuid, uint8_t uuidSize,
+                                      uint16_t uuid16) {
   return bleUuidRead16(uuid, uuidSize) == uuid16;
 }
 
-bool bleUuidEquals(const uint8_t* lhs, uint8_t lhsSize, const uint8_t* rhs,
-                   uint8_t rhsSize) {
+[[maybe_unused]] bool bleUuidEquals(const uint8_t* lhs, uint8_t lhsSize,
+                                   const uint8_t* rhs, uint8_t rhsSize) {
   if (lhs == nullptr || rhs == nullptr || lhsSize != rhsSize) {
     return false;
   }

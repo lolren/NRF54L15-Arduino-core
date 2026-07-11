@@ -99,7 +99,8 @@ void deriveKeys() {
 constexpr size_t kMaxFrag = 55U;
 uint8_t g_rbuf[512]; uint16_t g_rlen=0; uint8_t g_rtot=0,g_rmask=0;
 
-void sendFrag(uint8_t type, const uint8_t* d, uint16_t len, const otIp6Address& dst) {
+[[maybe_unused]] void sendFrag(uint8_t type, const uint8_t* d, uint16_t len,
+                              const otIp6Address& dst) {
   uint8_t tot = (len + kMaxFrag - 1) / kMaxFrag;
   for (uint8_t s = 0; s < tot; s++) {
     uint8_t f[64]; f[0]=type; f[1]=s; f[2]=tot;
@@ -180,6 +181,7 @@ void handleJoinReq(const uint8_t* data, uint16_t len,
 
 void handleJoinResp(const uint8_t* payload, uint16_t len,
                     const otMessageInfo& info) {
+  (void)info;
   // payload: enc(compact_dataset || nonce) || mac(16)
   if (len != (68U + 16U)) return;
 

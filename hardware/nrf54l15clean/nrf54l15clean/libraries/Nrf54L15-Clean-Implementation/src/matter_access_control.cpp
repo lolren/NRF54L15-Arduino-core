@@ -31,15 +31,16 @@ bool MatterAccessControl::getEntry(uint8_t index, AclEntry* outEntry) const {
 }
 
 void MatterAccessControl::clear() {
-  memset(entries_, 0, sizeof(entries_));
+  for (AclEntry& entry : entries_) {
+    entry = AclEntry{};
+  }
   entryCount_ = 0U;
 }
 
 // ─── Default Entries ─────────────────────────────────────────────
 
 bool MatterAccessControl::addDefaultViewEntry() {
-  AclEntry entry;
-  memset(&entry, 0, sizeof(entry));
+  AclEntry entry = {};
   entry.wildcardFabric = true;
   entry.wildcardNode = true;
   entry.wildcardCluster = true;
@@ -52,8 +53,7 @@ bool MatterAccessControl::addDefaultViewEntry() {
 bool MatterAccessControl::addNodeOperateEntry(
     const uint8_t nodeId[8],
     const uint8_t fabricId[8]) {
-  AclEntry entry;
-  memset(&entry, 0, sizeof(entry));
+  AclEntry entry = {};
 
   if (nodeId != nullptr) memcpy(entry.nodeId, nodeId, 8);
   if (fabricId != nullptr) memcpy(entry.fabricId, fabricId, 8);

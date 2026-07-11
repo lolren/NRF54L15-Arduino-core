@@ -93,7 +93,6 @@ class MatterDeviceAttestation {
  private:
   bool signCertificate(const Secp256r1Scalar& issuerPrivateKey,
                        const Secp256r1Point& issuerPublicKey,
-                       const Secp256r1Scalar& subjectPrivateKey,
                        const Secp256r1Point& subjectPublicKey,
                        uint16_t vendorId, uint16_t productId,
                        const uint8_t serialNumber[32],

@@ -9,7 +9,7 @@ static uint32_t bleBudgetedSpinLimit(uint32_t budgetUs, uint32_t multiplier,
   return static_cast<uint32_t>(spin);
 }
 
-static uint32_t bleBudgetedListenSpinLimit(uint32_t budgetUs) {
+[[maybe_unused]] static uint32_t bleBudgetedListenSpinLimit(uint32_t budgetUs) {
   return bleBudgetedSpinLimit(budgetUs, 4U, 12000UL, 1500000UL);
 }
 

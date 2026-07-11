@@ -259,7 +259,7 @@ public:
      * @note
      *  Normally, prefer to use Format()
      */
-    const char * AsString(bool withSourceLocation = true) const
+    const char * AsString(bool = true) const
     {
         // Arduino: inline stub
         return "error";

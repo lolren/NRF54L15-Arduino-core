@@ -212,7 +212,7 @@ bool activeScanForMask(ZigbeeRadio& radio, uint8_t* ioMacSequence,
     return false;
   }
 
-  memset(outResult, 0, sizeof(*outResult));
+  *outResult = ZigbeeBeaconCandidate{};
 
   uint8_t request[127] = {0U};
   uint8_t requestLength = 0U;
@@ -346,7 +346,7 @@ bool scanKnownNetworkForMask(ZigbeeRadio& radio, uint8_t* ioMacSequence,
     return false;
   }
 
-  memset(outResult, 0, sizeof(*outResult));
+  *outResult = ZigbeeBeaconCandidate{};
 
   uint8_t request[127] = {0U};
   uint8_t requestLength = 0U;
@@ -767,7 +767,7 @@ bool parseRecognizedTrustCenterCommand(const uint8_t* frame, uint8_t length,
                                        bool haveInstallCodeKey,
                                        ZigbeeApsCommandFrame* outCommand) {
   if (outCommand != nullptr) {
-    memset(outCommand, 0, sizeof(*outCommand));
+    *outCommand = ZigbeeApsCommandFrame{};
   }
   if (frame == nullptr || outCommand == nullptr) {
     return false;
@@ -810,7 +810,7 @@ bool waitForCoordinatorRealignment(const ZigbeeCommissioningPolicy& policy,
                                    ZigbeeRadio& radio, uint64_t localIeee,
                                    ZigbeeMacCoordinatorRealignmentView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeMacCoordinatorRealignmentView{};
   }
   if (outView == nullptr) {
     return false;
@@ -889,7 +889,7 @@ bool waitForNwkRejoinResponse(ZigbeeRadio& radio, uint16_t panId,
                               ZigbeeNwkRejoinResponse* outResponse,
                               uint32_t* outInboundFrameCounter) {
   if (outResponse != nullptr) {
-    memset(outResponse, 0, sizeof(*outResponse));
+    *outResponse = ZigbeeNwkRejoinResponse{};
   }
   if (outInboundFrameCounter != nullptr) {
     *outInboundFrameCounter = 0U;
@@ -1094,7 +1094,7 @@ bool scanForKnownNetwork(ZigbeeRadio& radio, uint8_t* ioMacSequence,
     return false;
   }
 
-  memset(outResult, 0, sizeof(*outResult));
+  *outResult = ZigbeeBeaconCandidate{};
   state->state = ZigbeeCommissioningState::kScanning;
   state->lastFailure = ZigbeeCommissioningFailure::kNone;
 
@@ -1318,7 +1318,7 @@ void ZigbeeCommissioning::initializeEndDeviceState(
     return;
   }
 
-  memset(state, 0, sizeof(*state));
+  *state = ZigbeeEndDeviceCommonState{};
   state->policy = policy;
   state->logicalType = logicalType;
   state->preferredChannel = preferredChannel;
@@ -1735,7 +1735,7 @@ bool ZigbeeCommissioning::acceptEndDeviceTimeoutResponse(
     const ZigbeeEndDeviceCommonState& state, const uint8_t* frame,
     uint8_t length, ZigbeeNwkEndDeviceTimeoutResponse* outResponse) {
   if (outResponse != nullptr) {
-    memset(outResponse, 0, sizeof(*outResponse));
+    *outResponse = ZigbeeNwkEndDeviceTimeoutResponse{};
   }
   if (frame == nullptr || outResponse == nullptr ||
       !shouldRequestEndDeviceTimeout(state)) {
@@ -1892,7 +1892,7 @@ bool ZigbeeCommissioning::activeScan(ZigbeeRadio& radio,
     return false;
   }
 
-  memset(outResult, 0, sizeof(*outResult));
+  *outResult = ZigbeeBeaconCandidate{};
   state->state = ZigbeeCommissioningState::kScanning;
   state->lastFailure = ZigbeeCommissioningFailure::kNone;
 
@@ -2019,7 +2019,7 @@ bool ZigbeeCommissioning::acceptTransportKeyCommand(
     const uint8_t* frame, uint8_t length, const uint8_t installCodeKey[16],
     bool haveInstallCodeKey, ZigbeeTransportKeyInstallResult* outResult) {
   if (outResult != nullptr) {
-    memset(outResult, 0, sizeof(*outResult));
+    *outResult = ZigbeeTransportKeyInstallResult{};
   }
   if (frame == nullptr || outResult == nullptr ||
       !validTransportKeyLifecycle(state)) {
@@ -2300,7 +2300,7 @@ bool ZigbeeCommissioning::acceptUpdateDeviceCommand(
     const uint8_t installCodeKey[16], bool haveInstallCodeKey,
     ZigbeeUpdateDeviceAcceptance* outResult) {
   if (outResult != nullptr) {
-    memset(outResult, 0, sizeof(*outResult));
+    *outResult = ZigbeeUpdateDeviceAcceptance{};
   }
   if (frame == nullptr || outResult == nullptr ||
       !expectsUpdateDeviceCommand(state)) {
@@ -2389,7 +2389,7 @@ bool ZigbeeCommissioning::acceptSwitchKeyCommand(
     bool haveInstallCodeKey,
     ZigbeeSwitchKeyAcceptance* outResult) {
   if (outResult != nullptr) {
-    memset(outResult, 0, sizeof(*outResult));
+    *outResult = ZigbeeSwitchKeyAcceptance{};
   }
   if (frame == nullptr || outResult == nullptr || !validSwitchKeyLifecycle(state)) {
     return false;

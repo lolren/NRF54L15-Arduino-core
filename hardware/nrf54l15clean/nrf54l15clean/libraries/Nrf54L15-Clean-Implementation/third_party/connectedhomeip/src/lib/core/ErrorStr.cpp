@@ -76,6 +76,7 @@ DLL_EXPORT const char * ErrorStr(CHIP_ERROR err, bool withSourceLocation)
  */
 DLL_EXPORT const char * ErrorStr(CHIP_ERROR err, bool withSourceLocation, ErrorStrStorage & storage)
 {
+    (void) withSourceLocation;
     char * formattedError   = storage.buff;
     uint16_t formattedSpace = storage.kBufferSize;
 

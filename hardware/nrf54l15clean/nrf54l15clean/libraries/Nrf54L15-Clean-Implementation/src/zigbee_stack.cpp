@@ -438,7 +438,7 @@ ZigbeeGroupEntry* allocateGroupEntry(ZigbeeGroupsState* groups, uint16_t groupId
                                                 sizeof(groups->entries[0]));
        ++i) {
     if (!groups->entries[i].used) {
-      memset(&groups->entries[i], 0, sizeof(groups->entries[i]));
+      groups->entries[i] = ZigbeeGroupEntry{};
       groups->entries[i].used = true;
       groups->entries[i].groupId = groupId;
       return &groups->entries[i];
@@ -507,7 +507,7 @@ bool removeGroupEntry(ZigbeeGroupsState* groups, uint16_t groupId) {
   if (entry == nullptr) {
     return false;
   }
-  memset(entry, 0, sizeof(*entry));
+  *entry = ZigbeeGroupEntry{};
   return true;
 }
 
@@ -539,8 +539,8 @@ ZigbeeSceneEntry* findSceneEntry(ZigbeeScenesState* scenes, uint16_t groupId,
   return nullptr;
 }
 
-const ZigbeeSceneEntry* findSceneEntry(const ZigbeeScenesState* scenes,
-                                       uint16_t groupId, uint8_t sceneId) {
+[[maybe_unused]] const ZigbeeSceneEntry* findSceneEntry(
+    const ZigbeeScenesState* scenes, uint16_t groupId, uint8_t sceneId) {
   if (scenes == nullptr || !scenes->enabled) {
     return nullptr;
   }
@@ -568,7 +568,7 @@ ZigbeeSceneEntry* allocateSceneEntry(ZigbeeScenesState* scenes, uint16_t groupId
                                                 sizeof(scenes->entries[0]));
        ++i) {
     if (!scenes->entries[i].used) {
-      memset(&scenes->entries[i], 0, sizeof(scenes->entries[i]));
+      scenes->entries[i] = ZigbeeSceneEntry{};
       scenes->entries[i].used = true;
       scenes->entries[i].groupId = groupId;
       scenes->entries[i].sceneId = sceneId;
@@ -584,7 +584,7 @@ bool removeSceneEntry(ZigbeeScenesState* scenes, uint16_t groupId,
   if (entry == nullptr) {
     return false;
   }
-  memset(entry, 0, sizeof(*entry));
+  *entry = ZigbeeSceneEntry{};
   return true;
 }
 
@@ -596,7 +596,7 @@ void removeAllScenesForGroup(ZigbeeScenesState* scenes, uint16_t groupId) {
                                                 sizeof(scenes->entries[0]));
        ++i) {
     if (scenes->entries[i].used && scenes->entries[i].groupId == groupId) {
-      memset(&scenes->entries[i], 0, sizeof(scenes->entries[i]));
+      scenes->entries[i] = ZigbeeSceneEntry{};
     }
   }
   if (scenes->currentGroupId == groupId) {
@@ -623,7 +623,7 @@ bool parseSceneExtensionSets(const uint8_t* payload, uint8_t length,
   if (outExtension == nullptr) {
     return false;
   }
-  memset(outExtension, 0, sizeof(*outExtension));
+  *outExtension = ParsedSceneExtensionData{};
   while (offset < length) {
     if (length < static_cast<uint8_t>(offset + 3U)) {
       return false;
@@ -715,7 +715,8 @@ bool clusterListContains(const uint16_t* clusters, uint8_t clusterCount,
   return false;
 }
 
-uint8_t attributeValueLength(const ZigbeeAttributeValue& value) {
+[[maybe_unused]] uint8_t attributeValueLength(
+    const ZigbeeAttributeValue& value) {
   switch (value.type) {
     case ZigbeeZclDataType::kBoolean:
     case ZigbeeZclDataType::kBitmap8:
@@ -860,7 +861,7 @@ bool readAttributeValue(const uint8_t* payload, uint8_t length, uint8_t* ioOffse
     return false;
   }
 
-  memset(outValue, 0, sizeof(*outValue));
+  *outValue = ZigbeeAttributeValue{};
   outValue->type = type;
 
   switch (type) {
@@ -949,8 +950,9 @@ bool appendReportableChange(uint8_t* outBuffer, uint8_t maxLength, uint8_t* ioOf
   return appendBytes(outBuffer, maxLength, ioOffset, bytes, storageLength);
 }
 
-bool encodeAddressField(const ZigbeeMacAddress& address, uint8_t* outFrame,
-                        uint8_t* ioOffset) {
+[[maybe_unused]] bool encodeAddressField(const ZigbeeMacAddress& address,
+                                         uint8_t* outFrame,
+                                         uint8_t* ioOffset) {
   if (outFrame == nullptr || ioOffset == nullptr) {
     return false;
   }
@@ -1652,7 +1654,7 @@ bool ZigbeeCodec::buildMacFrame(const ZigbeeMacFrame& frame,
 bool ZigbeeCodec::parseMacFrame(const uint8_t* frame, uint8_t length,
                                 ZigbeeMacFrame* outFrame) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeMacFrame{};
   }
   if (frame == nullptr || outFrame == nullptr || length < 3U) {
     return false;
@@ -1660,7 +1662,6 @@ bool ZigbeeCodec::parseMacFrame(const uint8_t* frame, uint8_t length,
 
   const uint16_t control = readLe16(&frame[0]);
   uint8_t offset = 2U;
-  outFrame->valid = true;
   outFrame->frameType = static_cast<ZigbeeMacFrameType>(control & 0x07U);
   outFrame->securityEnabled = ((control >> 3U) & 0x1U) != 0U;
   outFrame->framePending = ((control >> 4U) & 0x1U) != 0U;
@@ -1702,6 +1703,7 @@ bool ZigbeeCodec::parseMacFrame(const uint8_t* frame, uint8_t length,
   }
   outFrame->payload = &frame[offset];
   outFrame->payloadLength = static_cast<uint8_t>(length - offset);
+  outFrame->valid = true;
   return true;
 }
 
@@ -1731,7 +1733,7 @@ bool ZigbeeCodec::parseAssociationRequest(
     const uint8_t* frame, uint8_t length,
     ZigbeeMacAssociationRequestView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeMacAssociationRequestView{};
   }
   if (frame == nullptr || outView == nullptr) {
     return false;
@@ -1784,7 +1786,7 @@ bool ZigbeeCodec::parseAssociationResponse(
     const uint8_t* frame, uint8_t length,
     ZigbeeMacAssociationResponseView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeMacAssociationResponseView{};
   }
   if (frame == nullptr || outView == nullptr) {
     return false;
@@ -1836,7 +1838,7 @@ bool ZigbeeCodec::parseOrphanNotification(
     const uint8_t* frame, uint8_t length,
     ZigbeeMacOrphanNotificationView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeMacOrphanNotificationView{};
   }
   if (frame == nullptr || outView == nullptr) {
     return false;
@@ -1898,7 +1900,7 @@ bool ZigbeeCodec::parseCoordinatorRealignment(
     const uint8_t* frame, uint8_t length,
     ZigbeeMacCoordinatorRealignmentView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeMacCoordinatorRealignmentView{};
   }
   if (frame == nullptr || outView == nullptr) {
     return false;
@@ -1961,7 +1963,7 @@ bool ZigbeeCodec::buildBeaconFrame(uint8_t sequence, uint16_t panId,
 bool ZigbeeCodec::parseBeaconFrame(const uint8_t* frame, uint8_t length,
                                    ZigbeeMacBeaconView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeMacBeaconView{};
   }
   if (frame == nullptr || outView == nullptr) {
     return false;
@@ -1987,6 +1989,8 @@ bool ZigbeeCodec::parseBeaconFrame(const uint8_t* frame, uint8_t length,
       ((outView->superframeSpecification >> 15U) & 0x01U) != 0U;
 
   outView->network.valid = true;
+  outView->network.panCoordinator = outView->panCoordinator;
+  outView->network.associationPermit = outView->associationPermit;
   outView->network.protocolId = parsed.payload[4];
   outView->network.stackProfile = static_cast<uint8_t>(parsed.payload[5] & 0x0FU);
   outView->network.protocolVersion =
@@ -2101,7 +2105,7 @@ bool ZigbeeCodec::buildNwkFrame(const ZigbeeNetworkFrame& frame,
 bool ZigbeeCodec::parseNwkFrame(const uint8_t* frame, uint8_t length,
                                 ZigbeeNetworkFrame* outFrame) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeNetworkFrame{};
   }
   if (frame == nullptr || outFrame == nullptr || length < 8U) {
     return false;
@@ -2123,7 +2127,6 @@ bool ZigbeeCodec::parseNwkFrame(const uint8_t* frame, uint8_t length,
   }
 
   uint8_t offset = 2U;
-  outFrame->valid = true;
   outFrame->frameType =
       static_cast<ZigbeeNwkFrameType>(control & 0x03U);
   outFrame->discoverRoute = static_cast<uint8_t>((control >> 6U) & 0x03U);
@@ -2165,6 +2168,7 @@ bool ZigbeeCodec::parseNwkFrame(const uint8_t* frame, uint8_t length,
 
   outFrame->payload = &frame[offset];
   outFrame->payloadLength = static_cast<uint8_t>(length - offset);
+  outFrame->valid = true;
   return true;
 }
 
@@ -2184,7 +2188,7 @@ bool ZigbeeCodec::buildNwkRejoinRequestCommand(uint8_t capabilityInformation,
 bool ZigbeeCodec::parseNwkRejoinRequestCommand(
     const uint8_t* frame, uint8_t length, ZigbeeNwkRejoinRequest* outRequest) {
   if (outRequest != nullptr) {
-    memset(outRequest, 0, sizeof(*outRequest));
+    *outRequest = ZigbeeNwkRejoinRequest{};
   }
   if (frame == nullptr || outRequest == nullptr || length != 2U ||
       frame[0] != kZigbeeNwkCommandRejoinRequest) {
@@ -2215,7 +2219,7 @@ bool ZigbeeCodec::parseNwkRejoinResponseCommand(
     const uint8_t* frame, uint8_t length,
     ZigbeeNwkRejoinResponse* outResponse) {
   if (outResponse != nullptr) {
-    memset(outResponse, 0, sizeof(*outResponse));
+    *outResponse = ZigbeeNwkRejoinResponse{};
   }
   if (frame == nullptr || outResponse == nullptr || length != 4U ||
       frame[0] != kZigbeeNwkCommandRejoinResponse) {
@@ -2246,7 +2250,7 @@ bool ZigbeeCodec::parseNwkEndDeviceTimeoutRequestCommand(
     const uint8_t* frame, uint8_t length,
     ZigbeeNwkEndDeviceTimeoutRequest* outRequest) {
   if (outRequest != nullptr) {
-    memset(outRequest, 0, sizeof(*outRequest));
+    *outRequest = ZigbeeNwkEndDeviceTimeoutRequest{};
   }
   if (frame == nullptr || outRequest == nullptr || length != 3U ||
       frame[0] != kZigbeeNwkCommandEndDeviceTimeoutRequest) {
@@ -2277,7 +2281,7 @@ bool ZigbeeCodec::parseNwkEndDeviceTimeoutResponseCommand(
     const uint8_t* frame, uint8_t length,
     ZigbeeNwkEndDeviceTimeoutResponse* outResponse) {
   if (outResponse != nullptr) {
-    memset(outResponse, 0, sizeof(*outResponse));
+    *outResponse = ZigbeeNwkEndDeviceTimeoutResponse{};
   }
   if (frame == nullptr || outResponse == nullptr || length != 3U ||
       frame[0] != kZigbeeNwkCommandEndDeviceTimeoutResponse) {
@@ -2348,7 +2352,7 @@ bool ZigbeeCodec::buildApsDataFrame(const ZigbeeApsDataFrame& frame,
 bool ZigbeeCodec::parseApsDataFrame(const uint8_t* frame, uint8_t length,
                                     ZigbeeApsDataFrame* outFrame) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeApsDataFrame{};
   }
   if (frame == nullptr || outFrame == nullptr || length < 8U) {
     return false;
@@ -2369,7 +2373,6 @@ bool ZigbeeCodec::parseApsDataFrame(const uint8_t* frame, uint8_t length,
   }
 
   uint8_t offset = 1U;
-  outFrame->valid = true;
   outFrame->frameType = frameType;
   outFrame->deliveryMode = deliveryMode;
   outFrame->securityEnabled = securityEnabled;
@@ -2394,6 +2397,7 @@ bool ZigbeeCodec::parseApsDataFrame(const uint8_t* frame, uint8_t length,
   outFrame->counter = frame[offset++];
   outFrame->payload = &frame[offset];
   outFrame->payloadLength = static_cast<uint8_t>(length - offset);
+  outFrame->valid = true;
   return true;
 }
 
@@ -2433,7 +2437,7 @@ bool ZigbeeCodec::buildApsCommandFrame(const ZigbeeApsCommandFrame& frame,
 bool ZigbeeCodec::parseApsCommandFrame(const uint8_t* frame, uint8_t length,
                                        ZigbeeApsCommandFrame* outFrame) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeApsCommandFrame{};
   }
   if (frame == nullptr || outFrame == nullptr || length < 3U) {
     return false;
@@ -2507,7 +2511,7 @@ bool ZigbeeCodec::parseApsAcknowledgementFrame(
     const uint8_t* frame, uint8_t length,
     ZigbeeApsAcknowledgementFrame* outFrame) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeApsAcknowledgementFrame{};
   }
   if (frame == nullptr || outFrame == nullptr || length < 2U) {
     return false;
@@ -2526,7 +2530,6 @@ bool ZigbeeCodec::parseApsAcknowledgementFrame(
   }
 
   uint8_t offset = 1U;
-  outFrame->valid = true;
   outFrame->frameType = frameType;
   outFrame->deliveryMode = deliveryMode;
   outFrame->securityEnabled = securityEnabled;
@@ -2545,7 +2548,11 @@ bool ZigbeeCodec::parseApsAcknowledgementFrame(
   }
 
   outFrame->counter = frame[offset++];
-  return offset == length;
+  if (offset != length) {
+    return false;
+  }
+  outFrame->valid = true;
+  return true;
 }
 
 bool ZigbeeCodec::buildApsDataAcknowledgement(const ZigbeeApsDataFrame& request,
@@ -2598,7 +2605,7 @@ bool ZigbeeCodec::parseApsTransportKeyCommand(const uint8_t* frame,
                                               ZigbeeApsTransportKey* outKey,
                                               uint8_t* outCounter) {
   if (outKey != nullptr) {
-    memset(outKey, 0, sizeof(*outKey));
+    *outKey = ZigbeeApsTransportKey{};
   }
   if (outCounter != nullptr) {
     *outCounter = 0U;
@@ -2615,7 +2622,6 @@ bool ZigbeeCodec::parseApsTransportKeyCommand(const uint8_t* frame,
   }
 
   uint8_t offset = 0U;
-  outKey->valid = true;
   outKey->keyType = command.payload[offset++];
   if (outKey->keyType != kZigbeeApsTransportKeyStandardNetworkKey) {
     return false;
@@ -2627,6 +2633,7 @@ bool ZigbeeCodec::parseApsTransportKeyCommand(const uint8_t* frame,
   offset = static_cast<uint8_t>(offset + 8U);
   outKey->sourceIeee = readLe64(&command.payload[offset]);
   *outCounter = command.counter;
+  outKey->valid = true;
   return true;
 }
 
@@ -2660,7 +2667,7 @@ bool ZigbeeCodec::parseApsUpdateDeviceCommand(const uint8_t* frame,
                                               ZigbeeApsUpdateDevice* outDevice,
                                               uint8_t* outCounter) {
   if (outDevice != nullptr) {
-    memset(outDevice, 0, sizeof(*outDevice));
+    *outDevice = ZigbeeApsUpdateDevice{};
   }
   if (outCounter != nullptr) {
     *outCounter = 0U;
@@ -2704,7 +2711,7 @@ bool ZigbeeCodec::parseApsSwitchKeyCommand(const uint8_t* frame, uint8_t length,
                                            ZigbeeApsSwitchKey* outKey,
                                            uint8_t* outCounter) {
   if (outKey != nullptr) {
-    memset(outKey, 0, sizeof(*outKey));
+    *outKey = ZigbeeApsSwitchKey{};
   }
   if (outCounter != nullptr) {
     *outCounter = 0U;
@@ -2761,7 +2768,7 @@ bool ZigbeeCodec::buildZclFrame(const ZigbeeZclFrame& frame,
 bool ZigbeeCodec::parseZclFrame(const uint8_t* frame, uint8_t length,
                                 ZigbeeZclFrame* outFrame) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeZclFrame{};
   }
   if (frame == nullptr || outFrame == nullptr || length < 3U) {
     return false;
@@ -2868,7 +2875,7 @@ bool ZigbeeCodec::parseReadAttributesResponse(
     outRecords[count].attributeId = readLe16(&payload[offset]);
     offset = static_cast<uint8_t>(offset + 2U);
     outRecords[count].status = payload[offset++];
-    memset(&outRecords[count].value, 0, sizeof(outRecords[count].value));
+    outRecords[count].value = ZigbeeAttributeValue{};
 
     if (outRecords[count].status == kZclStatusSuccess) {
       if (length < static_cast<uint8_t>(offset + 1U)) {
@@ -3245,7 +3252,7 @@ bool ZigbeeCodec::parseConfigureReportingRequest(
   uint8_t offset = 0U;
   uint8_t count = 0U;
   while (offset < length) {
-    if (count >= maxConfigurations || (length - offset) < 6U) {
+    if (count >= maxConfigurations || (length - offset) < 6) {
       return false;
     }
 
@@ -3394,7 +3401,7 @@ bool ZigbeeCodec::parseReadReportingConfigurationRequest(
   uint8_t offset = 0U;
   uint8_t count = 0U;
   while (offset < length) {
-    if (count >= maxRecords || (length - offset) < 3U) {
+    if (count >= maxRecords || (length - offset) < 3) {
       return false;
     }
 
@@ -3461,7 +3468,7 @@ bool ZigbeeCodec::parseReadReportingConfigurationResponse(
   uint8_t offset = 0U;
   uint8_t count = 0U;
   while (offset < length) {
-    if (count >= maxRecords || (length - offset) < 4U) {
+    if (count >= maxRecords || (length - offset) < 4) {
       return false;
     }
 
@@ -3974,7 +3981,7 @@ bool ZigbeeCodec::parseZdoStatusResponse(const uint8_t* payload, uint8_t length,
 bool ZigbeeCodec::parseZdoAddressResponse(const uint8_t* payload, uint8_t length,
                                           ZigbeeZdoAddressResponseView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeZdoAddressResponseView{};
   }
   if (payload == nullptr || outView == nullptr || length < 2U) {
     return false;
@@ -4016,7 +4023,7 @@ bool ZigbeeCodec::parseZdoNodeDescriptorResponse(
     const uint8_t* payload, uint8_t length,
     ZigbeeZdoNodeDescriptorResponseView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeZdoNodeDescriptorResponseView{};
   }
   if (payload == nullptr || outView == nullptr || length < 4U) {
     return false;
@@ -4052,7 +4059,7 @@ bool ZigbeeCodec::parseZdoPowerDescriptorResponse(
     const uint8_t* payload, uint8_t length,
     ZigbeeZdoPowerDescriptorResponseView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeZdoPowerDescriptorResponseView{};
   }
   if (payload == nullptr || outView == nullptr || length < 4U) {
     return false;
@@ -4083,7 +4090,7 @@ bool ZigbeeCodec::parseZdoActiveEndpointsResponse(
     const uint8_t* payload, uint8_t length,
     ZigbeeZdoActiveEndpointsResponseView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeZdoActiveEndpointsResponseView{};
   }
   if (payload == nullptr || outView == nullptr || length < 5U) {
     return false;
@@ -4109,7 +4116,7 @@ bool ZigbeeCodec::parseZdoSimpleDescriptorResponse(
     const uint8_t* payload, uint8_t length,
     ZigbeeZdoSimpleDescriptorResponseView* outView) {
   if (outView != nullptr) {
-    memset(outView, 0, sizeof(*outView));
+    *outView = ZigbeeZdoSimpleDescriptorResponseView{};
   }
   if (payload == nullptr || outView == nullptr || length < 6U) {
     return false;
@@ -4213,9 +4220,13 @@ bool ZigbeeHomeAutomationDevice::configureOnOffLight(
     return false;
   }
 
-  memset(&config_, 0, sizeof(config_));
-  memset(reporting_, 0, sizeof(reporting_));
-  memset(reportingState_, 0, sizeof(reportingState_));
+  config_ = ZigbeeHomeAutomationConfig{};
+  for (ZigbeeReportingConfiguration& reporting : reporting_) {
+    reporting = ZigbeeReportingConfiguration{};
+  }
+  for (ZigbeeReportingRuntimeState& state : reportingState_) {
+    state = ZigbeeReportingRuntimeState{};
+  }
   identifyLastTickMs_ = 0U;
   leaveRequested_ = false;
   leaveRequestFlags_ = 0U;
@@ -4269,9 +4280,13 @@ bool ZigbeeHomeAutomationDevice::configureOnOffLightSwitch(
     return false;
   }
 
-  memset(&config_, 0, sizeof(config_));
-  memset(reporting_, 0, sizeof(reporting_));
-  memset(reportingState_, 0, sizeof(reportingState_));
+  config_ = ZigbeeHomeAutomationConfig{};
+  for (ZigbeeReportingConfiguration& reporting : reporting_) {
+    reporting = ZigbeeReportingConfiguration{};
+  }
+  for (ZigbeeReportingRuntimeState& state : reportingState_) {
+    state = ZigbeeReportingRuntimeState{};
+  }
   identifyLastTickMs_ = 0U;
   leaveRequested_ = false;
   leaveRequestFlags_ = 0U;
@@ -4329,9 +4344,13 @@ bool ZigbeeHomeAutomationDevice::configureDimmableLight(
     return false;
   }
 
-  memset(&config_, 0, sizeof(config_));
-  memset(reporting_, 0, sizeof(reporting_));
-  memset(reportingState_, 0, sizeof(reportingState_));
+  config_ = ZigbeeHomeAutomationConfig{};
+  for (ZigbeeReportingConfiguration& reporting : reporting_) {
+    reporting = ZigbeeReportingConfiguration{};
+  }
+  for (ZigbeeReportingRuntimeState& state : reportingState_) {
+    state = ZigbeeReportingRuntimeState{};
+  }
   identifyLastTickMs_ = 0U;
   leaveRequested_ = false;
   leaveRequestFlags_ = 0U;
@@ -4442,9 +4461,13 @@ bool ZigbeeHomeAutomationDevice::configureTemperatureSensor(
     return false;
   }
 
-  memset(&config_, 0, sizeof(config_));
-  memset(reporting_, 0, sizeof(reporting_));
-  memset(reportingState_, 0, sizeof(reportingState_));
+  config_ = ZigbeeHomeAutomationConfig{};
+  for (ZigbeeReportingConfiguration& reporting : reporting_) {
+    reporting = ZigbeeReportingConfiguration{};
+  }
+  for (ZigbeeReportingRuntimeState& state : reportingState_) {
+    state = ZigbeeReportingRuntimeState{};
+  }
   identifyLastTickMs_ = 0U;
   leaveRequested_ = false;
   leaveRequestFlags_ = 0U;
@@ -5277,7 +5300,7 @@ bool ZigbeeHomeAutomationDevice::makeAttributeValueForCluster(
   if (outValue == nullptr) {
     return false;
   }
-  memset(outValue, 0, sizeof(*outValue));
+  *outValue = ZigbeeAttributeValue{};
   if (makeGlobalAttributeValueForCluster(clusterId, attributeId, outValue)) {
     return true;
   }
@@ -5584,7 +5607,7 @@ bool ZigbeeHomeAutomationDevice::appendReadRecordForCluster(
     return false;
   }
 
-  memset(outRecord, 0, sizeof(*outRecord));
+  *outRecord = ZigbeeReadAttributeRecord{};
   outRecord->attributeId = attributeId;
   outRecord->status = kZclStatusSuccess;
   if (!makeAttributeValueForCluster(clusterId, attributeId, &outRecord->value)) {
@@ -5600,7 +5623,7 @@ bool ZigbeeHomeAutomationDevice::appendReadReportingRecordForCluster(
     return false;
   }
 
-  memset(outRecord, 0, sizeof(*outRecord));
+  *outRecord = ZigbeeReadReportingConfigurationResponseRecord{};
   outRecord->status = kZclStatusSuccess;
   outRecord->direction = direction;
   outRecord->attributeId = attributeId;
@@ -5640,7 +5663,7 @@ void ZigbeeHomeAutomationDevice::resetReportingState(uint8_t index) {
                                     sizeof(reportingState_[0]))) {
     return;
   }
-  memset(&reportingState_[index], 0, sizeof(reportingState_[index]));
+  reportingState_[index] = ZigbeeReportingRuntimeState{};
 }
 
 void ZigbeeHomeAutomationDevice::seedReportingState(uint8_t index) {
@@ -5845,8 +5868,7 @@ bool ZigbeeHomeAutomationDevice::commitDueAttributeReport(uint32_t nowMs) {
     reportingState_[i].baselineValid = true;
     reportingState_[i].lastReportedValue = reportingState_[i].pendingValue;
     reportingState_[i].lastReportMs = nowMs;
-    memset(&reportingState_[i].pendingValue, 0,
-           sizeof(reportingState_[i].pendingValue));
+    reportingState_[i].pendingValue = ZigbeeAttributeValue{};
     committed = true;
   }
   return committed;
@@ -5858,8 +5880,7 @@ void ZigbeeHomeAutomationDevice::discardDueAttributeReport() {
                                 sizeof(reportingState_[0]));
        ++i) {
     reportingState_[i].pending = false;
-    memset(&reportingState_[i].pendingValue, 0,
-           sizeof(reportingState_[i].pendingValue));
+    reportingState_[i].pendingValue = ZigbeeAttributeValue{};
   }
 }
 
@@ -5912,7 +5933,9 @@ const ZigbeeBindingEntry* ZigbeeHomeAutomationDevice::bindings() const {
 }
 
 bool ZigbeeHomeAutomationDevice::clearNeighborTable() {
-  memset(config_.neighbors, 0, sizeof(config_.neighbors));
+  for (ZigbeeNeighborTableEntry& neighbor : config_.neighbors) {
+    neighbor = ZigbeeNeighborTableEntry{};
+  }
   return true;
 }
 
@@ -5952,7 +5975,9 @@ ZigbeeHomeAutomationDevice::neighborTableEntries() const {
 }
 
 bool ZigbeeHomeAutomationDevice::clearRoutingTable() {
-  memset(config_.routes, 0, sizeof(config_.routes));
+  for (ZigbeeRoutingTableEntry& route : config_.routes) {
+    route = ZigbeeRoutingTableEntry{};
+  }
   return true;
 }
 
@@ -6123,7 +6148,7 @@ bool ZigbeeHomeAutomationDevice::setBinding(
     if (entry.used) {
       continue;
     }
-    memset(&entry, 0, sizeof(entry));
+    entry = ZigbeeBindingEntry{};
     entry.used = true;
     entry.sourceEndpoint = sourceEndpoint;
     entry.clusterId = clusterId;
@@ -6154,7 +6179,7 @@ bool ZigbeeHomeAutomationDevice::clearBinding(
         entry.destinationEndpoint != destinationEndpoint) {
       continue;
     }
-    memset(&entry, 0, sizeof(entry));
+    entry = ZigbeeBindingEntry{};
     return true;
   }
   return false;
@@ -7077,8 +7102,12 @@ bool ZigbeeHomeAutomationDevice::handleZclRequest(
     }
 
     if (frame.commandId == kGroupsCommandRemoveAllGroups) {
-      memset(&config_.groups.entries, 0, sizeof(config_.groups.entries));
-      memset(&config_.scenes.entries, 0, sizeof(config_.scenes.entries));
+      for (ZigbeeGroupEntry& entry : config_.groups.entries) {
+        entry = ZigbeeGroupEntry{};
+      }
+      for (ZigbeeSceneEntry& entry : config_.scenes.entries) {
+        entry = ZigbeeSceneEntry{};
+      }
       config_.scenes.sceneValid = false;
       config_.scenes.currentGroupId = 0U;
       config_.scenes.currentSceneId = 0U;

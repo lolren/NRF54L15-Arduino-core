@@ -7,6 +7,36 @@
 #include "matter_manual_pairing.h"
 
 namespace xiao_nrf54l15 {
+namespace {
+
+void copyPersistentCredentialsMembers(MatterCredentialsState* destination,
+                                      const MatterCredentialsState& source) {
+  destination->magic = source.magic;
+  destination->version = source.version;
+  destination->reserved = source.reserved;
+  destination->setupPinCode = source.setupPinCode;
+  destination->discriminator = source.discriminator;
+  destination->vendorId = source.vendorId;
+  destination->productId = source.productId;
+}
+
+void resetPersistentCredentialsState(MatterCredentialsState* state) {
+  if (state == nullptr) {
+    return;
+  }
+
+  // This structure is persisted as a full object blob. Clear its complete
+  // representation first so any ABI padding remains deterministic, then apply
+  // the typed defaults so future nonzero member initializers are preserved.
+  uint8_t* bytes = reinterpret_cast<uint8_t*>(state);
+  for (size_t i = 0; i < sizeof(*state); ++i) {
+    bytes[i] = 0U;
+  }
+  const MatterCredentialsState defaults{};
+  copyPersistentCredentialsMembers(state, defaults);
+}
+
+}  // namespace
 
 bool MatterCredentials::begin(const char* namespaceName) {
   if (storageOpen_ || namespaceName == nullptr) {
@@ -19,7 +49,7 @@ bool MatterCredentials::begin(const char* namespaceName) {
 
   storageOpen_ = true;
   stateLoaded_ = false;
-  memset(&state_, 0, sizeof(state_));
+  resetPersistentCredentialsState(&state_);
 
   if (loadState()) {
     return true;
@@ -37,7 +67,7 @@ void MatterCredentials::end() {
     storageOpen_ = false;
   }
   stateLoaded_ = false;
-  memset(&state_, 0, sizeof(state_));
+  resetPersistentCredentialsState(&state_);
 }
 
 uint32_t MatterCredentials::getSetupPinCode() const {
@@ -188,8 +218,11 @@ bool MatterCredentials::loadFromStorage(Preferences& prefs,
 
 bool MatterCredentials::saveToStorage(Preferences& prefs,
                                        const MatterCredentialsState& state) {
-  return prefs.putBytes(kCredentialsKey, &state, sizeof(state)) ==
-         sizeof(state);
+  MatterCredentialsState canonicalState;
+  resetPersistentCredentialsState(&canonicalState);
+  copyPersistentCredentialsMembers(&canonicalState, state);
+  return prefs.putBytes(kCredentialsKey, &canonicalState,
+                        sizeof(canonicalState)) == sizeof(canonicalState);
 }
 
 // Private helpers

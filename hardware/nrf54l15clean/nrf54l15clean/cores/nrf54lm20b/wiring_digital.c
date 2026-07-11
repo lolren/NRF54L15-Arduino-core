@@ -83,6 +83,14 @@ static NRF_GPIO_Type* gpio_for_port(uint8_t port)
     }
 }
 
+static void release_nfc_pad_for_gpio(const pin_desc_t* d)
+{
+    if (d != 0 && d->port == 1U && (d->pin == 1U || d->pin == 2U)) {
+        NRF_NFCT->PADCONFIG =
+            (NFCT_PADCONFIG_ENABLE_Disabled << NFCT_PADCONFIG_ENABLE_Pos);
+    }
+}
+
 static void irq_state_init_once(void)
 {
     if (g_irq_state_initialized != 0U) {
@@ -244,6 +252,7 @@ static void configure_pin_for_interrupt(const pin_desc_t* d, uint8_t level_low)
         return;
     }
 
+    release_nfc_pad_for_gpio(d);
     const uint32_t bit = (1UL << d->pin);
     uint32_t cnf = gpio->PIN_CNF[d->pin];
     cnf &= ~(GPIO_PIN_CNF_DIR_Msk |
@@ -361,6 +370,7 @@ void pinMode(uint8_t pin, uint8_t mode)
         return;
     }
 
+    release_nfc_pad_for_gpio(&d);
     const uint32_t bit = (1UL << d.pin);
     uint32_t cnf = gpio->PIN_CNF[d.pin];
 

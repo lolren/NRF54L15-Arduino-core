@@ -316,15 +316,15 @@ bool Nrf54MatterOnOffLightDevice::loadPersistentState(
     return false;
   }
 
-  memset(outState, 0, sizeof(*outState));
+  *outState = MatterOnOffLightPersistentState{};
   if (prefs_.getBytes(kPersistentStateKey, outState, sizeof(*outState)) !=
       sizeof(*outState)) {
-    memset(outState, 0, sizeof(*outState));
+    *outState = MatterOnOffLightPersistentState{};
     return false;
   }
 
   if (!persistentStateValid(*outState)) {
-    memset(outState, 0, sizeof(*outState));
+    *outState = MatterOnOffLightPersistentState{};
     return false;
   }
   return true;

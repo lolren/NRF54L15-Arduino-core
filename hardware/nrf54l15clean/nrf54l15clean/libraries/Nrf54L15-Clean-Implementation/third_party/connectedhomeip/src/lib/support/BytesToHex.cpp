@@ -203,6 +203,7 @@ size_t UppercaseHexToUint16(const char * src_hex, const size_t src_size, uint16_
 
 void LogBufferAsHex(const char * label, const ByteSpan & span)
 {
+    (void) label;
     constexpr size_t kBytesPerLine = 32u;
 
     size_t remaining = span.size();

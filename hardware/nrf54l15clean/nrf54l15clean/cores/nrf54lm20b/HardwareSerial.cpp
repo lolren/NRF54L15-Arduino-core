@@ -73,6 +73,18 @@ static NRF_GPIO_Type* gpio_for_port(uint8_t port) {
     }
 }
 
+static bool is_nfc_pad(uint8_t port, uint8_t pin) {
+    return port == 1U && (pin == 1U || pin == 2U);
+}
+
+static void release_nfc_pads_for_gpio(uint8_t txPort, uint8_t tx,
+                                      uint8_t rxPort, uint8_t rx) {
+    if (is_nfc_pad(txPort, tx) || is_nfc_pad(rxPort, rx)) {
+        NRF_NFCT->PADCONFIG =
+            (NFCT_PADCONFIG_ENABLE_Disabled << NFCT_PADCONFIG_ENABLE_Pos);
+    }
+}
+
 static void configure_pin_output(uint8_t port, uint8_t pin, bool high) {
     NRF_GPIO_Type* gpio = gpio_for_port(port);
     if (gpio == nullptr) {
@@ -424,6 +436,7 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
         return;
     }
 
+    release_nfc_pads_for_gpio(txPort, tx, rxPort, rx);
     configure_pin_output(txPort, tx, true);
     configure_pin_input(rxPort, rx, true);
     requestConstlatIfNeeded();
@@ -601,6 +614,7 @@ void HardwareSerial::forceReInit() {
     if (!decode_pin(_txPin, &txPort, &tx) || !decode_pin(_rxPin, &rxPort, &rx)) {
         return;
     }
+    release_nfc_pads_for_gpio(txPort, tx, rxPort, rx);
     configure_pin_output(txPort, tx, true);
     configure_pin_input(rxPort, rx, true);
 

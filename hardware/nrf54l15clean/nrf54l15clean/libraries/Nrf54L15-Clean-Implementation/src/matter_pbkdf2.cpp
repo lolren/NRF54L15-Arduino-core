@@ -1,4 +1,7 @@
-#if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && NRF54L15_CLEAN_MATTER_CORE_ENABLE
+#if (defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && \
+     NRF54L15_CLEAN_MATTER_CORE_ENABLE) || \
+    (defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) && \
+     NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE)
 
 #include "matter_pbkdf2.h"
 
@@ -242,4 +245,4 @@ bool MatterPbkdf2::deriveKey(const uint8_t* password, size_t passwordLength,
 
 }  // namespace xiao_nrf54l15
 
-#endif // NRF54L15_CLEAN_MATTER_CORE_ENABLE
+#endif  // Matter or OpenThread core enabled

@@ -236,6 +236,21 @@ jobs:
           - board: xiao_nrf54lm20b
             options: cpu_freq=128m
             sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Power/SystemOffWakeDiag
+          - board: nrf54l15dk_pca10156
+            options: clean_serial=header
+            sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Serial/SerialDualBaudRemapProbe
+          - board: xiao_nrf54l15
+            options: cpu_freq=64m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/HID/blehid_mouse
+          - board: xiao_nrf54l15
+            options: clean_thread=stage
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalJoinerPSK
+          - board: xiao_nrf54l15
+            options: clean_thread=stage,clean_matter=stage
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCryptoTest
+          - board: xiao_nrf54l15
+            options: clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeCoordinator
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -256,9 +271,17 @@ jobs:
 
       - name: Compile audit contract
         run: |
+          set -o pipefail
+          build_log="${RUNNER_TEMP}/audit-contract-build.log"
           arduino-cli compile \
+            --warnings all \
             --fqbn "localnrf54:nrf54l15clean:${{ matrix.board }}:${{ matrix.options }}" \
-            "${GITHUB_WORKSPACE}/${{ matrix.sketch }}"
+            "${GITHUB_WORKSPACE}/${{ matrix.sketch }}" 2>&1 | tee "${build_log}"
+          if grep -Fq "warning:" "${build_log}"; then
+            echo "Compiler warnings are not allowed in audit-contract builds."
+            grep -F "warning:" "${build_log}"
+            exit 1
+          fi
 
   windows-native-tooling:
     runs-on: windows-latest

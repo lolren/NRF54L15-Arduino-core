@@ -321,6 +321,8 @@ uint32_t buildMeasurementRfTimedMode2Token(uint8_t version,
                                            uint32_t listenWaitLoops,
                                            uint32_t disableWaitLoops,
                                            uint32_t stateAfter) {
+  (void)disableWaitLoops;
+  (void)stateAfter;
   return 0xD2000000UL ^
          static_cast<uint32_t>(version) ^
          (static_cast<uint32_t>(flags) << 16U) ^
@@ -594,7 +596,7 @@ bool buildH4VendorPeerResultSourceEvent(uint8_t* out,
   return true;
 }
 
-bool buildDemoPeerResultPackets(uint16_t connHandle,
+[[maybe_unused]] bool buildDemoPeerResultPackets(uint16_t connHandle,
                                 uint8_t configId,
                                 uint16_t procedureCounter,
                                 const BleCsControllerVprBuiltInPeerDemoConfig& config,
@@ -4139,7 +4141,6 @@ bool parseVprPendingLocalLlControlPduResponse(
   const uint8_t pduLen = params[9];
   if (outState->status != 0U || pduLen == 0U ||
       static_cast<size_t>(10U + pduLen) > completeEvent.returnParamsLen ||
-      pduLen > sizeof(outPdu->bytes) ||
       !bleCsLlControlPduIsValid(params + 10U, pduLen)) {
     return false;
   }
@@ -10343,8 +10344,9 @@ bool BleCsConnectedMode2SweepRunner::runInitiator(
     }
   }
 
-  memset(measurements, 0,
-         static_cast<size_t>(config.channelCount) * sizeof(measurements[0]));
+  for (uint8_t i = 0U; i < config.channelCount; ++i) {
+    measurements[i] = BleCsChannelMeasurement{};
+  }
 
   if (workItemApplied) {
     result.attempts = effectiveChannelCount;

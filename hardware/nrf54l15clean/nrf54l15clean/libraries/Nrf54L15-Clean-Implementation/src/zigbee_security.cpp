@@ -459,7 +459,7 @@ bool aesMmoHash(const uint8_t* data, uint16_t length, uint8_t outDigest[16]) {
     memcpy(block, &data[offset], remaining);
   }
   block[remaining] = 0x80U;
-  if ((kAesBlockSize - remaining) < 3U) {
+  if ((kAesBlockSize - remaining) < 3) {
     if (!aesEncryptBlock(digest, block, encrypted)) {
       return false;
     }
@@ -594,7 +594,7 @@ bool ZigbeeSecurity::parseNwkSecurityHeader(const uint8_t* data, uint8_t length,
                                             ZigbeeNwkSecurityHeader* outHeader,
                                             uint8_t* outHeaderLength) {
   if (outHeader != nullptr) {
-    memset(outHeader, 0, sizeof(*outHeader));
+    *outHeader = ZigbeeNwkSecurityHeader{};
   }
   if (outHeaderLength != nullptr) {
     *outHeaderLength = 0U;
@@ -605,7 +605,6 @@ bool ZigbeeSecurity::parseNwkSecurityHeader(const uint8_t* data, uint8_t length,
   }
 
   uint8_t offset = 0U;
-  outHeader->valid = true;
   outHeader->securityControl = data[offset++];
   outHeader->frameCounter = readLe32(&data[offset]);
   offset = static_cast<uint8_t>(offset + 4U);
@@ -637,6 +636,7 @@ bool ZigbeeSecurity::parseNwkSecurityHeader(const uint8_t* data, uint8_t length,
   }
 
   *outHeaderLength = offset;
+  outHeader->valid = true;
   return true;
 }
 
@@ -671,7 +671,7 @@ bool ZigbeeSecurity::parseApsSecurityHeader(const uint8_t* data, uint8_t length,
                                             ZigbeeApsSecurityHeader* outHeader,
                                             uint8_t* outHeaderLength) {
   if (outHeader != nullptr) {
-    memset(outHeader, 0, sizeof(*outHeader));
+    *outHeader = ZigbeeApsSecurityHeader{};
   }
   if (outHeaderLength != nullptr) {
     *outHeaderLength = 0U;
@@ -682,7 +682,6 @@ bool ZigbeeSecurity::parseApsSecurityHeader(const uint8_t* data, uint8_t length,
   }
 
   uint8_t offset = 0U;
-  outHeader->valid = true;
   outHeader->securityControl = data[offset++];
   outHeader->frameCounter = readLe32(&data[offset]);
   offset = static_cast<uint8_t>(offset + 4U);
@@ -727,6 +726,7 @@ bool ZigbeeSecurity::parseApsSecurityHeader(const uint8_t* data, uint8_t length,
   }
 
   *outHeaderLength = offset;
+  outHeader->valid = true;
   return true;
 }
 
@@ -923,10 +923,10 @@ bool ZigbeeSecurity::parseSecuredNwkFrame(const uint8_t* frame, uint8_t length,
                                           uint8_t* outPayloadLength,
                                           uint64_t defaultSourceIeee) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeNetworkFrame{};
   }
   if (outSecurity != nullptr) {
-    memset(outSecurity, 0, sizeof(*outSecurity));
+    *outSecurity = ZigbeeNwkSecurityHeader{};
   }
   if (outPayloadLength != nullptr) {
     *outPayloadLength = 0U;
@@ -937,6 +937,8 @@ bool ZigbeeSecurity::parseSecuredNwkFrame(const uint8_t* frame, uint8_t length,
     return false;
   }
 
+  ZigbeeNetworkFrame parsedFrame{};
+  ZigbeeNwkSecurityHeader parsedSecurity{};
   const uint16_t control = readLe16(frame);
   const uint8_t protocolVersion =
       static_cast<uint8_t>((control >> 2U) & 0x0FU);
@@ -954,51 +956,50 @@ bool ZigbeeSecurity::parseSecuredNwkFrame(const uint8_t* frame, uint8_t length,
   }
 
   uint8_t offset = 2U;
-  outFrame->valid = true;
-  outFrame->frameType = static_cast<ZigbeeNwkFrameType>(control & 0x03U);
-  outFrame->discoverRoute = static_cast<uint8_t>((control >> 6U) & 0x03U);
-  outFrame->multicast = multicast;
-  outFrame->securityEnabled = securityEnabled;
-  outFrame->sourceRoute = sourceRoute;
-  outFrame->extendedDestination = extendedDestination;
-  outFrame->extendedSource = extendedSource;
+  parsedFrame.frameType = static_cast<ZigbeeNwkFrameType>(control & 0x03U);
+  parsedFrame.discoverRoute = static_cast<uint8_t>((control >> 6U) & 0x03U);
+  parsedFrame.multicast = multicast;
+  parsedFrame.securityEnabled = securityEnabled;
+  parsedFrame.sourceRoute = sourceRoute;
+  parsedFrame.extendedDestination = extendedDestination;
+  parsedFrame.extendedSource = extendedSource;
 
   if (length < static_cast<uint8_t>(offset + 6U)) {
     return false;
   }
-  outFrame->destinationShort = readLe16(&frame[offset]);
+  parsedFrame.destinationShort = readLe16(&frame[offset]);
   offset = static_cast<uint8_t>(offset + 2U);
-  outFrame->sourceShort = readLe16(&frame[offset]);
+  parsedFrame.sourceShort = readLe16(&frame[offset]);
   offset = static_cast<uint8_t>(offset + 2U);
-  outFrame->radius = frame[offset++];
-  outFrame->sequence = frame[offset++];
+  parsedFrame.radius = frame[offset++];
+  parsedFrame.sequence = frame[offset++];
 
   if (extendedDestination) {
     if (length < static_cast<uint8_t>(offset + 8U)) {
       return false;
     }
-    outFrame->destinationExtended = readLe64(&frame[offset]);
+    parsedFrame.destinationExtended = readLe64(&frame[offset]);
     offset = static_cast<uint8_t>(offset + 8U);
   }
   if (extendedSource) {
     if (length < static_cast<uint8_t>(offset + 8U)) {
       return false;
     }
-    outFrame->sourceExtended = readLe64(&frame[offset]);
+    parsedFrame.sourceExtended = readLe64(&frame[offset]);
     offset = static_cast<uint8_t>(offset + 8U);
   }
 
   uint8_t securityHeaderLength = 0U;
   if (!parseNwkSecurityHeader(&frame[offset],
                               static_cast<uint8_t>(length - offset),
-                              outSecurity, &securityHeaderLength)) {
+                              &parsedSecurity, &securityHeaderLength)) {
     return false;
   }
-  if (outSecurity->sourceIeee == 0U) {
-    if (outFrame->extendedSource) {
-      outSecurity->sourceIeee = outFrame->sourceExtended;
+  if (parsedSecurity.sourceIeee == 0U) {
+    if (parsedFrame.extendedSource) {
+      parsedSecurity.sourceIeee = parsedFrame.sourceExtended;
     } else if (defaultSourceIeee != 0U) {
-      outSecurity->sourceIeee = defaultSourceIeee;
+      parsedSecurity.sourceIeee = defaultSourceIeee;
     }
   }
 
@@ -1024,20 +1025,29 @@ bool ZigbeeSecurity::parseSecuredNwkFrame(const uint8_t* frame, uint8_t length,
   }
 
   uint8_t nonce[kCcmNonceLength] = {0U};
-  if (!buildNwkNonce(outSecurity->sourceIeee, outSecurity->frameCounter,
-                     nwkSecurityControlForCrypto(outSecurity->securityControl),
+  if (!buildNwkNonce(parsedSecurity.sourceIeee, parsedSecurity.frameCounter,
+                     nwkSecurityControlForCrypto(parsedSecurity.securityControl),
                      nonce)) {
     return false;
   }
 
   const uint8_t ciphertextLength = static_cast<uint8_t>(length - offset);
+  uint8_t plaintext[127] = {0U};
+  uint8_t plaintextLength = 0U;
   if (!decryptCcmStar(key, nonce, aad, aadLength, &frame[offset],
-                      ciphertextLength, outPayload, outPayloadLength)) {
+                      ciphertextLength, plaintext, &plaintextLength)) {
     return false;
   }
 
-  outFrame->payload = outPayload;
-  outFrame->payloadLength = *outPayloadLength;
+  if (plaintextLength > 0U) {
+    memcpy(outPayload, plaintext, plaintextLength);
+  }
+  parsedFrame.payload = outPayload;
+  parsedFrame.payloadLength = plaintextLength;
+  parsedFrame.valid = true;
+  *outPayloadLength = plaintextLength;
+  *outFrame = parsedFrame;
+  *outSecurity = parsedSecurity;
   return true;
 }
 
@@ -1126,10 +1136,10 @@ bool ZigbeeSecurity::parseSecuredApsCommandFrame(
     ZigbeeApsCommandFrame* outFrame, ZigbeeApsSecurityHeader* outSecurity,
     uint8_t* outPayload, uint8_t* outPayloadLength) {
   if (outFrame != nullptr) {
-    memset(outFrame, 0, sizeof(*outFrame));
+    *outFrame = ZigbeeApsCommandFrame{};
   }
   if (outSecurity != nullptr) {
-    memset(outSecurity, 0, sizeof(*outSecurity));
+    *outSecurity = ZigbeeApsSecurityHeader{};
   }
   if (outPayloadLength != nullptr) {
     *outPayloadLength = 0U;
@@ -1140,6 +1150,8 @@ bool ZigbeeSecurity::parseSecuredApsCommandFrame(
     return false;
   }
 
+  ZigbeeApsCommandFrame parsedFrame{};
+  ZigbeeApsSecurityHeader parsedSecurity{};
   const uint8_t control = frame[0];
   const ZigbeeApsFrameType frameType =
       static_cast<ZigbeeApsFrameType>(control & 0x03U);
@@ -1152,17 +1164,16 @@ bool ZigbeeSecurity::parseSecuredApsCommandFrame(
   }
 
   uint8_t offset = 2U;
-  outFrame->valid = true;
-  outFrame->frameType = frameType;
-  outFrame->deliveryMode = deliveryMode;
-  outFrame->securityEnabled = securityEnabled;
-  outFrame->ackRequested = ((control >> 6U) & 0x1U) != 0U;
-  outFrame->counter = frame[1];
+  parsedFrame.frameType = frameType;
+  parsedFrame.deliveryMode = deliveryMode;
+  parsedFrame.securityEnabled = securityEnabled;
+  parsedFrame.ackRequested = ((control >> 6U) & 0x1U) != 0U;
+  parsedFrame.counter = frame[1];
 
   uint8_t securityHeaderLength = 0U;
   if (!parseApsSecurityHeader(&frame[offset],
                               static_cast<uint8_t>(length - offset),
-                              outSecurity, &securityHeaderLength)) {
+                              &parsedSecurity, &securityHeaderLength)) {
     return false;
   }
 
@@ -1188,8 +1199,8 @@ bool ZigbeeSecurity::parseSecuredApsCommandFrame(
   }
 
   uint8_t nonce[kCcmNonceLength] = {0U};
-  if (!buildNwkNonce(outSecurity->sourceIeee, outSecurity->frameCounter,
-                     apsSecurityControlForNonce(outSecurity->securityControl),
+  if (!buildNwkNonce(parsedSecurity.sourceIeee, parsedSecurity.frameCounter,
+                     apsSecurityControlForNonce(parsedSecurity.securityControl),
                      nonce)) {
     return false;
   }
@@ -1203,13 +1214,17 @@ bool ZigbeeSecurity::parseSecuredApsCommandFrame(
     return false;
   }
 
-  outFrame->commandId = plaintext[0];
-  *outPayloadLength = static_cast<uint8_t>(plaintextLength - 1U);
-  if (*outPayloadLength > 0U) {
-    memcpy(outPayload, &plaintext[1], *outPayloadLength);
+  const uint8_t payloadLength = static_cast<uint8_t>(plaintextLength - 1U);
+  if (payloadLength > 0U) {
+    memcpy(outPayload, &plaintext[1], payloadLength);
   }
-  outFrame->payload = outPayload;
-  outFrame->payloadLength = *outPayloadLength;
+  parsedFrame.commandId = plaintext[0];
+  parsedFrame.payload = outPayload;
+  parsedFrame.payloadLength = payloadLength;
+  parsedFrame.valid = true;
+  *outPayloadLength = payloadLength;
+  *outFrame = parsedFrame;
+  *outSecurity = parsedSecurity;
   return true;
 }
 
@@ -1254,7 +1269,10 @@ bool ZigbeeSecurity::parseSecuredApsTransportKeyCommand(
     ZigbeeApsTransportKey* outTransportKey, ZigbeeApsSecurityHeader* outSecurity,
     uint8_t* outCounter) {
   if (outTransportKey != nullptr) {
-    memset(outTransportKey, 0, sizeof(*outTransportKey));
+    *outTransportKey = ZigbeeApsTransportKey{};
+  }
+  if (outSecurity != nullptr) {
+    *outSecurity = ZigbeeApsSecurityHeader{};
   }
   if (outCounter != nullptr) {
     *outCounter = 0U;
@@ -1265,6 +1283,7 @@ bool ZigbeeSecurity::parseSecuredApsTransportKeyCommand(
   }
 
   ZigbeeApsCommandFrame command{};
+  ZigbeeApsSecurityHeader parsedSecurity{};
   uint8_t payload[64] = {0U};
   uint8_t payloadLength = 0U;
   uint8_t transportKeyKey[16] = {0U};
@@ -1272,7 +1291,7 @@ bool ZigbeeSecurity::parseSecuredApsTransportKeyCommand(
     return false;
   }
   if (!parseSecuredApsCommandFrame(frame, length, transportKeyKey, &command,
-                                   outSecurity,
+                                   &parsedSecurity,
                                    payload, &payloadLength) ||
       !command.valid ||
       command.commandId != kZigbeeApsCommandTransportKey ||
@@ -1281,7 +1300,6 @@ bool ZigbeeSecurity::parseSecuredApsTransportKeyCommand(
   }
 
   uint8_t offset = 0U;
-  outTransportKey->valid = true;
   outTransportKey->keyType = payload[offset++];
   if (outTransportKey->keyType != kZigbeeApsTransportKeyStandardNetworkKey) {
     return false;
@@ -1293,6 +1311,8 @@ bool ZigbeeSecurity::parseSecuredApsTransportKeyCommand(
   offset = static_cast<uint8_t>(offset + 8U);
   outTransportKey->sourceIeee = readLe64(&payload[offset]);
   *outCounter = command.counter;
+  outTransportKey->valid = true;
+  *outSecurity = parsedSecurity;
   return true;
 }
 
@@ -1329,7 +1349,10 @@ bool ZigbeeSecurity::parseSecuredApsUpdateDeviceCommand(
     ZigbeeApsUpdateDevice* outUpdateDevice,
     ZigbeeApsSecurityHeader* outSecurity, uint8_t* outCounter) {
   if (outUpdateDevice != nullptr) {
-    memset(outUpdateDevice, 0, sizeof(*outUpdateDevice));
+    *outUpdateDevice = ZigbeeApsUpdateDevice{};
+  }
+  if (outSecurity != nullptr) {
+    *outSecurity = ZigbeeApsSecurityHeader{};
   }
   if (outCounter != nullptr) {
     *outCounter = 0U;
@@ -1340,9 +1363,10 @@ bool ZigbeeSecurity::parseSecuredApsUpdateDeviceCommand(
   }
 
   ZigbeeApsCommandFrame command{};
+  ZigbeeApsSecurityHeader parsedSecurity{};
   uint8_t payload[16] = {0U};
   uint8_t payloadLength = 0U;
-  if (!parseSecuredApsCommandFrame(frame, length, key, &command, outSecurity,
+  if (!parseSecuredApsCommandFrame(frame, length, key, &command, &parsedSecurity,
                                    payload, &payloadLength) ||
       !command.valid || command.commandId != kZigbeeApsCommandUpdateDevice ||
       payloadLength != 11U) {
@@ -1354,6 +1378,7 @@ bool ZigbeeSecurity::parseSecuredApsUpdateDeviceCommand(
   outUpdateDevice->deviceShort = readLe16(&payload[8]);
   outUpdateDevice->status = payload[10];
   *outCounter = command.counter;
+  *outSecurity = parsedSecurity;
   return true;
 }
 
@@ -1376,7 +1401,10 @@ bool ZigbeeSecurity::parseSecuredApsSwitchKeyCommand(
     ZigbeeApsSwitchKey* outSwitchKey, ZigbeeApsSecurityHeader* outSecurity,
     uint8_t* outCounter) {
   if (outSwitchKey != nullptr) {
-    memset(outSwitchKey, 0, sizeof(*outSwitchKey));
+    *outSwitchKey = ZigbeeApsSwitchKey{};
+  }
+  if (outSecurity != nullptr) {
+    *outSecurity = ZigbeeApsSecurityHeader{};
   }
   if (outCounter != nullptr) {
     *outCounter = 0U;
@@ -1387,9 +1415,10 @@ bool ZigbeeSecurity::parseSecuredApsSwitchKeyCommand(
   }
 
   ZigbeeApsCommandFrame command{};
+  ZigbeeApsSecurityHeader parsedSecurity{};
   uint8_t payload[8] = {0U};
   uint8_t payloadLength = 0U;
-  if (!parseSecuredApsCommandFrame(frame, length, key, &command, outSecurity,
+  if (!parseSecuredApsCommandFrame(frame, length, key, &command, &parsedSecurity,
                                    payload, &payloadLength) ||
       !command.valid || command.commandId != kZigbeeApsCommandSwitchKey ||
       payloadLength != 1U) {
@@ -1399,6 +1428,7 @@ bool ZigbeeSecurity::parseSecuredApsSwitchKeyCommand(
   outSwitchKey->valid = true;
   outSwitchKey->keySequence = payload[0];
   *outCounter = command.counter;
+  *outSecurity = parsedSecurity;
   return true;
 }
 

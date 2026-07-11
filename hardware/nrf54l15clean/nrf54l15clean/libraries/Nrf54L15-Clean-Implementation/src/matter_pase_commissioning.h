@@ -227,8 +227,7 @@ class MatterPaseCommissioning {
                       const otIp6Address& source, uint16_t sourcePort);
   void handleSpake2p2(const uint8_t* payload, uint16_t length,
                       const otIp6Address& source, uint16_t sourcePort);
-  void handleSpake2p3(const uint8_t* payload, uint16_t length,
-                      const otIp6Address& source, uint16_t sourcePort);
+  void handleSpake2p3(const uint8_t* payload, uint16_t length);
 
   // SPAKE2+ cryptographic operations
   bool deriveW0W1FromPasscode();

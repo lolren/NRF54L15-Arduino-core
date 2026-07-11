@@ -118,10 +118,12 @@ static uint8_t highestSetBit(uint32_t mask)
     return (uint8_t)(31U - (uint32_t)__builtin_clz(mask));
 }
 
+#if defined(NRF54_CLEAN_XIAO_GRTC_RESTRICTED)
 static uint8_t lowestSetBit(uint32_t mask)
 {
     return (uint8_t)__builtin_ctz(mask);
 }
+#endif
 
 static bool lfclkRunningFrom(uint32_t src)
 {

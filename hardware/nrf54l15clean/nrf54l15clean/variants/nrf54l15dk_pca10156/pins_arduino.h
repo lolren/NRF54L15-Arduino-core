@@ -182,7 +182,7 @@ enum {
 /*
  * Default peripheral routes:
  * - Serial  : P1.04/P1.05 matches the DK expansion header/VCOM1 pair.
- * - Serial1 : P0.00/P0.01 exposes the alternate UART pair.
+ * - Serial1 : P1.02/P1.03 is a separate UARTE21 route exposed as D16/D17.
  * - Wire    : P1.10/P1.11 stays on the P1 header domain used by the core.
  * - Wire1   : P0.04/P0.03 mirrors the existing secondary route.
  * - SPI     : keep the known-good core route (P2.02/P2.04/P2.01, SS=P1.06).
@@ -194,8 +194,8 @@ enum {
 
 #define PIN_SERIAL_TX  PIN_P1_04
 #define PIN_SERIAL_RX  PIN_P1_05
-#define PIN_SERIAL1_TX PIN_SERIAL_TX
-#define PIN_SERIAL1_RX PIN_SERIAL_RX
+#define PIN_SERIAL1_TX PIN_P1_02
+#define PIN_SERIAL1_RX PIN_P1_03
 
 #define PIN_SPI_MOSI PIN_P2_02
 #define PIN_SPI_MISO PIN_P2_04

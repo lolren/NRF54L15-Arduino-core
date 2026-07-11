@@ -711,7 +711,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     encDebug_.encRspLastTxWasFresh = txPayloadIsFreshFast ? 1U : 0U;
     emitBleTrace("LL_ENC_RSP_FAST_TX_OK");
 
-    bool fastFollowStartEncHandled = false;
     if (fastFollowRxArmed) {
       ++encDebug_.followupArmed;
       const uint16_t rxPayloadLength = currentRxDataPduPayloadLength();
@@ -972,7 +971,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
                                            connectionEncPrecomputedPayload_,
                                            &preLen) &&
                       (preLen == kBleMicLen);
-                  fastFollowStartEncHandled = true;
                   emitBleTrace("LL_START_ENC_RSP_FAST_FOLLOW_TX_OK");
                 }
                 radio_->SHORTS = 0U;
@@ -1104,7 +1102,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       return false;
     }
 
-    const uint16_t cccd = readLe16(&rxPacket_[9]);
     const uint32_t armStartUs = bleTimingUs();
     uint8_t divider = kBleConnMicrosPollDivider;
     while ((radio_->EVENTS_CRCOK == 0U) &&

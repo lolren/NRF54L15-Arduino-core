@@ -452,7 +452,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::snapshot(
     return false;
   }
 
-  memset(outStatus, 0, sizeof(*outStatus));
+  *outStatus = MatterOnNetworkOnOffLightStatus{};
   outStatus->storageOpen = storageOpen_;
   outStatus->lightReady = lightReady_;
   outStatus->threadStarted = thread_.started();
@@ -677,7 +677,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::readinessSummary(
     return false;
   }
 
-  memset(outSummary, 0, sizeof(*outSummary));
+  *outSummary = MatterOnNetworkReadinessSummary{};
   outSummary->storageOpen = storageOpen_;
   outSummary->lightReady = lightReady_;
   outSummary->foundationReady = foundation_.mechanicalPathPossible();
@@ -754,7 +754,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoverySummary(
     return false;
   }
 
-  memset(outSummary, 0, sizeof(*outSummary));
+  *outSummary = MatterOnNetworkDiscoverySummary{};
   outSummary->valid = true;
   outSummary->serviceType = foundation_.commissionableServiceType();
   outSummary->port = Nrf54MatterOnOffLightFoundation::kMatterUdpPort;
@@ -839,7 +839,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::discoveryPublicationState(
     return false;
   }
 
-  memset(outState, 0, sizeof(*outState));
+  *outState = MatterOnNetworkDiscoveryPublicationState{};
   outState->attempted = discoveryPublicationAttempted_;
   outState->active = discoveryPublicationActive_;
   outState->stagedOnly = !discoveryPublicationBackendAvailable_;
@@ -878,7 +878,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::buildCommissionableDiscoveryRecord(
     return false;
   }
 
-  memset(outRecord, 0, sizeof(*outRecord));
+  *outRecord = MatterOnNetworkDiscoveryRecord{};
   outRecord->valid = summary.valid;
   outRecord->stagedOnly = summary.stagedOnly;
   outRecord->readyToRegister = summary.readyToRegister;
@@ -924,7 +924,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::buildOperationalDiscoveryRecord(
     return false;
   }
 
-  memset(outRecord, 0, sizeof(*outRecord));
+  *outRecord = MatterOnNetworkDiscoveryRecord{};
   outRecord->valid = true;
   outRecord->stagedOnly = true;
   outRecord->readyToRegister = false;
@@ -1400,7 +1400,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::buildCommissioningBundle(
     return false;
   }
 
-  memset(outBundle, 0, sizeof(*outBundle));
+  *outBundle = MatterOnNetworkCommissioningBundle{};
   outBundle->datasetSource = datasetSource_;
   outBundle->commissioningWindowState = commissioningWindowState();
   outBundle->commissioningWindowSecondsRemaining =
@@ -1692,7 +1692,7 @@ void Nrf54MatterOnNetworkOnOffLightNode::buildManualPayload(
     return;
   }
 
-  memset(outPayload, 0, sizeof(*outPayload));
+  *outPayload = MatterManualPairingPayload{};
   outPayload->setupPinCode = identity_.setupPinCode;
   outPayload->discriminator = identity_.discriminator;
   outPayload->vendorId = identity_.vendorId;
@@ -1706,7 +1706,7 @@ void Nrf54MatterOnNetworkOnOffLightNode::buildQrPayload(
     return;
   }
 
-  memset(outPayload, 0, sizeof(*outPayload));
+  *outPayload = MatterQrCodePayload{};
   outPayload->setupPinCode = identity_.setupPinCode;
   outPayload->discriminator = identity_.discriminator;
   outPayload->vendorId = identity_.vendorId;

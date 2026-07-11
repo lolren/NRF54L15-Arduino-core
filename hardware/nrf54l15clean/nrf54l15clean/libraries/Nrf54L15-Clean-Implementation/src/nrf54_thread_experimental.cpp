@@ -51,6 +51,10 @@ constexpr uint8_t kDemoPskc[OT_PSKC_MAX_SIZE] = {
     0x4A, 0x62, 0x18, 0xD4, 0xCE, 0x07, 0x39, 0x5B,
 };
 
+bool stageDelayElapsed(uint32_t elapsedMs, uint32_t delayMs) {
+  return elapsedMs >= delayMs;
+}
+
 }  // namespace
 
 bool Nrf54ThreadExperimental::begin(bool wipeSettings) {
@@ -197,6 +201,7 @@ bool Nrf54ThreadExperimental::stop() {
 bool Nrf54ThreadExperimental::restart(bool wipeSettings) {
 #if !defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) || \
     (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE == 0)
+  (void)wipeSettings;
   lastError_ = OT_ERROR_INVALID_STATE;
   return false;
 #else
@@ -255,7 +260,7 @@ void Nrf54ThreadExperimental::process() {
 
   const uint32_t elapsedMs = (uint32_t)(otPlatTimeGet() / 1000ULL) - beginMs_;
 
-  if (instance_ == nullptr && elapsedMs >= kStageInitDelayMs) {
+  if (instance_ == nullptr && stageDelayElapsed(elapsedMs, kStageInitDelayMs)) {
     instance_ = otInstanceInitSingle();
     if (instance_ == nullptr || !otInstanceIsInitialized(instance_)) {
       lastError_ = OT_ERROR_FAILED;
@@ -298,7 +303,7 @@ void Nrf54ThreadExperimental::process() {
   }
 
   if (instance_ != nullptr && !joinerOnly && datasetConfigured_ && !datasetApplied_ &&
-      elapsedMs >= kStageDatasetApplyDelayMs) {
+      stageDelayElapsed(elapsedMs, kStageDatasetApplyDelayMs)) {
     lastError_ = otDatasetSetActive(instance_, &dataset_);
     if (lastError_ == OT_ERROR_NONE) {
       datasetApplied_ = true;
@@ -306,7 +311,7 @@ void Nrf54ThreadExperimental::process() {
   }
 
   if (instance_ != nullptr && joinerOnly && !linkConfigured_ &&
-      elapsedMs >= kStageIp6EnableDelayMs) {
+      stageDelayElapsed(elapsedMs, kStageIp6EnableDelayMs)) {
     const otLinkModeConfig mode = {true, false, true};
     lastError_ = otThreadSetLinkMode(instance_, mode);
     if (lastError_ == OT_ERROR_NONE) {
@@ -320,7 +325,7 @@ void Nrf54ThreadExperimental::process() {
   // the initial child attach mode and intentionally re-attaches if a child that
   // first attached as rx-on later switches to rx-off.
   if (instance_ != nullptr && sleepyChild && datasetApplied_ && !linkConfigured_ &&
-      elapsedMs >= kStageIp6EnableDelayMs) {
+      stageDelayElapsed(elapsedMs, kStageIp6EnableDelayMs)) {
     const otLinkModeConfig mode = {false, false, true};
     lastError_ = otThreadSetLinkMode(instance_, mode);
     if (lastError_ == OT_ERROR_NONE) {
@@ -332,7 +337,7 @@ void Nrf54ThreadExperimental::process() {
   }
 
   if (instance_ != nullptr && !joinerOnly && !sleepyChild && datasetApplied_ && !linkConfigured_ &&
-      elapsedMs >= kStageIp6EnableDelayMs) {
+      stageDelayElapsed(elapsedMs, kStageIp6EnableDelayMs)) {
     // Child-first uses non-sleepy MTD mode first. If no parent appears, the
     // deterministic fallback below flips back to FTD/router-eligible mode.
     const bool fullThreadDevice =
@@ -347,7 +352,7 @@ void Nrf54ThreadExperimental::process() {
   }
 
   if (instance_ != nullptr && !joinerOnly && ip6Enabled_ && !threadEnabled_ &&
-      elapsedMs >= kStageThreadEnableDelayMs) {
+      stageDelayElapsed(elapsedMs, kStageThreadEnableDelayMs)) {
     lastError_ = otThreadSetEnabled(instance_, true);
     threadEnabled_ = (lastError_ == OT_ERROR_NONE);
   }
@@ -1118,7 +1123,7 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
     outSummary->waitingForIp6Enable = true;
     setText(outSummary->phaseName, sizeof(outSummary->phaseName),
             "joiner_ip6_enable");
-    if (elapsedMs < kStageIp6EnableDelayMs) {
+    if (!stageDelayElapsed(elapsedMs, kStageIp6EnableDelayMs)) {
       setText(outSummary->blockerName, sizeof(outSummary->blockerName),
               "waiting_joiner_ip6_delay");
     } else {
@@ -1161,7 +1166,7 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
     outSummary->waitingForDatasetApply = true;
     setText(outSummary->phaseName, sizeof(outSummary->phaseName),
             "dataset_apply");
-    if (elapsedMs < kStageDatasetApplyDelayMs) {
+    if (!stageDelayElapsed(elapsedMs, kStageDatasetApplyDelayMs)) {
       setText(outSummary->blockerName, sizeof(outSummary->blockerName),
               "waiting_dataset_apply_delay");
     } else {
@@ -1174,7 +1179,7 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
   if (!linkConfigured_ || !ip6Enabled_) {
     outSummary->waitingForIp6Enable = true;
     setText(outSummary->phaseName, sizeof(outSummary->phaseName), "ip6_enable");
-    if (elapsedMs < kStageIp6EnableDelayMs) {
+    if (!stageDelayElapsed(elapsedMs, kStageIp6EnableDelayMs)) {
       setText(outSummary->blockerName, sizeof(outSummary->blockerName),
               "waiting_ip6_enable_delay");
     } else {
@@ -1188,7 +1193,7 @@ bool Nrf54ThreadExperimental::getAttachSummary(AttachSummary* outSummary) const 
     outSummary->waitingForThreadEnable = true;
     setText(outSummary->phaseName, sizeof(outSummary->phaseName),
             "thread_enable");
-    if (elapsedMs < kStageThreadEnableDelayMs) {
+    if (!stageDelayElapsed(elapsedMs, kStageThreadEnableDelayMs)) {
       setText(outSummary->blockerName, sizeof(outSummary->blockerName),
               "waiting_thread_enable_delay");
     } else {

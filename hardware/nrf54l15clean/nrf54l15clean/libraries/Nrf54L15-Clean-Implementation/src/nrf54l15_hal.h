@@ -2564,20 +2564,20 @@ class BleRadio {
   bool addCustomGattCharacteristic(uint16_t serviceHandle, uint16_t uuid16,
                                    uint8_t properties,
                                    const uint8_t* initialValue = nullptr,
-                                   uint8_t initialValueLength = 0U,
+                                   uint16_t initialValueLength = 0U,
                                    uint16_t* outValueHandle = nullptr,
                                    uint16_t* outCccdHandle = nullptr);
   bool addCustomGattCharacteristic(uint16_t serviceHandle, uint16_t uuid16,
                                    uint8_t properties,
                                    const uint8_t* initialValue,
-                                   uint8_t initialValueLength,
+                                   uint16_t initialValueLength,
                                    uint16_t* outValueHandle,
                                    uint16_t* outCccdHandle,
                                    uint16_t* outUserDescriptionHandle,
                                    const char* userDescription);
   bool addCustomGattCharacteristicWithDescriptors(
       uint16_t serviceHandle, uint16_t uuid16, uint8_t properties,
-      const uint8_t* initialValue, uint8_t initialValueLength,
+      const uint8_t* initialValue, uint16_t initialValueLength,
       uint16_t* outValueHandle, uint16_t* outCccdHandle,
       const BleCustomGattDescriptorConfig* descriptors,
       BleCustomGattDescriptorHandles* outDescriptorHandles = nullptr);
@@ -2585,21 +2585,21 @@ class BleRadio {
                                       const uint8_t uuid128[16],
                                       uint8_t properties,
                                       const uint8_t* initialValue = nullptr,
-                                      uint8_t initialValueLength = 0U,
+                                      uint16_t initialValueLength = 0U,
                                       uint16_t* outValueHandle = nullptr,
                                       uint16_t* outCccdHandle = nullptr);
   bool addCustomGattCharacteristic128(uint16_t serviceHandle,
                                       const uint8_t uuid128[16],
                                       uint8_t properties,
                                       const uint8_t* initialValue,
-                                      uint8_t initialValueLength,
+                                      uint16_t initialValueLength,
                                       uint16_t* outValueHandle,
                                       uint16_t* outCccdHandle,
                                       uint16_t* outUserDescriptionHandle,
                                       const char* userDescription);
   bool addCustomGattCharacteristic128WithDescriptors(
       uint16_t serviceHandle, const uint8_t uuid128[16], uint8_t properties,
-      const uint8_t* initialValue, uint8_t initialValueLength,
+      const uint8_t* initialValue, uint16_t initialValueLength,
       uint16_t* outValueHandle, uint16_t* outCccdHandle,
       const BleCustomGattDescriptorConfig* descriptors,
       BleCustomGattDescriptorHandles* outDescriptorHandles = nullptr);
@@ -3014,7 +3014,7 @@ class BleRadio {
                                          const uint8_t* uuid, uint8_t uuidSize,
                                          uint8_t properties,
                                          const uint8_t* initialValue,
-                                         uint8_t initialValueLength,
+                                         uint16_t initialValueLength,
                                          uint16_t* outValueHandle,
                                          uint16_t* outCccdHandle,
                                          const BleCustomGattDescriptorConfig* descriptors,
@@ -3111,11 +3111,11 @@ class BleRadio {
   bool secureConnectionsResponderVerifiesRandom() const;
   void clearPendingL2capTxFragment();
   bool deferL2capTxPayload(const uint8_t* l2capPayload,
-                           uint8_t l2capPayloadLength);
+                           uint16_t l2capPayloadLength);
   bool rewindPendingL2capTxFragment();
   bool queueNextPendingL2capTxFragment();
   bool prepareL2capTxPayload(const uint8_t* l2capPayload,
-                             uint8_t l2capPayloadLength,
+                             uint16_t l2capPayloadLength,
                              uint8_t* outPayload,
                              uint8_t* outPayloadLength);
   bool buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLength,
@@ -3150,7 +3150,7 @@ class BleRadio {
                                        uint8_t uuidLength,
                                        uint8_t properties,
                                        const uint8_t* initialValue,
-                                       uint8_t initialValueLength,
+                                       uint16_t initialValueLength,
                                        uint16_t* outValueHandle,
                                        uint16_t* outCccdHandle);
   BleCustomServiceState* findCustomServiceByHandle(uint16_t serviceHandle);
@@ -3250,7 +3250,7 @@ class BleRadio {
   void rememberLatestConnectionRssi(const BleConnectionEvent& event);
   bool enqueueCustomGattNotification(uint8_t characteristicIndex, bool indicate,
                                      const uint8_t* value,
-                                     uint8_t valueLength);
+                                     uint16_t valueLength);
   bool peekCustomGattNotification(
       BleQueuedCustomNotificationState* outNotification) const;
   void popCustomGattNotification();

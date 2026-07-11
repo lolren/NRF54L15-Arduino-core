@@ -12,10 +12,6 @@ void writeUint16Le(uint16_t v, uint8_t* b, size_t off) {
   b[off + 1] = (v >> 8U) & 0xFFU;
 }
 
-uint16_t readUint16Le(const uint8_t* b, size_t off) {
-  return (uint16_t)b[off] | ((uint16_t)b[off + 1] << 8U);
-}
-
 // Build the To-Be-Signed data for a certificate
 size_t buildTbsData(const uint8_t subjectPubKey[65],
                     uint16_t vendorId, uint16_t productId,
@@ -65,8 +61,7 @@ bool MatterDeviceAttestation::generateTestChain(
   // Create PAA certificate (self-signed root)
   {
     uint8_t serial[32] = {0};
-    if (!signCertificate(paaPrivateKey_, paaPublicKey_,
-                         paaPrivateKey_, paaPublicKey_,
+    if (!signCertificate(paaPrivateKey_, paaPublicKey_, paaPublicKey_,
                          vendorId, productId,
                          serial, &paaCert_,
                          AttestationCertType::kPAA)) {
@@ -78,8 +73,7 @@ bool MatterDeviceAttestation::generateTestChain(
   // Create PAI certificate (signed by PAA)
   {
     uint8_t serial[32] = {0};
-    if (!signCertificate(paaPrivateKey_, paaPublicKey_,
-                         paiPrivateKey_, paiPublicKey_,
+    if (!signCertificate(paaPrivateKey_, paaPublicKey_, paiPublicKey_,
                          vendorId, productId,
                          serial, &paiCert_,
                          AttestationCertType::kPAI)) {
@@ -89,8 +83,7 @@ bool MatterDeviceAttestation::generateTestChain(
   }
 
   // Create DAC certificate (signed by PAI)
-  if (!signCertificate(paiPrivateKey_, paiPublicKey_,
-                       dacPrivateKey_, dacPublicKey_,
+  if (!signCertificate(paiPrivateKey_, paiPublicKey_, dacPublicKey_,
                        vendorId, productId,
                        serialNumber, &dacCert_,
                        AttestationCertType::kDAC)) {
@@ -104,7 +97,6 @@ bool MatterDeviceAttestation::generateTestChain(
 bool MatterDeviceAttestation::signCertificate(
     const Secp256r1Scalar& issuerPrivateKey,
     const Secp256r1Point& issuerPublicKey,
-    const Secp256r1Scalar& subjectPrivateKey,
     const Secp256r1Point& subjectPublicKey,
     uint16_t vendorId, uint16_t productId,
     const uint8_t serialNumber[32],
@@ -113,7 +105,7 @@ bool MatterDeviceAttestation::signCertificate(
 
   if (outCert == nullptr) return false;
 
-  memset(outCert, 0, sizeof(*outCert));
+  *outCert = AttestationCertificate{};
 
   // Subject public key
   Secp256r1::encodeUncompressed(subjectPublicKey, outCert->subjectPubKey);

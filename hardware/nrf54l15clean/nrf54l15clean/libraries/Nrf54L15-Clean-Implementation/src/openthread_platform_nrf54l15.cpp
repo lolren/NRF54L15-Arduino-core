@@ -318,7 +318,9 @@ void publishThreadChannelPowerSnapshot(OpenThreadPlatformState& state,
     const ThreadChannelPowerState& power =
         state.channelPower[threadRadioChannelIndex(channel)];
     state.snapshot.radioLastChannelMaxTxPowerDbm =
-        power.maxPowerSet ? power.maxPowerDbm : OT_RADIO_POWER_INVALID;
+        power.maxPowerSet
+            ? power.maxPowerDbm
+            : static_cast<int8_t>(OT_RADIO_POWER_INVALID);
     state.snapshot.radioLastChannelTargetPowerCentiDbm =
         power.targetPowerSet ? power.targetPowerCentiDbm : 0;
   }
@@ -1091,7 +1093,9 @@ bool threadMacDataRequestPendingCallback(const uint8_t* psdu, uint8_t length,
   state->snapshot.radioLastSrcMatchMatched = match;
   state->snapshot.radioLastSrcMatchWasShort = source.shortAddress;
   state->snapshot.radioLastSrcMatchShortAddress =
-      source.shortAddress ? source.shortValue : OT_RADIO_INVALID_SHORT_ADDR;
+      source.shortAddress
+          ? source.shortValue
+          : static_cast<otShortAddress>(OT_RADIO_INVALID_SHORT_ADDR);
   if (match) {
     state->snapshot.radioSrcMatchAckSetCount++;
   } else {
@@ -1619,10 +1623,10 @@ otCryptoKeyRef allocateVolatileKeyRef() {
   return 0U;
 }
 
-otError resolveKeyMaterial(const otCryptoKey* key,
-                           uint8_t* outKey,
-                           size_t outKeyCapacity,
-                           size_t* outKeyLength) {
+[[maybe_unused]] otError resolveKeyMaterial(const otCryptoKey* key,
+                                            uint8_t* outKey,
+                                            size_t outKeyCapacity,
+                                            size_t* outKeyLength) {
   if (key == nullptr || outKeyLength == nullptr) {
     return OT_ERROR_INVALID_ARGS;
   }
@@ -1650,7 +1654,7 @@ otError resolveKeyMaterial(const otCryptoKey* key,
   return OT_ERROR_NONE;
 }
 
-CryptoAesContext* getAesContext(otCryptoContext* context) {
+[[maybe_unused]] CryptoAesContext* getAesContext(otCryptoContext* context) {
   if (context == nullptr || context->mContext == nullptr) {
     return nullptr;
   }
@@ -1662,7 +1666,8 @@ CryptoAesContext* getAesContext(otCryptoContext* context) {
   return static_cast<CryptoAesContext*>(context->mContext);
 }
 
-CryptoSha256Context* getSha256Context(otCryptoContext* context) {
+[[maybe_unused]] CryptoSha256Context* getSha256Context(
+    otCryptoContext* context) {
   if (context == nullptr || context->mContext == nullptr) {
     return nullptr;
   }
@@ -1674,7 +1679,8 @@ CryptoSha256Context* getSha256Context(otCryptoContext* context) {
   return static_cast<CryptoSha256Context*>(context->mContext);
 }
 
-CryptoHmacSha256Context* getHmacSha256Context(otCryptoContext* context) {
+[[maybe_unused]] CryptoHmacSha256Context* getHmacSha256Context(
+    otCryptoContext* context) {
   if (context == nullptr || context->mContext == nullptr) {
     return nullptr;
   }
@@ -1686,7 +1692,7 @@ CryptoHmacSha256Context* getHmacSha256Context(otCryptoContext* context) {
   return static_cast<CryptoHmacSha256Context*>(context->mContext);
 }
 
-CryptoHkdfContext* getHkdfContext(otCryptoContext* context) {
+[[maybe_unused]] CryptoHkdfContext* getHkdfContext(otCryptoContext* context) {
   if (context == nullptr || context->mContext == nullptr) {
     return nullptr;
   }
@@ -1951,15 +1957,15 @@ otError finishHmacSha256(CryptoHmacSha256Context& context,
   return error;
 }
 
-otError hmacSha256Compute(const uint8_t* key,
-                         size_t keyLength,
-                         const uint8_t* inputA,
-                         size_t inputALength,
-                         const uint8_t* inputB,
-                         size_t inputBLength,
-                         const uint8_t* inputC,
-                         size_t inputCLength,
-                         uint8_t* hash) {
+[[maybe_unused]] otError hmacSha256Compute(const uint8_t* key,
+                                          size_t keyLength,
+                                          const uint8_t* inputA,
+                                          size_t inputALength,
+                                          const uint8_t* inputB,
+                                          size_t inputBLength,
+                                          const uint8_t* inputC,
+                                          size_t inputCLength,
+                                          uint8_t* hash) {
   CryptoHmacSha256Context context = {};
   otError error = startHmacSha256(context, key, keyLength);
   if (error == OT_ERROR_NONE && inputALength != 0U) {
@@ -2118,13 +2124,13 @@ otError aesCmacPrf128(const uint8_t* key,
   return error;
 }
 
-otError pbkdf2AesCmacPrf128(const uint8_t* password,
-                            uint16_t passwordLength,
-                            const uint8_t* salt,
-                            uint16_t saltLength,
-                            uint32_t iterationCounter,
-                            uint16_t keyLength,
-                            uint8_t* key) {
+[[maybe_unused]] otError pbkdf2AesCmacPrf128(const uint8_t* password,
+                                             uint16_t passwordLength,
+                                             const uint8_t* salt,
+                                             uint16_t saltLength,
+                                             uint32_t iterationCounter,
+                                             uint16_t keyLength,
+                                             uint8_t* key) {
   if ((password == nullptr && passwordLength != 0U) ||
       (salt == nullptr && saltLength != 0U) ||
       (key == nullptr && keyLength != 0U) || iterationCounter == 0U ||
@@ -2174,9 +2180,10 @@ otError pbkdf2AesCmacPrf128(const uint8_t* password,
       }
     }
 
+    const uint16_t remaining = static_cast<uint16_t>(keyLength - produced);
     const uint16_t chunkLength =
-        ((keyLength - produced) < kCryptoAesBlockSize)
-            ? (keyLength - produced)
+        (remaining < kCryptoAesBlockSize)
+            ? remaining
             : static_cast<uint16_t>(kCryptoAesBlockSize);
     memcpy(key + produced, t, chunkLength);
     produced += chunkLength;
@@ -2189,7 +2196,7 @@ otError pbkdf2AesCmacPrf128(const uint8_t* password,
   return OT_ERROR_NONE;
 }
 
-void recordUnsupportedCrypto(void) {
+[[maybe_unused]] void recordUnsupportedCrypto(void) {
   ++gOpenThreadPlatformState.snapshot.cryptoUnsupportedCount;
 }
 
@@ -2892,7 +2899,7 @@ void otSysInit(int, char**) {
   using namespace xiao_nrf54l15;
 
   OpenThreadPlatformState& state = gOpenThreadPlatformState;
-  memset(&state.snapshot, 0, sizeof(state.snapshot));
+  state.snapshot = OpenThreadPlatformSkeletonSnapshot{};
   memset(state.txPsdu, 0, sizeof(state.txPsdu));
   memset(state.txAckPsdu, 0, sizeof(state.txAckPsdu));
   clearThreadRadioRxQueue(state);
@@ -3008,7 +3015,7 @@ void otSysProcessDrivers(otInstance* instance) {
       fired = true;
     }
 
-    bool microFired = false;
+    [[maybe_unused]] bool microFired = false;
     const uint32_t nowUs = otPlatAlarmMicroGetNow();
     if (state.snapshot.alarmMicroRunning &&
         static_cast<int32_t>(nowUs - state.snapshot.alarmMicroDeadline) >= 0) {
@@ -4438,6 +4445,7 @@ otError otPlatRadioEnableCsl(otInstance* instance, uint32_t periodUs,
   // The OT core handles sample-time scheduling; the PAL returns accuracy
   // and uncertainty values.  Hardware-timed CSL wakeups require interrupt-
   // driven radio which the current cooperative-polling PAL does not use.
+  (void)instance;
   using namespace xiao_nrf54l15;
   OpenThreadPlatformState& state = gOpenThreadPlatformState;
   if (!state.snapshot.radioEnabled) {

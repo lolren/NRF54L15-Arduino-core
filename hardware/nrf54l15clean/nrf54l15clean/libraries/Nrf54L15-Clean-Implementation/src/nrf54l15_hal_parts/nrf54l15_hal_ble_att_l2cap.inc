@@ -741,7 +741,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       uint16_t used = 2U;
       uint8_t responseFormat = 0U;
       uint16_t recordCount = 0U;
-      bool stopFindInfo = false;
       for (size_t i = 0; i < (sizeof(kBleAttributeUuids) / sizeof(kBleAttributeUuids[0]));
            ++i) {
         const BleAttributeUuidRecord& record = kBleAttributeUuids[i];
@@ -996,8 +995,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       uint16_t used = 2U;
       uint8_t entryLen = 0U;
       uint16_t recordCount = 0U;
-      uint16_t firstSecurityBlockedHandle = 0U;
-      uint8_t firstSecurityBlockedError = 0U;
       for (size_t i = 0; i < (sizeof(kBlePrimaryServices) / sizeof(kBlePrimaryServices[0]));
            ++i) {
         const BlePrimaryServiceRecord& service = kBlePrimaryServices[i];
@@ -1099,8 +1096,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       if (typeLen == kBleUuid16Size && type == kUuidCharacteristic) {
         entryLen = 7U;
         outAttResponse[1] = entryLen;
-        const uint16_t maxRecords =
-            static_cast<uint16_t>((maxAttResponseLen - 2U) / entryLen);
         for (size_t i = 0; i < (sizeof(kBleCharacteristics) / sizeof(kBleCharacteristics[0]));
              ++i) {
           const BleCharacteristicRecord& ch = kBleCharacteristics[i];
@@ -1152,8 +1147,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       } else if (typeLen == kBleUuid16Size && type == kUuidPrimaryService) {
         entryLen = 4U;
         outAttResponse[1] = entryLen;
-        const uint16_t maxRecords =
-            static_cast<uint16_t>((maxAttResponseLen - 2U) / entryLen);
         for (size_t i = 0; i < (sizeof(kBlePrimaryServices) / sizeof(kBlePrimaryServices[0]));
              ++i) {
           const BlePrimaryServiceRecord& service = kBlePrimaryServices[i];

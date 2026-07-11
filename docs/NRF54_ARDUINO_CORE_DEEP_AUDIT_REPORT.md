@@ -9,9 +9,9 @@ This report is based only on the repository, the supplied local PDFs/text extrac
 
 ## Remediation Update - 2026-07-11
 
-Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.221**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218, 0.9.219, 0.9.220, and 0.9.221 follow-ups together record the current source-tree result.
+Current status for this checkout: **all 71 audit items have been addressed in the 0.9.222 source tree**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218 through 0.9.222 follow-ups together record the current source-tree result.
 
-The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
+The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation tooling, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
 Verification completed in this remediation pass:
 
@@ -82,6 +82,30 @@ Connected-board evidence on XIAO nRF54L15 UID `761FDE87`:
 * `./tools/release.sh 0.9.221` passed package-index verification, release-archive verification, and the archive Thread/Matter stage-probe compiles. Its archive is `nrf54l15clean-0.9.221-89ab4ffaf500.tar.bz2`, SHA-256 `89ab4ffaf5006ead5dc0587155fb339f43f3c346981339cd580c8cfdb23ccda7`, size `26941243`.
 
 The current persistence format stores one bond and one associated CCCD record. Switching to a phone whose older bond was replaced may require forgetting and pairing again; transparent retained switching among several hosts requires a future multi-bond storage migration. This follow-up does not claim full Bluetooth qualification or RF conformance, and affected users should retest the published package on their devices.
+
+### Release Hardening Follow-up - 2026-07-11 (v0.9.222)
+
+The PCA10156 variant documented `Serial1` as an alternate UART but aliased its default pins to `Serial`, putting both globals on P1.04/P1.05. Version 0.9.222 keeps the DK/VCOM `Serial` route on P1.04/P1.05 and moves the independent UARTE21 `Serial1` default to P1.02/P1.03, which are exposed by the variant as D16/D17 and are valid UARTE20/21 pins according to the supplied nRF54L15 product specification. Those two pads reset as NFC1/NFC2 with GPIO input disabled, so both L15 `HardwareSerial` and the GPIO configuration path now release NFCT `PADCONFIG` before using them; the corresponding LM20 path uses that chip's P1.01/P1.02 NFC mapping.
+
+Regression coverage checks that the two DK routes remain distinct, verifies NFCT release for both chip families, adds PCA10156 assertions and runtime register diagnostics to `SerialDualBaudRemapProbe`, and compiles that probe under the DK FQBN in CI. The probe also selects an independent P1.02/P1.03 route on HOLYIOT-25008 instead of remapping both UART objects to D0/D1. A separate Windows CI harness false failure was corrected: the intentional uploader failure-propagation test now clears its captured expected exit code before returning to the GitHub Actions shell wrapper.
+
+A post-v0.9.221 CI matrix run exposed three Thread-only PSK joiner link failures. `nrf54_all.h` intentionally exposes `MatterPbkdf2` as the shared PBKDF2/HMAC/SHA-256 helper for Thread and Matter, but its implementation file was guarded only by the Matter feature flag. The implementation now compiles when either staged core is enabled, restoring the Thread-only link path without enabling the rest of Matter.
+
+A strict compiler-warning audit then corrected behavior-sensitive defects across BLE, Matter, OpenThread and Zigbee. Custom-GATT declarations, storage and Bluefruit integration now preserve the advertised 512-byte characteristic-value capacity end to end; notifications larger than the negotiated single-PDU limit are rejected before any eight-bit length conversion. BLE central disconnects distinguish MIC failure, peer termination and internal termination. Secured Zigbee parsers commit frame and security output only after complete authenticated parsing, and malformed simple parsers leave their outputs invalid. Typed resets preserve nonzero defaults including the Matter SPAKE2+ PBKDF iteration count of 2000, invalid OpenThread address sentinels and channel-sounding quality sentinels. Persisted Matter and Zigbee blobs also retain deterministic padding while applying typed defaults.
+
+Verification completed for this follow-up:
+
+* `CXX=/usr/bin/g++ python3 scripts/test_core_io_regressions.py` passed, including the NFC/PCA10156, Thread PBKDF2, BLE disconnect/GATT, Zigbee parser/persistence and typed-default contracts; `python3 scripts/test_upload_helper.py` passed all 11 tests.
+* Strict source-local `--warnings all` builds passed without warning lines for `blehid_mouse`, the 512-byte custom-GATT probe, `ThreadExperimentalJoinerPSK`, `MatterPaseCryptoTest`, `ZigbeeCoordinator` with BLE disabled, and the PCA10156 `SerialDualBaudRemapProbe`. CI now enforces the same representative warning gate across L15 and LM20 audit targets.
+* Thread-only source-local builds passed for `ThreadExperimentalJoinerPSK`, `ThreadExperimentalJoinerPSKCommissioner`, and `ThreadExperimentalJoinerPSKJoiner`.
+* The Windows-native tooling job passed on GitHub Actions after the harness correction.
+* The canonical `./tools/release.sh 0.9.222` build passed package-index and exact-archive verification. Its final archive is `nrf54l15clean-0.9.222-895d84604181.tar.bz2`, SHA-256 `895d84604181ea524f36020d9b62d385ecc8d61e6327b4761002105e7926ad7c`, size `26940633`; all three checked-in indexes identify those exact bytes.
+* Six additional `--warnings all` builds from the extracted final archive passed for HID, 512-byte custom GATT, Thread PSK, Matter PASE, BLE-disabled Zigbee and PCA10156 Serial.
+* The extracted-archive HID image was loaded through pyOCD onto XIAO nRF54L15 UID `761FDE87`, reset, and observed advertising as `XIAO nRF54L15` without pairing. Only that probe enumerated during the final v0.9.222 pass; the second previously used board was unavailable.
+
+The five-phone HID interoperability result above remains the user-confirmed v0.9.221 baseline. The v0.9.222 final package still needs reporter retesting and does not claim Bluetooth qualification, RF conformance, multi-bond persistence, or PPK2 current characterization.
+
+The remainder of this document is retained as the pre-remediation audit record. Present-tense defect descriptions and priority tables below describe the audited baseline, not the corrected 0.9.222 source tree.
 
 ## Executive Summary
 

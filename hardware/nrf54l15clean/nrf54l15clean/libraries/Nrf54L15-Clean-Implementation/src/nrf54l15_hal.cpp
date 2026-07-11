@@ -138,6 +138,8 @@ bool quiesceSharedRadioForSystemOff(uint32_t spinLimit) {
   return true;
 }
 
+#if !defined(NRF54L15_CLEAN_BLE_DISABLED) && \
+    (!defined(NRF54L15_CLEAN_BLE_ENABLED) || (NRF54L15_CLEAN_BLE_ENABLED != 0))
 void clearUnownedBleBackgroundGrtcCompares() {
   static constexpr uint8_t kChannels[] = {
       kBleBackgroundAdvPrewarmCompareChannel,
@@ -167,6 +169,7 @@ void clearUnownedBleBackgroundGrtcCompares() {
     }
   }
 }
+#endif
 
 }  // namespace
 

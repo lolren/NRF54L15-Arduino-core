@@ -1343,8 +1343,6 @@ bool BleRadio::serviceBackgroundAdvertising() {
       backgroundAdvertisingManageLatency_ ? 1U : 0U;
   backgroundAdvertisingDebug_.constlatActive =
       bleBackgroundAdvertisingConstlatActive() ? 1U : 0U;
-  const uint8_t radioState = static_cast<uint8_t>(
-      (radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos);
   const bool txReadySeen = (radio_->EVENTS_READY != 0U);
   const bool txPhyendSeen = (radio_->EVENTS_PHYEND != 0U) ||
                             (radio_->EVENTS_END != 0U);
@@ -1681,7 +1679,6 @@ bool BleRadio::handleExtendedScanRequestAndMaybeRespond(
       ((RADIO_SHORTS_PHYEND_DISABLE_Enabled << RADIO_SHORTS_PHYEND_DISABLE_Pos) &
        RADIO_SHORTS_PHYEND_DISABLE_Msk);
 
-  const uint64_t txPhaseStartUs = nrf54l15_core_monotonic_time_us();
   radio_->TASKS_TXEN = RADIO_TASKS_TXEN_TASKS_TXEN_Trigger;
   uint32_t txEndUs = 0U;
   const bool txEndSeen = waitRadioEndBudgeted(radio_, 3000U, spinLimit,

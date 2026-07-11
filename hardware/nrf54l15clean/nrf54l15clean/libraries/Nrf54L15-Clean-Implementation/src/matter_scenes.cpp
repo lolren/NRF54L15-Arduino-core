@@ -71,7 +71,7 @@ bool MatterScenes::viewScene(uint16_t groupId, uint8_t sceneId,
 bool MatterScenes::removeScene(uint16_t groupId, uint8_t sceneId) {
   const int8_t idx = findScene(groupId, sceneId);
   if (idx < 0) return false;
-  memset(&scenes_[idx], 0, sizeof(scenes_[idx]));
+  scenes_[idx] = SceneEntry{};
   sceneCount_--;
   return true;
 }
@@ -112,7 +112,7 @@ bool MatterScenes::removeAllScenes(uint16_t groupId) {
   bool anyRemoved = false;
   for (uint8_t i = 0; i < kMaxScenes; i++) {
     if (scenes_[i].valid && scenes_[i].groupId == groupId) {
-      memset(&scenes_[i], 0, sizeof(scenes_[i]));
+      scenes_[i] = SceneEntry{};
       anyRemoved = true;
     }
   }
@@ -126,7 +126,9 @@ bool MatterScenes::removeAllScenes(uint16_t groupId) {
 }
 
 void MatterScenes::clear() {
-  memset(scenes_, 0, sizeof(scenes_));
+  for (SceneEntry& scene : scenes_) {
+    scene = SceneEntry{};
+  }
   sceneCount_ = 0U;
 }
 

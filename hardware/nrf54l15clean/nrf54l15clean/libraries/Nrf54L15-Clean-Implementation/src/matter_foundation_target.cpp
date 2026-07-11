@@ -201,7 +201,7 @@ bool Nrf54MatterOnOffLightFoundation::describeEndpoint(
     return false;
   }
 
-  memset(outSummary, 0, sizeof(*outSummary));
+  *outSummary = MatterFoundationDescriptorSummary{};
   const MatterFoundationEndpointDescriptor* descriptor = endpoint(endpointId);
   if (descriptor == nullptr) {
     return false;
@@ -282,7 +282,7 @@ bool Nrf54MatterOnOffLightFoundation::discoveryCapabilities(
     return false;
   }
 
-  memset(outCapabilities, 0, sizeof(*outCapabilities));
+  *outCapabilities = MatterFoundationDiscoveryCapabilities{};
   outCapabilities->dnsClientEnabled = kOpenThreadDnsClientEnabled;
   outCapabilities->mdnsCoreEnabled = kOpenThreadMdnsCoreEnabled;
   outCapabilities->mdnsPublicApiEnabled = kOpenThreadMdnsPublicApiEnabled;
@@ -343,7 +343,7 @@ void Nrf54MatterOnOffLightFoundation::buildDefaultThreadOnNetworkQrPayload(
     return;
   }
 
-  memset(outPayload, 0, sizeof(*outPayload));
+  *outPayload = MatterQrCodePayload{};
   outPayload->setupPinCode = kDefaultSetupPinCode;
   outPayload->discriminator = kDefaultDiscriminator;
   outPayload->vendorId = kDefaultVendorId;
@@ -359,7 +359,7 @@ void Nrf54MatterOnOffLightFoundation::buildDefaultThreadOnNetworkManualPayload(
     return;
   }
 
-  memset(outPayload, 0, sizeof(*outPayload));
+  *outPayload = MatterManualPairingPayload{};
   outPayload->setupPinCode = kDefaultSetupPinCode;
   outPayload->discriminator = kDefaultDiscriminator;
   outPayload->commissioningFlow = MatterCommissioningFlow::kStandard;

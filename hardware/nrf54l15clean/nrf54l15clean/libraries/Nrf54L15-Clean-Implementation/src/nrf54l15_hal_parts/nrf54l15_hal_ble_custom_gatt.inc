@@ -370,7 +370,7 @@ bool BleRadio::addCustomGattServiceCommon(const uint8_t* uuid, uint8_t uuidSize,
 bool BleRadio::addCustomGattCharacteristic(uint16_t serviceHandle, uint16_t uuid16,
                                            uint8_t properties,
                                            const uint8_t* initialValue,
-                                           uint8_t initialValueLength,
+                                           uint16_t initialValueLength,
                                            uint16_t* outValueHandle,
                                            uint16_t* outCccdHandle) {
   if (uuid16 == 0U) {
@@ -387,7 +387,7 @@ bool BleRadio::addCustomGattCharacteristic(uint16_t serviceHandle, uint16_t uuid
 bool BleRadio::addCustomGattCharacteristic(uint16_t serviceHandle, uint16_t uuid16,
                                            uint8_t properties,
                                            const uint8_t* initialValue,
-                                           uint8_t initialValueLength,
+                                           uint16_t initialValueLength,
                                            uint16_t* outValueHandle,
                                            uint16_t* outCccdHandle,
                                            uint16_t* outUserDescriptionHandle,
@@ -412,7 +412,7 @@ bool BleRadio::addCustomGattCharacteristic(uint16_t serviceHandle, uint16_t uuid
 
 bool BleRadio::addCustomGattCharacteristicWithDescriptors(
     uint16_t serviceHandle, uint16_t uuid16, uint8_t properties,
-    const uint8_t* initialValue, uint8_t initialValueLength,
+    const uint8_t* initialValue, uint16_t initialValueLength,
     uint16_t* outValueHandle, uint16_t* outCccdHandle,
     const BleCustomGattDescriptorConfig* descriptors,
     BleCustomGattDescriptorHandles* outDescriptorHandles) {
@@ -431,7 +431,7 @@ bool BleRadio::addCustomGattCharacteristic128(uint16_t serviceHandle,
                                               const uint8_t uuid128[16],
                                               uint8_t properties,
                                               const uint8_t* initialValue,
-                                              uint8_t initialValueLength,
+                                              uint16_t initialValueLength,
                                               uint16_t* outValueHandle,
                                               uint16_t* outCccdHandle) {
   return addCustomGattCharacteristicCommon(serviceHandle, uuid128,
@@ -445,7 +445,7 @@ bool BleRadio::addCustomGattCharacteristic128(uint16_t serviceHandle,
                                               const uint8_t uuid128[16],
                                               uint8_t properties,
                                               const uint8_t* initialValue,
-                                              uint8_t initialValueLength,
+                                              uint16_t initialValueLength,
                                               uint16_t* outValueHandle,
                                               uint16_t* outCccdHandle,
                                               uint16_t* outUserDescriptionHandle,
@@ -465,7 +465,7 @@ bool BleRadio::addCustomGattCharacteristic128(uint16_t serviceHandle,
 
 bool BleRadio::addCustomGattCharacteristic128WithDescriptors(
     uint16_t serviceHandle, const uint8_t uuid128[16], uint8_t properties,
-    const uint8_t* initialValue, uint8_t initialValueLength,
+    const uint8_t* initialValue, uint16_t initialValueLength,
     uint16_t* outValueHandle, uint16_t* outCccdHandle,
     const BleCustomGattDescriptorConfig* descriptors,
     BleCustomGattDescriptorHandles* outDescriptorHandles) {
@@ -480,7 +480,7 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
                                                  uint8_t uuidSize,
                                                  uint8_t properties,
                                                  const uint8_t* initialValue,
-                                                 uint8_t initialValueLength,
+                                                 uint16_t initialValueLength,
                                                  uint16_t* outValueHandle,
                                                  uint16_t* outCccdHandle,
                                                  const BleCustomGattDescriptorConfig* descriptors,
@@ -671,9 +671,11 @@ bool BleRadio::getCustomGattCharacteristicValue(uint16_t valueHandle, uint8_t* o
 bool BleRadio::enqueueCustomGattNotification(uint8_t characteristicIndex,
                                              bool indicate,
                                              const uint8_t* value,
-                                             uint8_t valueLength) {
-  if (connectionCustomNotificationQueueCount_ >=
-      kCustomGattNotificationQueueDepth) {
+                                             uint16_t valueLength) {
+  if (valueLength > maxNotificationValueLength() ||
+      (valueLength > 0U && value == nullptr) ||
+      connectionCustomNotificationQueueCount_ >=
+          kCustomGattNotificationQueueDepth) {
     return false;
   }
 
@@ -682,8 +684,8 @@ bool BleRadio::enqueueCustomGattNotification(uint8_t characteristicIndex,
   slot.valid = true;
   slot.characteristicIndex = characteristicIndex;
   slot.indication = indicate;
-  slot.valueLength = valueLength;
-  if (valueLength > 0U && value != nullptr) {
+  slot.valueLength = static_cast<uint8_t>(valueLength);
+  if (valueLength > 0U) {
     memcpy(slot.value, value, valueLength);
   }
 
@@ -998,7 +1000,8 @@ bool BleRadio::attMtuExchangeComplete() const {
 }
 
 uint16_t BleRadio::currentDataLengthMaxTimeUs() const {
-  const uint8_t phy = connected_ ? connectionCurrentTxPhy_ : kBlePhy1M;
+  const uint8_t phy =
+      connected_ ? connectionCurrentTxPhy_ : static_cast<uint8_t>(kBlePhy1M);
   return maximumDataLengthTimeUsForPhy(phy);
 }
 
@@ -1035,12 +1038,14 @@ uint8_t BleRadio::symmetricBlePhys(uint8_t txPhys, uint8_t rxPhys) const {
 uint8_t BleRadio::preferredSymmetricBlePhys() const {
   const uint8_t symmetric =
       symmetricBlePhys(connectionPreferredTxPhyMask_, connectionPreferredRxPhyMask_);
-  return (symmetric != kBlePhyNone) ? symmetric : kBlePhy1M;
+  return (symmetric != kBlePhyNone) ? symmetric
+                                    : static_cast<uint8_t>(kBlePhy1M);
 }
 
 uint8_t BleRadio::normalizedLocalBlePhys(uint8_t phys) const {
   const uint8_t supported = supportedBlePhys(phys);
-  return (supported != kBlePhyNone) ? supported : kBlePhy1M;
+  return (supported != kBlePhyNone) ? supported
+                                    : static_cast<uint8_t>(kBlePhy1M);
 }
 
 uint8_t BleRadio::selectPreferredBlePhy(uint8_t phys) const {
@@ -1181,8 +1186,10 @@ void BleRadio::updateConnectionDataLengthFromPeer(uint16_t peerMaxRxOctets,
     peerMaxTxOctets = kBleDataPduMaxPayload;
   }
 
-  const uint8_t txPhy = connected_ ? connectionCurrentTxPhy_ : kBlePhy1M;
-  const uint8_t rxPhy = connected_ ? connectionCurrentRxPhy_ : kBlePhy1M;
+  const uint8_t txPhy = connected_ ? connectionCurrentTxPhy_
+                                   : static_cast<uint8_t>(kBlePhy1M);
+  const uint8_t rxPhy = connected_ ? connectionCurrentRxPhy_
+                                   : static_cast<uint8_t>(kBlePhy1M);
   const uint16_t minTxTimeUs = minimumDataLengthTimeUsForPhy(txPhy);
   const uint16_t minRxTimeUs = minimumDataLengthTimeUsForPhy(rxPhy);
   const uint16_t maxTxTimeUs = maximumDataLengthTimeUsForPhy(txPhy);

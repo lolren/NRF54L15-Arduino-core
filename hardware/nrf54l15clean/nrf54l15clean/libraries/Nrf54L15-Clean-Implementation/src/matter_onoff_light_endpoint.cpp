@@ -40,7 +40,7 @@ bool Nrf54MatterOnOffLightEndpoint::readAttribute(
     return false;
   }
 
-  memset(outValue, 0, sizeof(*outValue));
+  *outValue = MatterAttributeValue{};
   if (device_ == nullptr) {
     setStatus(outStatus, MatterInteractionStatus::kInvalidState);
     return false;
@@ -303,7 +303,7 @@ void Nrf54MatterOnOffLightEndpoint::fillResult(
   if (device_ != nullptr) {
     (void)device_->snapshot(&outResult->light);
   } else {
-    memset(&outResult->light, 0, sizeof(outResult->light));
+    outResult->light = MatterOnOffLightDeviceState{};
   }
 }
 

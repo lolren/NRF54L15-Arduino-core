@@ -218,7 +218,8 @@ uint8_t customUuidLength(uint8_t uuidLength) {
   return 0U;
 }
 
-void setCustomUuid16(uint8_t* uuidLength, uint8_t* uuidBytes, uint16_t uuid16) {
+[[maybe_unused]] void setCustomUuid16(uint8_t* uuidLength, uint8_t* uuidBytes,
+                                     uint16_t uuid16) {
   if (uuidLength == nullptr || uuidBytes == nullptr) {
     return;
   }
@@ -228,8 +229,8 @@ void setCustomUuid16(uint8_t* uuidLength, uint8_t* uuidBytes, uint16_t uuid16) {
   writeLe16(uuidBytes, uuid16);
 }
 
-bool setCustomUuid128(uint8_t* uuidLength, uint8_t* uuidBytes,
-                      const uint8_t* uuid128Canonical) {
+[[maybe_unused]] bool setCustomUuid128(uint8_t* uuidLength, uint8_t* uuidBytes,
+                                      const uint8_t* uuid128Canonical) {
   if (uuidLength == nullptr || uuidBytes == nullptr || uuid128Canonical == nullptr) {
     return false;
   }
@@ -244,10 +245,10 @@ bool setCustomUuid128(uint8_t* uuidLength, uint8_t* uuidBytes,
   return true;
 }
 
-bool customUuidMatchesRaw(const uint8_t* uuidBytes,
-                          uint8_t uuidLength,
-                          const uint8_t* rawUuid,
-                          uint8_t rawUuidLength) {
+[[maybe_unused]] bool customUuidMatchesRaw(const uint8_t* uuidBytes,
+                                           uint8_t uuidLength,
+                                           const uint8_t* rawUuid,
+                                           uint8_t rawUuidLength) {
   uuidLength = customUuidLength(uuidLength);
   if (uuidLength == 0U || rawUuid == nullptr || rawUuidLength != uuidLength) {
     return false;
@@ -255,7 +256,8 @@ bool customUuidMatchesRaw(const uint8_t* uuidBytes,
   return memcmp(uuidBytes, rawUuid, uuidLength) == 0;
 }
 
-uint8_t customCharacteristicDeclarationValueLength(uint8_t uuidLength) {
+[[maybe_unused]] uint8_t customCharacteristicDeclarationValueLength(
+    uint8_t uuidLength) {
   uuidLength = customUuidLength(uuidLength);
   return uuidLength == 0U ? 0U : static_cast<uint8_t>(3U + uuidLength);
 }

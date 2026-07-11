@@ -231,7 +231,11 @@ void Secp256r1::bnModAdd(const BigNum256& a, const BigNum256& b, BigNum256* out)
     for (int i = 0; i < 8; i++) acc[i] = (uint64_t)s.w[i];
     acc[0] += 1; acc[3] -= 1; acc[6] -= 1; acc[7] += 1;
     for (int i = 0; i < 8; i++) {
-      if (acc[i] < 0) { int64_t b = (-acc[i] + 0xFFFFFFFFLL) >> 32; acc[i] += b << 32; acc[i+1] -= b; }
+      if (acc[i] < 0) {
+        int64_t borrowWords = (-acc[i] + 0xFFFFFFFFLL) >> 32;
+        acc[i] += borrowWords << 32;
+        acc[i + 1] -= borrowWords;
+      }
       if (acc[i] >= 0x100000000LL) { int64_t c = acc[i] >> 32; acc[i] &= 0xFFFFFFFFLL; acc[i+1] += c; }
     }
     for (int i = 0; i < 8; i++) s.w[i] = (uint32_t)acc[i];

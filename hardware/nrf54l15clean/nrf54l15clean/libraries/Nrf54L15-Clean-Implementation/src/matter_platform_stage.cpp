@@ -89,7 +89,7 @@ bool MatterPlatform::snapshot(MatterPlatformState* outState) const {
     return false;
   }
 
-  memset(outState, 0, sizeof(*outState));
+  *outState = MatterPlatformState{};
   outState->initialized = storageOpen_;
   outState->storageOpen = storageOpen_;
   outState->threadStarted = thread_.started();

@@ -700,6 +700,8 @@ class BluefruitCompatManager {
         scan_rsp_name_added_(false),
         characteristic_count_(0U),
         client_characteristic_count_(0U),
+        scan_report_data_{},
+        scan_report_len_(0U),
         scan_report_channel_valid_(false),
         scan_report_channel_(BleAdvertisingChannel::k37),
         pending_connect_valid_(false),
@@ -737,9 +739,7 @@ class BluefruitCompatManager {
         security_secured_callback_fired_(false),
         security_seen_procedure_active_(false),
         security_last_encrypted_(false),
-        security_secured_callback_timeout_ms_(0UL),
-        scan_report_data_{0},
-        scan_report_len_(0U) {
+        security_secured_callback_timeout_ms_(0UL) {
     memset(characteristics_, 0, sizeof(characteristics_));
     memset(client_characteristics_, 0, sizeof(client_characteristics_));
     memset(&scan_report_, 0, sizeof(scan_report_));
@@ -3285,7 +3285,7 @@ bool discoverServiceRangeSync(const BLEUuid& uuid, uint16_t* startHandle,
   }
 
   uint16_t searchStart = 0x0001U;
-  while (searchStart <= 0xFFFFU) {
+  while (true) {
     uint8_t request[7] = {kAttOpReadByGroupTypeReq, 0U, 0U, 0U, 0U, 0U, 0U};
     writeLe16(&request[1], searchStart);
     writeLe16(&request[3], 0xFFFFU);
@@ -3938,8 +3938,7 @@ err_t BLECharacteristic::begin() {
           static_cast<uint8_t>(_report_ref_read_perm);
     }
   }
-  const uint8_t initialLen =
-      static_cast<uint8_t>(min<uint16_t>(clampValueLen(_value_len), 0xFFU));
+  const uint16_t initialLen = clampValueLen(_value_len);
   const uint8_t properties = mapProperties(_properties);
   bool ok = false;
   if (uuid.size() == 2U) {
@@ -5390,11 +5389,11 @@ uint8_t BLEClientBas::read() {
 
 BLEClientCts::BLEClientCts()
     : BLEClientService(UUID16_SVC_CURRENT_TIME),
+      Time{},
+      LocalInfo{},
       current_time_(UUID16_CHR_CURRENT_TIME),
       local_info_(UUID16_CHR_LOCAL_TIME_INFORMATION),
-      adjust_callback_(nullptr),
-      Time{},
-      LocalInfo{} {}
+      adjust_callback_(nullptr) {}
 
 bool BLEClientCts::begin() {
   current_time_.setNotifyCallback(currentTimeNotifyThunk);
@@ -5530,6 +5529,7 @@ bool BLEAncs::performAction(uint32_t uid, uint8_t actionid) {
 }
 
 uint16_t BLEAncs::getAppName(uint32_t uid, void* buffer, uint16_t bufsize) {
+  (void)uid;
   return getAppAttribute("", ANCS_APP_ATTR_DISPLAY_NAME, buffer, bufsize);
 }
 
@@ -5597,9 +5597,9 @@ BLEClientHidAdafruit::BLEClientHidAdafruit()
       keyboard_callback_(nullptr),
       mouse_callback_(nullptr),
       gamepad_callback_(nullptr),
-      last_keyboard_report_{0},
-      last_mouse_report_{0},
-      last_gamepad_report_{0},
+      last_keyboard_report_{},
+      last_mouse_report_{},
+      last_gamepad_report_{},
       keyboard_led_state_(0U),
       protocol_mode_(UUID16_CHR_PROTOCOL_MODE),
       hid_info_(UUID16_CHR_HID_INFORMATION),
@@ -6152,7 +6152,9 @@ bool BLEHidAdafruit::keyPress(uint16_t conn_hdl, char ch) {
     return false;
   }
   hid_keyboard_report_t report{};
-  report.modifier = hid_ascii_to_keycode[ascii][0] ? KEYBOARD_MODIFIER_LEFTSHIFT : 0U;
+  report.modifier = hid_ascii_to_keycode[ascii][0]
+                        ? static_cast<uint8_t>(KEYBOARD_MODIFIER_LEFTSHIFT)
+                        : 0U;
   report.keycode[0] = hid_ascii_to_keycode[ascii][1];
   return keyboardReport(conn_hdl, &report);
 }

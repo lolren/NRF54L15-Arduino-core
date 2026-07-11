@@ -474,13 +474,13 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       return true;
     }
 
-    const uint32_t intervalUs =
+    const uint32_t timeoutIntervalUs =
         (connectionIntervalUnits_ > 0U)
             ? (static_cast<uint32_t>(connectionIntervalUnits_) * 1250UL)
             : 1250UL;
     const uint32_t timeoutUs =
         static_cast<uint32_t>(connectionTimeoutUnits_) * 10000UL;
-    uint32_t supervisionEvents = timeoutUs / intervalUs;
+    uint32_t supervisionEvents = timeoutUs / timeoutIntervalUs;
     if (supervisionEvents < 1U) {
       supervisionEvents = 1U;
     }
@@ -554,6 +554,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     connectionExpectedRxSn_ ^= 0x01U;
   }
   bool terminateInd = false;
+  bool terminateMicFailure = false;
   bool peerTerminateIndReceived = false;
   uint8_t peerTerminateErrorCode = 0U;
   if (packetIsNew &&
@@ -627,6 +628,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       !connectionEncAwaitingStartRsp_) {
     if (rxLengthRaw < kBleMicLen) {
       terminateInd = true;
+      terminateMicFailure = true;
       ++encDebug_.encRxShortPduCount;
       emitBleTrace("ENC_RX_SHORT_PDU");
     } else {
@@ -684,6 +686,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                   true, true));
       if (!decrypted) {
         terminateInd = true;
+        terminateMicFailure = true;
         ++encDebug_.encRxMicFailCount;
         encDebug_.encRxLastMicFailHdr = hdr0;
         encDebug_.encRxLastMicFailLenRaw = rxLengthRaw;
@@ -903,16 +906,18 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   }
 
   if (continueCentralTurnaround) {
-    const uint16_t rxPayloadLength = currentRxDataPduPayloadLength();
-    const uint16_t txPayloadLength = currentTxDataPduPayloadLength();
-    uint32_t followListenUs =
-        bleDataPduAirTimeUsOnPhy(static_cast<uint8_t>(rxPayloadLength),
-                                 connectionCurrentRxPhy_) +
-        bleConnectionTxEndBudgetUsOnPhy(static_cast<uint8_t>(txPayloadLength),
-                                        connectionCurrentTxPhy_) +
+    const uint16_t turnaroundRxPayloadLength = currentRxDataPduPayloadLength();
+    const uint16_t turnaroundTxPayloadLength = currentTxDataPduPayloadLength();
+    uint32_t turnaroundListenUs =
+        bleDataPduAirTimeUsOnPhy(
+            static_cast<uint8_t>(turnaroundRxPayloadLength),
+            connectionCurrentRxPhy_) +
+        bleConnectionTxEndBudgetUsOnPhy(
+            static_cast<uint8_t>(turnaroundTxPayloadLength),
+            connectionCurrentTxPhy_) +
         kBleConnRxPacketMarginUs;
-    if (followListenUs > kBleConnFollowupRxListenMaxUs) {
-      followListenUs = kBleConnFollowupRxListenMaxUs;
+    if (turnaroundListenUs > kBleConnFollowupRxListenMaxUs) {
+      turnaroundListenUs = kBleConnFollowupRxListenMaxUs;
     }
     const uint32_t followIntervalUs =
         (connectionIntervalUnits_ > 0U)
@@ -921,8 +926,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     if (((connectionCurrentRxPhy_ & kBlePhyCoded) == 0U) &&
         followIntervalUs > 3000U) {
       const uint32_t capUs = followIntervalUs - 3000U;
-      if (followListenUs > capUs) {
-        followListenUs = capUs;
+      if (turnaroundListenUs > capUs) {
+        turnaroundListenUs = capUs;
       }
     }
 
@@ -936,7 +941,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       const uint32_t followNowUs = bleTimingUs();
       const uint32_t elapsedUs =
           static_cast<uint32_t>(followNowUs - followStartUs);
-      if (elapsedUs >= followListenUs) {
+      if (elapsedUs >= turnaroundListenUs) {
         break;
       }
 
@@ -1036,10 +1041,13 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
 
       clearRadioCoreEvents(radio_);
       {
-        const size_t txCopyLen = 2U + static_cast<size_t>(txFollowLengthOnAir);
-        const size_t copyLen =
-            (txCopyLen <= sizeof(rxPacket_)) ? txCopyLen : sizeof(rxPacket_);
-        memcpy(rxPacket_, txPacket_, copyLen);
+        const size_t followPacketLength =
+            2U + static_cast<size_t>(txFollowLengthOnAir);
+        const size_t followCopyLength =
+            (followPacketLength <= sizeof(rxPacket_))
+                ? followPacketLength
+                : sizeof(rxPacket_);
+        memcpy(rxPacket_, txPacket_, followCopyLength);
       }
       radio_->PACKETPTR =
           static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&rxPacket_[0]));
@@ -1100,9 +1108,9 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         }
         break;
       }
-      const bool followRxAlreadyDone =
+      const bool turnaroundRxAlreadyDone =
           (radio_->EVENTS_CRCOK != 0U) || (radio_->EVENTS_CRCERROR != 0U);
-      if (followRxAlreadyDone) {
+      if (turnaroundRxAlreadyDone) {
         followRxEndTimestampUs = bleTimingUs();
       }
       connectionTxHistoryValid_ = true;
@@ -1117,19 +1125,19 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
           txFollowCarriesAttRequest;
 
       radio_->EVENTS_DISABLED = 0U;
-      if (!followRxAlreadyDone) {
+      if (!turnaroundRxAlreadyDone) {
         radio_->EVENTS_CRCOK = 0U;
         radio_->EVENTS_CRCERROR = 0U;
       }
       radio_->SHORTS = bleRadioShortsRxListen();
-      if (!followRxAlreadyDone) {
+      if (!turnaroundRxAlreadyDone) {
         const uint32_t state =
             (radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
         if (state == RADIO_STATE_STATE_Disabled) {
           radio_->TASKS_RXEN = RADIO_TASKS_RXEN_TASKS_RXEN_Trigger;
         }
       }
-      if (!waitForPostAckResponse && !followRxAlreadyDone) {
+      if (!waitForPostAckResponse && !turnaroundRxAlreadyDone) {
         radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
         waitRadioDisabledBudgeted(radio_, kBleConnDisableWaitUs,
                                   spinLimit / 2U + 1U);
@@ -1146,7 +1154,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       const uint32_t followNowUsAfterTx = bleTimingUs();
       const uint32_t elapsedUsAfterTx =
           static_cast<uint32_t>(followNowUsAfterTx - followStartUs);
-      if (elapsedUsAfterTx >= followListenUs) {
+      if (elapsedUsAfterTx >= turnaroundListenUs) {
         radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
         waitRadioDisabledBudgeted(radio_, kBleConnDisableWaitUs,
                                   spinLimit / 2U + 1U);
@@ -1154,9 +1162,9 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         connectionFreshTxAllowed_ = false;
         break;
       }
-      const uint32_t remainingUs = followListenUs - elapsedUsAfterTx;
+      const uint32_t remainingUs = turnaroundListenUs - elapsedUsAfterTx;
       bool followRxDone =
-          followRxAlreadyDone ||
+          turnaroundRxAlreadyDone ||
           waitRadioRxDoneBudgeted(radio_, remainingUs, spinLimit / 2U + 1U,
                                   &followRxEndTimestampUs);
       if (!followRxDone && (radio_->EVENTS_ADDRESS != 0U)) {
@@ -1227,6 +1235,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
           connectionEncRxEnabled_) {
         if (rxLengthFollowRaw < kBleMicLen) {
           terminateInd = true;
+          terminateMicFailure = true;
           break;
         }
 
@@ -1288,6 +1297,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                                           swappedRxDirection, true, true));
         if (!decrypted) {
           terminateInd = true;
+          terminateMicFailure = true;
           break;
         }
       }
@@ -1471,9 +1481,22 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   }
 
   if (terminateInd) {
-    emitBleTrace("CENTRAL_TERMINATE");
-    disconnectWithReason(BleDisconnectReason::kPeerTerminate,
-                         peerTerminateErrorCode, spinLimit / 2U + 1U);
+    const BleDisconnectReason disconnectReason =
+        terminateMicFailure
+            ? BleDisconnectReason::kMicFailure
+            : (peerTerminateIndReceived ? BleDisconnectReason::kPeerTerminate
+                                        : BleDisconnectReason::kInternalTerminate);
+    const uint8_t disconnectErrorCode =
+        terminateMicFailure ? kBleLlErrorMicFailure : peerTerminateErrorCode;
+    if (terminateMicFailure) {
+      emitBleTrace("CENTRAL_TERMINATE_MIC_FAILURE");
+    } else if (peerTerminateIndReceived) {
+      emitBleTrace("CENTRAL_PEER_TERMINATE");
+    } else {
+      emitBleTrace("CENTRAL_TERMINATE_INTERNAL");
+    }
+    disconnectWithReason(disconnectReason, disconnectErrorCode,
+                         spinLimit / 2U + 1U);
   }
 
   clearRadioCoreEvents(radio_);

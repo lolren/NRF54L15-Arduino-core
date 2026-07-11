@@ -255,7 +255,380 @@ def validate_hardware_serial_contracts() -> None:
         route_body = function_body(source, "static bool uart_route_valid(")
         assert "tx == 2U && rx == 0U" in route_body
         assert "tx == 8U && rx == 7U" in route_body
-        print(f"PASS {chip} serial shutdown, high-baud, and route contracts")
+        nfc_release_body = function_body(
+            source, "static void release_nfc_pads_for_gpio("
+        )
+        nfc_pad_body = function_body(source, "static bool is_nfc_pad(")
+        expected_nfc_pins = (
+            "pin == 2U || pin == 3U"
+            if chip == "nrf54l15"
+            else "pin == 1U || pin == 2U"
+        )
+        assert expected_nfc_pins in nfc_pad_body
+        assert "is_nfc_pad(txPort, tx) || is_nfc_pad(rxPort, rx)" in nfc_release_body
+        assert "NRF_NFCT->PADCONFIG" in nfc_release_body
+        assert "NFCT_PADCONFIG_ENABLE_Disabled" in nfc_release_body
+        assert source.count(
+            "release_nfc_pads_for_gpio(txPort, tx, rxPort, rx);"
+        ) == 2
+        digital_source = (PLATFORM / "cores" / chip / "wiring_digital.c").read_text(
+            encoding="utf-8"
+        )
+        digital_nfc_body = function_body(
+            digital_source, "static void release_nfc_pad_for_gpio("
+        )
+        assert expected_nfc_pins.replace("pin", "d->pin") in digital_nfc_body
+        assert "NRF_NFCT->PADCONFIG" in digital_nfc_body
+        assert "NFCT_PADCONFIG_ENABLE_Disabled" in digital_nfc_body
+        pin_mode_body = function_body(digital_source, "void pinMode(")
+        assert "release_nfc_pad_for_gpio(&d);" in pin_mode_body
+        interrupt_body = function_body(
+            digital_source, "static void configure_pin_for_interrupt("
+        )
+        assert "release_nfc_pad_for_gpio(d);" in interrupt_body
+        print(
+            f"PASS {chip} serial shutdown, high-baud, route, and NFC-pad contracts"
+        )
+
+
+def validate_pca10156_serial_route_contracts() -> None:
+    variant = (
+        PLATFORM / "variants/nrf54l15dk_pca10156/pins_arduino.h"
+    ).read_text(encoding="utf-8")
+    assert "#define PIN_SERIAL_TX  PIN_P1_04" in variant
+    assert "#define PIN_SERIAL_RX  PIN_P1_05" in variant
+    assert "#define PIN_SERIAL1_TX PIN_P1_02" in variant
+    assert "#define PIN_SERIAL1_RX PIN_P1_03" in variant
+    assert "#define PIN_SERIAL1_TX PIN_SERIAL_TX" not in variant
+    assert "#define PIN_SERIAL1_RX PIN_SERIAL_RX" not in variant
+
+    serial_source = (PLATFORM / "cores/nrf54l15/HardwareSerial.cpp").read_text(
+        encoding="utf-8"
+    )
+    assert "HardwareSerial Serial(NRF_UARTE20, PIN_SERIAL_TX, PIN_SERIAL_RX);" in serial_source
+    assert "HardwareSerial Serial1(NRF_UARTE21, PIN_SERIAL1_TX, PIN_SERIAL1_RX);" in serial_source
+    route_body = function_body(serial_source, "static bool uart_route_valid(")
+    assert "if (txPort == 1U) {\n        return true;\n    }" in route_body
+    print("PASS PCA10156 Serial and Serial1 default routes are independent")
+
+
+def validate_thread_crypto_build_contracts() -> None:
+    source = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/matter_pbkdf2.cpp"
+    ).read_text(encoding="utf-8")
+    guard = source[: source.index('#include "matter_pbkdf2.h"')]
+    assert "NRF54L15_CLEAN_MATTER_CORE_ENABLE" in guard
+    assert "NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE" in guard
+    assert "||" in guard
+    print("PASS PBKDF2 implementation is available to Matter and Thread builds")
+
+
+def validate_ble_disconnect_reason_contracts() -> None:
+    source = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_ble_central_event.inc"
+    ).read_text(encoding="utf-8")
+    body = function_body(
+        source, "bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,"
+    )
+    assert "bool terminateMicFailure = false;" in body
+    assert body.count("terminateMicFailure = true;") == 4
+    assert "terminateMicFailure\n            ? BleDisconnectReason::kMicFailure" in body
+    assert "peerTerminateIndReceived ? BleDisconnectReason::kPeerTerminate" in body
+    assert ": BleDisconnectReason::kInternalTerminate" in body
+    assert "terminateMicFailure ? kBleLlErrorMicFailure : peerTerminateErrorCode" in body
+    print("PASS BLE central MIC, peer, and internal disconnect classification")
+
+
+def validate_custom_gatt_initial_value_capacity_contracts() -> None:
+    source_root = (
+        PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
+    )
+    header = (source_root / "nrf54l15_hal.h").read_text(encoding="utf-8")
+    implementation = (
+        source_root / "nrf54l15_hal_parts/nrf54l15_hal_ble_custom_gatt.inc"
+    ).read_text(encoding="utf-8")
+
+    signature_pattern = re.compile(
+        r"\bbool\s+(?:BleRadio::)?"
+        r"(addCustomGattCharacteristic[A-Za-z0-9_]*)"
+        r"\s*\(([^;{}]*)\)\s*(?:;|\{)",
+        re.DOTALL,
+    )
+    expected_header = {
+        "addCustomGattCharacteristic": 2,
+        "addCustomGattCharacteristicWithDescriptors": 1,
+        "addCustomGattCharacteristic128": 2,
+        "addCustomGattCharacteristic128WithDescriptors": 1,
+        "addCustomGattCharacteristicCommon": 1,
+        "addCustomGattCharacteristicUuid": 1,
+    }
+    expected_implementation = expected_header | {
+        "addCustomGattCharacteristicUuid": 0,
+    }
+
+    for label, source, expected in (
+        ("header", header, expected_header),
+        ("implementation", implementation, expected_implementation),
+    ):
+        signatures = signature_pattern.findall(source)
+        actual = {
+            name: sum(1 for signature_name, _ in signatures if signature_name == name)
+            for name in expected
+        }
+        assert actual == expected, f"custom GATT {label} signatures changed: {actual}"
+        assert len(signatures) == sum(expected.values())
+        for name, parameters in signatures:
+            normalized = " ".join(parameters.split())
+            assert "uint16_t initialValueLength" in normalized, (
+                f"{label} {name} narrows the initial value length: {normalized}"
+            )
+            assert "uint8_t initialValueLength" not in normalized
+
+    max_length_match = re.search(
+        r"static constexpr uint16_t\s+kCustomGattMaxValueLength\s*=\s*(\d+)U;",
+        header,
+    )
+    assert max_length_match is not None
+    max_length = int(max_length_match.group(1))
+    assert max_length == 512
+    assert max_length > 0xFF
+
+    common_body = function_body(
+        implementation, "bool BleRadio::addCustomGattCharacteristicCommon("
+    )
+    assert "initialValueLength > kCustomGattMaxValueLength" in common_body
+    assert "characteristic.valueLength = initialValueLength;" in common_body
+    assert "memcpy(characteristic.value, initialValue, initialValueLength);" in common_body
+    assert "uint16_t valueLength;" in header
+    assert "uint8_t value[kCustomGattMaxValueLength];" in header
+    enqueue_signature = re.search(
+        r"enqueueCustomGattNotification\s*\([^;]*uint16_t\s+valueLength\s*\);",
+        header,
+        re.DOTALL,
+    )
+    assert enqueue_signature is not None
+    enqueue_body = function_body(
+        implementation, "bool BleRadio::enqueueCustomGattNotification("
+    )
+    capacity_guard = "valueLength > maxNotificationValueLength()"
+    narrowing_store = "slot.valueLength = static_cast<uint8_t>(valueLength);"
+    assert capacity_guard in enqueue_body
+    assert narrowing_store in enqueue_body
+    assert enqueue_body.index(capacity_guard) < enqueue_body.index(narrowing_store)
+    bluefruit = (
+        PLATFORM / "libraries/Bluefruit52Lib/src/bluefruit.cpp"
+    ).read_text(encoding="utf-8")
+    bluefruit_begin = function_body(bluefruit, "err_t BLECharacteristic::begin()")
+    assert "const uint16_t initialLen = clampValueLen(_value_len);" in bluefruit_begin
+    assert "0xFFU" not in bluefruit_begin
+    print(
+        "PASS custom GATT stores 512-byte values and rejects oversized "
+        "single-PDU notifications before narrowing"
+    )
+
+
+def validate_parser_output_validity_contracts() -> None:
+    source_root = PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
+    zigbee_stack = (source_root / "zigbee_stack.cpp").read_text(encoding="utf-8")
+    zigbee_security = (source_root / "zigbee_security.cpp").read_text(
+        encoding="utf-8"
+    )
+    vpr = (source_root / "nrf54l15_vpr.cpp").read_text(encoding="utf-8")
+
+    simple_parsers = (
+        (
+            zigbee_stack,
+            "bool ZigbeeCodec::parseMacFrame(",
+            "*outFrame = ZigbeeMacFrame{};",
+            "outFrame->valid = true;",
+        ),
+        (
+            zigbee_stack,
+            "bool ZigbeeCodec::parseNwkFrame(",
+            "*outFrame = ZigbeeNetworkFrame{};",
+            "outFrame->valid = true;",
+        ),
+        (
+            zigbee_stack,
+            "bool ZigbeeCodec::parseApsDataFrame(",
+            "*outFrame = ZigbeeApsDataFrame{};",
+            "outFrame->valid = true;",
+        ),
+        (
+            zigbee_stack,
+            "bool ZigbeeCodec::parseApsAcknowledgementFrame(",
+            "*outFrame = ZigbeeApsAcknowledgementFrame{};",
+            "outFrame->valid = true;",
+        ),
+        (
+            zigbee_stack,
+            "bool ZigbeeCodec::parseApsTransportKeyCommand(",
+            "*outKey = ZigbeeApsTransportKey{};",
+            "outKey->valid = true;",
+        ),
+        (
+            zigbee_security,
+            "bool ZigbeeSecurity::parseNwkSecurityHeader(",
+            "*outHeader = ZigbeeNwkSecurityHeader{};",
+            "outHeader->valid = true;",
+        ),
+        (
+            zigbee_security,
+            "bool ZigbeeSecurity::parseApsSecurityHeader(",
+            "*outHeader = ZigbeeApsSecurityHeader{};",
+            "outHeader->valid = true;",
+        ),
+    )
+    for source, signature, reset, valid_commit in simple_parsers:
+        body = function_body(source, signature)
+        assert reset in body, f"{signature} does not restore typed defaults"
+        assert body.count(valid_commit) == 1
+        assert body.rindex(valid_commit) > body.rfind("return false;")
+
+    beacon_body = function_body(
+        zigbee_stack, "bool ZigbeeCodec::parseBeaconFrame("
+    )
+    assert "*outView = ZigbeeMacBeaconView{};" in beacon_body
+    assert (
+        "outView->network.panCoordinator = outView->panCoordinator;"
+        in beacon_body
+    )
+    assert (
+        "outView->network.associationPermit = outView->associationPermit;"
+        in beacon_body
+    )
+
+    secured_parsers = (
+        (
+            "bool ZigbeeSecurity::parseSecuredNwkFrame(",
+            "ZigbeeNetworkFrame parsedFrame{};",
+            "ZigbeeNwkSecurityHeader parsedSecurity{};",
+        ),
+        (
+            "bool ZigbeeSecurity::parseSecuredApsCommandFrame(",
+            "ZigbeeApsCommandFrame parsedFrame{};",
+            "ZigbeeApsSecurityHeader parsedSecurity{};",
+        ),
+    )
+    for signature, frame_candidate, security_candidate in secured_parsers:
+        body = function_body(zigbee_security, signature)
+        assert frame_candidate in body
+        assert security_candidate in body
+        decrypt = body.index("decryptCcmStar(")
+        last_failure = body.rfind("return false;")
+        assert body.rindex("parsedFrame.valid = true;") > max(decrypt, last_failure)
+        assert body.rindex("*outFrame = parsedFrame;") > max(decrypt, last_failure)
+        assert body.rindex("*outSecurity = parsedSecurity;") > max(
+            decrypt, last_failure
+        )
+        assert "outFrame->valid = true;" not in body
+
+    transport_body = function_body(
+        zigbee_security,
+        "bool ZigbeeSecurity::parseSecuredApsTransportKeyCommand(",
+    )
+    assert "ZigbeeApsSecurityHeader parsedSecurity{};" in transport_body
+    assert "&parsedSecurity," in transport_body
+    assert transport_body.rindex("outTransportKey->valid = true;") > (
+        transport_body.rfind("return false;")
+    )
+    assert transport_body.rindex("*outSecurity = parsedSecurity;") > (
+        transport_body.rfind("return false;")
+    )
+
+    for signature in (
+        "bool ZigbeeSecurity::parseSecuredApsUpdateDeviceCommand(",
+        "bool ZigbeeSecurity::parseSecuredApsSwitchKeyCommand(",
+    ):
+        body = function_body(zigbee_security, signature)
+        assert "*outSecurity = ZigbeeApsSecurityHeader{};" in body
+        assert "ZigbeeApsSecurityHeader parsedSecurity{};" in body
+        assert "&parsedSecurity," in body
+        assert body.rindex("*outSecurity = parsedSecurity;") > body.rfind(
+            "return false;"
+        )
+
+    vpr_body = function_body(
+        vpr,
+        "bool VprControllerServiceHost::readBleCsWorkflowCompletedResult(",
+    )
+    assert "*result = VprBleCsCompletedResultPayload{};" in vpr_body
+    assert vpr_body.index("parsed.valid = payload[2] != 0U;") > vpr_body.index(
+        "parsed.payloadLen > VprBleCsCompletedResultPayload::kMaxPayloadBytes"
+    )
+    assert vpr_body.rindex("*result = parsed;") > vpr_body.rfind("return false;")
+    print("PASS malformed parser outputs remain invalid until fully accepted")
+
+
+def validate_zigbee_persistence_reset_contracts() -> None:
+    source = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/zigbee_persistence.cpp"
+    ).read_text(encoding="utf-8")
+    assert "std::is_trivially_copyable<ZigbeePersistentState>::value" in source
+    reset_body = function_body(source, "void resetPersistentState(")
+    assert "memset(static_cast<void*>(state), 0, sizeof(*state));" in reset_body
+    assert "reporting = ZigbeeReportingConfiguration{};" in reset_body
+    assert "binding = ZigbeeBindingEntry{};" in reset_body
+
+    load_body = function_body(source, "bool loadChunkedState(")
+    initialize_body = function_body(
+        source, "void ZigbeePersistentStateStore::initialize("
+    )
+    assert "resetPersistentState(outState);" in load_body
+    assert "resetPersistentState(state);" in initialize_body
+    print("PASS Zigbee persisted state keeps deterministic padding and typed defaults")
+
+
+def validate_protocol_typed_reset_contracts() -> None:
+    source_root = PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
+
+    pase_header = (source_root / "matter_pase_commissioning.h").read_text(
+        encoding="utf-8"
+    )
+    pase_source = (source_root / "matter_pase_commissioning.cpp").read_text(
+        encoding="utf-8"
+    )
+    assert "kMatterSpake2pPbkdf2Iterations = 2000U" in pase_header
+    assert "uint32_t iterations = kMatterSpake2pPbkdf2Iterations;" in pase_header
+    pase_end = function_body(pase_source, "void MatterPaseCommissioning::end()")
+    assert "session_ = MatterPaseSessionState{};" in pase_end
+    assert "verifier_ = MatterSpake2pVerifier{};" in pase_end
+    assert "memset" not in pase_end
+
+    credentials = (source_root / "matter_credentials.cpp").read_text(
+        encoding="utf-8"
+    )
+    credential_reset = function_body(
+        credentials, "void resetPersistentCredentialsState("
+    )
+    assert "bytes[i] = 0U;" in credential_reset
+    assert "copyPersistentCredentialsMembers(state, defaults);" in credential_reset
+    credential_save = function_body(
+        credentials, "bool MatterCredentials::saveToStorage("
+    )
+    assert "resetPersistentCredentialsState(&canonicalState);" in credential_save
+    assert "copyPersistentCredentialsMembers(&canonicalState, state);" in credential_save
+    assert "canonicalState = state;" not in credential_save
+    assert "prefs.putBytes(kCredentialsKey, &canonicalState" in credential_save
+
+    openthread = (source_root / "openthread_platform_nrf54l15.cpp").read_text(
+        encoding="utf-8"
+    )
+    ot_init = function_body(openthread, "void otSysInit(int, char**)")
+    assert "state.snapshot = OpenThreadPlatformSkeletonSnapshot{};" in ot_init
+
+    channel_sounding = (source_root / "ble_channel_sounding.cpp").read_text(
+        encoding="utf-8"
+    )
+    sweep = function_body(
+        channel_sounding,
+        "bool BleCsConnectedMode2SweepRunner::runInitiator(",
+    )
+    assert "measurements[i] = BleCsChannelMeasurement{};" in sweep
+    print("PASS Matter, OpenThread, and channel-sounding typed sentinel resets")
 
 
 def validate_spi_contracts() -> None:
@@ -539,6 +912,13 @@ def main() -> int:
     validate_vectors()
     validate_cmsis_priority_contracts()
     validate_hardware_serial_contracts()
+    validate_pca10156_serial_route_contracts()
+    validate_thread_crypto_build_contracts()
+    validate_ble_disconnect_reason_contracts()
+    validate_custom_gatt_initial_value_capacity_contracts()
+    validate_parser_output_validity_contracts()
+    validate_zigbee_persistence_reset_contracts()
+    validate_protocol_typed_reset_contracts()
     validate_spi_contracts()
     validate_system_off_wake_contracts()
     validate_xiao_low_power_board_contracts()

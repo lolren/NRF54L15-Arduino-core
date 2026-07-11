@@ -24,7 +24,7 @@ uint8_t MatterFabricTable::addFabric(const uint8_t fabricId[8],
   if (idx >= kMaxFabrics) return kMaxFabrics;
 
   FabricEntry& entry = entries_[idx];
-  memset(&entry, 0, sizeof(entry));
+  entry = FabricEntry{};
   memcpy(entry.fabricId, fabricId, 8);
   memcpy(entry.nodeId, nodeId, 8);
   if (rootPublicKey != nullptr) {
@@ -45,7 +45,7 @@ bool MatterFabricTable::removeFabric(uint8_t fabricIndex) {
     return false;
   }
 
-  memset(&entries_[fabricIndex], 0, sizeof(entries_[fabricIndex]));
+  entries_[fabricIndex] = FabricEntry{};
   fabricCount_--;
   return true;
 }
@@ -88,7 +88,9 @@ uint8_t MatterFabricTable::nextFabricIndex() const {
 }
 
 void MatterFabricTable::clear() {
-  memset(entries_, 0, sizeof(entries_));
+  for (FabricEntry& entry : entries_) {
+    entry = FabricEntry{};
+  }
   fabricCount_ = 0U;
 }
 

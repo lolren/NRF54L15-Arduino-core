@@ -2397,6 +2397,7 @@ bool VprControllerServiceHost::readBleCsWorkflowCompletedResult(
   if (result == nullptr) {
     return false;
   }
+  *result = VprBleCsCompletedResultPayload{};
 
   uint8_t params[1] = {static_cast<uint8_t>(peerSide ? 1U : 0U)};
   uint8_t response[NRF54L15_VPR_TRANSPORT_MAX_VPR_DATA];
@@ -2416,22 +2417,23 @@ bool VprControllerServiceHost::readBleCsWorkflowCompletedResult(
     return false;
   }
 
-  memset(result, 0, sizeof(*result));
-  result->peerSide = payload[1] != 0U;
-  result->valid = payload[2] != 0U;
-  result->configId = payload[3];
-  result->procedureCounter = static_cast<uint16_t>(payload[4]) |
-                             (static_cast<uint16_t>(payload[5]) << 8U);
-  result->payloadLen = static_cast<uint16_t>(payload[6]) |
-                       (static_cast<uint16_t>(payload[7]) << 8U);
-  if (result->payloadLen > VprBleCsCompletedResultPayload::kMaxPayloadBytes ||
-      payloadLen < static_cast<size_t>(12U + result->payloadLen)) {
+  VprBleCsCompletedResultPayload parsed{};
+  parsed.peerSide = payload[1] != 0U;
+  parsed.configId = payload[3];
+  parsed.procedureCounter = static_cast<uint16_t>(payload[4]) |
+                            (static_cast<uint16_t>(payload[5]) << 8U);
+  parsed.payloadLen = static_cast<uint16_t>(payload[6]) |
+                      (static_cast<uint16_t>(payload[7]) << 8U);
+  if (parsed.payloadLen > VprBleCsCompletedResultPayload::kMaxPayloadBytes ||
+      payloadLen < static_cast<size_t>(12U + parsed.payloadLen)) {
     return false;
   }
-  if (result->payloadLen != 0U) {
-    memcpy(result->payload, &payload[8], result->payloadLen);
+  if (parsed.payloadLen != 0U) {
+    memcpy(parsed.payload, &payload[8], parsed.payloadLen);
   }
-  result->hash32 = readLe32(&payload[8 + result->payloadLen]);
+  parsed.hash32 = readLe32(&payload[8 + parsed.payloadLen]);
+  parsed.valid = payload[2] != 0U;
+  *result = parsed;
   return true;
 }
 

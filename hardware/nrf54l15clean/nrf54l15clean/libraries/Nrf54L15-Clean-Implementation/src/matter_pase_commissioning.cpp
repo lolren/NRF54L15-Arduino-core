@@ -51,23 +51,6 @@ constexpr char kSpake2pContextProliferation[] = "SPAKE2P Key Salt";
 constexpr char kSpake2pContextAlpha[] = "SPAKE2P Key Confirmation";
 constexpr char kSpake2pContextBeta[] = "SPAKE2P Key Confirmation";
 
-// Derive TT = HMAC(context, w0 || w1)
-void spake2pDeriveTransientKey(
-    const uint8_t w0[kMatterSpake2pW0Length],
-    const uint8_t w1[kMatterSpake2pW1Length],
-    uint8_t outTT[kMatterSpake2pHashSize]) {
-  const char* context = kSpake2pContextProliferation;
-  const size_t contextLen = strlen(context);
-
-  uint8_t message[kMatterSpake2pW0Length + kMatterSpake2pW1Length] = {0};
-  memcpy(message, w0, kMatterSpake2pW0Length);
-  memcpy(message + kMatterSpake2pW0Length, w1, kMatterSpake2pW1Length);
-
-  MatterPbkdf2::hmacSha256(
-      reinterpret_cast<const uint8_t*>(context), contextLen,
-      message, sizeof(message), outTT);
-}
-
 // Derive w0s, w1s from passcode using Matter's formula:
 // w0s = PBKDF2(passcode, salt || "SPAKE2P Key Salt", iterations, 32)
 // w1s = PBKDF2(passcode, salt || w0s || "SPAKE2P Key Salt", iterations, 32)
@@ -112,17 +95,8 @@ bool spake2pDeriveWS(
     return false;
   }
 
-  // Reduce w0 mod n
-  Secp256r1::BigNum256 w0Bn = {};
-  w0Bn.w[0] = static_cast<uint32_t>(w0Raw[0]) |
-              (static_cast<uint32_t>(w0Raw[1]) << 8U) |
-              (static_cast<uint32_t>(w0Raw[2]) << 16U) |
-              (static_cast<uint32_t>(w0Raw[3]) << 24U);
   // Treat raw bytes as a 256-bit number, reduce mod n
-  Secp256r1Scalar w0Scalar = {};
-  memcpy(w0Scalar.bytes, w0Raw, sizeof(w0Scalar.bytes));
-  // The Scalar already uses bnFromBytes internally; just reduce
-  // Actually, the PBKDF2 output is hashLen bytes. Pad to 32 then reduce.
+  // The PBKDF2 output is hashLen bytes. Pad to 32 then reduce.
   uint8_t w0Padded[32] = {0};
   memcpy(w0Padded, w0Raw, sizeof(w0Raw));
   Secp256r1::BigNum256 w0Full;
@@ -239,11 +213,11 @@ void MatterPaseCommissioning::end() {
   platform_ = nullptr;
   callback_ = nullptr;
   callbackContext_ = nullptr;
-  memset(&session_, 0, sizeof(session_));
+  session_ = MatterPaseSessionState{};
   session_.active = false;
   localExchangeId_ = 0U;
   localMessageId_ = 0U;
-  memset(&verifier_, 0, sizeof(verifier_));
+  verifier_ = MatterSpake2pVerifier{};
 }
 
 void MatterPaseCommissioning::process() {
@@ -290,7 +264,7 @@ bool MatterPaseCommissioning::deriveVerifier(
     return false;
   }
 
-  memset(outVerifier, 0, sizeof(*outVerifier));
+  *outVerifier = MatterSpake2pVerifier{};
   memcpy(outVerifier->salt, salt, kMatterSpake2pSaltSize);
   outVerifier->iterations = iterations;
 
@@ -811,7 +785,7 @@ void MatterPaseCommissioning::handleMessage(
       handleSpake2p2(appPayload, appLength, source, sourcePort);
       break;
     case MatterMessageType::kPaseSpake2p3:
-      handleSpake2p3(appPayload, appLength, source, sourcePort);
+      handleSpake2p3(appPayload, appLength);
       break;
     default:
       break;
@@ -1013,8 +987,7 @@ void MatterPaseCommissioning::handleSpake2p2(
 }
 
 void MatterPaseCommissioning::handleSpake2p3(
-    const uint8_t* payload, uint16_t length,
-    const otIp6Address& source, uint16_t sourcePort) {
+    const uint8_t* payload, uint16_t length) {
   if (payload == nullptr || initiator_) {
     return;
   }
@@ -1048,7 +1021,7 @@ bool MatterPaseCommissioning::parseMessageHeader(
     return false;
   }
 
-  memset(outHeader, 0, sizeof(*outHeader));
+  *outHeader = MatterMessageHeader{};
   size_t offset = 0U;
 
   outHeader->exchangeFlags = payload[offset++];

@@ -198,7 +198,7 @@ public:
     // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61648 prevents making
     // operator""_span a friend (and this constructor private).
 
-    constexpr Span(UncheckedType tag, pointer databuf, size_t datalen) : mDataBuf(databuf), mDataLen(datalen) {}
+    constexpr Span(UncheckedType, pointer databuf, size_t datalen) : mDataBuf(databuf), mDataLen(datalen) {}
 
 private:
     pointer mDataBuf;

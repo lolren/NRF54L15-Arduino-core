@@ -532,17 +532,19 @@ BleConnectionRole BleRadio::connectionRole() const {
 }
 
 uint8_t BleRadio::currentTxPhy() const {
-  return connected_ ? connectionCurrentTxPhy_ : kBlePhy1M;
+  return connected_ ? connectionCurrentTxPhy_
+                    : static_cast<uint8_t>(kBlePhy1M);
 }
 
 uint8_t BleRadio::currentRxPhy() const {
-  return connected_ ? connectionCurrentRxPhy_ : kBlePhy1M;
+  return connected_ ? connectionCurrentRxPhy_
+                    : static_cast<uint8_t>(kBlePhy1M);
 }
 
 uint8_t BleRadio::getPHY() const {
   const uint8_t txPhy = currentTxPhy();
   const uint8_t rxPhy = currentRxPhy();
-  return (txPhy == rxPhy) ? txPhy : kBlePhyNone;
+  return (txPhy == rxPhy) ? txPhy : static_cast<uint8_t>(kBlePhyNone);
 }
 
 bool BleRadio::isConnectionEncrypted() const {

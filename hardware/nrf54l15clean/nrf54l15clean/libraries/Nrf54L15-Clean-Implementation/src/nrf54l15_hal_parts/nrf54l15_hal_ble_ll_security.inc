@@ -443,7 +443,8 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
             (smpPairingState_ != kSmpPairingStateIdle) &&
             !connectionEncSessionValid_;
         const uint8_t symmetricPhys =
-            pairingInProgress ? kBlePhy1M : preferredSymmetricBlePhys();
+            pairingInProgress ? static_cast<uint8_t>(kBlePhy1M)
+                              : preferredSymmetricBlePhys();
         outPayload[0] = kBleLlCtrlPhyRsp;
         outPayload[1] = symmetricPhys;
         outPayload[2] = symmetricPhys;
@@ -1571,7 +1572,7 @@ void BleRadio::clearPendingL2capTxFragment() {
 }
 
 bool BleRadio::deferL2capTxPayload(const uint8_t* l2capPayload,
-                                   uint8_t l2capPayloadLength) {
+                                   uint16_t l2capPayloadLength) {
   if (l2capPayload == nullptr || l2capPayloadLength == 0U ||
       connectionPendingL2capTxFragmentActive_ ||
       l2capPayloadLength > sizeof(connectionPendingL2capTxFragmentPayload_)) {
@@ -1650,7 +1651,7 @@ bool BleRadio::queueNextPendingL2capTxFragment() {
 }
 
 bool BleRadio::prepareL2capTxPayload(const uint8_t* l2capPayload,
-                                     uint8_t l2capPayloadLength,
+                                     uint16_t l2capPayloadLength,
                                      uint8_t* outPayload,
                                      uint8_t* outPayloadLength) {
   if (l2capPayload == nullptr || outPayload == nullptr ||
@@ -1668,7 +1669,7 @@ bool BleRadio::prepareL2capTxPayload(const uint8_t* l2capPayload,
 
   if (l2capPayloadLength <= maxPayload) {
     memcpy(outPayload, l2capPayload, l2capPayloadLength);
-    *outPayloadLength = l2capPayloadLength;
+    *outPayloadLength = static_cast<uint8_t>(l2capPayloadLength);
     return true;
   }
 
@@ -1709,8 +1710,8 @@ bool BleRadio::buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLengt
   writeLe16(&l2capPayload[0], l2capLength);
   writeLe16(&l2capPayload[2], kBleL2capCidSmp);
   memcpy(&l2capPayload[4], smpPayload, smpLength);
-  return prepareL2capTxPayload(l2capPayload, static_cast<uint8_t>(totalLength),
-                               outPayload, outPayloadLength);
+  return prepareL2capTxPayload(l2capPayload, totalLength, outPayload,
+                               outPayloadLength);
 }
 
 bool BleRadio::queuePendingSmpL2capResponse(const uint8_t* smpPayload,

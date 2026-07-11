@@ -176,7 +176,7 @@ bool MatterCaseSession::beginAsResponder(StateCallback callback,
 void MatterCaseSession::end() {
   callback_ = nullptr;
   state_ = CaseState::kIdle;
-  memset(&sessionKeys_, 0, sizeof(sessionKeys_));
+  sessionKeys_ = CaseSessionKeys{};
 }
 
 bool MatterCaseSession::active() const {
@@ -211,7 +211,7 @@ bool MatterCaseSession::generateSelfSignedCert(
     CaseCertificate* outCert) {
   if (outCert == nullptr) return false;
 
-  memset(outCert, 0, sizeof(*outCert));
+  *outCert = CaseCertificate{};
   Secp256r1::encodeUncompressed(publicKey, outCert->subjectPubKey);
 
   // Issuer = self, so hash the same public key
@@ -252,7 +252,7 @@ bool MatterCaseSession::generateSelfSignedCert(
 bool MatterCaseSession::buildSigma1(CaseSigma1* outMsg) {
   if (outMsg == nullptr) return false;
 
-  memset(outMsg, 0, sizeof(*outMsg));
+  *outMsg = CaseSigma1{};
   if (!generateRandom(outMsg->initiatorRandom, kCaseRandomSize)) {
     return false;
   }
@@ -291,7 +291,7 @@ bool MatterCaseSession::processSigma1(const CaseSigma1& msg) {
 bool MatterCaseSession::buildSigma2(CaseSigma2* outMsg) {
   if (outMsg == nullptr || initiator_) return false;
 
-  memset(outMsg, 0, sizeof(*outMsg));
+  *outMsg = CaseSigma2{};
   if (!generateRandom(outMsg->responderRandom, kCaseRandomSize)) {
     return false;
   }
@@ -393,7 +393,7 @@ bool MatterCaseSession::processSigma2(const CaseSigma2& msg) {
 bool MatterCaseSession::buildSigma3(CaseSigma3* outMsg) {
   if (outMsg == nullptr || !initiator_) return false;
 
-  memset(outMsg, 0, sizeof(*outMsg));
+  *outMsg = CaseSigma3{};
 
   // Serialize and encrypt local certificate
   uint8_t certBuf[256] = {0};

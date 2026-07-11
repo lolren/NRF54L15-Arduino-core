@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <type_traits>
 
 namespace xiao_nrf54l15 {
 
@@ -17,6 +18,25 @@ constexpr char kPrefsKeyStateChunkPrefix[] = "st";
 constexpr size_t kPrefsChunkValueLen = 48U;
 constexpr size_t kPrefsChunkKeyCapacity = 5U;
 constexpr size_t kPrefsMaxChunkCount = 27U;
+
+static_assert(std::is_trivially_copyable<ZigbeePersistentState>::value,
+              "Zigbee persistence requires a trivially copyable state blob");
+
+void resetPersistentState(ZigbeePersistentState* state) {
+  if (state == nullptr) {
+    return;
+  }
+
+  // The full object representation is persisted, so keep padding deterministic
+  // before restoring the nested records' nonzero typed defaults.
+  memset(static_cast<void*>(state), 0, sizeof(*state));
+  for (ZigbeeReportingConfiguration& reporting : state->reporting) {
+    reporting = ZigbeeReportingConfiguration{};
+  }
+  for (ZigbeeBindingEntry& binding : state->bindings) {
+    binding = ZigbeeBindingEntry{};
+  }
+}
 
 struct ZigbeePersistentStateV1 {
   uint32_t magic = 0U;
@@ -227,7 +247,7 @@ bool loadChunkedState(Preferences* prefs, ZigbeePersistentState* outState) {
     return false;
   }
 
-  memset(outState, 0, sizeof(*outState));
+  resetPersistentState(outState);
   uint8_t* dst = reinterpret_cast<uint8_t*>(outState);
   size_t offset = 0U;
   for (size_t i = 0U; i < chunkCount; ++i) {
@@ -311,7 +331,7 @@ void ZigbeePersistentStateStore::initialize(ZigbeePersistentState* state) {
   if (state == nullptr) {
     return;
   }
-  memset(state, 0, sizeof(*state));
+  resetPersistentState(state);
   state->magic = kZigbeeStateMagic;
   state->version = kZigbeeStateVersion;
 }

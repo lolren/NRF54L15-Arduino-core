@@ -921,8 +921,6 @@
       !connectionEncKeyDerivationPending_ &&
       packetIsNew &&
       (rxPeerMoreData || txHasFollowingPayload);
-  const bool allowQueuedDataBurstFollowup =
-      allowPlainFollowupTurnaround && txHasFollowingPayload;
   const bool allowQueuedSmpFollowupTurnaround =
       !terminateInd &&
       !connectionEncSessionValid_ &&
@@ -1259,10 +1257,10 @@
 	                                            ((connectionTxSn_ & 0x01U) << 3U) |
 	                                            (txFollowHasMoreData ? 0x10U : 0U));
 
-	        const bool sessionEncryptionActive =
+	        const bool followSessionEncryptionActive =
 	            connectionEncTxEnabled_ && connectionEncSessionValid_;
 	        if (!txFollowCanUseFreshPayload &&
-	            sessionEncryptionActive &&
+	            followSessionEncryptionActive &&
 	            connectionLastTxWasEncrypted_) {
 	          *txFollowLengthOnAir = connectionLastTxEncryptedLength_;
 	          txPacket_[1] = *txFollowLengthOnAir;
@@ -1295,7 +1293,7 @@
 	            connectionEncEnableTxOnNextEvent_;
 	        const bool encryptFollowTx =
 	            !txFollowIsEmptyAckPlain &&
-	            (sessionEncryptionActive || encryptFollowStartEncRsp);
+	            (followSessionEncryptionActive || encryptFollowStartEncRsp);
 
 	        if (!encryptFollowTx) {
 	          if (txFollowCanUseFreshPayload) {
@@ -1527,8 +1525,6 @@
         }
 
         uint8_t rxLengthFollow = rxLengthFollowRaw;
-        bool followWasDecrypted = false;
-        uint64_t followCounterUsed = connectionEncRxCounter_;
         if (connectionEncSessionValid_ &&
             (connectionEncRxEnabled_ ||
              connectionEncAwaitingStartRsp_ ||
@@ -1677,8 +1673,6 @@
                 }
               } else {
                 rxLengthFollow = plaintextLen;
-                followWasDecrypted = true;
-                followCounterUsed = decryptCounterUsed;
                 if (plaintextLen > 0U) {
                   memcpy(&rxPacket_[2], plaintext, plaintextLen);
                 }
