@@ -2,11 +2,11 @@
 
 <div align="center">
 
-**Bare-metal Cortex-M33 + RISC-V. No Zephyr. No nRF Connect SDK.**
+**Bare-metal Cortex-M33 + RISC-V. No Zephyr runtime or external nRF Connect SDK installation.**
 
 [![Release](https://img.shields.io/github/v/release/lolren/nrf54-arduino-core?color=00d4ff&label=latest)](https://github.com/lolren/nrf54-arduino-core/releases)
 [![Boards](https://img.shields.io/badge/boards-5-00d4ff)](#-supported-boards)
-[![License](https://img.shields.io/badge/license-MIT-00d4ff)](#)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20third--party-00d4ff)](hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/third_party/nordic_sdc/LICENSE)
 
 *The most advanced bare-metal Arduino core for Nordic's latest-generation SoC — BLE, 802.15.4, Thread, Matter, Zigbee, and a RISC‑V coprocessor, all without a vendor RTOS.*
 
@@ -97,7 +97,7 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 | **Binary size** | ~12 KB blink | ~100 KB+ blink |
 | **Compiler** | GCC | GCC + Zephyr build system |
 | **Peripheral access** | Direct register writes | Vendor HAL + DTS |
-| **BLE stack** | Custom register‑level | SoftDevice / Zephyr BLE |
+| **BLE stack** | Custom register-level; bundled Nordic SDC/MPSL for Channel Sounding | SoftDevice / Zephyr BLE |
 | **RISC‑V coprocessor** | Fully usable | Limited Arduino access |
 | **Learning curve** | Datasheet + Arduino API | Zephyr + DTS + Kconfig |
 
@@ -239,7 +239,7 @@ Examples:
 | **Zigbee** | ~40K | ⚠️ Good | Partial — HA/Zigbee2MQTT device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
 | **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
-| **Channel Sounding** | ~8K | ⚠️ Partial | Mode 2, VPR-owned local LL PDU selection, LL-control workflow bridge, raw RF tone/DFE, and post-LL-control real-measurement Mode 2 host ingestion work on 2 boards; connected Zephyr-parity RF scheduler still staged |
+| **Channel Sounding** | Nordic controller + Arduino glue | ⚠️ Experimental | Two-board LE CS Test through bundled Nordic SDC/MPSL; no Bluetooth qualification or connected-ACL interoperability claim |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes — all nPM1300 features, GPIO bit‑bang I²C |
 
 ---
@@ -251,7 +251,37 @@ Examples:
 - **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
-- **Channel Sounding connected-CS parity is staged.** The HCI/VPR workflow, real over-air LL-control bridge, raw two-board RF tone/DFE smoke path, and post-LL-control real-measurement Mode 2 host ingestion are hardware-tested, but the final Zephyr-parity connected scheduler still needs VPR/RADIO-owned in-connection subevent timing and real connected result generation.
+- **Channel Sounding has one supported experimental path:** the
+  `BleChannelSoundingInitiator` / `BleChannelSoundingReflector` pair. Nordic
+  SDC/MPSL executes LE CS Test and emits HCI CS result events. A separate
+  CRC-protected Arduino protocol establishes a per-cycle session token before
+  the test and returns a session-correlated reflector step buffer after SDC
+  releases RADIO. That transport is not a connected ACL Channel Sounding
+  procedure. Bluetooth SIG
+  qualification, cross-vendor interoperability, calibrated accuracy, and
+  production power figures are not claimed.
+
+### Channel Sounding Setup
+
+Select **Tools -> CPU Frequency -> 128 MHz** before building either Channel
+Sounding example. The equivalent Arduino CLI option is `cpu_freq=128m`; the
+runtime fails explicitly instead of starting SDC/MPSL with the default 64 MHz
+profile.
+
+The only public Channel Sounding examples are:
+
+- `BleChannelSoundingInitiator`
+- `BleChannelSoundingReflector`
+
+The controller binaries are Nordic components, revision
+`7a07f89ee8c32658ebfd2034b4cae92fde63e122`
+(`v3.4.0-rc1-12-g7a07f89ee`). They are covered by the included
+[Nordic 5-Clause license](hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/third_party/nordic_sdc/LICENSE),
+not the core's MIT license. The license restricts use to Nordic Semiconductor
+integrated circuits and prohibits reverse engineering, decompiling, modifying,
+or disassembling the binary software. See the
+[attribution notice](hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/third_party/nordic_sdc/LICENSE-ATTRIBUTION.txt)
+and [version record](hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/third_party/nordic_sdc/VERSION).
 
 ---
 
@@ -262,7 +292,7 @@ Examples:
 - **[BLE Status & Resume Checklist](docs/BLE_COMPLIANCE_RESUME.md)**
 - **[Zigbee2MQTT Integration](docs/ZIGBEE2MQTT_INTEGRATION.md)**
 - **[Zigbee Full-Support Handoff](docs/ZIGBEE_FULL_SUPPORT_HANDOFF.md)**
-- **[Channel Sounding Zephyr-Parity Status](docs/CHANNEL_SOUNDING_ZEPHYR_PARITY.md)**
+- **[Channel Sounding Status](docs/CHANNEL_SOUNDING_CURRENT_STATUS.md)**
 - **[Thread & Matter Implementation Plan](docs/THREAD_MATTER_IMPLEMENTATION_PLAN.md)**
 - **[Thread & Matter Hardening Status](docs/THREAD_MATTER_FINISH_PLAN.md)**
 - **[Power Profile Measurements](POWER_PROFILE_MEASUREMENTS.md)**
@@ -271,7 +301,7 @@ Examples:
 
 <div align="center">
 
-**Built from datasheets. Verified on hardware. No vendor blobs.**
+**Bare-metal Arduino core with clearly identified, separately licensed third-party components.**
 
 ---
 

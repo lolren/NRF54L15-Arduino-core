@@ -1,0 +1,6 @@
+board:
+  name: xiao_nrf54lm20a
+  full_name: XIAO nRF54LM20A
+  vendor: seeed
+  socs:
+    - name: nrf54lm20a

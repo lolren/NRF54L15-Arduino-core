@@ -1,7 +1,8 @@
 # nRF54L15 Clean Implementation — New Silicon Features
 
-Complete catalog of all newly-implemented HAL wrappers and Arduino IDE examples
-for the nRF54L15. All items have been tested on two XIAO nRF54L15 boards.
+Catalog of newly implemented HAL wrappers and Arduino IDE examples for the
+nRF54L15 family. Compile and hardware status is tracked per feature; inclusion
+in this catalog does not imply that every board/feature combination was flashed.
 
 ## 27/27 Plan Items Complete
 
@@ -33,14 +34,14 @@ for the nRF54L15. All items have been tested on two XIAO nRF54L15 boards.
 | WDT31 | Existing `Watchdog` class | Non-secure watchdog |
 | KMU/CRACEN | `CracenIkg` class + doc | Key management |
 | BLE Security | `BleRadio` class + SMP | Pairing/bonding |
-| BLE CS | `BleRadio` class + raw | Channel sounding |
+| BLE CS | `BleCsControllerRuntime` + Nordic SDC/MPSL | LE CS Test initiator/reflector |
 | Thread | `OpenThread` + radio diag | Joiner, UDP hello |
 | Matter | `MatterOnOffLight` | Foundation, on-network |
 | VPR | `nrf54l15::VPR_BASE` + transport | Ticker, CRC, hibernate |
 
-## Arduino IDE Examples (100+ total, all tested)
+## Arduino IDE Examples
 
-### Peripherals (22 new examples, all compile, all flashed)
+### Peripherals (22 new examples)
 
 | Example | Category |
 |---------|----------|
@@ -67,13 +68,13 @@ for the nRF54L15. All items have been tested on two XIAO nRF54L15 boards.
 | BlePeriodicAdvertising | BLE periodic advertising |
 | SiliconFeatureSelfTest | Self-test across all features |
 
-### Existing Example Categories (all compile, flashed to boards)
+### Existing Example Categories
 
 | Category | Examples | Count |
 |----------|----------|-------|
 | BLE/Security | BleBondPersistenceProbe, BlePairingEncryptionStatus | 2 |
 | BLE/Connections | 12 BLE connection examples | 12 |
-| BLE/ChannelSounding | 5 channel sounding examples | 5 |
+| BLE/ChannelSounding | BleChannelSoundingInitiator, BleChannelSoundingReflector | 2 |
 | BLE/Advertising | 2 advertising examples | 2 |
 | BLE/Diagnostics | BLE diagnostics | 1 |
 | BLE/GATT | GATT examples | 2 |
@@ -83,7 +84,11 @@ for the nRF54L15. All items have been tested on two XIAO nRF54L15 boards.
 | Matter | 5 Matter examples | 5 |
 | VPR | 16 VPR examples | 16 |
 
-### Total: 100+ Arduino IDE examples, all compile clean, all flashed to both XIAOs
+Channel Sounding requires `Tools -> CPU Frequency -> 128 MHz` or the CLI option
+`cpu_freq=128m`. It links separately licensed Nordic SDC/MPSL binary components;
+see [`third_party/nordic_sdc/LICENSE`](../../third_party/nordic_sdc/LICENSE),
+[`LICENSE-ATTRIBUTION.txt`](../../third_party/nordic_sdc/LICENSE-ATTRIBUTION.txt),
+and [`VERSION`](../../third_party/nordic_sdc/VERSION).
 
 ## Board Validation Results (2026-05-01)
 

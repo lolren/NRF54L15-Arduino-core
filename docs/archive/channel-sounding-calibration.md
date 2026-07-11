@@ -1,5 +1,10 @@
 # Channel Sounding Calibration
 
+> Historical raw-radio experiment: the commands and profiles below target the
+> retired BLE 2M/CTE/CSTONES phase path. They must not be applied to the current
+> Nordic SDC/MPSL controller results. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 The clean Arduino channel-sounding examples now expose a simple calibration loop for the
 phase-based ranging path.
 

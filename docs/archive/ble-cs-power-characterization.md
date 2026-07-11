@@ -1,5 +1,10 @@
 # BLE / CS Power Characterization
 
+> Historical harness: this document covers a synthetic VPR fixture, not the
+> current Nordic SDC/MPSL Channel Sounding path. It must not be used for current
+> power claims. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This note defines the current bench path for measuring BLE and Channel Sounding
 current on the `XIAO nRF54L15 / Sense`.
 

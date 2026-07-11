@@ -116,11 +116,13 @@ typedef enum IRQn {
     PendSV_IRQn            =  -2,
     SysTick_IRQn           =  -1,
 
-    // Peripheral interrupts
+    // Software and peripheral interrupts
+    SWI00_IRQn             = 28,
     AAR00_CCM00_IRQn      = 74,
     ECB00_IRQn            = 75,
     SPIM00_IRQn           = 77,
     EGU10_IRQn            = 135,
+    TIMER10_IRQn          = 133,
     RADIO_0_IRQn          = 138,
     RADIO_1_IRQn          = 139,
     SPIM20_IRQn            = 198,

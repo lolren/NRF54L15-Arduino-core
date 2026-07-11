@@ -9,7 +9,7 @@ This report is based only on the repository, the supplied local PDFs/text extrac
 
 ## Remediation Update - 2026-07-11
 
-Current status for this checkout: **all 71 audit items have been addressed in the 0.9.222 source tree**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218 through 0.9.222 follow-ups together record the current source-tree result.
+Current status for this checkout: **all 71 audit items have been addressed in the 0.9.223 source tree**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218 through 0.9.223 follow-ups together record the current source-tree result.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation tooling, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -105,7 +105,25 @@ Verification completed for this follow-up:
 
 The five-phone HID interoperability result above remains the user-confirmed v0.9.221 baseline. The v0.9.222 final package still needs reporter retesting and does not claim Bluetooth qualification, RF conformance, multi-bond persistence, or PPK2 current characterization.
 
-The remainder of this document is retained as the pre-remediation audit record. Present-tense defect descriptions and priority tables below describe the audited baseline, not the corrected 0.9.222 source tree.
+### Channel Sounding Controller Follow-up - 2026-07-11 (v0.9.223 source tree)
+
+The public Channel Sounding path now replaces the experimental raw-RADIO examples with `BleCsControllerRuntime`, backed by Nordic's SoftDevice Controller (SDC) and Multiprotocol Service Layer (MPSL). The Arduino IDE exposes exactly two public Channel Sounding examples, `BleChannelSoundingInitiator` and `BleChannelSoundingReflector`; former raw-radio, parser, transport and interoperability sketches are retained only as test fixtures under `extras/tests/channel_sounding`. Both public examples require the 128 MHz CPU profile and fail explicitly instead of starting under the 64 MHz profile.
+
+The bundled binary controller components are SoftDevice Controller multirole, MPSL and MPSL FEM common for the `nrf54l` and `nrf54lm` families, taken from Nordic nrfxlib revision `7a07f89ee8c32658ebfd2034b4cae92fde63e122` (`v3.4.0-rc1-12-g7a07f89ee`). They are not covered by the core's MIT license. The checked-in Nordic 5-Clause license restricts the binaries to Nordic Semiconductor integrated circuits, requires retention of its notices, and prohibits reverse engineering, decompilation, modification and disassembly; the accompanying attribution notice is also retained.
+
+Connected-board validation used XIAO nRF54L15 UID `761FDE87` and XIAO nRF54LM20A UID `3377B9D6`, with warning-clean builds at 128 MHz:
+
+* With the L15 as initiator and LM20A as reflector, the final positive run recorded 20 accepted ranges, 23 reflector results and 20 exact session-token/transfer-ID/CRC matches.
+* With the reflector deliberately absent, the initiator accepted zero ranges. Restoring it then produced 37 complete accepted range lines, 42 reflector results and 38 matching result sessions; serial capture ended while the final accepted initiator line was being printed.
+* Reversing the roles, with LM20A as initiator and L15 as reflector, produced 12 accepted ranges, 15 reflector results and 12 exact session matches. This exercises both controller roles on both chip families.
+* Accepted procedures reassembled both HCI LE CS Subevent Result `0x31` and continuation `0x32`, yielding 42 controller steps per side, 34 or 35 usable PBR channels, matching peer envelopes and no reported parser drops or rejections. The on-board parser regression also rejected malformed, reordered, duplicate-channel, incoherent-phase and one-RTT-pair inputs.
+* The canonical `./tools/release.sh 0.9.223` build passed all package-index, exact-archive, extracted Thread and extracted Matter verification. The resulting archive is `nrf54l15clean-0.9.223-dd1189998b11.tar.bz2`, SHA-256 `dd1189998b1161a1ba0f85b4dc59d8fe1faaa22b1c7573311af135e3d85a1ba1`, size `27532154`; all three checked-in indexes identify those exact bytes.
+
+The timing-critical sounding phase is a controller-executed Bluetooth LE CS Test. This core's proprietary CRC-protected protocol first establishes a per-cycle session token and shared DRBG nonce. After SDC releases RADIO, the reflector returns its step buffer in an envelope correlated by that token, profile, role, controller counters and step count. Those pre/post-test exchanges are not a connected-ACL Channel Sounding procedure, a Bluetooth profile, or a cross-vendor result transport.
+
+This evidence establishes repeatable operation of the two-board Arduino test path on the attached hardware. It does not claim Bluetooth SIG qualification, RF conformance or certification, connected-procedure interoperability, universal antenna-delay calibration, certified distance accuracy, or production power performance. The reported PBR/RTT ranges remain engineering measurements that require calibration and validation for each board, antenna, placement and enclosure.
+
+The remainder of this document is retained as the pre-remediation audit record. Present-tense defect descriptions and priority tables below describe the audited baseline, not the corrected 0.9.223 source tree.
 
 ## Executive Summary
 

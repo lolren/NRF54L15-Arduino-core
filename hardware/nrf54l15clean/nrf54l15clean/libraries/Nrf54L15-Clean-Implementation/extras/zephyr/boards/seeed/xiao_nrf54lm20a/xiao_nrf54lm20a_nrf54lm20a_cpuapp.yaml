@@ -1,0 +1,15 @@
+identifier: xiao_nrf54lm20a/nrf54lm20a/cpuapp
+name: XIAO nRF54LM20A
+vendor: seeed
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+sysbuild: true
+ram: 511
+flash: 1936
+supported:
+  - counter
+  - gpio
+  - uart
+  - watchdog

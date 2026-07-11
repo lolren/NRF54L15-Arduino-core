@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 impl_rel="hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation"
 impl_src="${repo_root}/${impl_rel}"
+fixture_root="${impl_src}/extras/tests/channel_sounding"
 
 fqbn="${CS_FQBN:-nrf54l15clean:nrf54l15clean:xiao_nrf54l15}"
 board_port="${CS_BOARD_PORT:-/dev/ttyACM1}"
@@ -21,7 +22,7 @@ fi
 installed_impl="${installed_base}/${installed_version}/libraries/Nrf54L15-Clean-Implementation"
 nrf_ocd="${installed_base}/${installed_version}/tools/nrf_ocd"
 
-sketch="${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingVprInvalidParams"
+sketch="${fixture_root}/BleChannelSoundingVprInvalidParams"
 
 if [[ "${regenerate_vpr}" != "0" ]]; then
   python3 "${impl_src}/tools/generate_vpr_cs_transport_stub.py"
@@ -35,7 +36,8 @@ fi
 
 if [[ "${sync_installed}" != "0" ]]; then
   rsync -a "${impl_src}/src/" "${installed_impl}/src/"
-  rsync -a "${sketch}" "${installed_impl}/examples/BLE/ChannelSounding/"
+  mkdir -p "${installed_impl}/extras/tests/channel_sounding"
+  rsync -a "${sketch}" "${installed_impl}/extras/tests/channel_sounding/"
 fi
 
 arduino-cli compile --upload \

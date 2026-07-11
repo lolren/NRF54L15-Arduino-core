@@ -1,5 +1,10 @@
 # Zephyr Channel Sounding Validation
 
+> Historical reference: this capture remains evidence for the official Zephyr
+> controller sample, but its description of the Arduino implementation predates
+> the bundled Nordic SDC/MPSL runtime. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This repo's clean Arduino core now includes a working two-board **phase-based** channel-sounding path using `RADIO.CSTONES` and DFE tone capture.
 
 This document is for a different purpose:

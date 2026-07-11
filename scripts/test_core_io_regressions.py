@@ -20,9 +20,11 @@ CHIPS = {
     "nrf54l15": {
         "last_irq": 269,
         "vectors": {
+            28: "SWI00_IRQHandler",
             70: "AAR00_CCM00_IRQHandler",
             71: "ECB00_IRQHandler",
             74: "SPIM00_IRQHandler",
+            133: "TIMER10_IRQHandler",
             135: "EGU10_IRQHandler",
             138: "RADIO_0_IRQHandler",
             139: "RADIO_1_IRQHandler",
@@ -61,9 +63,11 @@ CHIPS = {
             269: "GPIOTE30_1_IRQHandler",
         },
         "irqs": {
+            "SWI00": 28,
             "AAR00_CCM00": 70,
             "ECB00": 71,
             "SPIM00": 74,
+            "TIMER10": 133,
             "SPIM20": 198,
             "SPIM21": 199,
             "SPIM22": 200,
@@ -82,9 +86,11 @@ CHIPS = {
     "nrf54lm20b": {
         "last_irq": 270,
         "vectors": {
+            28: "SWI00_IRQHandler",
             74: "AAR00_CCM00_IRQHandler",
             75: "ECB00_IRQHandler",
             77: "SPIM00_IRQHandler",
+            133: "TIMER10_IRQHandler",
             135: "EGU10_IRQHandler",
             138: "RADIO_0_IRQHandler",
             139: "RADIO_1_IRQHandler",
@@ -123,9 +129,11 @@ CHIPS = {
             270: "CLOCK_POWER_IRQHandler",
         },
         "irqs": {
+            "SWI00": 28,
             "AAR00_CCM00": 74,
             "ECB00": 75,
             "SPIM00": 77,
+            "TIMER10": 133,
             "SPIM20": 198,
             "SPIM21": 199,
             "SPIM22": 200,
@@ -641,6 +649,57 @@ def validate_protocol_typed_reset_contracts() -> None:
     print("PASS Matter, OpenThread, and channel-sounding typed sentinel resets")
 
 
+def validate_channel_sounding_public_examples_contracts() -> None:
+    examples = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding"
+    )
+    expected = ["BleChannelSoundingInitiator", "BleChannelSoundingReflector"]
+    actual = sorted(path.name for path in examples.iterdir() if path.is_dir())
+    assert actual == expected, (
+        "public Channel Sounding examples must contain only the canonical pair: "
+        f"{actual}"
+    )
+    for name in expected:
+        sketch_path = examples / name / f"{name}.ino"
+        assert sketch_path.is_file()
+        sketch = sketch_path.read_text(encoding="utf-8")
+        assert '#include "ble_cs_controller_runtime.h"' in sketch
+        assert "BleCsControllerRuntime" in sketch
+        assert "BleCsSubeventResultReassembler" in sketch
+        assert "kBleCsHciEvtSubeventResult" in sketch
+        assert "kBleCsHciEvtSubeventResultContinue" in sketch
+        assert "measureChannelAveraged(" not in sketch
+        assert "listenAndReflectOnce(" not in sketch
+        assert "protocol=physical_pbr" not in sketch
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "*.uf2"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if tracked.returncode == 0:
+        tracked_uf2 = [
+            path
+            for line in tracked.stdout.splitlines()
+            if (path := ROOT / line).is_file()
+        ]
+    else:
+        tracked_uf2 = list(ROOT.rglob("*.uf2"))
+    assert not tracked_uf2, f"tracked UF2 artifacts are not allowed: {tracked_uf2}"
+    public_uf2 = list(examples.rglob("*.uf2"))
+    assert not public_uf2, (
+        f"UF2 build artifacts are not allowed in public CS examples: {public_uf2}"
+    )
+    print(
+        "PASS exactly two controller-backed public Channel Sounding examples "
+        "and no UF2 artifacts"
+    )
+
+
 def validate_spi_contracts() -> None:
     source = (PLATFORM / "cores/nrf54lm20b/SPI.cpp").read_text(encoding="utf-8")
     begin_transaction = function_body(
@@ -929,6 +988,7 @@ def main() -> int:
     validate_parser_output_validity_contracts()
     validate_zigbee_persistence_reset_contracts()
     validate_protocol_typed_reset_contracts()
+    validate_channel_sounding_public_examples_contracts()
     validate_spi_contracts()
     validate_system_off_wake_contracts()
     validate_xiao_low_power_board_contracts()

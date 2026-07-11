@@ -110,13 +110,19 @@ Outputs are written to `measurements/ble_timing_sweep_<timestamp>/`:
 If no windows are captured, verify serial path and keep Tools serial routing at
 `USB bridge on Serial` (`clean_serial=bridge`).
 
-For BLE / CS current work, use the dedicated quiet harness:
+For current Channel Sounding measurements, build the public initiator and
+reflector with `cpu_freq=128m`. Instrument one board at a time while keeping the
+other board and test configuration fixed. Record controller initialization,
+active LE CS Test, post-test result transfer, and idle intervals separately.
 
-- `hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingVprServicePowerProbe/BleChannelSoundingVprServicePowerProbe.ino`
-- parser:
-  `python3 scripts/parse_cs_power_probe.py --log cs_power_probe.log`
-- measurement note:
-  `docs/ble-cs-power-characterization.md`
+The old `BleChannelSoundingVprServicePowerProbe` under
+`extras/tests/channel_sounding` exercises a synthetic VPR regression fixture at
+64 MHz. It does not measure the Nordic SDC/MPSL Channel Sounding path and must
+not be used for current CS power claims. Its parser and measurement note remain
+available only for historical comparisons:
+
+- `python3 scripts/parse_cs_power_probe.py --log cs_power_probe.log`
+- `docs/archive/ble-cs-power-characterization.md`
 
 ## 7. Measurement Matrix
 
@@ -132,9 +138,9 @@ You can also fill `docs/power_profiles_template.csv` directly.
 | P5 | `BleConnectionPeripheral` | `clean_cpu=cpu64,clean_power=low,clean_ble=on,clean_ble_timing=interop` | Connected | TBD | TBD | TBD | TBD | Interop profile |
 | P6 | `BleConnectionPeripheral` | `clean_cpu=cpu64,clean_power=low,clean_ble=on,clean_ble_timing=aggressive` | Connected | TBD | TBD | TBD | TBD | Aggressive BLE timing |
 | P7 | `BleConnectionPeripheral` | `clean_cpu=cpu64,clean_power=low,clean_ble=on,clean_ble_timing=balanced` | Connected | TBD | TBD | TBD | TBD | TX power reduction impact; set sketch `kTxPowerDbm` explicitly for this row |
-| P8 | `BleChannelSoundingVprServicePowerProbe` | `clean_cpu=cpu64,clean_power=low,clean_autogate=balanced,clean_ble=on,clean_ble_timing=balanced,clean_vpr=on` | Service idle | TBD | TBD | TBD | TBD | Use first `phase_ms` slice and quiet harness |
-| P9 | `BleChannelSoundingVprServicePowerProbe` | `clean_cpu=cpu64,clean_power=low,clean_autogate=balanced,clean_ble=on,clean_ble_timing=balanced,clean_vpr=on` | Connected, no CS | TBD | TBD | TBD | TBD | Use second `phase_ms` slice |
-| P10 | `BleChannelSoundingVprServicePowerProbe` | `clean_cpu=cpu64,clean_power=low,clean_autogate=balanced,clean_ble=on,clean_ble_timing=balanced,clean_vpr=on` | Connected + CS | TBD | TBD | TBD | TBD | Use third `phase_ms` slice; the harness repeats CS runs at fixed `cs_gap_ms` |
+| P8 | `BleChannelSoundingReflector` | `cpu_freq=128m` with the example's normal radio settings | Active LE CS Test, reflector | TBD | TBD | TBD | TBD | Measure one board; keep initiator placement/configuration fixed |
+| P9 | `BleChannelSoundingInitiator` | `cpu_freq=128m` with the example's normal radio settings | Active LE CS Test, initiator | TBD | TBD | TBD | TBD | Separate controller activity from serial output where possible |
+| P10 | `BleChannelSoundingInitiator` | `cpu_freq=128m` with the example's normal radio settings | Post-test peer result transfer and estimate | TBD | TBD | TBD | TBD | Capture separately from the controller-owned sounding interval |
 
 ## 8. Interpretation Rules
 

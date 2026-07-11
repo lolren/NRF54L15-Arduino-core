@@ -36,9 +36,9 @@ jobs:
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/Security/BleBondPersistenceProbe
             options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingReflector
-            options: clean_ble=on
+            options: clean_ble=on,cpu_freq=128m
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator
-            options: clean_ble=on
+            options: clean_ble=on,cpu_freq=128m
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/LowPower/LowPowerIdleWfi
             options: clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/LowPower/LowPowerTelemetryDutyMetrics
@@ -242,6 +242,18 @@ jobs:
           - board: xiao_nrf54l15
             options: cpu_freq=64m
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/HID/blehid_mouse
+          - board: xiao_nrf54lm20b
+            options: clean_ble=on,cpu_freq=128m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator
+          - board: xiao_nrf54lm20b
+            options: clean_ble=on,cpu_freq=128m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingReflector
+          - board: xiao_nrf54l15
+            options: clean_ble=on,cpu_freq=128m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator
+          - board: xiao_nrf54l15
+            options: clean_ble=on,cpu_freq=128m
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingReflector
           - board: xiao_nrf54l15
             options: clean_thread=stage
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/ThreadExperimentalJoinerPSK

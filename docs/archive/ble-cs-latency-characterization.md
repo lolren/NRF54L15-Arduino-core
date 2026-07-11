@@ -1,5 +1,10 @@
 # BLE / CS Latency Characterization
 
+> Historical measurement: these timings cover the retired synthetic VPR and
+> direct-radio paths. They are not latency figures for the current Nordic
+> SDC/MPSL runtime. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This note captures the current measured latency for the shipped BLE and Channel
 Sounding bring-up paths on attached `XIAO nRF54L15 / Sense` hardware.
 

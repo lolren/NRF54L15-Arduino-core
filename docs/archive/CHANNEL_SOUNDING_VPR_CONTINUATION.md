@@ -1,5 +1,9 @@
 # Channel Sounding VPR Continuation
 
+> Historical record: this VPR bring-up path is retained for regression work and
+> is not the supported Channel Sounding controller. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This note is the resume point for the current Channel Sounding and VPR transport work.
 
 Master completion checklist:

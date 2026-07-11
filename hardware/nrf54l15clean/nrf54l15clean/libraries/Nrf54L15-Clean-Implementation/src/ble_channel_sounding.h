@@ -13,6 +13,9 @@ namespace xiao_nrf54l15 {
 
 constexpr size_t kBleCsMaxSwitchPatternCount = 8U;
 constexpr size_t kBleCsChannelMapBytes = 10U;
+constexpr size_t kBleCsPeerSessionRequestBytes = 16U;
+constexpr size_t kBleCsPeerResultEnvelopeHeaderBytes = 32U;
+constexpr uint8_t kBleCsMainMode0 = 0x0U;
 constexpr uint8_t kBleCsMainMode1 = 0x1U;
 constexpr uint8_t kBleCsMainMode2 = 0x2U;
 constexpr uint8_t kBleCsMainMode3 = 0x3U;
@@ -429,7 +432,8 @@ struct BleCsRttSample {
 struct BleCsChannelMeasurement {
   bool valid = false;
   // 0=ok, 1=invalid setup, 2=control TX, 3=probe TX, 4=report RX,
-  // 5=report decode, 6=insufficient tone/RTT quality.
+  // 5=report decode, 6=insufficient tone/RTT quality,
+  // 7=insufficient averaged samples or phase coherence.
   uint8_t status = 0U;
   uint8_t channelIndex = 0;
   uint8_t sequence = 0;
@@ -441,7 +445,10 @@ struct BleCsChannelMeasurement {
   BleCsToneSample peerTone;
   BleCsRttSample localRtt;
   BleCsRttSample peerRtt;
+  bool combinedPhaseValid = false;
+  uint8_t phaseSampleCount = 0U;
   float combinedPhaseRad = 0.0f;
+  float phaseCoherence = 0.0f;
   float rttDistanceMeters = 0.0f;
 };
 
@@ -460,6 +467,10 @@ struct BleCsEstimate {
   float rttVariance = 0.0f;
   float medianToneQuality = 0.0f;
   float fitDeltaMeters = 0.0f;
+  float adjacentPhaseDistanceMeters = 0.0f;
+  float regressionPhaseDistanceMeters = 0.0f;
+  float adjacentPhaseCoherence = 0.0f;
+  uint8_t adjacentPhasePairs = 0U;
 };
 
 struct BleCsCalibrationProfile {
@@ -1260,6 +1271,37 @@ struct BleCsReflectorTiming {
   uint32_t reportTxUs = 0U;
 };
 
+struct BleCsStepTransferStats {
+  uint16_t transferId = 0U;
+  uint16_t bytesTransferred = 0U;
+  uint16_t framesSent = 0U;
+  uint16_t framesReceived = 0U;
+  uint16_t acknowledgements = 0U;
+  uint16_t retries = 0U;
+  uint16_t duplicateFrames = 0U;
+  uint16_t rejectedFrames = 0U;
+  uint32_t payloadCrc32 = 0U;
+};
+
+struct BleCsPeerSession {
+  uint32_t token = 0U;
+  uint32_t profileTag = 0U;
+  uint16_t drbgNonce = 0U;
+};
+
+struct BleCsPeerResultMetadata {
+  BleCsPeerSession session{};
+  uint16_t startAclConnEventCounter = 0U;
+  uint16_t procedureCounter = 0U;
+  uint16_t numStepsReported = 0U;
+  uint8_t role = 0U;
+  uint8_t configId = 0U;
+  uint8_t numAntennaPaths = 0U;
+  uint8_t mainModeType = 0U;
+  uint8_t subModeType = 0U;
+  uint8_t rttType = 0U;
+};
+
 class BleChannelSoundingRadio {
  public:
   explicit BleChannelSoundingRadio(uint32_t radioBase = nrf54l15::RADIO_BASE);
@@ -1274,6 +1316,12 @@ class BleChannelSoundingRadio {
 
   bool measureChannel(uint8_t channelIndex, uint8_t sequence,
                       BleCsChannelMeasurement* outMeasurement);
+  bool measureChannelAveraged(uint8_t channelIndex,
+                              uint8_t exchangeCount,
+                              uint8_t* inOutSequence,
+                              BleCsChannelMeasurement* outMeasurement,
+                              float minPhaseCoherence = 0.75f,
+                              uint16_t interExchangeGuardUs = 120U);
   bool measureConnectedWindowChannel(
       const BleConnectionTimingSnapshot& snapshot,
       uint8_t channelIndex,
@@ -1322,6 +1370,9 @@ class BleChannelSoundingRadio {
                                  BleCsStepMode2Data* outData);
   static bool parseMode3StepData(const BleCsSubeventStep* step,
                                  BleCsStepMode3Data* outData);
+  static bool parseMode3StepData(const BleCsSubeventStep* step,
+                                 bool hasRttSoundingSequence,
+                                 BleCsStepMode3Data* outData);
   static bool parseToneInfo(const uint8_t* toneData,
                             size_t toneDataLen,
                             BleCsStepToneInfo* outInfo);
@@ -1331,11 +1382,15 @@ class BleChannelSoundingRadio {
   static bool parseMode3ToneInfo(const BleCsSubeventStep* step,
                                  uint8_t toneIndex,
                                  BleCsStepToneInfo* outInfo);
-  static void parseSubeventStepData(const uint8_t* stepData,
-                                    size_t stepDataLen,
-                                    bool (*callback)(const BleCsSubeventStep* step,
-                                                     void* userData),
-                                    void* userData);
+  static bool parseMode3ToneInfo(const BleCsSubeventStep* step,
+                                 bool hasRttSoundingSequence,
+                                 uint8_t toneIndex,
+                                 BleCsStepToneInfo* outInfo);
+  static bool parseSubeventStepData(
+      const uint8_t* stepData,
+      size_t stepDataLen,
+      bool (*callback)(const BleCsSubeventStep* step, void* userData),
+      void* userData);
   static bool encodeMode2StepDataFromMeasurements(
       const BleCsChannelMeasurement* measurements,
       size_t count,
@@ -1487,12 +1542,45 @@ class BleChannelSoundingRadio {
   bool copyLastDfePacket(uint8_t* outPacket,
                          size_t maxLen,
                          size_t* outLen) const;
+  static bool encodePeerSessionRequest(const BleCsPeerSession& session,
+                                       uint8_t* outData,
+                                       size_t maxDataLen,
+                                       uint16_t* outDataLen);
+  static bool decodePeerSessionRequest(const uint8_t* data,
+                                       size_t dataLen,
+                                       BleCsPeerSession* outSession);
+  static bool encodePeerResultEnvelope(
+      const BleCsPeerResultMetadata& metadata,
+      const uint8_t* stepData,
+      uint16_t stepDataLen,
+      uint8_t* outData,
+      size_t maxDataLen,
+      uint16_t* outDataLen);
+  static bool decodePeerResultEnvelope(
+      const uint8_t* data,
+      size_t dataLen,
+      BleCsPeerResultMetadata* outMetadata,
+      const uint8_t** outStepData,
+      uint16_t* outStepDataLen);
+  bool sendPeerStepData(const uint8_t* stepData,
+                        uint16_t stepDataLen,
+                        uint16_t transferId,
+                        uint32_t timeoutMs,
+                        BleCsStepTransferStats* outStats = nullptr);
+  bool receivePeerStepData(uint8_t* outStepData,
+                           size_t maxStepDataLen,
+                           uint16_t* outStepDataLen,
+                           uint16_t* outTransferId,
+                           uint32_t timeoutMs,
+                           BleCsStepTransferStats* outStats = nullptr);
 
  private:
   enum class PacketType : uint8_t {
     kControl = 0x43U,
     kProbe = 0x50U,
     kReport = 0x52U,
+    kStepData = 0x44U,
+    kStepAck = 0x41U,
   };
 
   struct RxFrame {
@@ -1502,7 +1590,7 @@ class BleChannelSoundingRadio {
     uint8_t channelIndex = 0;
     uint8_t flags = 0;
     int8_t rssiDbm = 0;
-    uint8_t extra[24] = {0};
+    uint8_t extra[249] = {0};
     uint8_t extraLen = 0;
   };
 
@@ -1553,8 +1641,8 @@ class BleChannelSoundingRadio {
   PowerManager power_;
   BleCsConfig config_;
   bool initialized_;
-  alignas(4) uint8_t txPacket_[3U + 48U];
-  alignas(4) uint8_t rxPacket_[3U + 48U];
+  alignas(4) uint8_t txPacket_[3U + 255U];
+  alignas(4) uint8_t rxPacket_[3U + 255U];
   alignas(4) uint8_t dfePacket_[512U];
   alignas(4) uint32_t auxDataWords_[4];
   uint16_t lastDfePacketAmountBytes_;

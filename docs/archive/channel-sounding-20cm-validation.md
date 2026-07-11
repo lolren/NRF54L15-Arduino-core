@@ -1,5 +1,10 @@
 # Channel Sounding 20 cm Validation
 
+> Historical raw-radio experiment: this calibration was produced by the retired
+> BLE 2M/CTE/CSTONES phase path, not a complete Bluetooth LE Channel Sounding
+> procedure. Its offsets do not apply to Nordic SDC results. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This note captures the current measured one-point calibration run for the real
 two-board phase-based Arduino Channel Sounding path.
 

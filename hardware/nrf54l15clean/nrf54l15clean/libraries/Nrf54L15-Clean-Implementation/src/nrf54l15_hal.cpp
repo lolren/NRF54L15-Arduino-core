@@ -11,6 +11,8 @@
 
 extern "C" uint8_t nrf54l15_constlat_users_active(void) __attribute__((weak));
 extern "C" void nrf54l15_grtc_irq_observer(void) __attribute__((weak));
+extern "C" bool nrf54_cs_controller_radio_irq_service(void)
+    __attribute__((weak));
 extern "C" void nrf54l15_grtc_irq_observer(void) {}
 namespace xiao_nrf54l15 {
 class I2sTx;
@@ -266,6 +268,10 @@ extern "C" void nrf54l15_ble_grtc_irq_service(void) {
 }
 
 extern "C" void RADIO_0_IRQHandler(void) {
+  if (nrf54_cs_controller_radio_irq_service != nullptr &&
+      nrf54_cs_controller_radio_irq_service()) {
+    return;
+  }
   if (g_activeZigbeeRadioIrq != nullptr &&
       g_activeZigbeeRadioIrq->serviceBufferedReceiveIrq()) {
     return;

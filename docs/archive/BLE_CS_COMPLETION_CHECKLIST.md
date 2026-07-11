@@ -1,5 +1,9 @@
 # BLE And Channel Sounding Completion Checklist
 
+> Historical record: the Channel Sounding sections describe synthetic VPR and
+> retired direct-radio work, not the current Nordic SDC/MPSL runtime. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This checklist tracks practical completion for the repo's BLE and Channel
 Sounding work on `nRF54L15`.
 

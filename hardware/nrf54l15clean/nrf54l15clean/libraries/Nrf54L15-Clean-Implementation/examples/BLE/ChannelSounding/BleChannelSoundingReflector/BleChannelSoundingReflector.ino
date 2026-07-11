@@ -1,138 +1,370 @@
 /*
  * BleChannelSoundingReflector
  *
- * Passive partner for BleChannelSoundingInitiator in a two-board BLE Channel
- * Sounding distance measurement setup.
+ * Runs a Bluetooth LE Channel Sounding Test as the reflector, then sends its
+ * completed controller step data to BleChannelSoundingInitiator.
  *
- * The Reflector simply listens on the control channel and echoes back tone
- * probes from the Initiator. It does not compute a distance estimate itself;
- * all processing is done on the Initiator board.
- *
- * Connection: both boards must be within radio range and use the same
- * control channel (37 by default). The Initiator will find the Reflector
- * automatically when the Reflector is running and listening.
- *
- * Serial output:
- *   replies = how many probe exchanges the Reflector has completed.
- *   LED blinks briefly on each successful reply.
+ * Select the 128 MHz CPU menu option. A CRC-framed request establishes a
+ * per-cycle token before Nordic SDC/MPSL owns RADIO for the CS Test. The same
+ * token correlates the result returned afterward. This is not a connected ACL
+ * CS link.
  */
 
 #include <Arduino.h>
 
-#include "ble_channel_sounding.h"
-#include "nrf54l15_hal.h"
+#include <string.h>
 
-#ifdef ledOn
-#undef ledOn
-#endif
-#ifdef ledOff
-#undef ledOff
-#endif
+#include "ble_channel_sounding.h"
+#include "ble_cs_controller_runtime.h"
+#include "nrf54l15_hal.h"
 
 using namespace xiao_nrf54l15;
 
 namespace {
 
-// kCeramic: on-board antenna (validated). kExternal: only if physically attached.
-static constexpr BoardAntennaPath kAntennaPath = BoardAntennaPath::kCeramic;
+constexpr BoardAntennaPath kAntennaPath = BoardAntennaPath::kCeramic;
+constexpr uint32_t kControllerTimeoutMs = 12000U;
+constexpr uint32_t kControllerStopTimeoutMs = 1500U;
+constexpr uint32_t kPeerTransferTimeoutMs = 5000U;
+constexpr uint32_t kResultSendTimeoutMs = 2500U;
+constexpr uint32_t kRetryDelayMs = 227U;
+constexpr uint8_t kRequiredMode0Steps = 3U;
+constexpr uint32_t kPeerProfileTag = 0x43534D32UL;  // "CSM2"
 
-static BleChannelSoundingRadio gCs;
-static uint32_t gReplyCount = 0U;
-static uint32_t gLastLogMs = 0U;
-static BleCsDfeCaptureInfo gLastDfeInfo{};
+struct ControllerCapture {
+  BleCsSubeventResultHeader header{};
+  uint8_t stepData[kBleCsMaxControllerStepDataBytes] = {0};
+  uint16_t stepDataLen = 0U;
+  uint16_t initialEvents = 0U;
+  uint16_t continuationEvents = 0U;
+  uint16_t rejectedEvents = 0U;
+  uint32_t droppedPackets = 0U;
+  int32_t runtimeError = 0;
+  bool complete = false;
+};
 
-void ledOn() {
-  (void)Gpio::write(kPinUserLed, false);
+BleCsControllerRuntime gController;
+BleCsSubeventResultReassembler gReassembler;
+BleChannelSoundingRadio gTransferRadio;
+BleCsControllerTestConfig gTestConfig;
+BleCsPeerSession gSession;
+ControllerCapture gCapture;
+uint8_t gPeerEnvelope[kBleCsMaxControllerStepDataBytes] = {0};
+uint32_t gCycle = 0U;
+uint32_t gTransferredResults = 0U;
+
+void led(bool on) {
+  (void)Gpio::write(kPinUserLed, !on);
 }
 
-void ledOff() {
-  (void)Gpio::write(kPinUserLed, true);
-}
-
-void pulse(uint8_t count, uint16_t onMs = 25U, uint16_t offMs = 45U) {
-  for (uint8_t i = 0U; i < count; ++i) {
-    ledOn();
-    delay(onMs);
-    ledOff();
-    if ((i + 1U) < count) {
-      delay(offMs);
-    }
-  }
-}
-
-[[noreturn]] void failStage(uint8_t stage) {
+[[noreturn]] void fail(uint8_t stage) {
+  Serial.print(F("fatal_stage="));
+  Serial.println(stage);
   while (true) {
-    pulse(stage, 90U, 120U);
-    delay(900U);
+    led(true);
+    delay(80U + (static_cast<uint32_t>(stage) * 20U));
+    led(false);
+    delay(400U);
   }
 }
 
 void configureBoard() {
-  (void)Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
-  ledOff();
-
+  (void)Gpio::configure(kPinUserLed, GpioDirection::kOutput,
+                        GpioPull::kDisabled);
+  led(false);
   Serial.begin(115200);
-  const uint32_t start = millis();
-  while (!Serial && (static_cast<uint32_t>(millis() - start) < 1500U)) {
+  const uint32_t startedMs = millis();
+  while (!Serial && (millis() - startedMs) < 1500U) {
   }
-
   BoardControl::setBatterySenseEnabled(false);
   BoardControl::setImuMicEnabled(false);
   if (!BoardControl::enableRfPath(kAntennaPath)) {
-    failStage(1);
+    fail(1U);
   }
+  if (nrf54l15_core_get_cpu_frequency_hz() != 128000000UL) {
+    Serial.println(F("channel_sounding_error=requires_cpu_128mhz"));
+    fail(2U);
+  }
+}
+
+void drainControllerPackets(ControllerCapture* capture) {
+  BleCsControllerHciPacket packet{};
+  while (gController.readPacket(&packet)) {
+    if (capture == nullptr || packet.messageType != 0x04U) {
+      continue;
+    }
+
+    BleCsHciLeMetaEvent meta{};
+    if (!BleChannelSoundingRadio::parseHciLeMetaEvent(
+            packet.data, packet.dataLength, &meta)) {
+      continue;
+    }
+
+    BleCsSubeventResult result{};
+    bool accepted = false;
+    if (meta.subeventCode == kBleCsHciEvtSubeventResult) {
+      ++capture->initialEvents;
+      accepted = gReassembler.consumeInitialEvent(meta.payload,
+                                                  meta.payloadLen, &result);
+    } else if (meta.subeventCode ==
+               kBleCsHciEvtSubeventResultContinue) {
+      ++capture->continuationEvents;
+      accepted = gReassembler.consumeContinuationEvent(
+          meta.payload, meta.payloadLen, &result);
+    } else {
+      continue;
+    }
+
+    if (!accepted) {
+      ++capture->rejectedEvents;
+      continue;
+    }
+    if (!result.isComplete) {
+      continue;
+    }
+    if (result.stepData == nullptr || result.stepDataLen == 0U ||
+        result.stepDataLen > sizeof(capture->stepData)) {
+      ++capture->rejectedEvents;
+      continue;
+    }
+
+    capture->header = result.header;
+    capture->stepDataLen = result.stepDataLen;
+    memcpy(capture->stepData, result.stepData, result.stepDataLen);
+    capture->complete = true;
+  }
+}
+
+bool stopTimedOutController() {
+  if (!gController.testRunning()) {
+    return true;
+  }
+  if (!gController.stopTest()) {
+    return false;
+  }
+
+  const uint32_t startedMs = millis();
+  while (gController.testRunning() &&
+         (millis() - startedMs) < kControllerStopTimeoutMs) {
+    gController.poll();
+    drainControllerPackets(nullptr);
+  }
+  return !gController.testRunning();
+}
+
+bool runControllerTest(ControllerCapture* capture) {
+  if (capture == nullptr) {
+    return false;
+  }
+  *capture = ControllerCapture{};
+  gReassembler.reset();
+
+  if (!gController.begin()) {
+    capture->runtimeError = gController.lastError();
+    return false;
+  }
+  if (!gController.startTest(BleCsControllerRole::kReflector, gTestConfig)) {
+    capture->runtimeError = gController.lastError();
+    (void)gController.end();
+    return false;
+  }
+
+  const uint32_t startedMs = millis();
+  while (!capture->complete &&
+         (millis() - startedMs) < kControllerTimeoutMs) {
+    gController.poll();
+    drainControllerPackets(capture);
+  }
+
+  bool stopped = true;
+  if (!capture->complete) {
+    stopped = stopTimedOutController();
+  }
+  capture->droppedPackets = gController.droppedPacketCount();
+  capture->runtimeError = gController.lastError();
+  const bool ended = gController.end();
+
+  return stopped && ended && capture->complete &&
+         capture->droppedPackets == 0U &&
+         capture->rejectedEvents == 0U &&
+         capture->header.procedureDoneStatus ==
+             kBleCsProcedureDoneComplete &&
+         capture->header.subeventDoneStatus == kBleCsSubeventDoneComplete &&
+         capture->header.numAntennaPaths <= 1U &&
+         capture->header.numStepsReported > kRequiredMode0Steps;
+}
+
+bool beginPeerTransport() {
+  BleCsConfig config{};
+  config.txPowerDbm = 0;
+  config.maxPayloadLength = 255U;
+  config.enableRtt = false;
+  config.enableRawDfeCapture = false;
+  return gTransferRadio.begin(config);
+}
+
+uint16_t transferIdForSession(const BleCsPeerSession& session) {
+  uint16_t transferId = static_cast<uint16_t>(
+      session.token ^ (session.token >> 16U));
+  return (transferId != 0U) ? transferId : 1U;
+}
+
+bool awaitCorrelatedSession(BleCsStepTransferStats* outTransfer) {
+  if (outTransfer == nullptr) {
+    return false;
+  }
+  *outTransfer = BleCsStepTransferStats{};
+  if (!beginPeerTransport()) {
+    return false;
+  }
+
+  uint8_t request[kBleCsPeerSessionRequestBytes] = {0};
+  uint16_t requestLen = 0U;
+  uint16_t transferId = 0U;
+  const bool received = gTransferRadio.receivePeerStepData(
+      request, sizeof(request), &requestLen, &transferId,
+      kPeerTransferTimeoutMs, outTransfer);
+  gTransferRadio.end();
+  if (!received || !BleChannelSoundingRadio::decodePeerSessionRequest(
+                       request, requestLen, &gSession) ||
+      gSession.profileTag != kPeerProfileTag ||
+      transferId != transferIdForSession(gSession)) {
+    gSession = BleCsPeerSession{};
+    return false;
+  }
+
+  gTestConfig.drbgNonce = gSession.drbgNonce;
+  return true;
+}
+
+void printRetry(const ControllerCapture& capture) {
+  Serial.print(F("cs_result role=reflector result=RETRY cycle="));
+  Serial.print(gCycle);
+  Serial.print(F(" proc_status="));
+  Serial.print(capture.header.procedureDoneStatus);
+  Serial.print(F(" subevent_status="));
+  Serial.print(capture.header.subeventDoneStatus);
+  Serial.print(F(" steps="));
+  Serial.print(capture.header.numStepsReported);
+  Serial.print(F(" bytes="));
+  Serial.print(capture.stepDataLen);
+  Serial.print(F(" hci_initial="));
+  Serial.print(capture.initialEvents);
+  Serial.print(F(" hci_continue="));
+  Serial.print(capture.continuationEvents);
+  Serial.print(F(" rejected="));
+  Serial.print(capture.rejectedEvents);
+  Serial.print(F(" dropped="));
+  Serial.print(capture.droppedPackets);
+  Serial.print(F(" error="));
+  Serial.println(capture.runtimeError);
+}
+
+void printTransfer(const ControllerCapture& capture,
+                   const BleCsStepTransferStats& transfer) {
+  Serial.print(F("cs_result role=reflector result=PASS cycle="));
+  Serial.print(gCycle);
+  Serial.print(F(" transferred_results="));
+  Serial.print(gTransferredResults);
+  Serial.print(F(" sounding=bluetooth_le_cs_test steps="));
+  Serial.print(capture.header.numStepsReported);
+  Serial.print(F(" bytes="));
+  Serial.print(capture.stepDataLen);
+  Serial.print(F(" transfer_id="));
+  Serial.print(transfer.transferId);
+  Serial.print(F(" session_token=0x"));
+  Serial.print(gSession.token, HEX);
+  Serial.print(F(" transfer_crc32=0x"));
+  Serial.print(transfer.payloadCrc32, HEX);
+  Serial.print(F(" transfer_frames="));
+  Serial.print(transfer.framesSent);
+  Serial.print(F(" transfer_acks="));
+  Serial.print(transfer.acknowledgements);
+  Serial.print(F(" transfer_retries="));
+  Serial.print(transfer.retries);
+  Serial.print(F(" hci_initial="));
+  Serial.print(capture.initialEvents);
+  Serial.print(F(" hci_continue="));
+  Serial.print(capture.continuationEvents);
+  Serial.print(F(" rejected="));
+  Serial.print(capture.rejectedEvents);
+  Serial.print(F(" dropped="));
+  Serial.println(capture.droppedPackets);
 }
 
 }  // namespace
 
 void setup() {
   configureBoard();
-
-  BleCsConfig config;
-  config.txPowerDbm = -8;             // TX power for echo tones.
-  config.controlChannel = 37U;        // Must match the Initiator's controlChannel.
-  config.probeToReportDelayUs = 1200U;// Must match the Initiator.
-  config.controlListenWindowUs = 20000U; // How long to listen for a control message.
-  config.probeListenWindowUs = 8000U; // How long to listen for each probe tone.
-  config.maxPayloadLength = 32U;     // Keep the stable payload size on the raw-radio path.
-  config.minToneMagnitude = 16U;      // Reject probes below this signal strength.
-  config.enableRtt = false;           // Raw RADIO RTT AUXDATA is still experimental.
-  config.enableRawDfeCapture = true;  // Keep reflector-side DFE bytes for bring-up.
-
-  // begin() arms the reflector; it will start listening immediately.
-  if (!gCs.begin(config)) {
-    failStage(2);
-  }
-
   Serial.println(F("CoreBleChannelSoundingReflector start"));
-  Serial.println(F("mode=phase_sounding"));
-  Serial.println(F("dfe_raw_capture=enabled"));
-  Serial.println(F("rtt=controller_hci_decode_ready_raw_aux_disabled"));
-  Serial.println(F("control_channel=37"));
-  Serial.println(F("pair_with=CoreBleChannelSoundingInitiator"));
-  pulse(1U, 45U, 80U);
+  Serial.println(F("role=reflector sounding=bluetooth_le_cs_test cpu_mhz=128"));
+  Serial.println(F("controller=nordic_sdc result_transport=crc_radio"));
+  Serial.println(F("connected_acl_cs=0 qualification_claimed=0"));
 }
 
 void loop() {
-  // listenAndReflectOnce() blocks until one complete probe exchange is done
-  // (or a timeout occurs). Returns true if the exchange was successful.
-  // This call should be as tight as possible to avoid missing probe windows.
-  if (gCs.listenAndReflectOnce()) {
-    ++gReplyCount;
-    gLastDfeInfo = gCs.lastDfeCaptureInfo();
-    pulse(1U, 8U, 0U);  // Brief LED blink on successful reply.
+  ++gCycle;
+  BleCsStepTransferStats sessionTransfer{};
+  if (!awaitCorrelatedSession(&sessionTransfer)) {
+    Serial.print(F("cs_result role=reflector result=RETRY cycle="));
+    Serial.print(gCycle);
+    Serial.print(F(" reason=session_sync bytes="));
+    Serial.print(sessionTransfer.bytesTransferred);
+    Serial.print(F(" rejected="));
+    Serial.println(sessionTransfer.rejectedFrames);
+    delay(kRetryDelayMs);
+    return;
+  }
+  if (!runControllerTest(&gCapture)) {
+    printRetry(gCapture);
+    delay(kRetryDelayMs);
+    return;
   }
 
-  const uint32_t now = millis();
-  if ((now - gLastLogMs) >= 1000U) {
-    gLastLogMs = now;
-    Serial.print(F("t="));
-    Serial.print(now);
-    Serial.print(F(" replies="));
-    Serial.print(gReplyCount);
-    Serial.print(F(" dfe_bytes="));
-    Serial.print(gLastDfeInfo.amountBytes);
-    Serial.print(F(" dfe_zero="));
-    Serial.println(gLastDfeInfo.allZero ? 1 : 0);
+  BleCsPeerResultMetadata metadata{};
+  metadata.session = gSession;
+  metadata.startAclConnEventCounter =
+      gCapture.header.startAclConnEventCounter;
+  metadata.procedureCounter = gCapture.header.procedureCounter;
+  metadata.numStepsReported = gCapture.header.numStepsReported;
+  metadata.role = static_cast<uint8_t>(BleCsControllerRole::kReflector);
+  metadata.configId = gCapture.header.configId;
+  metadata.numAntennaPaths = gCapture.header.numAntennaPaths;
+  metadata.mainModeType = gTestConfig.mainModeType;
+  metadata.subModeType = gTestConfig.subModeType;
+  metadata.rttType = gTestConfig.rttType;
+  uint16_t envelopeLen = 0U;
+  if (!BleChannelSoundingRadio::encodePeerResultEnvelope(
+          metadata, gCapture.stepData, gCapture.stepDataLen, gPeerEnvelope,
+          sizeof(gPeerEnvelope), &envelopeLen) ||
+      !beginPeerTransport()) {
+    Serial.print(F("cs_result role=reflector result=RETRY cycle="));
+    Serial.print(gCycle);
+    Serial.println(F(" reason=result_envelope"));
+    delay(kRetryDelayMs);
+    return;
   }
+
+  BleCsStepTransferStats transfer{};
+  const bool sent = gTransferRadio.sendPeerStepData(
+      gPeerEnvelope, envelopeLen, transferIdForSession(gSession),
+      kResultSendTimeoutMs, &transfer);
+  gTransferRadio.end();
+  if (!sent) {
+    Serial.print(F("cs_result role=reflector result=RETRY cycle="));
+    Serial.print(gCycle);
+    Serial.print(F(" reason=peer_transfer bytes="));
+    Serial.print(transfer.bytesTransferred);
+    Serial.print(F(" retries="));
+    Serial.println(transfer.retries);
+    delay(kRetryDelayMs);
+    return;
+  }
+
+  ++gTransferredResults;
+  led(true);
+  printTransfer(gCapture, transfer);
+  delay(20U);
+  led(false);
+  delay(kRetryDelayMs);
 }

@@ -1,0 +1,133 @@
+/*
+ * Copyright (c) 2026
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <nordic/nrf54lm20a_cpuapp.dtsi>
+#include "xiao_nrf54lm20a-pinctrl.dtsi"
+
+/ {
+	model = "Seeed XIAO nRF54LM20A";
+	compatible = "seeed,xiao-nrf54lm20a-cpuapp";
+
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+		zephyr,sram = &cpuapp_sram;
+		zephyr,flash-controller = &rram_controller;
+		zephyr,flash = &cpuapp_rram;
+		zephyr,console = &uart20;
+		zephyr,shell-uart = &uart20;
+		zephyr,bt-mon-uart = &uart20;
+		zephyr,bt-c2h-uart = &uart20;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led0: led_0 {
+			gpios = <&gpio1 22 GPIO_ACTIVE_LOW>;
+			label = "Red LED";
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+
+		button0: button_0 {
+			gpios = <&gpio0 9 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "User button";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+		sw0 = &button0;
+		watchdog0 = &wdt31;
+	};
+};
+
+&cpuapp_sram {
+	status = "okay";
+};
+
+&hfpll {
+	clock-frequency = <DT_FREQ_M(128)>;
+};
+
+&lfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <17000>;
+	status = "okay";
+};
+
+&hfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <15000>;
+	status = "okay";
+};
+
+&vregmain {
+	status = "okay";
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+&grtc {
+	owned-channels = <0 1 2 3 4 5 6 7 8 9 10 11>;
+	/* Channels 7-11 are reserved for zero-latency IRQs; 3-4 for FLPR. */
+	child-owned-channels = <3 4 7 8 9 10 11>;
+	status = "okay";
+};
+
+&uart20 {
+	current-speed = <115200>;
+	pinctrl-0 = <&uart20_default>;
+	pinctrl-1 = <&uart20_sleep>;
+	pinctrl-names = "default", "sleep";
+	status = "okay";
+};
+
+&clock {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&gpio2 {
+	status = "okay";
+};
+
+&gpio3 {
+	status = "okay";
+};
+
+&gpiote20 {
+	status = "okay";
+};
+
+&gpiote30 {
+	status = "okay";
+};
+
+&radio {
+	status = "okay";
+};
+
+&temp {
+	status = "okay";
+};
+
+/* The board's USB-C connector terminates at the SAMD11 debug probe. */
+&usbhs_wrapper {
+	status = "disabled";
+};
+
+#include <vendor/nordic/nrf54lm20a_cpuapp_partition.dtsi>

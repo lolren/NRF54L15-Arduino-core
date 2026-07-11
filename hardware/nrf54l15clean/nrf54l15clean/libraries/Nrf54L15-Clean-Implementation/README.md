@@ -269,16 +269,32 @@ Current controller note:
 - if you pass different TX/RX masks, the API narrows them to their common
   symmetric subset; if there is no common subset, the call fails
 
-Channel Sounding bring-up note:
+Channel Sounding controller note:
 
-- `BleRadio::getConnectionTimingSnapshot(...)` exposes the current BLE
-  connection event cadence for diagnostics and controller bring-up.
-- `BleChannelSoundingRadio::planConnectedWindow(...)` can check whether a
-  requested CS work window fits between the current time and the next
-  connection event after guard time.
-- `BLE -> ChannelSounding -> BleChannelSoundingLlControlWorkflowCentral`
-  prints a `cs_connected_window ...` line before its physical follow-up. That
-  line is the current handoff point toward true in-connection CS scheduling.
+- The public initiator and reflector use `BleCsControllerRuntime`, which starts
+  Nordic MPSL and the SoftDevice Controller (SDC), runs LE CS Test, and exposes
+  the controller's HCI CS result events to the Arduino layer.
+- Select `Tools -> CPU Frequency -> 128 MHz` before building either example.
+  The CLI equivalent is `cpu_freq=128m`. The runtime rejects the default 64 MHz
+  profile with `BleCsControllerRuntime::kErrorRequires128MHz`.
+- SDC owns the timing-critical sounding transaction. A separate CRC-protected
+  Arduino protocol establishes a per-cycle token and shared DRBG nonce before
+  the test. After SDC releases RADIO, it returns a reflector envelope correlated
+  by that token, profile, role, controller counters, and step count. That
+  transport is not a normal connected ACL Channel Sounding procedure.
+- HCI/VPR and raw-radio bring-up programs are retained under
+  `extras/tests/channel_sounding` as regression fixtures, not public examples or
+  physical Bluetooth Channel Sounding evidence.
+
+The bundled controller archives use Nordic nrfxlib revision
+`7a07f89ee8c32658ebfd2034b4cae92fde63e122`
+(`v3.4.0-rc1-12-g7a07f89ee`). They are covered by the included
+[Nordic 5-Clause license](third_party/nordic_sdc/LICENSE), not this library's
+MIT-licensed source. The license restricts use to Nordic Semiconductor
+integrated circuits and prohibits reverse engineering, decompiling, modifying,
+or disassembling the binary software. Redistributed packages must retain that
+license, the [attribution notice](third_party/nordic_sdc/LICENSE-ATTRIBUTION.txt),
+and the [version record](third_party/nordic_sdc/VERSION).
 
 Arduino IDE organization:
 
@@ -846,7 +862,7 @@ BLE examples:
   - `NordicUart` for NUS bridge, console, and probe sketches
   - `Security` for pairing, encryption, and bond persistence checks
   - `Privacy` for RPA generation/resolution helpers
-  - `ChannelSounding` for two-board channel probing examples
+  - `ChannelSounding` for the two-board LE CS Test initiator and reflector
   - `Diagnostics` for stress rigs and issue-focused debug probes
 
 - `examples/BLE/Advertising/BleAdvertiser/BleAdvertiser.ino`
@@ -962,66 +978,34 @@ BLE examples:
   - Demonstrates BLE privacy primitives using the Bluefruit compatibility API.
   - Generates an RPA from an IRK, resolves it through hardware AAR, enables opt-in local RPA rotation, and advertises as `X54-RPA`.
 - `examples/BLE/ChannelSounding/BleChannelSoundingReflector/BleChannelSoundingReflector.ino`
-  - Two-board phase-sounding reflector using `RADIO.CSTONES`/DFE capture on requested BLE channels.
-  - Returns reflector-side IQ/magnitude terms for the initiator's phase-slope distance fit.
+  - Starts Nordic SDC/MPSL in the LE CS Test reflector role and collects the
+    controller's HCI CS step results.
+  - Ends the controller test before transferring its completed local step data
+    to the initiator through the CRC-protected Arduino result transport.
 - `examples/BLE/ChannelSounding/BleChannelSoundingInitiator/BleChannelSoundingInitiator.ino`
-  - Sweeps BLE data channels with tone-extended probes and combines both endpoints' IQ terms.
-  - Reports `dist_m`, rolling `median_m`, `valid_channels`, and fit `residual` from the phase-slope estimator.
-  - Also emits `std_est`, `std_steps`, `std_m`, and `std_delta_m` after encoding the same real measurements as standard Mode 2 CS subevent result step data and feeding them back through the controller-style parser/estimator path.
-  - `BleChannelSoundingRadio::measureMode2Sweep()` is the reusable library primitive for centre-out multi-channel raw Mode 2 sweeps.
-- `scripts/test_cs_raw_radio_pair.sh`
-  - Local two-board regression harness for the raw RADIO phase-sounding path.
-  - Compiles/uploads `BleChannelSoundingReflector` and `BleChannelSoundingInitiator`, resets both probes, captures serial, and fails unless the initiator reports `raw_cs_init=ok`, nonzero `valid_channels`, nonzero DFE capture, at least one `std_est=1` Mode 2 subevent-result estimate, and enough reflector replies.
-- `examples/BLE/ChannelSounding/BleChannelSoundingVprLinkedInitiator/BleChannelSoundingVprLinkedInitiator.ino`
-  - Uses the generic VPR BLE link snapshot as the source for the dedicated CS image.
-  - Runs one imported-link CS workflow without the SWD-summary probe harness and prints the nominal regression estimate over `Serial`.
-  - Also prints linked-path timing fields as `lat_ms=source_boot/source_connect/handoff_boot/start/complete/total`.
-- `examples/BLE/ChannelSounding/BleChannelSoundingVprServiceNominal/BleChannelSoundingVprServiceNominal.ino`
-  - Uses the generic VPR BLE controller service in-place without booting the dedicated CS image.
-  - Single-board nominal example: no reflector is required, and `nominal_dist_m` remains synthetic regression output only.
-  - Prints controller-owned completed-result summary fields as `summary=`, `steps=`, `modes=`, `ch=`, and `hash=`.
-  - Also reads back controller-produced completed local/peer result payload bytes and validates them as `raw=`, `raw_steps=`, and `raw_hash=`.
-  - Also prints in-place runtime timing fields as `lat_ms=begin/complete/disconnect/total`.
-- `examples/BLE/ChannelSounding/BleChannelSoundingVprServicePowerProbe/BleChannelSoundingVprServicePowerProbe.ino`
-  - Quiet single-board power-measurement harness for the generic VPR BLE -> CS runtime.
-  - Splits service-idle, BLE-connected, and BLE+CS phases, then prints a repeated summary line after the measured window.
-- `examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral/BleChannelSoundingLlControlPeripheral.ino`
-  - Two-board diagnostic peripheral for raw Channel Sounding LL-control transport.
-  - Answers CS_REQ, CS_SEC_REQ, and CS_PROC_REQ with real-shaped CS LL-control peer PDUs.
-  - After the LL-control exchange completes and the central disconnects, switches into raw RADIO reflector mode for the workflow central's physical follow-up sweep.
-- `examples/BLE/ChannelSounding/BleChannelSoundingLlControlCentral/BleChannelSoundingLlControlCentral.ino`
-  - Two-board diagnostic central for raw Channel Sounding LL-control transport.
-  - Injects received peer CS LL-control PDUs into the VPR peer-exchange state machine and reports the bridge pass/fail status.
-  - The pair uses the public `bleCsBuildLlControl*()` helpers from `ble_channel_sounding.h` for raw CS LL-control packet construction.
-  - The central uses `BleCsControllerVprHost::queuePendingInitiatorLlControlPdu()` so local CS_REQ/CS_SEC_REQ/CS_PROC_REQ selection and queueing follows the VPR peer-exchange stage through the CS host API.
-  - With the bundled VPR image, that helper reads the pending local initiator PDU through vendor command `0xFCEA`, so the VPR/controller side now owns local PDU selection while CPUAPP remains the temporary BLE queue sink.
-  - The central uses `BleCsControllerVprHost::serviceInitiatorLlControlBridge()` so peer PDU consumption, direct-HCI transitions, and next-PDU queueing live behind the CS host API.
-  - The central uses `BleCsControllerVprHost::pollInitiatorLlControlBridge()` so duplicate-safe initiator queueing, one BLE connection-event poll, and peer-PDU service are owned by the CS host API instead of the sketch loop.
-  - Production-style stream workflow callers can use `pollWithInitiatorLlControlBridge()` or `loopOnceWithInitiatorLlControlBridge()` to combine normal host/VPR stream polling with one real BLE LL-control bridge poll.
-  - Received peer PDUs are consumed through `BleCsControllerVprHost::consumePeerLlControlPduFromEvent()`.
-- `examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral/BleChannelSoundingLlControlWorkflowCentral.ino`
-  - Two-board workflow central for raw Channel Sounding LL-control transport.
-  - Uses `BleCsControllerVprHost::pumpInitiatorLlControlWorkflowBridge()` and `BleCsLlControlBridgeWorkflowTracker` so normal CS host workflow progress, over-air CS LL-control TX/RX, and completed local/peer result publication are tracked by the CS library instead of open-coded pass/fail masks in the sketch.
-  - Expected PASS line: `cs_ll_workflow_bridge=PASS ... rx=0x3F vpr_pdu=3 ... local=1 peer=1 proc=1 est=1`.
-  - Then intentionally disconnects the BLE link, runs a raw 37-channel physical CS sweep against the same peer, and feeds the real `BleCsChannelMeasurement[]` into `BleCsControllerVprHost::consumeMode2ResultsFromMeasurements()`.
-  - Expected follow-up PASS line: `cs_ll_physical_followup=PASS ... raw_est=1 host_est=1 host_steps=N/N`.
-- `scripts/test_cs_ll_workflow_bridge.sh`
-  - Local regression harness for the XIAO pair.
-  - Compiles/uploads the LL-control peripheral and workflow central, resets both probes, captures serial, and fails unless both the full LL-control workflow PASS and physical follow-up PASS lines are observed.
+  - Starts Nordic SDC/MPSL in the LE CS Test initiator role, reassembles local
+    controller results, and receives the reflector's completed step data.
+  - Combines the two genuine controller result buffers and reports the available
+    phase-based ranging and RTT estimates.
 
-Latency characterization note:
+Both examples require the 128 MHz boot profile. They are experimental
+engineering tools, not a Bluetooth SIG qualification, universal calibration,
+or cross-vendor connected-CS application profile.
 
-- `docs/ble-cs-latency-characterization.md`
-- `docs/ble-cs-power-characterization.md`
+HCI, VPR, LL-control, soak, power, and Zephyr-bridge diagnostics live under
+`extras/tests/channel_sounding`. They remain regression fixtures and are not
+shown as Arduino examples. Their deterministic controller records are not
+physical distance measurements.
 
-Calibration and error-model notes:
+Historical VPR/raw-radio characterization notes:
 
-- `docs/channel-sounding-calibration.md`
-- `docs/channel-sounding-20cm-validation.md`
-- `docs/channel-sounding-board-pair-characterization.md`
-- `docs/channel-sounding-physical-output.md`
-- `docs/channel-sounding-profiles/README.md`
-- `docs/channel-sounding-error-model.md`
+- `docs/archive/ble-cs-latency-characterization.md`
+- `docs/archive/ble-cs-power-characterization.md`
+
+The old calibration, 20 cm, board-pair, physical-output, and error-model notes
+under `docs/archive`, plus `docs/channel-sounding-profiles`, describe the retired
+direct-radio experiment. Their offsets and accuracy bands must not be applied to
+SDC controller results.
 
 Zigbee examples:
 
@@ -1163,7 +1147,9 @@ Examples:
     - Optional callback hooks for flash-backed load/save/clear policies
 - Not implemented yet:
   - Central-initiated BLE connections on the in-tree Arduino controller path. The notify companion for `BleNotifyEchoPeripheral` is host-side (`scripts/ble_notify_echo_central.py`) for that reason.
-  - Bluetooth Channel Sounding LL procedure and HCI/host control plane (full spec feature).
+  - A normal connected ACL Channel Sounding procedure integrated into the
+    in-tree custom BLE controller. The public Channel Sounding pair instead uses
+    Nordic SDC's standalone LE CS Test controller path.
   - Asymmetric LE PHY pairs where TX and RX settle to different modes on the same link.
   - Full LL procedure/state-machine compliance (full control procedure matrix and deep corner-cases)
   - Full security feature set (host-validated passkey/OOB matrix, full key distribution matrix, signing)

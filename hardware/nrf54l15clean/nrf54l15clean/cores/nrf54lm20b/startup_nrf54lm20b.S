@@ -45,8 +45,13 @@ g_pfnVectors:
     .word   SysTick_Handler         /* 15: SysTick Handler */
 
     /* External Interrupts (nRF54LM20 application core). */
-    /* IRQ 0..73 */
-    .rept 74
+    /* IRQ 0..27 */
+    .rept 28
+    .word   Default_Handler
+    .endr
+    /* IRQ 28: SWI00; IRQ 29..73: reserved. */
+    .word   SWI00_IRQHandler
+    .rept 45
     .word   Default_Handler
     .endr
     /* IRQ 74..75: AAR00/CCM00 and ECB00. */
@@ -56,16 +61,18 @@ g_pfnVectors:
     .word   Default_Handler
     /* IRQ 77: serial-fabric instance 00. */
     .word   SPIM00_IRQHandler
-    /* IRQ 78..134 */
-    .rept 57
+    /* IRQ 78..132 */
+    .rept 55
     .word   Default_Handler
     .endr
+    /* IRQ 133: TIMER10; IRQ 134: reserved. */
+    .word   TIMER10_IRQHandler
+    .word   Default_Handler
     /* IRQ 135: EGU10. */
     .word   EGU10_IRQHandler
-    /* IRQ 136..137 */
-    .rept 2
+    /* IRQ 136..137: reserved. */
     .word   Default_Handler
-    .endr
+    .word   Default_Handler
     /* IRQ 138..139: RADIO instances. */
     .word   RADIO_0_IRQHandler
     .word   RADIO_1_IRQHandler
@@ -309,6 +316,18 @@ SPIM21_IRQHandler:
 EGU10_IRQHandler:
     bx lr
     .size EGU10_IRQHandler, .-EGU10_IRQHandler
+
+    .weak SWI00_IRQHandler
+    .type SWI00_IRQHandler, %function
+SWI00_IRQHandler:
+    bx lr
+    .size SWI00_IRQHandler, .-SWI00_IRQHandler
+
+    .weak TIMER10_IRQHandler
+    .type TIMER10_IRQHandler, %function
+TIMER10_IRQHandler:
+    bx lr
+    .size TIMER10_IRQHandler, .-TIMER10_IRQHandler
 
     .weak TWIM20_IRQHandler
     .type TWIM20_IRQHandler, %function

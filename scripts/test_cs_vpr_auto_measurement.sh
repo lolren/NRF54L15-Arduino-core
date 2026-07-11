@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 impl_rel="hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation"
 impl_src="${repo_root}/${impl_rel}"
+fixture_root="${impl_src}/extras/tests/channel_sounding"
 
 fqbn="${CS_FQBN:-nrf54l15clean:nrf54l15clean:xiao_nrf54l15}"
 central_port="${CS_CENTRAL_PORT:-/dev/ttyACM1}"
@@ -23,8 +24,8 @@ fi
 installed_impl="${installed_base}/${installed_version}/libraries/Nrf54L15-Clean-Implementation"
 nrf_ocd="${installed_base}/${installed_version}/tools/nrf_ocd"
 
-peripheral_sketch="${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral"
-central_sketch="${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral"
+peripheral_sketch="${fixture_root}/BleChannelSoundingLlControlPeripheral"
+central_sketch="${fixture_root}/BleChannelSoundingLlControlWorkflowCentral"
 central_tmp_root="$(mktemp -d)"
 central_tmp_sketch="${central_tmp_root}/BleChannelSoundingLlControlWorkflowCentral"
 mkdir -p "${central_tmp_sketch}"
@@ -45,10 +46,10 @@ fi
 
 if [[ "${sync_installed}" != "0" ]]; then
   rsync -a "${impl_src}/src/" "${installed_impl}/src/"
-  rsync -a "${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlPeripheral" \
-           "${installed_impl}/examples/BLE/ChannelSounding/"
-  rsync -a "${impl_src}/examples/BLE/ChannelSounding/BleChannelSoundingLlControlWorkflowCentral" \
-           "${installed_impl}/examples/BLE/ChannelSounding/"
+  mkdir -p "${installed_impl}/extras/tests/channel_sounding"
+  rsync -a "${peripheral_sketch}" \
+           "${central_sketch}" \
+           "${installed_impl}/extras/tests/channel_sounding/"
 fi
 
 rm -rf /tmp/cs_vpr_auto_peripheral_regression \

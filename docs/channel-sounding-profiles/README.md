@@ -1,5 +1,10 @@
 # Channel Sounding Calibration Profiles
 
+> Legacy raw-radio profiles: these artifacts were fitted to the retired BLE
+> 2M/CTE/CSTONES phase experiment. They are not valid calibration inputs for
+> Nordic SDC/MPSL controller results. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This directory stores measured calibration artifacts for the real two-board
 phase-based Channel Sounding path.
 

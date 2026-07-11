@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fqbn="${ARDUINO_FQBN:-nrf54l15clean:nrf54l15clean:xiao_nrf54l15}"
-examples_root="${repo_root}/hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding"
+fixtures_root="${repo_root}/hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/extras/tests/channel_sounding"
 bluefruit_lib="${repo_root}/hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib"
 hal_lib="${repo_root}/hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation"
 
@@ -13,7 +13,7 @@ compile_example() {
   arduino-cli compile --clean --fqbn "${fqbn}" \
     --library "${bluefruit_lib}" \
     --library "${hal_lib}" \
-    "${examples_root}/${sketch}/${sketch}.ino" >/tmp/cs_zephyr_bridge_${sketch}.log
+    "${fixtures_root}/${sketch}/${sketch}.ino" >/tmp/cs_zephyr_bridge_${sketch}.log
   tail -n 4 "/tmp/cs_zephyr_bridge_${sketch}.log"
 }
 

@@ -62,7 +62,17 @@ Current gap:
 - pairing/bond persistence is still partial
 - central support is still intentionally minimal (fixed-handle client flows and basic ATT request queueing, not a full generic host stack)
 - `Bluefruit52Lib` still targets the common peripheral/runtime subset first, but the active-scan wrapper now emits real separate `SCAN_RSP` callback reports with the correct `scan_response` bit instead of collapsing them into the ADV path
-- full Bluetooth channel sounding / AoA / AoD parity is not implemented yet; the current clean-core path now includes two-board phase sounding plus raw DFE capture hooks, HCI-style step parsing helpers, raw HCI subevent-result reassembly, controller-style step-buffer estimation helpers, transport-agnostic HCI CS command/completion packet helpers, a workflow/session/host layer for sequencing CS command exchange, a `Stream`-friendly H4 transport bridge with framing helpers that can tolerate interleaved ACL traffic, controller-standard RTT step decode / RTT distance estimation from HCI CS result packets, a working VPR-backed CS controller transport path inside the core, a VPR-side CS demo responder for the supported opcode set, and a standalone CS Test result stream that emits `0x31`/`0x32` on handle `0x0FFF` (synthetic step data) while CS Test mode is active with a host-side test-result collector, but it still does not have a real production BLE controller/runtime, and raw RADIO RTT AUXDATA decode is still not reliable
+- the experimental Channel Sounding surface is exactly the two-board
+  `BleChannelSoundingInitiator` / `BleChannelSoundingReflector` pair. It uses
+  the bundled Nordic SDC/MPSL controller to run LE CS Test and reassembles the
+  controller's HCI CS result events. A separate CRC-protected Arduino transport
+  establishes a per-cycle session token before the test and returns a
+  metadata-correlated reflector step buffer after SDC releases RADIO. This
+  requires the 128 MHz boot profile. It is
+  not a normal connected ACL CS workflow, Bluetooth qualification, universal
+  calibration, or cross-vendor result protocol. Synthetic VPR and retired raw
+  RADIO fixtures remain under `extras/tests/channel_sounding` for regression
+  coverage only.
 - the KMU path now includes a real `KMU -> CRACEN IKG` seed proof, the VPR side now has a generic shared-transport proof, a reusable host-side controller-service wrapper, validated non-CS VPR offload proofs for `FNV1a`, `CRC32`, `CRC32C`, an autonomous ticker service, queued async ticker/vendor events, and real VPR hibernate saved-context probes, plus a live capability probe showing `svc=1.7` / `opmask=0x3FF`; there are now dedicated local probes for hibernate resume, hibernate wake, and loaded-image restart, repeated loaded-image restart is hardware-validated on both attached boards through `VprRestartLifecycleProbe`, and `VprHibernateResumeProbe` now passes on both attached boards through a deterministic reset-after-hibernate service restart that preserves retained host-side service state while disabling raw VPR hardware context restore for the restart path; richer VPR-side service/runtime work is still open, and true raw VPR CPU-context resume is still an investigation topic rather than a finished public feature; the public `Tampc` wrapper now covers active-shield / glitch / domain-debug / AP-debug configuration with a live config probe, and the extra serial-fabric `22` / `30` paths now have a runtime probe
 - Zigbee has a staged HA stack: IEEE 802.15.4 radio helpers, commissioning/security helpers, NWK/APS/ZCL subsets, descriptors, binding, and sketch-configurable ZDO management table responses. Full OTA, broad ZCL coverage, and automatic production route maintenance are still open.
 - Thread is experimental, not production-claimed. The repo now has staged
@@ -88,8 +98,8 @@ Current gap:
 - [`NRF54L15_FEATURE_MATRIX.md`](NRF54L15_FEATURE_MATRIX.md)
 - [`POWER_PROFILE_MEASUREMENTS.md`](../POWER_PROFILE_MEASUREMENTS.md)
 - [`BLE_REGRESSION_RUNBOOK.md`](BLE_REGRESSION_RUNBOOK.md)
-- [`BLE_CS_COMPLETION_CHECKLIST.md`](BLE_CS_COMPLETION_CHECKLIST.md)
-- [`CHANNEL_SOUNDING_ZEPHYR_PARITY.md`](CHANNEL_SOUNDING_ZEPHYR_PARITY.md)
+- [Historical BLE/CS Completion Checklist](archive/BLE_CS_COMPLETION_CHECKLIST.md)
+- [`CHANNEL_SOUNDING_CURRENT_STATUS.md`](CHANNEL_SOUNDING_CURRENT_STATUS.md)
 - [`THREAD_MATTER_IMPLEMENTATION_PLAN.md`](THREAD_MATTER_IMPLEMENTATION_PLAN.md)
 - [`THREAD_MATTER_NEXT_AI_HANDOVER_2026_06_07.md`](THREAD_MATTER_NEXT_AI_HANDOVER_2026_06_07.md)
 - [`THREAD_RUNTIME_OWNERSHIP.md`](THREAD_RUNTIME_OWNERSHIP.md)

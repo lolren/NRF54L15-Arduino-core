@@ -1,5 +1,10 @@
 # Channel Sounding Physical Output
 
+> Historical raw-radio experiment: the bounded output and 20 cm profile below
+> do not apply to Nordic SDC/MPSL controller results and are not a current
+> Bluetooth Channel Sounding accuracy claim. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This repo now exposes a bounded physical-distance surface for the active
 `XIAO nRF54L15 / Sense + XIAO nRF54L15 / Sense` bench profile.
 

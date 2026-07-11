@@ -1,5 +1,9 @@
 # Channel Sounding Board-Pair RF Characterization
 
+> Historical raw-radio experiment: these delay terms came from the retired BLE
+> 2M/CTE/CSTONES phase path and do not calibrate Nordic SDC results. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This note records the current checked-in RF / delay characterization for the
 active two-board Arduino Channel Sounding path.
 

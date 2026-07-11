@@ -15,6 +15,17 @@ constexpr uint8_t kPayloadHeaderLen = 6U;
 constexpr uint8_t kReportToneExtraLen = 11U;
 constexpr uint8_t kReportRttExtraLen = 9U;
 constexpr uint8_t kReportExtraLen = kReportToneExtraLen + kReportRttExtraLen;
+constexpr uint8_t kStepTransferVersion = 1U;
+constexpr uint8_t kStepTransferHeaderLen = 11U;
+constexpr uint8_t kStepAckLen = 6U;
+constexpr uint8_t kStepTransferChannel = 18U;
+constexpr uint8_t kStepTransferChunkLimit = 220U;
+constexpr uint32_t kStepTransferListenWindowUs = 30000U;
+constexpr uint16_t kStepTransferAckTurnaroundUs = 1200U;
+constexpr uint32_t kStepTransferFinalAckLingerMs = 180U;
+constexpr uint8_t kPeerProtocolVersion = 1U;
+constexpr uint32_t kPeerSessionMagic = 0x31515343UL;  // "CSQ1"
+constexpr uint32_t kPeerResultMagic = 0x31525343UL;   // "CSR1"
 constexpr uint8_t kCteTypeAoA = 0U;
 constexpr uint32_t kBleCrcPolynomial = 0x00065BUL;
 constexpr uint32_t kCstStartBudgetUs = 1500U;
@@ -25,10 +36,18 @@ constexpr uint32_t kSpinLimit = 3000000UL;
 constexpr uint8_t kMicrosPollDivider = 32U;
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kSpeedOfLightMetersPerSecond = 299792458.0f;
+constexpr float kAdjacentChannelSpacingHz = 2000000.0f;
+constexpr float kAdjacentChannelSpacingToleranceHz = 1024.0f;
+constexpr float kMinimumAdjacentPhaseCoherence = 0.50f;
+constexpr uint8_t kMinimumAdjacentPhasePairs = 4U;
 constexpr size_t kMaxCsChannels = 37U;
 constexpr size_t kMaxSlopePairs =
     (kMaxCsChannels * (kMaxCsChannels - 1U)) / 2U;
 constexpr size_t kMaxCsControllerStepSamples = 256U;
+constexpr size_t kMinimumControllerPbrChannels = 4U;
+constexpr size_t kMinimumControllerRttPairs = 3U;
+constexpr float kMinimumControllerPbrSpanHz = 10000000.0f;
+constexpr float kMaximumControllerPbrResidualVariance = 0.50f;
 constexpr uint8_t kCsChmapLen = 10U;
 constexpr uint8_t kAntennaId1 = 0x1U;
 constexpr uint8_t kAntennaId2 = 0x2U;
@@ -72,6 +91,7 @@ struct BleCsControllerRttPair {
   bool failed = false;
   bool initiatorPresent = false;
   bool reflectorPresent = false;
+  uint8_t channel = 0U;
   int16_t toaTodInitiator = kBleCsTimeDifferenceNotAvailable;
   int16_t todToaReflector = kBleCsTimeDifferenceNotAvailable;
 };
@@ -135,6 +155,21 @@ uint32_t fnv1a32Bytes(const uint8_t* data, size_t len) {
     hash *= 16777619UL;
   }
   return hash;
+}
+
+uint32_t crc32Bytes(const uint8_t* data, size_t len) {
+  uint32_t crc = 0xFFFFFFFFUL;
+  if (data == nullptr && len != 0U) {
+    return 0U;
+  }
+  for (size_t i = 0U; i < len; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0U; bit < 8U; ++bit) {
+      const uint32_t mask = 0U - (crc & 1U);
+      crc = (crc >> 1U) ^ (0xEDB88320UL & mask);
+    }
+  }
+  return ~crc;
 }
 
 uint32_t buildMeasurementExecuteToken(uint8_t configId,
@@ -463,6 +498,7 @@ bool appendMode2DemoStep(uint8_t* buffer,
 }
 
 inline bool validDataChannel(uint8_t channelIndex);
+inline bool validCsChannelIndex(uint8_t channelIndex);
 
 inline bool bleCsEventCounterReached(uint16_t current, uint16_t target) {
   return static_cast<int16_t>(current - target) >= 0;
@@ -494,7 +530,7 @@ bool appendMode2ToneStep(uint8_t* buffer,
       (maxLen - *offset) < 8U) {
     return false;
   }
-  if (!validDataChannel(channel) || !tone.valid) {
+  if (!validCsChannelIndex(channel) || !tone.valid) {
     return false;
   }
 
@@ -633,7 +669,10 @@ bool buildH4VendorPeerResultSourceEvent(uint8_t* out,
         static_cast<int16_t>(lroundf(cosf(theta) * config.amplitude));
     const int16_t peerQ =
         static_cast<int16_t>(lroundf(sinf(theta) * config.amplitude));
-    if (!appendMode2DemoStep(peerSteps, sizeof(peerSteps), &peerLen, channel, peerI, peerQ)) {
+    const uint8_t csChannelIndex = static_cast<uint8_t>(
+        csFrequencyOffsetMHz(channel) - 2U);
+    if (!appendMode2DemoStep(peerSteps, sizeof(peerSteps), &peerLen,
+                             csChannelIndex, peerI, peerQ)) {
       return false;
     }
   }
@@ -642,7 +681,7 @@ bool buildH4VendorPeerResultSourceEvent(uint8_t* out,
   const size_t contLen = peerLen - splitLen;
   const bool partial = contLen > 0U;
   const uint16_t startAclConnEventCounter = 0x1234U;
-  const uint8_t numAntennaPaths = 2U;
+  const uint8_t numAntennaPaths = 1U;
   const uint8_t initSteps = static_cast<uint8_t>(splitLen / 8U);
   const uint8_t contSteps = static_cast<uint8_t>(contLen / 8U);
   uint8_t initPayload[64] = {0};
@@ -715,6 +754,16 @@ inline int16_t readLe16Signed(const uint8_t* data) {
 
 inline bool validDataChannel(uint8_t channelIndex) {
   return channelIndex <= 36U;
+}
+
+inline bool validCsChannelIndex(uint8_t channelIndex) {
+  return channelIndex >= 2U && channelIndex <= 76U &&
+         channelIndex != 23U && channelIndex != 24U &&
+         channelIndex != 25U;
+}
+
+float csChannelFrequencyHz(uint8_t channelIndex) {
+  return (2402.0f + static_cast<float>(channelIndex)) * 1000000.0f;
 }
 
 inline bool validLogicalChannel(uint8_t channelIndex) {
@@ -1270,6 +1319,74 @@ float toneQualityScore(const BleCsToneSample& local, const BleCsToneSample& peer
   return minMagnitude / denom;
 }
 
+bool estimateAdjacentPhaseDistance(const float* freqsHz,
+                                   const float* phases,
+                                   const float* quality,
+                                   size_t count,
+                                   float* outDistanceMeters,
+                                   float* outCoherence,
+                                   uint8_t* outPairCount) {
+  if (freqsHz == nullptr || phases == nullptr || quality == nullptr ||
+      outDistanceMeters == nullptr || outCoherence == nullptr ||
+      outPairCount == nullptr) {
+    return false;
+  }
+
+  *outDistanceMeters = NAN;
+  *outCoherence = 0.0f;
+  *outPairCount = 0U;
+  if (count < 2U) {
+    return false;
+  }
+
+  float sumI = 0.0f;
+  float sumQ = 0.0f;
+  float weightSum = 0.0f;
+  uint8_t pairCount = 0U;
+  for (size_t i = 1U; i < count; ++i) {
+    const float spacingHz = freqsHz[i] - freqsHz[i - 1U];
+    if (!isfinite(spacingHz) ||
+        fabsf(spacingHz - kAdjacentChannelSpacingHz) >
+            kAdjacentChannelSpacingToleranceHz) {
+      continue;
+    }
+
+    const float weight = fminf(quality[i], quality[i - 1U]);
+    if (!isfinite(weight) || weight <= 0.0f) {
+      continue;
+    }
+
+    const float phaseDifference = phases[i] - phases[i - 1U];
+    sumI += weight * cosf(phaseDifference);
+    sumQ += weight * sinf(phaseDifference);
+    weightSum += weight;
+    ++pairCount;
+  }
+
+  *outPairCount = pairCount;
+  if (pairCount < kMinimumAdjacentPhasePairs || weightSum <= 0.0f) {
+    return false;
+  }
+
+  const float resultant = hypotf(sumI, sumQ);
+  const float coherence = fminf(1.0f, resultant / weightSum);
+  *outCoherence = coherence;
+  if (!isfinite(coherence) || coherence < kMinimumAdjacentPhaseCoherence) {
+    return false;
+  }
+
+  const float meanPhaseDifference = atan2f(sumQ, sumI);
+  const float distance = fabsf(
+      -(kSpeedOfLightMetersPerSecond * meanPhaseDifference) /
+      (4.0f * kPi * kAdjacentChannelSpacingHz));
+  if (!isfinite(distance) || distance <= 0.0f) {
+    return false;
+  }
+
+  *outDistanceMeters = distance;
+  return true;
+}
+
 float stepToneQualityScore(uint8_t localQuality, uint8_t peerQuality) {
   auto scoreOne = [](uint8_t quality) -> float {
     switch (quality) {
@@ -1300,7 +1417,12 @@ bool controllerPhaseDistanceEstimate(const BleCsControllerPhasePair* pairs,
   size_t sampleCount = 0U;
   for (size_t i = 0U; i < pairCount && sampleCount < kMaxCsControllerStepSamples; ++i) {
     if (pairs[i].failed || !pairs[i].localPresent || !pairs[i].peerPresent ||
-        !validDataChannel(pairs[i].channel)) {
+        !validCsChannelIndex(pairs[i].channel) ||
+        (pairs[i].local.i == 0 && pairs[i].local.q == 0) ||
+        (pairs[i].peer.i == 0 && pairs[i].peer.q == 0)) {
+      if (outEstimate->rejectedLowQualityChannels < 0xFFU) {
+        ++outEstimate->rejectedLowQualityChannels;
+      }
       continue;
     }
     const float localI = static_cast<float>(pairs[i].local.i);
@@ -1309,9 +1431,7 @@ bool controllerPhaseDistanceEstimate(const BleCsControllerPhasePair* pairs,
     const float peerQ = static_cast<float>(pairs[i].peer.q);
     const float combI = (localI * peerI) - (localQ * peerQ);
     const float combQ = (localI * peerQ) + (peerI * localQ);
-    freqsHz[sampleCount] =
-        (2400.0f + static_cast<float>(logicalChannelToFrequency(pairs[i].channel))) *
-        1000000.0f;
+    freqsHz[sampleCount] = csChannelFrequencyHz(pairs[i].channel);
     phases[sampleCount] = atan2f(combQ, combI);
     quality[sampleCount] =
         stepToneQualityScore(pairs[i].localQuality, pairs[i].peerQuality);
@@ -1320,11 +1440,23 @@ bool controllerPhaseDistanceEstimate(const BleCsControllerPhasePair* pairs,
 
   outEstimate->totalToneChannels = static_cast<uint8_t>(
       (sampleCount <= 255U) ? sampleCount : 255U);
-  if (sampleCount < 2U) {
+  if (sampleCount < kMinimumControllerPbrChannels) {
     return false;
   }
 
   sortPhaseSamplesWithQuality(freqsHz, phases, quality, sampleCount);
+  for (size_t i = 1U; i < sampleCount; ++i) {
+    if (freqsHz[i] <= freqsHz[i - 1U]) {
+      // The estimator currently supports one single-antenna PCT pair per
+      // channel. Repeated frequencies need antenna/repetition metadata before
+      // they can be combined without manufacturing an independent sample.
+      return false;
+    }
+  }
+  if ((freqsHz[sampleCount - 1U] - freqsHz[0U]) <
+      kMinimumControllerPbrSpanHz) {
+    return false;
+  }
   for (size_t i = 1U; i < sampleCount; ++i) {
     const float prev = phases[i - 1U];
     while ((phases[i] - prev) > kPi) {
@@ -1356,7 +1488,12 @@ bool controllerPhaseDistanceEstimate(const BleCsControllerPhasePair* pairs,
 
   const float phaseDistance =
       fabsf(-(kSpeedOfLightMetersPerSecond * slope) / (4.0f * kPi));
-  if (!isfinite(phaseDistance) || phaseDistance <= 0.0f) {
+  const float residualVariance =
+      residualAccum / static_cast<float>(sampleCount);
+  outEstimate->residualVariance = residualVariance;
+  if (!isfinite(phaseDistance) || phaseDistance <= 0.0f ||
+      !isfinite(residualVariance) ||
+      residualVariance > kMaximumControllerPbrResidualVariance) {
     return false;
   }
 
@@ -1365,7 +1502,6 @@ bool controllerPhaseDistanceEstimate(const BleCsControllerPhasePair* pairs,
   outEstimate->phaseSlopeDistanceMeters = phaseDistance;
   outEstimate->distanceMeters = phaseDistance;
   outEstimate->slopeRadPerHz = slope;
-  outEstimate->residualVariance = residualAccum / static_cast<float>(sampleCount);
   return true;
 }
 
@@ -1397,7 +1533,7 @@ bool controllerRttDistanceEstimate(const BleCsControllerRttPair* pairs,
     rttDistances[rttCount++] = distance;
   }
 
-  if (rttCount == 0U) {
+  if (rttCount < kMinimumControllerRttPairs) {
     return false;
   }
 
@@ -1418,7 +1554,7 @@ bool controllerRttDistanceEstimate(const BleCsControllerRttPair* pairs,
     varianceAccum += err * err;
     ++inlierCount;
   }
-  if (inlierCount == 0U) {
+  if (inlierCount < kMinimumControllerRttPairs) {
     return false;
   }
 
@@ -1434,6 +1570,17 @@ bool parseControllerStepBufferCallback(const BleCsSubeventStep* step, void* user
       static_cast<BleCsControllerBufferParseContext*>(userData);
   if (context == nullptr || step == nullptr) {
     return false;
+  }
+
+  if (step->mode > kBleCsMainMode3) {
+    return false;
+  }
+  if (!validCsChannelIndex(step->channel)) {
+    return false;
+  }
+  if (step->mode == kBleCsMainMode0) {
+    const uint8_t expectedLength = context->bufferRoleIsInitiator ? 5U : 3U;
+    return step->dataLen == expectedLength;
   }
 
   if (step->mode == kBleCsMainMode2 || step->mode == kBleCsMainMode3) {
@@ -1482,7 +1629,7 @@ bool parseControllerStepBufferCallback(const BleCsSubeventStep* step, void* user
         }
         BleCsControllerPhasePair& pair = context->phasePairs[context->phaseCursor++];
         if (pair.channel != step->channel) {
-          pair.failed = true;
+          return false;
         }
         if ((tone.qualityIndicator == kBleCsToneQualityLow) ||
             (tone.qualityIndicator == kBleCsToneQualityUnavailable)) {
@@ -1512,6 +1659,7 @@ bool parseControllerStepBufferCallback(const BleCsSubeventStep* step, void* user
       }
       BleCsControllerRttPair& pair = context->rttPairs[*context->rttCount];
       pair.failed = invalidRtt;
+      pair.channel = step->channel;
       if (context->bufferRoleIsInitiator) {
         pair.initiatorPresent = true;
         pair.toaTodInitiator = mode1.timeDifferenceHalfNs;
@@ -1526,6 +1674,9 @@ bool parseControllerStepBufferCallback(const BleCsSubeventStep* step, void* user
         return false;
       }
       BleCsControllerRttPair& pair = context->rttPairs[context->rttCursor++];
+      if (pair.channel != step->channel) {
+        return false;
+      }
       if (invalidRtt) {
         pair.failed = true;
       }
@@ -1747,7 +1898,7 @@ bool BleChannelSoundingRadio::begin(const BleCsConfig& config) {
     return false;
   }
   if (!validLogicalChannel(config.controlChannel) || config.maxPayloadLength == 0U ||
-      config.maxPayloadLength > 48U || config.cteTimeUnits < 2U ||
+      config.cteTimeUnits < 2U ||
       config.cteTimeUnits > 10U ||
       config.dfeSwitchPatternCount > kBleCsMaxSwitchPatternCount) {
     initialized_ = false;
@@ -1882,13 +2033,12 @@ bool BleChannelSoundingRadio::parseMode1StepData(const BleCsSubeventStep* step,
       return false;
     }
   } else {
-    if (step->dataLen >= kBleCsMode3SsRttStepBaseLen &&
-        ((step->dataLen - kBleCsMode3SsRttStepBaseLen) % kBleCsToneInfoLen) == 0U) {
-      hasRttSoundingSequence = true;
-    } else if (step->dataLen >= kBleCsMode3StepBaseLen &&
-               ((step->dataLen - kBleCsMode3StepBaseLen) % kBleCsToneInfoLen) == 0U) {
-      hasRttSoundingSequence = false;
-    } else {
+    // Mode 3 normal and sounding-sequence layouts differ by eight bytes, so
+    // their lengths are indistinguishable modulo one four-byte tone record.
+    // The unqualified parser therefore uses the normal layout. Call the
+    // explicit parseMode3StepData() overload when RTT SS was configured.
+    if (step->dataLen < kBleCsMode3StepBaseLen ||
+        ((step->dataLen - kBleCsMode3StepBaseLen) % kBleCsToneInfoLen) != 0U) {
       return false;
     }
   }
@@ -1917,7 +2067,7 @@ bool BleChannelSoundingRadio::parseMode2StepData(const BleCsSubeventStep* step,
     return false;
   }
   const size_t toneBytes = static_cast<size_t>(step->dataLen - 1U);
-  if ((toneBytes % kBleCsToneInfoLen) != 0U) {
+  if (toneBytes == 0U || (toneBytes % kBleCsToneInfoLen) != 0U) {
     return false;
   }
 
@@ -1928,6 +2078,13 @@ bool BleChannelSoundingRadio::parseMode2StepData(const BleCsSubeventStep* step,
 
 bool BleChannelSoundingRadio::parseMode3StepData(const BleCsSubeventStep* step,
                                                  BleCsStepMode3Data* outData) {
+  return parseMode3StepData(step, false, outData);
+}
+
+bool BleChannelSoundingRadio::parseMode3StepData(
+    const BleCsSubeventStep* step,
+    bool hasRttSoundingSequence,
+    BleCsStepMode3Data* outData) {
   if (step == nullptr || outData == nullptr || step->data == nullptr ||
       step->mode != kBleCsMainMode3 || step->dataLen < kBleCsMode3StepBaseLen) {
     return false;
@@ -1936,12 +2093,28 @@ bool BleChannelSoundingRadio::parseMode3StepData(const BleCsSubeventStep* step,
   if (!parseMode1StepData(step, &outData->timing)) {
     return false;
   }
-  const uint8_t toneDataOffset = outData->timing.hasRttSoundingSequence
-                                     ? static_cast<uint8_t>(kBleCsMode3SsRttStepBaseLen)
-                                     : static_cast<uint8_t>(kBleCsMode3StepBaseLen);
-  outData->antennaPermutationIndex = step->data[toneDataOffset - 1U];
-  outData->toneCount = static_cast<uint8_t>(
+  const uint8_t toneDataOffset =
+      hasRttSoundingSequence
+          ? static_cast<uint8_t>(kBleCsMode3SsRttStepBaseLen)
+          : static_cast<uint8_t>(kBleCsMode3StepBaseLen);
+  if (step->dataLen < toneDataOffset ||
+      ((step->dataLen - toneDataOffset) % kBleCsToneInfoLen) != 0U) {
+    return false;
+  }
+  const uint8_t toneCount = static_cast<uint8_t>(
       (step->dataLen - toneDataOffset) / kBleCsToneInfoLen);
+  if (toneCount == 0U) {
+    return false;
+  }
+  outData->timing.hasRttSoundingSequence = hasRttSoundingSequence;
+  outData->timing.soundingPct1 = BleCsIqSample{};
+  outData->timing.soundingPct2 = BleCsIqSample{};
+  if (hasRttSoundingSequence) {
+    outData->timing.soundingPct1 = parsePctSample(step->data + 6U);
+    outData->timing.soundingPct2 = parsePctSample(step->data + 10U);
+  }
+  outData->antennaPermutationIndex = step->data[toneDataOffset - 1U];
+  outData->toneCount = toneCount;
   outData->toneDataOffset = toneDataOffset;
   return true;
 }
@@ -1977,8 +2150,17 @@ bool BleChannelSoundingRadio::parseMode2ToneInfo(const BleCsSubeventStep* step,
 bool BleChannelSoundingRadio::parseMode3ToneInfo(const BleCsSubeventStep* step,
                                                  uint8_t toneIndex,
                                                  BleCsStepToneInfo* outInfo) {
+  return parseMode3ToneInfo(step, false, toneIndex, outInfo);
+}
+
+bool BleChannelSoundingRadio::parseMode3ToneInfo(
+    const BleCsSubeventStep* step,
+    bool hasRttSoundingSequence,
+    uint8_t toneIndex,
+    BleCsStepToneInfo* outInfo) {
   BleCsStepMode3Data mode3{};
-  if (!parseMode3StepData(step, &mode3) || outInfo == nullptr ||
+  if (!parseMode3StepData(step, hasRttSoundingSequence, &mode3) ||
+      outInfo == nullptr ||
       toneIndex >= mode3.toneCount) {
     return false;
   }
@@ -1990,14 +2172,13 @@ bool BleChannelSoundingRadio::parseMode3ToneInfo(const BleCsSubeventStep* step,
                        outInfo);
 }
 
-void BleChannelSoundingRadio::parseSubeventStepData(const uint8_t* stepData,
-                                                    size_t stepDataLen,
-                                                    bool (*callback)(
-                                                        const BleCsSubeventStep* step,
-                                                        void* userData),
-                                                    void* userData) {
+bool BleChannelSoundingRadio::parseSubeventStepData(
+    const uint8_t* stepData,
+    size_t stepDataLen,
+    bool (*callback)(const BleCsSubeventStep* step, void* userData),
+    void* userData) {
   if (stepData == nullptr || callback == nullptr) {
-    return;
+    return false;
   }
 
   size_t offset = 0U;
@@ -2009,18 +2190,19 @@ void BleChannelSoundingRadio::parseSubeventStepData(const uint8_t* stepData,
     offset += kBleCsStepHeaderLen;
 
     if (step.dataLen == 0U) {
-      return;
+      return false;
     }
     if ((stepDataLen - offset) < step.dataLen) {
-      return;
+      return false;
     }
 
     step.data = stepData + offset;
     if (!callback(&step, userData)) {
-      return;
+      return false;
     }
     offset += step.dataLen;
   }
+  return offset == stepDataLen;
 }
 
 bool BleChannelSoundingRadio::encodeMode2StepDataFromMeasurements(
@@ -2052,8 +2234,10 @@ bool BleChannelSoundingRadio::encodeMode2StepDataFromMeasurements(
       continue;
     }
 
+    const uint8_t csChannelIndex = static_cast<uint8_t>(
+        logicalChannelToFrequency(measurement.channelIndex) - 2U);
     if (!appendMode2ToneStep(outStepData, maxStepDataLen, &offset,
-                             measurement.channelIndex, 0U, tone)) {
+                             csChannelIndex, 0U, tone)) {
       return false;
     }
     ++(*outStepsEncoded);
@@ -2365,8 +2549,11 @@ bool BleChannelSoundingRadio::estimateDistanceFromStepBuffers(
   localContext.rttCount = &rttCount;
   localContext.fillingPeer = false;
   localContext.bufferRoleIsInitiator = localRoleIsInitiator;
-  parseSubeventStepData(localStepData, localStepDataLen, parseControllerStepBufferCallback,
-                        &localContext);
+  if (!parseSubeventStepData(localStepData, localStepDataLen,
+                             parseControllerStepBufferCallback,
+                             &localContext)) {
+    return false;
+  }
 
   BleCsControllerBufferParseContext peerContext{};
   peerContext.phasePairs = phasePairs;
@@ -2377,8 +2564,13 @@ bool BleChannelSoundingRadio::estimateDistanceFromStepBuffers(
   peerContext.rttCount = &rttCount;
   peerContext.fillingPeer = true;
   peerContext.bufferRoleIsInitiator = !localRoleIsInitiator;
-  parseSubeventStepData(peerStepData, peerStepDataLen, parseControllerStepBufferCallback,
-                        &peerContext);
+  if (!parseSubeventStepData(peerStepData, peerStepDataLen,
+                             parseControllerStepBufferCallback,
+                             &peerContext) ||
+      peerContext.phaseCursor != phaseCount ||
+      peerContext.rttCursor != rttCount) {
+    return false;
+  }
 
   const bool phaseOk = controllerPhaseDistanceEstimate(phasePairs, phaseCount, outEstimate);
   const bool rttOk = controllerRttDistanceEstimate(rttPairs, rttCount, outEstimate);
@@ -2392,10 +2584,12 @@ bool BleChannelSoundingRadio::estimateDistanceFromStepBuffers(
         fabsf(outEstimate->rttDistanceMeters - outEstimate->phaseSlopeDistanceMeters);
     if (delta <= fmaxf(0.25f, sqrtf(outEstimate->rttVariance) + 0.20f)) {
       outEstimate->distanceMeters =
-          (0.65f * outEstimate->rttDistanceMeters) +
-          (0.35f * outEstimate->phaseSlopeDistanceMeters);
+          (0.65f * outEstimate->phaseSlopeDistanceMeters) +
+          (0.35f * outEstimate->rttDistanceMeters);
     } else {
-      outEstimate->distanceMeters = outEstimate->rttDistanceMeters;
+      // AA-only RTT carries a board/controller timing bias until calibrated.
+      // A coherent multi-channel PBR slope is the primary ranging result.
+      outEstimate->distanceMeters = outEstimate->phaseSlopeDistanceMeters;
     }
   } else if (rttOk) {
     outEstimate->distanceMeters = outEstimate->rttDistanceMeters;
@@ -2411,7 +2605,13 @@ bool BleChannelSoundingRadio::estimateDistanceFromSubeventResults(
     const BleCsSubeventResult& localResult, const BleCsSubeventResult& peerResult,
     bool localRoleIsInitiator, BleCsEstimate* outEstimate) {
   if (!localResult.isComplete || !peerResult.isComplete ||
-      localResult.stepData == nullptr || peerResult.stepData == nullptr) {
+      localResult.stepData == nullptr || peerResult.stepData == nullptr ||
+      localResult.header.numAntennaPaths > 1U ||
+      peerResult.header.numAntennaPaths > 1U ||
+      (localResult.header.numAntennaPaths != 0U &&
+       peerResult.header.numAntennaPaths != 0U &&
+       localResult.header.numAntennaPaths !=
+           peerResult.header.numAntennaPaths)) {
     return false;
   }
 
@@ -8591,6 +8791,399 @@ bool BleChannelSoundingRadio::copyLastDfePacket(uint8_t* outPacket,
   return (copyLen == available);
 }
 
+bool BleChannelSoundingRadio::encodePeerSessionRequest(
+    const BleCsPeerSession& session,
+    uint8_t* outData,
+    size_t maxDataLen,
+    uint16_t* outDataLen) {
+  if (outDataLen != nullptr) {
+    *outDataLen = 0U;
+  }
+  if (outData == nullptr || outDataLen == nullptr || session.token == 0U ||
+      session.profileTag == 0U ||
+      maxDataLen < kBleCsPeerSessionRequestBytes) {
+    return false;
+  }
+
+  memset(outData, 0, kBleCsPeerSessionRequestBytes);
+  writeLe32(outData + 0U, kPeerSessionMagic);
+  outData[4U] = kPeerProtocolVersion;
+  writeLe16(outData + 6U, session.drbgNonce);
+  writeLe32(outData + 8U, session.token);
+  writeLe32(outData + 12U, session.profileTag);
+  *outDataLen = static_cast<uint16_t>(kBleCsPeerSessionRequestBytes);
+  return true;
+}
+
+bool BleChannelSoundingRadio::decodePeerSessionRequest(
+    const uint8_t* data,
+    size_t dataLen,
+    BleCsPeerSession* outSession) {
+  if (outSession != nullptr) {
+    *outSession = BleCsPeerSession{};
+  }
+  if (data == nullptr || outSession == nullptr ||
+      dataLen != kBleCsPeerSessionRequestBytes ||
+      readLe32(data + 0U) != kPeerSessionMagic ||
+      data[4U] != kPeerProtocolVersion) {
+    return false;
+  }
+
+  BleCsPeerSession session{};
+  session.drbgNonce = readLe16(data + 6U);
+  session.token = readLe32(data + 8U);
+  session.profileTag = readLe32(data + 12U);
+  if (session.token == 0U || session.profileTag == 0U) {
+    return false;
+  }
+  *outSession = session;
+  return true;
+}
+
+bool BleChannelSoundingRadio::encodePeerResultEnvelope(
+    const BleCsPeerResultMetadata& metadata,
+    const uint8_t* stepData,
+    uint16_t stepDataLen,
+    uint8_t* outData,
+    size_t maxDataLen,
+    uint16_t* outDataLen) {
+  if (outDataLen != nullptr) {
+    *outDataLen = 0U;
+  }
+  const size_t totalLen = kBleCsPeerResultEnvelopeHeaderBytes + stepDataLen;
+  if (outData == nullptr || outDataLen == nullptr || stepData == nullptr ||
+      stepDataLen == 0U || metadata.session.token == 0U ||
+      metadata.session.profileTag == 0U || metadata.role > 1U ||
+      metadata.numAntennaPaths > 1U || metadata.numStepsReported == 0U ||
+      totalLen > maxDataLen || totalLen > kBleCsMaxControllerStepDataBytes) {
+    return false;
+  }
+
+  memset(outData, 0, kBleCsPeerResultEnvelopeHeaderBytes);
+  writeLe32(outData + 0U, kPeerResultMagic);
+  outData[4U] = kPeerProtocolVersion;
+  outData[5U] = metadata.role;
+  outData[6U] = metadata.configId;
+  outData[7U] = metadata.numAntennaPaths;
+  writeLe16(outData + 8U, metadata.startAclConnEventCounter);
+  writeLe16(outData + 10U, metadata.procedureCounter);
+  writeLe16(outData + 12U, metadata.numStepsReported);
+  writeLe16(outData + 14U, stepDataLen);
+  writeLe32(outData + 16U, metadata.session.token);
+  writeLe32(outData + 20U, metadata.session.profileTag);
+  writeLe16(outData + 24U, metadata.session.drbgNonce);
+  outData[26U] = metadata.mainModeType;
+  outData[27U] = metadata.subModeType;
+  outData[28U] = metadata.rttType;
+  memcpy(outData + kBleCsPeerResultEnvelopeHeaderBytes, stepData,
+         stepDataLen);
+  *outDataLen = static_cast<uint16_t>(totalLen);
+  return true;
+}
+
+bool BleChannelSoundingRadio::decodePeerResultEnvelope(
+    const uint8_t* data,
+    size_t dataLen,
+    BleCsPeerResultMetadata* outMetadata,
+    const uint8_t** outStepData,
+    uint16_t* outStepDataLen) {
+  if (outMetadata != nullptr) {
+    *outMetadata = BleCsPeerResultMetadata{};
+  }
+  if (outStepData != nullptr) {
+    *outStepData = nullptr;
+  }
+  if (outStepDataLen != nullptr) {
+    *outStepDataLen = 0U;
+  }
+  if (data == nullptr || outMetadata == nullptr || outStepData == nullptr ||
+      outStepDataLen == nullptr ||
+      dataLen < kBleCsPeerResultEnvelopeHeaderBytes ||
+      readLe32(data + 0U) != kPeerResultMagic ||
+      data[4U] != kPeerProtocolVersion) {
+    return false;
+  }
+
+  BleCsPeerResultMetadata metadata{};
+  metadata.role = data[5U];
+  metadata.configId = data[6U];
+  metadata.numAntennaPaths = data[7U];
+  metadata.startAclConnEventCounter = readLe16(data + 8U);
+  metadata.procedureCounter = readLe16(data + 10U);
+  metadata.numStepsReported = readLe16(data + 12U);
+  const uint16_t stepDataLen = readLe16(data + 14U);
+  metadata.session.token = readLe32(data + 16U);
+  metadata.session.profileTag = readLe32(data + 20U);
+  metadata.session.drbgNonce = readLe16(data + 24U);
+  metadata.mainModeType = data[26U];
+  metadata.subModeType = data[27U];
+  metadata.rttType = data[28U];
+  const size_t expectedLen =
+      kBleCsPeerResultEnvelopeHeaderBytes + stepDataLen;
+  if (metadata.role > 1U || metadata.numAntennaPaths > 1U ||
+      metadata.numStepsReported == 0U || stepDataLen == 0U ||
+      metadata.session.token == 0U || metadata.session.profileTag == 0U ||
+      expectedLen != dataLen || dataLen > kBleCsMaxControllerStepDataBytes) {
+    return false;
+  }
+
+  *outMetadata = metadata;
+  *outStepData = data + kBleCsPeerResultEnvelopeHeaderBytes;
+  *outStepDataLen = stepDataLen;
+  return true;
+}
+
+bool BleChannelSoundingRadio::sendPeerStepData(
+    const uint8_t* stepData,
+    uint16_t stepDataLen,
+    uint16_t transferId,
+    uint32_t timeoutMs,
+    BleCsStepTransferStats* outStats) {
+  BleCsStepTransferStats stats{};
+  stats.transferId = transferId;
+  if (outStats != nullptr) {
+    *outStats = stats;
+  }
+  if (!initialized_ || stepData == nullptr || stepDataLen == 0U ||
+      stepDataLen > kBleCsMaxControllerStepDataBytes || timeoutMs == 0U ||
+      config_.maxPayloadLength <=
+          (kPayloadHeaderLen + kStepTransferHeaderLen)) {
+    return false;
+  }
+
+  const uint8_t payloadCapacity = static_cast<uint8_t>(
+      config_.maxPayloadLength - kPayloadHeaderLen - kStepTransferHeaderLen);
+  const uint8_t chunkCapacity =
+      (payloadCapacity < kStepTransferChunkLimit) ? payloadCapacity
+                                                  : kStepTransferChunkLimit;
+  if (chunkCapacity == 0U) {
+    return false;
+  }
+
+  const uint32_t startedMs = millis();
+  const uint32_t payloadCrc = crc32Bytes(stepData, stepDataLen);
+  stats.payloadCrc32 = payloadCrc;
+  uint16_t offset = 0U;
+  uint8_t sequence = static_cast<uint8_t>(transferId);
+  while (offset < stepDataLen && (millis() - startedMs) < timeoutMs) {
+    const uint16_t remaining = static_cast<uint16_t>(stepDataLen - offset);
+    const uint8_t chunkLen = static_cast<uint8_t>(
+        (remaining < chunkCapacity) ? remaining : chunkCapacity);
+    uint8_t extra[kStepTransferHeaderLen + kStepTransferChunkLimit] = {0};
+    extra[0] = kStepTransferVersion;
+    writeLe16(&extra[1], transferId);
+    writeLe16(&extra[3], stepDataLen);
+    writeLe16(&extra[5], offset);
+    writeLe32(&extra[7], payloadCrc);
+    memcpy(&extra[kStepTransferHeaderLen], &stepData[offset], chunkLen);
+
+    bool acknowledged = false;
+    bool restartRequested = false;
+    while (!acknowledged && (millis() - startedMs) < timeoutMs) {
+      const uint8_t flags =
+          (static_cast<uint16_t>(offset + chunkLen) == stepDataLen) ? 0x01U
+                                                                    : 0x00U;
+      if (!sendFrame(kStepTransferChannel, PacketType::kStepData, sequence,
+                     kStepTransferChannel, flags, extra,
+                     static_cast<uint8_t>(kStepTransferHeaderLen + chunkLen),
+                     false, false)) {
+        ++stats.retries;
+        continue;
+      }
+      ++stats.framesSent;
+
+      RxFrame ack{};
+      if (!receiveFrame(kStepTransferChannel, kStepTransferListenWindowUs,
+                        false, false, false, &ack, nullptr, nullptr) ||
+          !ack.valid || ack.type != PacketType::kStepAck ||
+          ack.sequence != sequence || ack.extraLen != kStepAckLen ||
+          ack.extra[0] != kStepTransferVersion ||
+          readLe16(&ack.extra[1]) != transferId) {
+        ++stats.retries;
+        continue;
+      }
+
+      const uint16_t acknowledgedOffset = readLe16(&ack.extra[3]);
+      if (ack.extra[5] == 2U && acknowledgedOffset == 0U) {
+        ++stats.retries;
+        offset = 0U;
+        stats.bytesTransferred = 0U;
+        sequence = static_cast<uint8_t>(transferId);
+        restartRequested = true;
+        break;
+      }
+      if (ack.extra[5] != 0U ||
+          acknowledgedOffset !=
+              static_cast<uint16_t>(offset + chunkLen)) {
+        ++stats.retries;
+        continue;
+      }
+      ++stats.acknowledgements;
+      acknowledged = true;
+    }
+
+    if (restartRequested) {
+      continue;
+    }
+    if (!acknowledged) {
+      if (outStats != nullptr) {
+        *outStats = stats;
+      }
+      return false;
+    }
+    offset = static_cast<uint16_t>(offset + chunkLen);
+    stats.bytesTransferred = offset;
+    ++sequence;
+  }
+
+  const bool complete = (offset == stepDataLen);
+  if (outStats != nullptr) {
+    *outStats = stats;
+  }
+  return complete;
+}
+
+bool BleChannelSoundingRadio::receivePeerStepData(
+    uint8_t* outStepData,
+    size_t maxStepDataLen,
+    uint16_t* outStepDataLen,
+    uint16_t* outTransferId,
+    uint32_t timeoutMs,
+    BleCsStepTransferStats* outStats) {
+  BleCsStepTransferStats stats{};
+  if (outStepDataLen != nullptr) {
+    *outStepDataLen = 0U;
+  }
+  if (outTransferId != nullptr) {
+    *outTransferId = 0U;
+  }
+  if (outStats != nullptr) {
+    *outStats = stats;
+  }
+  if (!initialized_ || outStepData == nullptr || outStepDataLen == nullptr ||
+      outTransferId == nullptr || maxStepDataLen == 0U ||
+      maxStepDataLen > kBleCsMaxControllerStepDataBytes || timeoutMs == 0U) {
+    return false;
+  }
+
+  const uint32_t startedMs = millis();
+  bool transferStarted = false;
+  uint16_t transferId = 0U;
+  uint16_t totalLen = 0U;
+  uint16_t receivedLen = 0U;
+  uint32_t expectedCrc = 0U;
+  uint32_t completionObservedMs = 0U;
+  bool completionObserved = false;
+  bool finalAckSent = false;
+  while ((millis() - startedMs) < timeoutMs) {
+    if (completionObserved &&
+        (millis() - completionObservedMs) >=
+            kStepTransferFinalAckLingerMs) {
+      break;
+    }
+
+    RxFrame frame{};
+    if (!receiveFrame(kStepTransferChannel, kStepTransferListenWindowUs,
+                      false, false, false, &frame, nullptr, nullptr)) {
+      continue;
+    }
+    ++stats.framesReceived;
+    if (!frame.valid || frame.type != PacketType::kStepData ||
+        frame.extraLen <= kStepTransferHeaderLen ||
+        frame.extra[0] != kStepTransferVersion) {
+      ++stats.rejectedFrames;
+      continue;
+    }
+
+    const uint16_t frameTransferId = readLe16(&frame.extra[1]);
+    const uint16_t frameTotalLen = readLe16(&frame.extra[3]);
+    const uint16_t frameOffset = readLe16(&frame.extra[5]);
+    const uint32_t frameCrc = readLe32(&frame.extra[7]);
+    const uint8_t chunkLen =
+        static_cast<uint8_t>(frame.extraLen - kStepTransferHeaderLen);
+    const uint32_t frameEnd =
+        static_cast<uint32_t>(frameOffset) + static_cast<uint32_t>(chunkLen);
+
+    if (frameTotalLen == 0U || frameTotalLen > maxStepDataLen ||
+        frameTotalLen > kBleCsMaxControllerStepDataBytes ||
+        frameEnd > frameTotalLen) {
+      ++stats.rejectedFrames;
+      continue;
+    }
+    if (!transferStarted) {
+      if (frameOffset != 0U) {
+        ++stats.rejectedFrames;
+        continue;
+      }
+      transferStarted = true;
+      transferId = frameTransferId;
+      totalLen = frameTotalLen;
+      expectedCrc = frameCrc;
+      stats.transferId = transferId;
+      stats.payloadCrc32 = expectedCrc;
+    }
+    if (frameTransferId != transferId || frameTotalLen != totalLen ||
+        frameCrc != expectedCrc) {
+      ++stats.rejectedFrames;
+      continue;
+    }
+
+    uint8_t ackStatus = 0U;
+    if (frameOffset == receivedLen) {
+      memcpy(&outStepData[receivedLen],
+             &frame.extra[kStepTransferHeaderLen], chunkLen);
+      receivedLen = static_cast<uint16_t>(receivedLen + chunkLen);
+    } else if (frameOffset < receivedLen && frameEnd <= receivedLen) {
+      ++stats.duplicateFrames;
+    } else {
+      ++stats.rejectedFrames;
+      ackStatus = 1U;
+    }
+
+    if (receivedLen == totalLen &&
+        crc32Bytes(outStepData, receivedLen) != expectedCrc) {
+      ++stats.rejectedFrames;
+      receivedLen = 0U;
+      ackStatus = 2U;
+      transferStarted = false;
+    }
+
+    uint8_t ack[kStepAckLen] = {0};
+    ack[0] = kStepTransferVersion;
+    writeLe16(&ack[1], transferId);
+    writeLe16(&ack[3], receivedLen);
+    ack[5] = ackStatus;
+    waitElapsedMicros(kStepTransferAckTurnaroundUs);
+    if (sendFrame(kStepTransferChannel, PacketType::kStepAck, frame.sequence,
+                  kStepTransferChannel, 0U, ack, sizeof(ack), false, false)) {
+      ++stats.framesSent;
+      ++stats.acknowledgements;
+      if (ackStatus == 0U && receivedLen == totalLen) {
+        finalAckSent = true;
+      }
+    }
+
+    if (ackStatus == 0U && receivedLen == totalLen && finalAckSent) {
+      if (!completionObserved) {
+        completionObserved = true;
+        completionObservedMs = millis();
+      }
+    }
+  }
+
+  stats.bytesTransferred = receivedLen;
+  const bool complete = completionObserved && finalAckSent &&
+                        receivedLen == totalLen;
+  if (complete) {
+    *outStepDataLen = receivedLen;
+    *outTransferId = transferId;
+  }
+  if (outStats != nullptr) {
+    *outStats = stats;
+  }
+  return complete;
+}
+
 bool BleChannelSoundingRadio::configureBle2MCommon() {
   radio_->SHORTS = 0U;
   detachRawRadioAutomation(radio_);
@@ -8948,7 +9541,9 @@ bool BleChannelSoundingRadio::decodeFrame(const uint8_t* packet,
   const uint8_t typeValue = payload[2];
   if (typeValue != static_cast<uint8_t>(PacketType::kControl) &&
       typeValue != static_cast<uint8_t>(PacketType::kProbe) &&
-      typeValue != static_cast<uint8_t>(PacketType::kReport)) {
+      typeValue != static_cast<uint8_t>(PacketType::kReport) &&
+      typeValue != static_cast<uint8_t>(PacketType::kStepData) &&
+      typeValue != static_cast<uint8_t>(PacketType::kStepAck)) {
     return false;
   }
 
@@ -9417,7 +10012,12 @@ bool BleChannelSoundingRadio::measureChannel(uint8_t channelIndex,
     outMeasurement->peerTone = peerTone;
     outMeasurement->localRtt = localRtt;
     outMeasurement->peerRtt = peerRtt;
-    outMeasurement->combinedPhaseRad = combinedPhaseRad(*outMeasurement);
+    if (localTone.valid && peerTone.valid) {
+      outMeasurement->combinedPhaseRad = combinedPhaseRad(*outMeasurement);
+      outMeasurement->combinedPhaseValid = true;
+      outMeasurement->phaseSampleCount = 1U;
+      outMeasurement->phaseCoherence = 1.0f;
+    }
     (void)rttDistanceMeters(*outMeasurement, &outMeasurement->rttDistanceMeters);
     outMeasurement->valid =
         (localTone.valid && peerTone.valid) || (localRtt.valid && peerRtt.valid);
@@ -9426,6 +10026,84 @@ bool BleChannelSoundingRadio::measureChannel(uint8_t channelIndex,
   }
 
   return false;
+}
+
+bool BleChannelSoundingRadio::measureChannelAveraged(
+    uint8_t channelIndex,
+    uint8_t exchangeCount,
+    uint8_t* inOutSequence,
+    BleCsChannelMeasurement* outMeasurement,
+    float minPhaseCoherence,
+    uint16_t interExchangeGuardUs) {
+  if (outMeasurement == nullptr) {
+    return false;
+  }
+
+  *outMeasurement = BleCsChannelMeasurement{};
+  outMeasurement->channelIndex = channelIndex;
+  if (!initialized_ || !validDataChannel(channelIndex) ||
+      inOutSequence == nullptr || exchangeCount < 3U ||
+      !isfinite(minPhaseCoherence) || minPhaseCoherence < 0.0f ||
+      minPhaseCoherence > 1.0f) {
+    outMeasurement->status = 1U;
+    return false;
+  }
+
+  BleCsChannelMeasurement representative{};
+  float representativeQuality = 0.0f;
+  float phaseSumI = 0.0f;
+  float phaseSumQ = 0.0f;
+  uint8_t validPhaseSamples = 0U;
+  for (uint8_t exchange = 0U; exchange < exchangeCount; ++exchange) {
+    const uint8_t sequence = *inOutSequence;
+    *inOutSequence = static_cast<uint8_t>(sequence + 1U);
+
+    BleCsChannelMeasurement measurement{};
+    const bool measured = measureChannel(channelIndex, sequence, &measurement);
+    if (measured && measurement.valid && measurement.combinedPhaseValid &&
+        measurement.localTone.valid && measurement.peerTone.valid &&
+        isfinite(measurement.combinedPhaseRad)) {
+      const float quality = toneQualityScore(measurement.localTone,
+                                             measurement.peerTone);
+      if (validPhaseSamples == 0U || quality > representativeQuality) {
+        representative = measurement;
+        representativeQuality = quality;
+      }
+      phaseSumI += cosf(measurement.combinedPhaseRad);
+      phaseSumQ += sinf(measurement.combinedPhaseRad);
+      ++validPhaseSamples;
+    }
+
+    if ((exchange + 1U) < exchangeCount && interExchangeGuardUs > 0U) {
+      waitElapsedMicros(interExchangeGuardUs);
+    }
+  }
+
+  if (validPhaseSamples > 0U) {
+    *outMeasurement = representative;
+  }
+  outMeasurement->channelIndex = channelIndex;
+  outMeasurement->phaseSampleCount = validPhaseSamples;
+  if (validPhaseSamples > 0U) {
+    const float resultant = hypotf(phaseSumI, phaseSumQ);
+    outMeasurement->phaseCoherence = fminf(
+        1.0f, resultant / static_cast<float>(validPhaseSamples));
+  }
+
+  if (validPhaseSamples < 3U ||
+      !isfinite(outMeasurement->phaseCoherence) ||
+      outMeasurement->phaseCoherence < minPhaseCoherence) {
+    outMeasurement->valid = false;
+    outMeasurement->combinedPhaseValid = false;
+    outMeasurement->status = 7U;
+    return false;
+  }
+
+  outMeasurement->combinedPhaseRad = atan2f(phaseSumQ, phaseSumI);
+  outMeasurement->combinedPhaseValid = true;
+  outMeasurement->valid = true;
+  outMeasurement->status = 0U;
+  return true;
 }
 
 uint8_t BleChannelSoundingRadio::centeredDataChannelAt(uint8_t order,
@@ -10824,6 +11502,11 @@ bool BleChannelSoundingRadio::listenAndReflectOnce(uint32_t controlListenWindowU
 
 float BleChannelSoundingRadio::combinedPhaseRad(
     const BleCsChannelMeasurement& measurement) {
+  if (measurement.combinedPhaseValid) {
+    return isfinite(measurement.combinedPhaseRad)
+               ? measurement.combinedPhaseRad
+               : NAN;
+  }
   if (!measurement.localTone.valid || !measurement.peerTone.valid) {
     return 0.0f;
   }
@@ -10875,6 +11558,8 @@ bool BleChannelSoundingRadio::estimateDistancePhaseSlope(
 
   *outEstimate = BleCsEstimate{};
   outEstimate->phaseSlopeDistanceMeters = NAN;
+  outEstimate->adjacentPhaseDistanceMeters = NAN;
+  outEstimate->regressionPhaseDistanceMeters = NAN;
   outEstimate->rttDistanceMeters = NAN;
   outEstimate->distanceMeters = NAN;
 
@@ -10893,9 +11578,17 @@ bool BleChannelSoundingRadio::estimateDistancePhaseSlope(
         (2400.0f + static_cast<float>(logicalChannelToFrequency(
                         measurements[i].channelIndex))) *
         1000000.0f;
-    phases[phaseCount] = combinedPhaseRad(measurements[i]);
-    toneQuality[phaseCount] =
+    const float phase = combinedPhaseRad(measurements[i]);
+    if (!isfinite(phase)) {
+      continue;
+    }
+    phases[phaseCount] = phase;
+    float quality =
         toneQualityScore(measurements[i].localTone, measurements[i].peerTone);
+    if (measurements[i].combinedPhaseValid) {
+      quality *= fmaxf(0.0f, fminf(1.0f, measurements[i].phaseCoherence));
+    }
+    toneQuality[phaseCount] = quality;
     ++phaseCount;
   }
   outEstimate->totalToneChannels = static_cast<uint8_t>(phaseCount);
@@ -10937,6 +11630,16 @@ bool BleChannelSoundingRadio::estimateDistancePhaseSlope(
       }
     }
 
+    float adjacentDistance = NAN;
+    float adjacentCoherence = 0.0f;
+    uint8_t adjacentPairs = 0U;
+    const bool adjacentOk = estimateAdjacentPhaseDistance(
+        freqsHz, phases, toneQuality, phaseCount, &adjacentDistance,
+        &adjacentCoherence, &adjacentPairs);
+    outEstimate->adjacentPhaseDistanceMeters = adjacentDistance;
+    outEstimate->adjacentPhaseCoherence = adjacentCoherence;
+    outEstimate->adjacentPhasePairs = adjacentPairs;
+
     for (size_t i = 1U; i < phaseCount; ++i) {
       const float prev = phases[i - 1U];
       while ((phases[i] - prev) > kPi) {
@@ -10947,6 +11650,7 @@ bool BleChannelSoundingRadio::estimateDistancePhaseSlope(
       }
     }
 
+    bool regressionOk = false;
     float slope = 0.0f;
     float intercept = 0.0f;
     if (fitTheilSenLine(freqsHz, phases, phaseCount, &slope, &intercept)) {
@@ -11007,13 +11711,24 @@ bool BleChannelSoundingRadio::estimateDistancePhaseSlope(
       const float phaseDistance = fabsf(
           -(kSpeedOfLightMetersPerSecond * slope) / (4.0f * kPi));
       if (isfinite(phaseDistance) && phaseDistance > 0.0f) {
-        phaseOk = true;
+        regressionOk = true;
         outEstimate->usedChannels = static_cast<uint8_t>(phaseCount);
-        outEstimate->phaseSlopeDistanceMeters = phaseDistance;
+        outEstimate->regressionPhaseDistanceMeters = phaseDistance;
         outEstimate->slopeRadPerHz = slope;
         outEstimate->residualVariance =
             residualSse / static_cast<float>(phaseCount);
       }
+    }
+
+    phaseOk = adjacentOk || regressionOk;
+    if (adjacentOk) {
+      outEstimate->phaseSlopeDistanceMeters = adjacentDistance;
+      if (!regressionOk) {
+        outEstimate->usedChannels = static_cast<uint8_t>(phaseCount);
+      }
+    } else if (regressionOk) {
+      outEstimate->phaseSlopeDistanceMeters =
+          outEstimate->regressionPhaseDistanceMeters;
     }
   }
 

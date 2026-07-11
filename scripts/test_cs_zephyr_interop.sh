@@ -31,10 +31,10 @@ run_zephyr_pair() {
 print_mixed_status() {
   cat <<'STATUS'
 cs_mixed_arduino_initiator_zephyr_reflector=READY_FOR_HARDWARE_TEST
-arduino_initiator_example=BLE/ChannelSounding/BleChannelSoundingZephyrCompatInitiator
+arduino_initiator_fixture=extras/tests/channel_sounding/BleChannelSoundingZephyrCompatInitiator
 zephyr_reflector=zephyr/samples/bluetooth/channel_sounding reflector
 cs_mixed_zephyr_initiator_arduino_reflector=READY_FOR_HARDWARE_TEST
-arduino_reflector_example=BLE/ChannelSounding/BleChannelSoundingZephyrCompatReflector
+arduino_reflector_fixture=extras/tests/channel_sounding/BleChannelSoundingZephyrCompatReflector
 zephyr_initiator=zephyr/samples/bluetooth/channel_sounding initiator
 step_data_service=87654321-4567-2389-1254-f67f9fedcba9
 step_data_characteristic=87654321-4567-2389-1254-f67f9fedcba8

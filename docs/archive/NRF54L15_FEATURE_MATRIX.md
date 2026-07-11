@@ -1,5 +1,9 @@
 # nRF54L15 Feature Matrix
 
+> Historical release snapshot: Channel Sounding status in this file predates
+> the Nordic SDC/MPSL runtime. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 Status baseline:
 
 - Repository release line: `0.8.6`

@@ -1,5 +1,10 @@
 # Channel Sounding Error Model
 
+> Historical raw-radio model: the output fields and rejection rules below
+> describe the retired BLE 2M/CTE/CSTONES experiment, not the current Nordic
+> SDC/MPSL controller path. See
+> [Channel Sounding Current Status](../CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
 This note explains what the current clean-core Channel Sounding numbers mean,
 which outputs are physically relevant, and which ones are only bring-up or
 nominal regression surfaces.
