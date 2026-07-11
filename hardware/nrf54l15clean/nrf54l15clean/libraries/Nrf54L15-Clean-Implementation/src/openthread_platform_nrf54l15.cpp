@@ -596,24 +596,26 @@ void makeCountKey(uint16_t key, char* outKey, size_t outLen) {
   snprintf(outKey, outLen, "k%04X.c", static_cast<unsigned>(key));
 }
 
-void makeLengthKey(uint16_t key, int index, char* outKey, size_t outLen) {
-  snprintf(outKey, outLen, "k%04X.%02d.l", static_cast<unsigned>(key), index);
+void makeLengthKey(uint16_t key, uint16_t index, char* outKey, size_t outLen) {
+  snprintf(outKey, outLen, "k%04X.%02u.l", static_cast<unsigned>(key),
+           static_cast<unsigned>(index));
 }
 
-void makeDataKey(uint16_t key, int index, char* outKey, size_t outLen) {
-  snprintf(outKey, outLen, "k%04X.%02d.d", static_cast<unsigned>(key), index);
+void makeDataKey(uint16_t key, uint16_t index, char* outKey, size_t outLen) {
+  snprintf(outKey, outLen, "k%04X.%02u.d", static_cast<unsigned>(key),
+           static_cast<unsigned>(index));
 }
 
 void makeDataChunkKey(uint16_t key,
-                      int index,
+                      uint16_t index,
                       uint16_t chunkIndex,
                       char* outKey,
                       size_t outLen) {
   snprintf(outKey,
            outLen,
-           "k%04X.%02d.d%02u",
+           "k%04X.%02u.d%02u",
            static_cast<unsigned>(key),
-           index,
+           static_cast<unsigned>(index),
            static_cast<unsigned>(chunkIndex));
 }
 
@@ -627,7 +629,8 @@ uint16_t getSettingChunkCount(uint16_t valueLength) {
                                kSettingChunkLength);
 }
 
-void removeSettingDataKeys(uint16_t key, int index, uint16_t valueLength) {
+void removeSettingDataKeys(uint16_t key, uint16_t index,
+                           uint16_t valueLength) {
   ensureSettingsOpen();
 
   char dataKey[20];
@@ -656,7 +659,8 @@ bool setSettingCount(uint16_t key, uint16_t count) {
   return gOpenThreadPlatformState.settings.putUShort(countKey, count) == sizeof(uint16_t);
 }
 
-bool readSettingItem(uint16_t key, int index, uint8_t* value, uint16_t* valueLength) {
+bool readSettingItem(uint16_t key, uint16_t index, uint8_t* value,
+                     uint16_t* valueLength) {
   if (valueLength == nullptr) {
     return false;
   }
@@ -716,7 +720,8 @@ bool readSettingItem(uint16_t key, int index, uint8_t* value, uint16_t* valueLen
   return true;
 }
 
-bool writeSettingItem(uint16_t key, int index, const uint8_t* value, uint16_t valueLength) {
+bool writeSettingItem(uint16_t key, uint16_t index, const uint8_t* value,
+                      uint16_t valueLength) {
   ensureSettingsOpen();
 
   char lengthKey[20];
@@ -795,7 +800,7 @@ bool writeSettingItem(uint16_t key, int index, const uint8_t* value, uint16_t va
   return true;
 }
 
-void removeSettingItemKeys(uint16_t key, int index) {
+void removeSettingItemKeys(uint16_t key, uint16_t index) {
   ensureSettingsOpen();
 
   char lengthKey[20];
@@ -808,7 +813,7 @@ void removeSettingItemKeys(uint16_t key, int index) {
   removeSettingDataKeys(key, index, valueLength);
 }
 
-bool shiftSettingItem(uint16_t key, int fromIndex, int toIndex) {
+bool shiftSettingItem(uint16_t key, uint16_t fromIndex, uint16_t toIndex) {
   uint16_t length = 0;
   if (!readSettingItem(key, fromIndex, nullptr, &length)) {
     return false;
@@ -3193,7 +3198,8 @@ otError otPlatSettingsGet(otInstance*, uint16_t key, int index, uint8_t* value, 
   }
 
   uint16_t actualLength = (valueLength == nullptr) ? 0 : *valueLength;
-  if (!xiao_nrf54l15::readSettingItem(key, index, value, &actualLength)) {
+  if (!xiao_nrf54l15::readSettingItem(
+          key, static_cast<uint16_t>(index), value, &actualLength)) {
     return OT_ERROR_NOT_FOUND;
   }
 

@@ -619,6 +619,16 @@ def validate_protocol_typed_reset_contracts() -> None:
     )
     ot_init = function_body(openthread, "void otSysInit(int, char**)")
     assert "state.snapshot = OpenThreadPlatformSkeletonSnapshot{};" in ot_init
+    assert re.search(
+        r"void\s+makeDataChunkKey\s*\(\s*uint16_t\s+key,\s*"
+        r"uint16_t\s+index,",
+        openthread,
+    )
+    chunk_key = function_body(openthread, "void makeDataChunkKey(")
+    assert '"k%04X.%02u.d%02u"' in chunk_key
+    assert "static_cast<unsigned>(index)" in chunk_key
+    settings_get = function_body(openthread, "otError otPlatSettingsGet(")
+    assert "static_cast<uint16_t>(index)" in settings_get
 
     channel_sounding = (source_root / "ble_channel_sounding.cpp").read_text(
         encoding="utf-8"
