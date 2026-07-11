@@ -71,39 +71,28 @@
               radio_->SHORTS = 0U;
             }
 
-	            const bool preserveFailedFollowDataTx =
-	                !txFollowOk && txFollowCanUseFreshPayload &&
-	                (txFollowLength > 0U) &&
-	                ((txFollowLlid == kBlePduDataStartOrComplete) ||
-	                 (txFollowLlid == kBlePduDataContinuation));
-	            if (txFollowOk || preserveFailedFollowDataTx) {
+	            const bool preserveFailedFollowTx =
+	                !txFollowOk && txFollowCanUseFreshPayload;
+	            if (txFollowOk || preserveFailedFollowTx) {
 	              connectionTxHistoryValid_ = true;
 	              connectionLastTxMoreData_ =
 	                  (txPacket_[0] & 0x10U) != 0U;
 	              connectionLastTxSn_ =
 	                  static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
-	              if (txFollowCanUseFreshPayload && txFollowLength > 0U) {
+	              if (txFollowCanUseFreshPayload) {
 	                connectionFreshTxAllowed_ = false;
 	              }
 	            }
-	            if ((txFollowOk || preserveFailedFollowDataTx) &&
+	            if ((txFollowOk || preserveFailedFollowTx) &&
 	                txFollowEncrypted && txFollowCounterValid) {
-	              connectionEncTxCounter_ =
-	                  (txFollowCounterUsed + 1ULL) & kBleEncPacketCounterMask;
-	              if (connectionEncPrecomputedCounter_ != connectionEncTxCounter_) {
-	                connectionEncPrecomputedEmptyValid_ = false;
-	              }
-	              if (txFollowIsStartEncRspPlain) {
-	                connectionEncPrecomputedStartRspTxValid_ = false;
-	              }
 	              ++encDebug_.encTxPacketCount;
 	              if (txFollowOk && txFollowIsStartEncRspPlain) {
 	                ++encDebug_.followupStartEncRspTxOk;
 	              }
 	            }
 	            if (!txFollowOk) {
-	              if (preserveFailedFollowDataTx) {
-	                emitBleTrace("DATA_FOLLOW_TX_TIMEOUT_RETAINED");
+	              if (preserveFailedFollowTx) {
+	                emitBleTrace("FOLLOW_TX_TIMEOUT_RETAINED");
 	              }
 	              break;
 	            }
@@ -334,6 +323,14 @@
 
     // Peripheral-initiated SMP Security Request: with no key it starts pairing;
     // with a loaded bond it asks the central to start link-layer encryption.
+    if (connectionSmpSecurityRequestPending_ &&
+        (smpTimedOutForConnection_ || smpBackoffActiveForCurrentPeer())) {
+      connectionSmpSecurityRequestPending_ = false;
+      if (!smpTimedOutForConnection_) {
+        smpPairingFailureReasonPending_ = true;
+        smpLastPairingFailureReason_ = kSmpReasonRepeatedAttempts;
+      }
+    }
     if ((deferredLength == 0U) &&
         !connectionPendingTxValid_ &&
         !encryptionProcedureBusy &&
@@ -355,6 +352,7 @@
       deferredLlid = kBlePduDataStartOrComplete;
       deferredLength = 6U;
       connectionSmpSecurityRequestPending_ = false;
+      restartSmpTimer();
       emitBleTrace("SMP_SEC_REQ_TX");
     }
 

@@ -860,8 +860,10 @@ BLE examples:
   - `Connections` for connected link bring-up and timing instrumentation
   - `GATT` for services, characteristics, notifications, and central discovery flows
   - `NordicUart` for NUS bridge, console, and probe sketches
-  - `Security` for pairing, encryption, and bond persistence checks
-  - `Privacy` for RPA generation/resolution helpers
+  - `Security` for Just Works, passkey, Numeric Comparison, LE SC OOB,
+    encryption, identity-key exchange, and bond persistence checks
+  - `Privacy` for stable-identity, RPA generation/rotation, and AAR resolution
+    helpers
   - `ChannelSounding` for the two-board LE CS Test initiator and reflector
   - `Diagnostics` for stress rigs and issue-focused debug probes
 
@@ -968,15 +970,32 @@ BLE examples:
 - `examples/BLE/Security/BleBondPersistenceProbe/BleBondPersistenceProbe.ino`
   - Demonstrates bond retention across resets and reconnect-side encryption reuse.
   - Hold user button at boot to clear persistent bond state.
+- `examples/BLE/Security/BlePairPeripheral/BlePairPeripheral.ino`
+- `examples/BLE/Security/BlePairCentral/BlePairCentral.ino`
+  - Two-board LE Secure Connections pair with encrypted GATT notification/write
+    traffic, Preferences-backed bond save/load, and encrypted reconnect without
+    re-pairing.
+  - Compile both with `BLE_PAIR_USE_NUMERIC_COMPARISON=1` to display and answer
+    the same six-digit comparison. `BLE_PAIR_AUTO_ACCEPT_PROMPTS=0` exercises
+    responder rejection without encrypting or saving a bond.
+  - Compile both with `BLE_PAIR_USE_PRIVACY=1` to rotate the local RPA, exchange
+    Identity Information and Identity Address Information, resolve the retained
+    peer identity through AAR, and reconnect after reset without a new pairing.
 - `examples/BLE/Security/BleOobPairPeripheral/BleOobPairPeripheral.ino`
   - Peripheral side of a two-board LE Secure Connections OOB pairing bring-up.
-  - Prints local `r/c` OOB data and starts advertising after peer OOB data is pasted over Serial.
+  - Prints local `r/c` OOB data and starts advertising after any required peer
+    OOB data is pasted over Serial.
 - `examples/BLE/Security/BleOobPairCentral/BleOobPairCentral.ino`
   - Central side of the same OOB pairing bring-up.
-  - Starts scanning only after the peripheral's `peer <r> <c>` line is pasted over Serial.
+  - `BLE_OOB_MODE=0` exchanges both records, while modes `1` and `2` exercise
+    peripheral-to-central and central-to-peripheral one-way OOB respectively.
+    Mutual OOB is authenticated; the one-way modes are encrypted but
+    conservatively remain unauthenticated in the public state.
 - `examples/BLE/Privacy/BleResolvablePrivateAddress/BleResolvablePrivateAddress.ino`
   - Demonstrates BLE privacy primitives using the Bluefruit compatibility API.
-  - Generates an RPA from an IRK, resolves it through hardware AAR, enables opt-in local RPA rotation, and advertises as `X54-RPA`.
+  - Derives the local IRK from the factory identity root, preserves the stable
+    identity address, generates and resolves an RPA through hardware AAR,
+    enables opt-in local RPA rotation, and advertises as `X54-RPA`.
 - `examples/BLE/ChannelSounding/BleChannelSoundingReflector/BleChannelSoundingReflector.ino`
   - Starts Nordic SDC/MPSL in the LE CS Test reflector role and collects the
     controller's HCI CS step results.
@@ -1125,16 +1144,34 @@ Examples:
     - Command Reject reason granularity (`Cmd Not Understood`, `Signaling MTU exceeded`, `Invalid CID`)
     - Connection Parameter Update Request -> accepted on the in-tree central path, which replies over L2CAP and then drives an LL `Connection Update Ind` using the requested range (currently choosing the upper bound when `min != max`)
     - LE Credit Based Connection Request -> response with `PSM not supported`
-  - SMP legacy Just Works pairing subset:
-    - Pairing Request/Response/Confirm/Random validation flow
-    - Legacy `c1`/`s1` confirm and STK derivation
-    - Encryption Information/Master Identification key distribution parsing
-    - LE Secure Connections Just Works, fixed-PIN, two-board numeric comparison,
-      and mutual OOB plumbing are present; broader host interop remains a
-      validation target.
-    - Privacy primitives can generate/set RPAs, rotate the local RPA on an
-      opt-in sketch-selected interval, keep a small sketch-managed resolving
-      list of peer IRKs, and resolve peer RPAs through AAR.
+  - SMP security support:
+    - Legacy Just Works Pairing Request/Response/Confirm/Random validation flow
+      with `c1`/`s1` and STK derivation
+    - Legacy Encryption Information/Master Identification key distribution
+      parsing
+    - LE Secure Connections Just Works, fixed-PIN/passkey entry, Numeric
+      Comparison with asynchronous user acceptance/rejection, and OOB in
+      mutual plus both one-way directions
+    - Role-ordered Identity Information and Identity Address Information
+      distribution, stable local identity/IRK retention, peer identity storage,
+      and privacy-aware bonded reconnect without re-pairing
+    - Mutual OOB is marked authenticated. One-way OOB is encrypted but is kept
+      conservatively unauthenticated rather than claiming mutual MITM proof.
+    - Negotiated 7-16 octet encryption-key sizes are validated and applied to
+      derived, received, persisted, and restored keys.
+    - SMP uses the 30-second transaction timer and a bounded, identity-aware
+      single-peer repeated-attempt delay with exponential growth and decay.
+    - Security nonces, OOB records, and LL encryption material use fail-closed
+      CRACEN entropy with foreground prefetch; no deterministic fallback is
+      accepted for security material.
+  - BLE privacy support:
+    - Stable identity address separated from the active over-the-air RPA
+    - Local IRK derivation from the factory identity root with `d1(IR, 1, 0)`
+    - Opt-in, sketch-selected RPA rotation while disconnected
+    - Application-managed resolving list of up to eight peer IRKs with hardware
+      AAR resolution, plus opt-in seeding from the retained bonded-peer IRK
+    - Identity-aware retained bond selection and encrypted reconnect after an
+      RPA change
   - Optional protocol-level BLE trace path:
     - Enable Arduino Tools -> `BLE Trace` to emit LL/SMP trace markers for interop debugging
   - BLE timing:
@@ -1146,16 +1183,21 @@ Examples:
     - Retention-backed bond record in `.noinit` RAM
     - Optional callback hooks for flash-backed load/save/clear policies
 - Not implemented yet:
-  - Central-initiated BLE connections on the in-tree Arduino controller path. The notify companion for `BleNotifyEchoPeripheral` is host-side (`scripts/ble_notify_echo_central.py`) for that reason.
   - A normal connected ACL Channel Sounding procedure integrated into the
     in-tree custom BLE controller. The public Channel Sounding pair instead uses
     Nordic SDC's standalone LE CS Test controller path.
   - Asymmetric LE PHY pairs where TX and RX settle to different modes on the same link.
   - Full LL procedure/state-machine compliance (full control procedure matrix and deep corner-cases)
-  - Full security feature set (host-validated passkey/OOB matrix, full key distribution matrix, signing)
-  - Full privacy policy (automatic resolving-list policy, identity-aware bonded
-    reconnects, and host-validated privacy interop)
+  - Data signing/CSRK distribution, locally generated legacy LTK/EDIV/Rand
+    distribution, a multi-peer repeated-attempt policy, a multi-bond database,
+    and the full negative/phone/desktop security matrix
+  - Automatic controller-enforced resolving-list/allow-list policy and broad
+    cross-vendor privacy interoperability validation
   - Full L2CAP signaling and complete GATT server database/configuration model
+
+The implemented list describes this core's bounded feature surface, not full
+Bluetooth Core conformance. Bluetooth SIG PTS/BQB qualification and product
+qualification remain separate release activities.
 
 ## Power Profiling Workflow
 

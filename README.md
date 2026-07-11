@@ -65,7 +65,34 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 
 ---
 
-## v0.9.223 Highlights
+## v1.0.0-rc1 Highlights
+
+- LE Secure Connections security now includes asynchronous Numeric Comparison
+  accept/reject handling and OOB records supplied mutually or in either
+  one-way direction.
+- SMP security now reduces encryption keys to the negotiated 7-16 octet size,
+  enforces the 30-second transaction timeout with single-peer repeated-attempt
+  throttling, and aborts without deterministic fallback if CRACEN entropy is
+  unavailable.
+- BLE privacy now keeps the stable local identity separate from the active RPA,
+  derives the local IRK from the identity root, distributes identity keys during
+  bonding, resolves bonded peers through hardware AAR, and reuses the retained
+  bond after an RPA change.
+- The full [two-board release gate](docs/TWO_BOARD_RELEASE_GATE.md) exercises
+  positive and rejected Numeric Comparison, all three OOB directions, RPA
+  rotation, identity-key distribution, and privacy-aware bonded reconnects on
+  XIAO nRF54L15 and XIAO nRF54LM20A.
+
+Release candidates are opt-in and are not offered through the stable Board
+Manager feed. Add the archive feed below, then request the exact RC version:
+
+```text
+https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l15clean_archive_index.json
+```
+
+```bash
+arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.0-rc1"
+```
 
 - Controller-backed Bluetooth LE Channel Sounding Test is now available through
   the two public Arduino examples: `BleChannelSoundingInitiator` and
@@ -136,8 +163,8 @@ protocol boundary, measurements, and validation evidence.
 | **GATT Server + Client** | ✅ | — | — | — | — | — |
 | **Bluefruit API** | ✅ | — | — | — | — | — |
 | **LE Secure Connections** | ✅ | — | — | — | — | — |
-| **OOB + Numeric Comparison** | ⚠️ | — | — | — | — | — |
-| **Privacy / RPA** | ⚠️ | — | — | — | — | — |
+| **OOB + Numeric Comparison** | ✅ | — | — | — | — | — |
+| **Privacy / RPA** | ✅ | — | — | — | — | — |
 | **Controller LE CS Test (Mode 2 / PBR)** | — | — | — | — | — | ⚠️ |
 | **MAC / NWK / APS** | — | ✅ | ⚠️ | ⚠️ | — | — |
 | **Coordinator / Router** | — | — | ⚠️ | ⚠️ | — | — |
@@ -148,6 +175,16 @@ protocol boundary, measurements, and validation evidence.
 
 `CS` is limited to the controller-backed, single-antenna two-board test path
 described below. It is not a general connected BLE Channel Sounding API.
+
+The BLE security and privacy check marks describe the implemented clean-core
+scope: single-link LE Secure Connections, Numeric Comparison user consent,
+mutual and one-way OOB, a stable identity with rotating local RPAs, SMP identity
+key/address distribution, hardware AAR resolution, and retained bonded
+reconnects. They do not assert complete Bluetooth Core conformance or Bluetooth
+SIG qualification. Data signing/CSRK distribution, a multi-bond privacy policy,
+locally generated legacy bond-key distribution, controller-enforced allow-list
+policy, broader host interoperability, and PTS/BQB qualification remain outside
+this claim.
 
 ### 🔐 Crypto
 
@@ -257,7 +294,7 @@ Examples:
 | Stack | Lines | Maturity | Production Ready? |
 |---|---|---|---|
 | **Arduino Core** | ~150K | ✅ Mature | Yes — GPIO, PWM, ADC, I2C, SPI, UART, I2S, PDM, NFC |
-| **BLE** | ~80K | ✅ Mature | Yes — advertising, scanning, connections, GATT, Bluefruit |
+| **BLE** | ~80K | ✅ Release candidate | Documented single-link scope: advertising, scanning, connections, GATT, Bluefruit, LE SC security, and privacy/RPA |
 | **Zigbee** | ~40K | ⚠️ Good | Partial — HA/Zigbee2MQTT device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
 | **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
@@ -317,6 +354,7 @@ and [version record](hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Cle
 - **[Board Reference & Pinouts](docs/board-reference.md)**
 - **[Development Guide](docs/development.md)**
 - **[BLE Status & Resume Checklist](docs/BLE_COMPLIANCE_RESUME.md)**
+- **[Two-Board Release Gate](docs/TWO_BOARD_RELEASE_GATE.md)**
 - **[Zigbee2MQTT Integration](docs/ZIGBEE2MQTT_INTEGRATION.md)**
 - **[Zigbee Full-Support Handoff](docs/ZIGBEE_FULL_SUPPORT_HANDOFF.md)**
 - **[Channel Sounding Status](docs/CHANNEL_SOUNDING_CURRENT_STATUS.md)**

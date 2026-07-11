@@ -203,6 +203,8 @@ void loop() {
   Serial.print(pduTypeName(advType));
   Serial.print(" advA=");
   printAddress(result.advertiserAddress);
+  Serial.print(" adv_addr_type=");
+  Serial.print(result.advertiserAddressRandom ? "random" : "public");
   Serial.print(" adv_raw_len=");
   Serial.print(result.advPayloadLength);
   Serial.print(" adv_data_len=");

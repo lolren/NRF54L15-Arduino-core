@@ -34,8 +34,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tool-version",
-        default="1.1.2",
-        help="Tool version to verify when --include-tools is set",
+        default=None,
+        help=(
+            "Tool version to verify when --include-tools is set (default: derive "
+            "it from the selected platform's toolsDependencies)"
+        ),
     )
     parser.add_argument(
         "--tool-hosts",
@@ -84,6 +87,22 @@ def find_tool_systems(package: dict, name: str, version: str, hosts: set[str]) -
         if systems:
             return systems
     raise SystemExit(f"Tool {name!r}@{version!r} not found in package index")
+
+
+def find_platform_tool_version(platform: dict, name: str) -> str:
+    versions = {
+        str(dependency.get("version", ""))
+        for dependency in platform.get("toolsDependencies", [])
+        if isinstance(dependency, dict)
+        and dependency.get("name") == name
+        and dependency.get("version")
+    }
+    if len(versions) != 1:
+        raise SystemExit(
+            f"Expected exactly one {name!r} dependency in selected platform, "
+            f"found: {sorted(versions)}"
+        )
+    return next(iter(versions))
 
 
 def download_with_retries(url: str, retries: int, retry_delay: float) -> bytes:
@@ -141,10 +160,14 @@ def main() -> int:
 
     if args.include_tools:
         hosts = {item.strip() for item in args.tool_hosts.split(",") if item.strip()}
-        for system in find_tool_systems(package, args.tool_name, args.tool_version, hosts):
+        tool_version = args.tool_version or find_platform_tool_version(
+            platform,
+            args.tool_name,
+        )
+        for system in find_tool_systems(package, args.tool_name, tool_version, hosts):
             host = str(system.get("host", "unknown"))
             verify_entry(
-                f"tool {args.tool_name}@{args.tool_version} [{host}]",
+                f"tool {args.tool_name}@{tool_version} [{host}]",
                 system,
                 retries=args.retries,
                 retry_delay=args.retry_delay,

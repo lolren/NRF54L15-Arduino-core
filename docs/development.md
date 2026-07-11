@@ -59,8 +59,12 @@ Validated and stable with host adapter + hardware:
 
 Current gap:
 
-- pairing/bond persistence is still partial
 - central support is still intentionally minimal (fixed-handle client flows and basic ATT request queueing, not a full generic host stack)
+- Fresh Just Works, Numeric Comparison accept/reject, mutual and both one-way
+  LE SC OOB modes, RPA rotation, identity-key exchange, and privacy-aware
+  bonded reconnect have a reproducible two-board gate. Remaining work includes
+  CSRK/signing, legacy bond-key generation, multi-bond/controller privacy
+  policy, and broad negative/host interoperability.
 - `Bluefruit52Lib` still targets the common peripheral/runtime subset first, but the active-scan wrapper now emits real separate `SCAN_RSP` callback reports with the correct `scan_response` bit instead of collapsing them into the ADV path
 - the experimental Channel Sounding surface is exactly the two-board
   `BleChannelSoundingInitiator` / `BleChannelSoundingReflector` pair. It uses
@@ -100,6 +104,7 @@ Current gap:
 - [`BLE_REGRESSION_RUNBOOK.md`](BLE_REGRESSION_RUNBOOK.md)
 - [Historical BLE/CS Completion Checklist](archive/BLE_CS_COMPLETION_CHECKLIST.md)
 - [`CHANNEL_SOUNDING_CURRENT_STATUS.md`](CHANNEL_SOUNDING_CURRENT_STATUS.md)
+- [`TWO_BOARD_RELEASE_GATE.md`](TWO_BOARD_RELEASE_GATE.md)
 - [`THREAD_MATTER_IMPLEMENTATION_PLAN.md`](THREAD_MATTER_IMPLEMENTATION_PLAN.md)
 - [`THREAD_MATTER_NEXT_AI_HANDOVER_2026_06_07.md`](THREAD_MATTER_NEXT_AI_HANDOVER_2026_06_07.md)
 - [`THREAD_RUNTIME_OWNERSHIP.md`](THREAD_RUNTIME_OWNERSHIP.md)
@@ -107,6 +112,7 @@ Current gap:
 - [`MATTER_FOUNDATION_MANIFEST.md`](MATTER_FOUNDATION_MANIFEST.md)
 - `scripts/ble_cli_matrix.sh`
 - `scripts/ble_pair_bond_regression.sh`
+- `scripts/run_two_board_release_gate.py`
 
 ## Local Development Workflow
 

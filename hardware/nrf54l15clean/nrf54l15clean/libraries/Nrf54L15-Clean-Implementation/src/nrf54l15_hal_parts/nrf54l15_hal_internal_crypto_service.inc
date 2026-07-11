@@ -147,7 +147,8 @@ bool fillBleSecurityRandomBytes(uint8_t* out, uint8_t len, uint32_t seed,
     return true;
   }
 
-  fillPseudoRandomBytes(out, len, seed);
+  (void)seed;
+  memset(out, 0, len);
   return false;
 }
 
@@ -651,6 +652,21 @@ bool aesEncryptLe(const uint8_t keyLe[16], const uint8_t plaintextLe[16],
     bleHardwareCryptoDisable();
   }
   return aesEncryptLeSoftware(keyLe, plaintextLe, outLe);
+}
+
+bool deriveBleIdentityResolvingKey(const uint8_t identityRoot[16],
+                                   uint8_t irkOut[16]) {
+  if (identityRoot == nullptr || irkOut == nullptr ||
+      isAllBytes(identityRoot, 16U, 0x00U) ||
+      isAllBytes(identityRoot, 16U, 0xFFU)) {
+    return false;
+  }
+
+  // Bluetooth d1(IR, 1, 0): d and r are placed in the least-significant
+  // little-endian octets before applying the Bluetooth little-endian AES e().
+  uint8_t plaintext[16] = {0};
+  plaintext[0] = 0x01U;
+  return aesEncryptLe(identityRoot, plaintext, irkOut);
 }
 
 bool bleCcmEncryptPayload(const uint8_t key[16], const uint8_t iv[8],

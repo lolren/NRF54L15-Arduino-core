@@ -521,11 +521,13 @@ class CracenRng {
   void clearEvent();
 
  private:
+  bool setupConditioningKeyIfAvailable();
   bool ensureDataAvailable(uint32_t spinLimit);
 
   NRF_CRACEN_Type* cracen_;
   NRF_CRACENCORE_Type* core_;
   bool active_;
+  bool conditioningKeySet_;
 };
 
 enum class KmuRevocationPolicy : uint32_t {
@@ -2521,6 +2523,10 @@ class BleRadio {
   bool getDeviceAddressString(char* out, size_t outSize,
                               BleAddressType* typeOut = nullptr) const;
   bool getDeviceAddress(uint8_t addressOut[6], BleAddressType* typeOut = nullptr) const;
+  bool getLocalIdentityAddress(uint8_t addressOut[6],
+                               BleAddressType* typeOut = nullptr) const;
+  bool getLocalIdentityIrk(uint8_t irkOut[16]) const;
+  bool restoreLocalIdentityAddress();
   bool generateResolvablePrivateAddress(const uint8_t irk[16],
                                         uint8_t addressOut[6]);
   bool setResolvablePrivateAddress(const uint8_t irk[16],
@@ -2735,6 +2741,8 @@ class BleRadio {
   // OOB (Out-of-Band) pairing for LE Secure Connections
   // Enable/disable OOB pairing. Must be called before requestPairing().
   void setSecurityOobEnabled(bool enable);
+  // Retire one-shot OOB/keypair material without permitting a downgrade.
+  void retireSecurityOobData();
   // Set local OOB data (r, c values generated from another source or pre-shared)
   bool setSecurityOobLocalData(const uint8_t oob_r[16], const uint8_t oob_c[16]);
   // Set remote OOB data received via NFC, QR code, or other OOB channel
@@ -2835,6 +2843,7 @@ class BleRadio {
     connectionPendingTxLlid_ = 0x01U;
     connectionPendingTxLength_ = 0U;
     connectionPendingTxValid_ = false;
+    connectionPendingTxSmpFragment_ = false;
   }
 
  private:
@@ -3090,6 +3099,7 @@ class BleRadio {
   uint8_t readAttributeValue(uint16_t handle, uint16_t offset, uint8_t* outValue,
                              uint8_t maxLen) const;
   void clearSmpPairingState();
+  void clearSmpSecurityState();
   void clearEncryptionState();
   void clearConnectionSecurityState();
   void captureSecureConnectionsDebugState(BleSecureConnectionsDebugState* out) const;
@@ -3100,6 +3110,16 @@ class BleRadio {
   bool computeSecureConnectionsDhKey();
   bool computeSecureConnectionsLocalConfirm();
   bool computeSecureConnectionsCheckValues();
+  void reduceSmpEncryptionKey(uint8_t key[16]) const;
+  void restartSmpTimer();
+  void stopSmpTimer();
+  void serviceSmpTimer();
+  void noteLastSmpTxAcknowledged();
+  void currentSmpPeerKey(uint8_t address[6], bool* random) const;
+  void decaySmpBackoff(uint32_t nowMs);
+  bool smpBackoffActiveForCurrentPeer();
+  void noteSmpPairingFailure(uint8_t reason);
+  void clearSmpBackoffForCurrentPeer();
   uint8_t resolveCurrentSecureConnectionsIoAction() const;
   uint8_t resolveCurrentSecureConnectionsPairAlgorithm() const;
   bool currentPairingIsAuthenticated() const;
@@ -3132,10 +3152,16 @@ class BleRadio {
                                          uint8_t* outLength);
   void clearChannelSoundingLlControlState();
   void serviceSecureConnectionsWork();
+  void serviceSmpKeyDistribution();
+  bool completeSmpKeyDistributionIfDone();
+  bool localIdentityDistributionAvailable() const;
   bool isBondRecordUsable(const BleBondRecord& record) const;
   bool loadBondRecordFromPersistence();
   bool persistBondRecord(const BleBondRecord& record);
   bool flushDeferredBondStorage();
+  // Prepare the encrypted LL_START_ENC_RSP while normal connection work has
+  // budget, rather than trying to run CCM in the T_IFS response window.
+  void primeStartEncryptionResponseCiphertext();
   bool clearPersistentBondRecord();
   bool buildCurrentBondRecord(BleBondRecord* outRecord) const;
   bool primeBondForCurrentPeer();
@@ -3297,6 +3323,9 @@ class BleRadio {
   NRF_FICR_Type* ficr_;
   bool initialized_;
   BleAddressType addressType_;
+  bool localIdentityAddressValid_;
+  BleAddressType localIdentityAddressType_;
+  uint8_t localIdentityAddress_[6];
   BleAdvPduType pduType_;
   bool useChSel2_;
   bool rpaRotationEnabled_;
@@ -3405,6 +3434,7 @@ class BleRadio {
   uint8_t connectionPendingTxLlid_;
   uint8_t connectionPendingTxLength_;
   bool connectionPendingTxValid_;
+  bool connectionPendingTxSmpFragment_;
   uint8_t connectionPendingTxPayload_[255];
   bool connectionPendingL2capTxFragmentActive_;
   uint16_t connectionPendingL2capTxFragmentLength_;
@@ -3533,9 +3563,6 @@ class BleRadio {
   bool connectionLastTxWasEncrypted_;
   uint8_t connectionLastTxEncryptedLength_;
   uint8_t connectionLastTxEncryptedPayload_[255];  // max DLE payload (251) + AES-CCM MIC (4)
-  bool connectionEncPrecomputedEmptyValid_;
-  uint64_t connectionEncPrecomputedCounter_;
-  uint8_t connectionEncPrecomputedPayload_[4];
   bool connectionEncPrecomputedStartRspValid_;
   uint8_t connectionEncPrecomputedStartRsp_[1 + 4];
   bool connectionEncPrecomputedStartRspTxValid_;
@@ -3549,18 +3576,22 @@ class BleRadio {
   bool bondRecordValid_;
   bool bondStorageLoaded_;
   bool bondKeyPrimedForConnection_;
+  bool bondIdentityMatchedForConnection_;
   bool bondFlashPersistPending_;
   bool cccdFlashPersistPending_;
+  bool bondLocalIdentityMigrationPending_;
+  uint32_t bondLocalIdentityMigrationRetryAtUs_;
   bool connectionBondedEncryptionRequested_;
   BleTraceCallback traceCallback_;
   void* traceCallbackContext_;
   bool smpBondingRequested_;
   bool smpLocalInitiator_;
-  bool smpExpectInitiatorEncKey_;
-  bool smpExpectInitiatorIdKey_;
-  bool smpDistributeResponderIdKey_;
-  bool smpResponderIdInfoSent_;
-  bool smpResponderIdAddressSent_;
+  bool smpExpectPeerEncKey_;
+  bool smpExpectPeerIdKey_;
+  bool smpDistributeLocalIdKey_;
+  bool smpLocalIdInfoSent_;
+  bool smpLocalIdAddressSent_;
+  bool smpLocalIdAddressAcked_;
   uint8_t smpLocalIoCapabilities_;
   bool smpPendingUserPasskey_;
   bool smpPendingUserPasskeyMatchRequest_;
@@ -3579,6 +3610,16 @@ class BleRadio {
   uint8_t smpKeySize_;
   uint8_t smpDeferredPairingFailedReason_;
   uint8_t smpLastPairingFailureReason_;
+  bool smpTimerActive_;
+  bool smpTimedOutForConnection_;
+  uint32_t smpTimerStartedMs_;
+  bool smpBackoffPeerValid_;
+  bool smpBackoffPeerAddressRandom_;
+  uint8_t smpBackoffPeerAddress_[6];
+  uint8_t smpBackoffLevel_;
+  uint32_t smpBackoffStartedMs_;
+  uint32_t smpBackoffDurationMs_;
+  uint32_t smpBackoffLastFailureMs_;
   bool smpFixedPasskeyValid_;
   uint32_t smpFixedPasskeyValue_;
   uint32_t smpPendingUserPasskeyValue_;

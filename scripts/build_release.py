@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,12 @@ OPENTHREAD_PLATFORM_PACKAGE_EXCLUDES = (
     "libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core",
     "libraries/Nrf54L15-Clean-Implementation/src/openthread_core_stage",
     "libraries/Nrf54L15-Clean-Implementation/src/openthread_core_stage_bridge.cpp",
+)
+RELEASE_VERSION_RE = re.compile(
+    r"^(0|[1-9][0-9]*)\."
+    r"(0|[1-9][0-9]*)\."
+    r"(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 
 
@@ -181,31 +188,62 @@ def build_archive(
             add_path(tar, child, f"{archive_root}/{rel}")
 
 
+def match_release_version(version: str) -> re.Match[str]:
+    match = RELEASE_VERSION_RE.fullmatch(version)
+    if match is None:
+        raise SystemExit(f"Unsupported version format: {version!r}")
+    prerelease = match.group(4)
+    if prerelease is not None:
+        for identifier in prerelease.split("."):
+            if identifier.isdigit() and len(identifier) > 1 and identifier[0] == "0":
+                raise SystemExit(
+                    f"Numeric prerelease identifiers must not contain leading zeroes: {version!r}"
+                )
+    return match
+
+
 def version_sort_key(version: str) -> tuple:
-    parts = []
-    for token in version.split("."):
-        if token.isdigit():
-            parts.append((0, int(token)))
-        else:
-            parts.append((1, token))
-    return tuple(parts)
+    match = RELEASE_VERSION_RE.fullmatch(version)
+    if match is None:
+        # Tool versions in legacy indexes are not always SemVer. Keep them
+        # sortable without treating them as valid platform release versions.
+        return (0, version)
+    major, minor, patch = (int(match.group(index)) for index in (1, 2, 3))
+    prerelease = match.group(4)
+    prerelease_key: tuple[tuple[int, int, str], ...] = ()
+    if prerelease is not None:
+        prerelease_key = tuple(
+            (0, int(identifier), "")
+            if identifier.isdigit()
+            else (1, 0, identifier)
+            for identifier in prerelease.split(".")
+        )
+    # A final release sorts after all of its prereleases. Numeric prerelease
+    # identifiers sort before non-numeric identifiers as required by SemVer.
+    return (1, major, minor, patch, prerelease is None, prerelease_key)
 
 
 def parse_version(version: str) -> tuple[int, int, int]:
-    parts = version.strip().split(".")
-    if len(parts) != 3 or any(not part.isdigit() for part in parts):
-        raise SystemExit(f"Unsupported version format: {version!r}")
-    return int(parts[0]), int(parts[1]), int(parts[2])
+    match = match_release_version(version)
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
-def update_core_version_header(platform_dir: Path, version: str) -> None:
+def is_prerelease_version(version: str) -> bool:
+    return match_release_version(version).group(4) is not None
+
+
+def render_core_version_header(version: str) -> str:
     major, minor, patch = parse_version(version)
-    content = f"""#ifndef NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
+    prerelease = match_release_version(version).group(4) or ""
+    prerelease_flag = 1 if prerelease else 0
+    return f"""#ifndef NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
 #define NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
 
 #define ARDUINO_NRF54L15_CLEAN_VERSION_MAJOR {major}
 #define ARDUINO_NRF54L15_CLEAN_VERSION_MINOR {minor}
 #define ARDUINO_NRF54L15_CLEAN_VERSION_PATCH {patch}
+#define ARDUINO_NRF54L15_CLEAN_VERSION_PRERELEASE "{prerelease}"
+#define ARDUINO_NRF54L15_CLEAN_VERSION_IS_PRERELEASE {prerelease_flag}
 
 #define ARDUINO_NRF54L15_CLEAN_VERSION_ENCODE(major, minor, patch) \\
     (((major) * 10000UL) + ((minor) * 100UL) + (patch))
@@ -220,6 +258,10 @@ def update_core_version_header(platform_dir: Path, version: str) -> None:
 
 #endif  // NRF54L15_CLEAN_CORE_VERSION_GENERATED_H
 """
+
+
+def update_core_version_header(platform_dir: Path, version: str) -> None:
+    content = render_core_version_header(version)
     cores_dir = platform_dir / "cores"
     header_paths = sorted(cores_dir.glob("*/CoreVersionGenerated.h"))
     if not header_paths:
@@ -401,10 +443,59 @@ def prune_platforms(index: dict, keep: int) -> dict:
     return data
 
 
+def keep_final_platforms(index: dict) -> dict:
+    """Return an index whose platform list contains only final releases."""
+    data = json.loads(json.dumps(index))
+    package = data.setdefault("packages", [{}])[0]
+    final_platforms = []
+    for platform in package.get("platforms", []):
+        if not isinstance(platform, dict):
+            continue
+        version = str(platform.get("version", ""))
+        try:
+            prerelease = is_prerelease_version(version)
+        except SystemExit:
+            # Preserve legacy non-SemVer entries. This filter is a release-channel
+            # boundary, not a migration tool for historical package metadata.
+            prerelease = False
+        if not prerelease:
+            final_platforms.append(platform)
+    package["platforms"] = final_platforms
+    return data
+
+
+def prepare_release_indexes(
+    existing_full: dict,
+    stable_source: dict,
+    platform_entry: dict,
+    tool_entry: dict,
+    stable_keep: int,
+) -> tuple[dict, dict]:
+    """Build final-only stable metadata and the complete archive metadata."""
+    version = str(platform_entry["version"])
+    full_index = merge_tool(merge_platform(existing_full, platform_entry), tool_entry)
+
+    stable_index = keep_final_platforms(stable_source)
+    if is_prerelease_version(version):
+        return prune_platforms(stable_index, keep=stable_keep), full_index
+
+    stable_index = merge_platform(stable_index, platform_entry)
+    stable_index = prune_platforms(
+        merge_tool(stable_index, tool_entry),
+        keep=stable_keep,
+    )
+    return stable_index, full_index
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=Path(__file__).resolve().parents[1], type=Path)
     parser.add_argument("--version", default=None)
+    parser.add_argument(
+        "--validate-version-only",
+        action="store_true",
+        help="Validate the requested version without modifying files or building artifacts",
+    )
     parser.add_argument("--source-version", default=None)
     parser.add_argument("--packager", default="nrf54l15clean")
     parser.add_argument("--platform-name", default="nRF54L15 Boards")
@@ -581,8 +672,10 @@ def write_release_manifest(
     tools: list[dict],
     indexes: dict,
 ) -> None:
+    prerelease = is_prerelease_version(version)
     manifest = {
         "version": version,
+        "channel": "prerelease" if prerelease else "stable",
         "platform": platform,
         "platformPackageExcludes": list(platform_excludes),
         "tools": tools,
@@ -610,15 +703,19 @@ def main() -> int:
             "--include-openthread-core and --exclude-openthread-core are mutually exclusive"
         )
     root = args.root.resolve()
-    dist_dir = args.dist_dir.resolve() if args.dist_dir else (root / "dist")
-    dist_dir.mkdir(parents=True, exist_ok=True)
-
     source_version = args.source_version if args.source_version else detect_source_version(root=root, packager=args.packager)
     platform_dir = root / "hardware" / args.packager / source_version
     if not platform_dir.is_dir():
         raise SystemExit(f"Platform directory not found: {platform_dir}")
 
     version = args.version if args.version else read_platform_version(platform_dir)
+    parse_version(version)
+    if args.validate_version_only:
+        print(f"release version OK: {version}")
+        return 0
+
+    dist_dir = args.dist_dir.resolve() if args.dist_dir else (root / "dist")
+    dist_dir.mkdir(parents=True, exist_ok=True)
     update_core_version_header(platform_dir, version)
     update_platform_txt_version(platform_dir, version)
 
@@ -734,7 +831,6 @@ def main() -> int:
         architecture=args.packager,
     )
 
-    full_index = merge_tool(merge_platform(existing_full, platform_entry), tool_entry)
     if stable_fallback_index_path.is_file():
         stable_source = load_existing_index(
             stable_fallback_index_path,
@@ -743,9 +839,12 @@ def main() -> int:
         )
     else:
         stable_source = make_index(packager=args.packager, repo_url=args.repo_url)
-    stable_index = prune_platforms(
-        merge_tool(merge_platform(stable_source, platform_entry), tool_entry),
-        keep=args.stable_keep,
+    stable_index, full_index = prepare_release_indexes(
+        existing_full=existing_full,
+        stable_source=stable_source,
+        platform_entry=platform_entry,
+        tool_entry=tool_entry,
+        stable_keep=args.stable_keep,
     )
 
     stable_index_path = dist_dir / f"package_{args.packager}_index.json"
@@ -755,6 +854,14 @@ def main() -> int:
     stable_alias_index_path.write_text(json.dumps(stable_index, indent=2) + "\n", encoding="utf-8")
     archive_index_path.write_text(json.dumps(full_index, indent=2) + "\n", encoding="utf-8")
 
+    artifact_index_paths = (
+        [archive_index_path]
+        if is_prerelease_version(version)
+        else [stable_index_path, stable_alias_index_path, archive_index_path]
+    )
+    release_index_path = (
+        archive_index_path if is_prerelease_version(version) else stable_index_path
+    )
     write_release_manifest(
         dist_dir / "release-manifest.json",
         version=version,
@@ -771,6 +878,8 @@ def main() -> int:
             "stable": str(stable_index_path),
             "stable_alias": str(stable_alias_index_path),
             "archive": str(archive_index_path),
+            "release": str(release_index_path),
+            "artifact": [str(path) for path in artifact_index_paths],
         },
     )
 
@@ -788,6 +897,7 @@ def main() -> int:
         if manifest.get("skipped_python_versions"):
             skipped = ", ".join(item["python"] for item in manifest["skipped_python_versions"])
             print(f"tool skipped:     {system['host']} -> {skipped}")
+    print(f"release channel:  {'prerelease' if is_prerelease_version(version) else 'stable'}")
     print(f"stable index:     {dist_dir / f'package_{args.packager}_index.json'}")
     print(f"archive index:    {dist_dir / f'package_{args.packager}_archive_index.json'}")
     return 0

@@ -917,6 +917,81 @@ def validate_serial_fabric_runtime_probe_contracts() -> None:
     print("PASS serial-fabric runtime probe duplicate and CLI-status contract")
 
 
+def validate_ble_security_hardening_contracts() -> None:
+    parts = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts"
+    )
+    crypto_service = (parts / "nrf54l15_hal_internal_crypto_service.inc").read_text(
+        encoding="utf-8"
+    )
+    random_fill = function_body(
+        crypto_service, "bool fillBleSecurityRandomBytes("
+    )
+    assert "rng.fill(out, len, spinLimit)" in random_fill
+    assert "memset(out, 0, len);" in random_fill
+    assert "fillPseudoRandomBytes" not in random_fill
+
+    crypto_hal = (parts / "nrf54l15_hal_crypto_analog.inc").read_text(
+        encoding="utf-8"
+    )
+    rng_begin = function_body(crypto_hal, "bool CracenRng::beginNonBlocking()")
+    assert "tryAcquireCracenRng()" in rng_begin
+    assert "CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Msk" in rng_begin
+    assert "RNGCONTROL.WARMUPPERIOD = 512U" in rng_begin
+    assert "RNGCONTROL.SAMPLINGPERIOD = 1U" in rng_begin
+    assert "RNGCONTROL.INITWAITVAL = 512U" in rng_begin
+    assert "NB128BITBLOCKS" in rng_begin
+    rng_conditioning = function_body(
+        crypto_hal, "bool CracenRng::setupConditioningKeyIfAvailable()"
+    )
+    assert "availableWords() < 4U" in rng_conditioning
+    assert "RNGCONTROL.KEY[i] = core_->RNGCONTROL.FIFO[0]" in rng_conditioning
+    rng_end = function_body(crypto_hal, "void CracenRng::end()")
+    assert "if (!active_)" in rng_end
+    assert "releaseCracenRng();" in rng_end
+
+    ll_security = (parts / "nrf54l15_hal_ble_ll_security.inc").read_text(
+        encoding="utf-8"
+    )
+    smp_clear = function_body(ll_security, "void BleRadio::clearSmpSecurityState()")
+    assert "clearSmpPairingState();" in smp_clear
+    assert "clearEncryptionState();" not in smp_clear
+    connection_clear = function_body(
+        ll_security, "void BleRadio::clearConnectionSecurityState()"
+    )
+    assert "clearSmpSecurityState();" in connection_clear
+    assert "clearEncryptionState();" in connection_clear
+    timeout = function_body(ll_security, "void BleRadio::serviceSmpTimer()")
+    assert "connectionPendingTxSmpFragment_" in timeout
+    assert "connectionTxHistoryValid_ = false" not in timeout
+    key_distribution = function_body(
+        ll_security, "bool BleRadio::completeSmpKeyDistributionIfDone()"
+    )
+    assert "smpLocalIdAddressAcked_" in key_distribution
+    identity_ack = function_body(
+        ll_security, "void BleRadio::noteLastSmpTxAcknowledged()"
+    )
+    assert "kSmpCodeIdentityAddressInformation" in identity_ack
+    prefetch = function_body(
+        ll_security, "void BleRadio::prefetchConnectionSecurityMaterial("
+    )
+    assert "uint8_t material[28]" in prefetch
+    assert prefetch.count("fillBleSecurityRandomBytes(") == 1
+    bond_build = function_body(
+        ll_security, "bool BleRadio::buildCurrentBondRecord("
+    )
+    assert "kBleBondRecordFlagAuthenticated" in bond_build
+    assert "kBleBondRecordFlagSecureConnections" in bond_build
+
+    smp = (parts / "nrf54l15_hal_ble_att_l2cap.inc").read_text(encoding="utf-8")
+    assert "SMP_SECURITY_REQUEST_BOND_UPGRADE" in smp
+    assert "clearSmpPairingState();" in smp
+    assert "kBleBondRecordFlagSecureConnections" in smp
+    assert "SMP_RESERVED_CODE_IGNORED" in smp
+    print("PASS BLE SMP, bond-upgrade, timeout, and fail-closed RNG contracts")
+
+
 def compile_and_run_host_tests(temp: Path) -> None:
     cxx = os.environ.get("CXX")
     if not cxx:
@@ -994,6 +1069,7 @@ def main() -> int:
     validate_xiao_low_power_board_contracts()
     validate_xiao_retention_probe_contracts()
     validate_serial_fabric_runtime_probe_contracts()
+    validate_ble_security_hardening_contracts()
     with tempfile.TemporaryDirectory(prefix="nrf54-core-io-") as directory:
         compile_and_run_host_tests(Path(directory))
     return 0

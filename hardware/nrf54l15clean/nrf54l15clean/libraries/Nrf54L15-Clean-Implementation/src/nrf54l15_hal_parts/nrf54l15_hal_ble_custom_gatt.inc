@@ -1475,18 +1475,27 @@ void BleRadio::maybeQueueCentralLinkSetupRequest() {
         connectionPrefetchedEncMaterialValid_ = false;
         ++encDebug_.encRandomPrefetchUseCount;
       } else {
-        if (fillBleSecurityRandomBytes(&connectionEncSkd_[0], 8U, seed,
-                                       kBleSecurityRandomSpinLimit)) {
+        const bool skdmOk = fillBleSecurityRandomBytes(
+            &connectionEncSkd_[0], 8U, seed,
+            kBleSecurityRandomSpinLimit);
+        if (skdmOk) {
           ++encDebug_.encRandomHardwareCount;
         } else {
           ++encDebug_.encRandomFallbackCount;
         }
-        if (fillBleSecurityRandomBytes(&connectionEncIv_[0], 4U,
-                                       seed ^ 0x6BA38B4FUL,
-                                       kBleSecurityRandomSpinLimit)) {
+        const bool ivmOk = fillBleSecurityRandomBytes(
+            &connectionEncIv_[0], 4U, seed ^ 0x6BA38B4FUL,
+            kBleSecurityRandomSpinLimit);
+        if (ivmOk) {
           ++encDebug_.encRandomHardwareCount;
         } else {
           ++encDebug_.encRandomFallbackCount;
+        }
+        if (!skdmOk || !ivmOk) {
+          memset(connectionEncSkd_, 0, sizeof(connectionEncSkd_));
+          memset(connectionEncIv_, 0, sizeof(connectionEncIv_));
+          emitBleTrace("ENC_RANDOM_UNAVAILABLE");
+          return;
         }
       }
 
@@ -1513,10 +1522,6 @@ void BleRadio::maybeQueueCentralLinkSetupRequest() {
       connectionLastTxEncryptedLength_ = 0U;
       memset(connectionLastTxEncryptedPayload_, 0,
              sizeof(connectionLastTxEncryptedPayload_));
-      connectionEncPrecomputedEmptyValid_ = false;
-      connectionEncPrecomputedCounter_ = 0ULL;
-      memset(connectionEncPrecomputedPayload_, 0,
-             sizeof(connectionEncPrecomputedPayload_));
       connectionEncPrecomputedStartRspValid_ = false;
       memset(connectionEncPrecomputedStartRsp_, 0,
              sizeof(connectionEncPrecomputedStartRsp_));
@@ -1537,9 +1542,6 @@ void BleRadio::maybeQueueCentralLinkSetupRequest() {
       connectionPendingTxLength_ = 23U;
       connectionPendingTxValid_ = true;
       connectionBondedEncryptionRequested_ = false;
-      if (smpPairingState_ != kSmpPairingStateIdle) {
-        smpPairingState_ = kSmpPairingStateIdle;
-      }
       emitBleTrace("LL_ENC_REQ_QUEUED");
       return;
     }

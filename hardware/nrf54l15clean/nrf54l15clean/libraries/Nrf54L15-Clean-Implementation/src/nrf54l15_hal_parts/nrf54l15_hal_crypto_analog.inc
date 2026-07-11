@@ -38,31 +38,35 @@ constexpr uint32_t kVdmaDescriptorAttrCcmMdata =
      << VDMADESCRIPTOR_CONFIG_ATTRIBUTE_Pos) &
     VDMADESCRIPTOR_CONFIG_ATTRIBUTE_Msk;
 constexpr size_t kAarMaxIrksScratch = 64U;
-#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
-// LM20 RNG STATUS: REP/PROP/aggregate health failures, startup/per-share
-// failures, and conditioning-too-slow. FIFO full (bit 7) is not an error.
-constexpr uint32_t kCracenRngFailureMask =
-    CRACENCORE_RNGCONTROL_STATUS_REPFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_PROPFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_ANYHEALTHTESTFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_STARTUPFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_REPTESTFAILPERSHARE_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_PROPTESTFAILPERSHARE_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_CONDITIONINGISTOOSLOW_Msk;
-#else
-constexpr uint32_t kCracenRngFailureMask =
-    CRACENCORE_RNGCONTROL_STATUS_REPFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_PROPFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_STARTUPFAIL_Msk |
-    CRACENCORE_RNGCONTROL_STATUS_FIFOACCFAIL_Msk;
-#endif
-
 alignas(4) uint8_t g_aarAddressScratch[6] = {};
 alignas(4) uint8_t g_aarIrkScratch[kAarMaxIrksScratch * 16U] = {};
 alignas(4) uint16_t g_aarResolvedIndexScratch = 0xFFFFU;
 alignas(4) NRF_VDMADESCRIPTOR_Type g_aarInJobs[kAarMaxIrksScratch + 3U] = {};
 alignas(4) NRF_VDMADESCRIPTOR_Type g_aarOutJobs[2] = {};
 alignas(4) volatile int16_t g_saadcSampleScratch = 0;
+volatile bool g_cracenRngOwned = false;
+
+bool tryAcquireCracenRng() {
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  const bool acquired = !g_cracenRngOwned;
+  if (acquired) {
+    g_cracenRngOwned = true;
+  }
+  if ((primask & 1U) == 0U) {
+    __enable_irq();
+  }
+  return acquired;
+}
+
+void releaseCracenRng() {
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  g_cracenRngOwned = false;
+  if ((primask & 1U) == 0U) {
+    __enable_irq();
+  }
+}
 
 bool isQdecPortSupported(const Pin& pin) {
 #if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
@@ -124,10 +128,17 @@ CracenRng::CracenRng(uint32_t controlBase, uint32_t coreBase)
           static_cast<uintptr_t>(controlBase))),
       core_(reinterpret_cast<NRF_CRACENCORE_Type*>(
           static_cast<uintptr_t>(coreBase))),
-      active_(false) {}
+      active_(false),
+      conditioningKeySet_(false) {}
 
 bool CracenRng::beginNonBlocking() {
   if (cracen_ == nullptr || core_ == nullptr) {
+    return false;
+  }
+  if (active_) {
+    return true;
+  }
+  if (!tryAcquireCracenRng()) {
     return false;
   }
 
@@ -135,23 +146,27 @@ bool CracenRng::beginNonBlocking() {
   cracen_->ENABLE = nextEnable;
   clearEvent();
 
-  uint32_t control = core_->RNGCONTROL.CONTROL;
+  // Match Nordic's TRNG acquisition sequence: reset sticky FSM/FIFO state,
+  // apply the SoC sampling parameters, then seed the conditioning key from
+  // the first four entropy words before exposing any data to the caller.
+  core_->RNGCONTROL.CONTROL = CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Msk;
+  __asm volatile("dsb 0xF" ::: "memory");
 #if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
-  // ENABLE is a self-clearing start pulse on LM20.
-  control |= CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
-  core_->RNGCONTROL.CONTROL = control;
-  __asm volatile("dsb 0xF" ::: "memory");
+  core_->RNGCONTROL.WARMUPPERIOD = 512U;
+  core_->RNGCONTROL.SAMPLINGPERIOD = 1U;
 #else
-  control &= ~CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
-  core_->RNGCONTROL.CONTROL = control;
-  __asm volatile("dsb 0xF" ::: "memory");
-
-  control |= CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
-  core_->RNGCONTROL.CONTROL = control;
-  __asm volatile("dsb 0xF" ::: "memory");
+  core_->RNGCONTROL.INITWAITVAL = 512U;
+  core_->RNGCONTROL.SWOFFTMRVAL = 0U;
+  core_->RNGCONTROL.CLKDIV = 0U;
 #endif
+  core_->RNGCONTROL.CONTROL =
+      CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk |
+      ((4UL << CRACENCORE_RNGCONTROL_CONTROL_NB128BITBLOCKS_Pos) &
+       CRACENCORE_RNGCONTROL_CONTROL_NB128BITBLOCKS_Msk);
+  __asm volatile("dsb 0xF" ::: "memory");
 
   active_ = true;
+  conditioningKeySet_ = false;
   if (!healthy()) {
     end();
     return false;
@@ -160,32 +175,37 @@ bool CracenRng::beginNonBlocking() {
 }
 
 bool CracenRng::begin(uint32_t spinLimit) {
-  if (!beginNonBlocking()) {
-    return false;
+  if (active_) {
+    return ensureDataAvailable(spinLimit);
   }
-  if (!ensureDataAvailable(spinLimit)) {
+  for (uint8_t attempt = 0U; attempt < 2U; ++attempt) {
+    if (beginNonBlocking() && ensureDataAvailable(spinLimit)) {
+      return true;
+    }
     end();
-    return false;
   }
-  return true;
+  return false;
 }
 
 void CracenRng::end() {
+  if (!active_) {
+    return;
+  }
   if (cracen_ == nullptr || core_ == nullptr) {
     active_ = false;
+    conditioningKeySet_ = false;
+    releaseCracenRng();
     return;
   }
 
-#if !defined(NRF54LM20A_XXAA) && !defined(NRF54LM20B_XXAA)
-  uint32_t control = core_->RNGCONTROL.CONTROL;
-  control &= ~CRACENCORE_RNGCONTROL_CONTROL_ENABLE_Msk;
-  core_->RNGCONTROL.CONTROL = control;
+  core_->RNGCONTROL.CONTROL = CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Msk;
   __asm volatile("dsb 0xF" ::: "memory");
-#endif
 
   cracen_->ENABLE &= ~CRACEN_ENABLE_RNG_Msk;
   clearEvent();
   active_ = false;
+  conditioningKeySet_ = false;
+  releaseCracenRng();
 }
 
 bool CracenRng::fill(void* data, size_t length, uint32_t spinLimit) {
@@ -257,7 +277,8 @@ bool CracenRng::tryRandomWord(uint32_t* outWord) {
     return false;
   }
 
-  const bool ready = (availableWords() != 0U) && healthy();
+  const bool ready = healthy() && setupConditioningKeyIfAvailable() &&
+                     (availableWords() != 0U);
   if (ready) {
     *outWord = core_->RNGCONTROL.FIFO[0];
   }
@@ -289,7 +310,6 @@ bool CracenRng::healthy() const {
       (currentStatus & CRACENCORE_RNGCONTROL_STATUS_STATE_Msk) >>
       CRACENCORE_RNGCONTROL_STATUS_STATE_Pos;
   return (currentStatus != 0xFFFFFFFFUL) &&
-         ((currentStatus & kCracenRngFailureMask) == 0U) &&
          (state != CRACENCORE_RNGCONTROL_STATUS_STATE_ERROR);
 }
 
@@ -302,17 +322,31 @@ void CracenRng::clearEvent() {
   cracen_->EVENTS_RNG = 0U;
 }
 
+bool CracenRng::setupConditioningKeyIfAvailable() {
+  if (conditioningKeySet_) {
+    return true;
+  }
+  if (!active_ || !healthy() || availableWords() < 4U) {
+    return false;
+  }
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    core_->RNGCONTROL.KEY[i] = core_->RNGCONTROL.FIFO[0];
+  }
+  conditioningKeySet_ = true;
+  return true;
+}
+
 bool CracenRng::ensureDataAvailable(uint32_t spinLimit) {
   if (!active_ || core_ == nullptr) {
     return false;
   }
 
   while (spinLimit-- > 0U) {
-    if (availableWords() != 0U) {
-      return healthy();
-    }
     if (!healthy()) {
       return false;
+    }
+    if (setupConditioningKeyIfAvailable() && availableWords() != 0U) {
+      return true;
     }
   }
   return false;

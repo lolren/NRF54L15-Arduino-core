@@ -192,6 +192,9 @@ enum {
 #define PIN_WIRE1_SDA PIN_P0_04
 #define PIN_WIRE1_SCL PIN_P0_03
 
+// GRTC PWM is hard-wired by the silicon to P0.03.
+#define PIN_GRTC_PWM PIN_P0_03
+
 #define PIN_SERIAL_TX  PIN_P1_04
 #define PIN_SERIAL_RX  PIN_P1_05
 #define PIN_SERIAL1_TX PIN_P1_02

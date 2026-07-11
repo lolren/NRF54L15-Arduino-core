@@ -3,6 +3,9 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       ficr_(reinterpret_cast<NRF_FICR_Type*>(static_cast<uintptr_t>(ficrBase))),
       initialized_(false),
       addressType_(BleAddressType::kRandomStatic),
+      localIdentityAddressValid_(false),
+      localIdentityAddressType_(BleAddressType::kRandomStatic),
+      localIdentityAddress_{0},
       pduType_(BleAdvPduType::kAdvInd),
       useChSel2_(true),
       rpaRotationEnabled_(false),
@@ -104,6 +107,7 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionPendingTxLlid_(0x01U),
       connectionPendingTxLength_(0U),
       connectionPendingTxValid_(false),
+      connectionPendingTxSmpFragment_(false),
       connectionPendingTxPayload_{0},
       connectionPendingL2capTxFragmentActive_(false),
       connectionPendingL2capTxFragmentLength_(0U),
@@ -230,9 +234,6 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionLastTxWasEncrypted_(false),
       connectionLastTxEncryptedLength_(0U),
       connectionLastTxEncryptedPayload_{0},
-      connectionEncPrecomputedEmptyValid_(false),
-      connectionEncPrecomputedCounter_(0ULL),
-      connectionEncPrecomputedPayload_{0},
       connectionEncPrecomputedStartRspValid_(false),
       connectionEncPrecomputedStartRsp_{0},
       connectionEncPrecomputedStartRspTxValid_(false),
@@ -246,18 +247,22 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       bondRecordValid_(false),
       bondStorageLoaded_(false),
       bondKeyPrimedForConnection_(false),
+      bondIdentityMatchedForConnection_(false),
       bondFlashPersistPending_(false),
       cccdFlashPersistPending_(false),
+      bondLocalIdentityMigrationPending_(false),
+      bondLocalIdentityMigrationRetryAtUs_(0U),
       connectionBondedEncryptionRequested_(false),
       traceCallback_(nullptr),
       traceCallbackContext_(nullptr),
       smpBondingRequested_(false),
       smpLocalInitiator_(false),
-      smpExpectInitiatorEncKey_(false),
-      smpExpectInitiatorIdKey_(false),
-      smpDistributeResponderIdKey_(false),
-      smpResponderIdInfoSent_(false),
-      smpResponderIdAddressSent_(false),
+      smpExpectPeerEncKey_(false),
+      smpExpectPeerIdKey_(false),
+      smpDistributeLocalIdKey_(false),
+      smpLocalIdInfoSent_(false),
+      smpLocalIdAddressSent_(false),
+      smpLocalIdAddressAcked_(false),
       smpLocalIoCapabilities_(kSmpIoCapNoInputNoOutput),
       smpPendingUserPasskey_(false),
       smpPendingUserPasskeyMatchRequest_(false),
@@ -276,6 +281,16 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       smpKeySize_(16U),
       smpDeferredPairingFailedReason_(0U),
       smpLastPairingFailureReason_(0U),
+      smpTimerActive_(false),
+      smpTimedOutForConnection_(false),
+      smpTimerStartedMs_(0UL),
+      smpBackoffPeerValid_(false),
+      smpBackoffPeerAddressRandom_(false),
+      smpBackoffPeerAddress_{0},
+      smpBackoffLevel_(0U),
+      smpBackoffStartedMs_(0UL),
+      smpBackoffDurationMs_(0UL),
+      smpBackoffLastFailureMs_(0UL),
       smpFixedPasskeyValid_(false),
       smpFixedPasskeyValue_(0UL),
       smpPendingUserPasskeyValue_(0UL),
@@ -786,7 +801,7 @@ bool BleRadio::loadAddressFromFicr(bool forceRandomStatic) {
 }
 
 bool BleRadio::setDeviceAddress(const uint8_t address[6], BleAddressType type) {
-  if (address == nullptr) {
+  if (address == nullptr || connected_) {
     return false;
   }
   if (type == BleAddressType::kRandomPrivateResolvable &&
@@ -798,6 +813,13 @@ bool BleRadio::setDeviceAddress(const uint8_t address[6], BleAddressType type) {
     return false;
   }
 
+  uint8_t requestedAddress[6] = {};
+  memcpy(requestedAddress, address, sizeof(requestedAddress));
+  if (type == BleAddressType::kRandomStatic) {
+    requestedAddress[5] =
+        static_cast<uint8_t>((requestedAddress[5] & 0x3FU) | 0xC0U);
+  }
+
   BleLegacyAdvertisingConfigSnapshot configSnapshot{};
   BleBackgroundAdvertisingRestartState restartState{};
   captureLegacyAdvertisingConfigSnapshot(&configSnapshot);
@@ -806,10 +828,7 @@ bool BleRadio::setDeviceAddress(const uint8_t address[6], BleAddressType type) {
     stopBackgroundAdvertising();
   }
 
-  memcpy(address_, address, sizeof(address_));
-  if (type == BleAddressType::kRandomStatic) {
-    address_[5] = static_cast<uint8_t>((address_[5] & 0x3FU) | 0xC0U);
-  }
+  memcpy(address_, requestedAddress, sizeof(address_));
   addressType_ = type;
   if (rpaRotationEnabled_) {
     rpaRotationAddressValid_ =
@@ -823,6 +842,16 @@ bool BleRadio::setDeviceAddress(const uint8_t address[6], BleAddressType type) {
     return false;
   }
   if (restartBackgroundAdvertisingFromState(restartState)) {
+    if (type == BleAddressType::kPublic ||
+        type == BleAddressType::kRandomStatic) {
+      // Advertising restart may service RPA rotation and change address_ before
+      // returning. The stable identity is the normalized address requested by
+      // the caller, never that active over-the-air RPA.
+      memcpy(localIdentityAddress_, requestedAddress,
+             sizeof(localIdentityAddress_));
+      localIdentityAddressType_ = type;
+      localIdentityAddressValid_ = true;
+    }
     return true;
   }
 
@@ -848,6 +877,56 @@ bool BleRadio::getDeviceAddress(uint8_t addressOut[6], BleAddressType* typeOut) 
     *typeOut = addressType_;
   }
   return true;
+}
+
+bool BleRadio::getLocalIdentityAddress(uint8_t addressOut[6],
+                                       BleAddressType* typeOut) const {
+  if (addressOut == nullptr || !localIdentityAddressValid_) {
+    return false;
+  }
+  memcpy(addressOut, localIdentityAddress_, sizeof(localIdentityAddress_));
+  if (typeOut != nullptr) {
+    *typeOut = localIdentityAddressType_;
+  }
+  return true;
+}
+
+bool BleRadio::getLocalIdentityIrk(uint8_t irkOut[16]) const {
+  if (irkOut == nullptr) {
+    return false;
+  }
+  uint8_t identityRoot[16] = {};
+  Ficr::identityRoot(identityRoot);
+  return deriveBleIdentityResolvingKey(identityRoot, irkOut);
+}
+
+bool BleRadio::restoreLocalIdentityAddress() {
+  if (!localIdentityAddressValid_ || connected_) {
+    return false;
+  }
+
+  const bool rotationWasEnabled = rpaRotationEnabled_;
+  const bool rotationAddressWasValid = rpaRotationAddressValid_;
+  const uint32_t rotationIntervalMs = rpaRotationIntervalMs_;
+  const uint32_t rotationLastMs = rpaRotationLastMs_;
+  uint8_t rotationIrk[16] = {};
+  memcpy(rotationIrk, rpaRotationIrk_, sizeof(rotationIrk));
+
+  // Stop rotation before setDeviceAddress() restarts background advertising;
+  // otherwise the restart path immediately replaces the identity with an RPA.
+  rpaRotationEnabled_ = false;
+  rpaRotationAddressValid_ = false;
+  if (setDeviceAddress(localIdentityAddress_, localIdentityAddressType_)) {
+    disableResolvablePrivateAddressRotation();
+    return true;
+  }
+
+  rpaRotationEnabled_ = rotationWasEnabled;
+  rpaRotationAddressValid_ = rotationAddressWasValid;
+  rpaRotationIntervalMs_ = rotationIntervalMs;
+  rpaRotationLastMs_ = rotationLastMs;
+  memcpy(rpaRotationIrk_, rotationIrk, sizeof(rpaRotationIrk_));
+  return false;
 }
 
 bool BleRadio::getDeviceAddressString(char* out, size_t outSize,
@@ -899,14 +978,30 @@ bool BleRadio::generateResolvablePrivateAddress(const uint8_t irk[16],
     return false;
   }
 
-  uint8_t prand[3] = {};
   const uint32_t seed =
       micros() ^ static_cast<uint32_t>(Ficr::deviceId()) ^
       (static_cast<uint32_t>(address_[0]) << 24U) ^
       (static_cast<uint32_t>(address_[3]) << 8U);
-  (void)fillBleSecurityRandomBytes(prand, sizeof(prand), seed,
-                                   kBleSecurityRandomSpinLimit);
-  prand[2] = static_cast<uint8_t>((prand[2] & 0x3FU) | 0x40U);
+  uint8_t prand[3] = {};
+  bool prandValid = false;
+  for (uint8_t attempt = 0U; attempt < 8U && !prandValid; ++attempt) {
+    if (!fillBleSecurityRandomBytes(
+            prand, sizeof(prand),
+            seed ^ (static_cast<uint32_t>(attempt) * 0x9E3779B9UL),
+            kBleSecurityRandomSpinLimit)) {
+      memset(prand, 0, sizeof(prand));
+      return false;
+    }
+    prand[2] = static_cast<uint8_t>((prand[2] & 0x3FU) | 0x40U);
+    const bool randomPartAllZero =
+        prand[0] == 0x00U && prand[1] == 0x00U && prand[2] == 0x40U;
+    const bool randomPartAllOne =
+        prand[0] == 0xFFU && prand[1] == 0xFFU && prand[2] == 0x7FU;
+    prandValid = !randomPartAllZero && !randomPartAllOne;
+  }
+  if (!prandValid) {
+    return false;
+  }
 
   uint8_t hash[3] = {};
   if (!computeBleResolvablePrivateAddressHash(irk, prand, hash)) {
@@ -937,7 +1032,7 @@ bool BleRadio::enableResolvablePrivateAddressRotation(const uint8_t irk[16],
                                                       uint32_t intervalMs,
                                                       bool rotateNow,
                                                       uint8_t addressOut[6]) {
-  if (irk == nullptr || intervalMs == 0U) {
+  if (irk == nullptr || intervalMs == 0U || (rotateNow && connected_)) {
     return false;
   }
 
@@ -955,7 +1050,11 @@ bool BleRadio::enableResolvablePrivateAddressRotation(const uint8_t irk[16],
     return true;
   }
 
-  return serviceResolvablePrivateAddressRotation(addressOut);
+  if (!serviceResolvablePrivateAddressRotation(addressOut)) {
+    disableResolvablePrivateAddressRotation();
+    return false;
+  }
+  return true;
 }
 
 void BleRadio::disableResolvablePrivateAddressRotation() {
@@ -1000,13 +1099,20 @@ bool BleRadio::serviceResolvablePrivateAddressRotation(uint8_t addressOut[6]) {
     return true;
   }
 
+  const uint32_t previousLastMs = rpaRotationLastMs_;
+  const bool previousAddressValid = rpaRotationAddressValid_;
+  // Mark the rotation before setDeviceAddress() restarts background
+  // advertising. Its restart path services privacy again and must observe the
+  // new epoch rather than generate a second RPA immediately.
+  rpaRotationLastMs_ = nowMs;
+  rpaRotationAddressValid_ = true;
   uint8_t rpa[6] = {};
   if (!setResolvablePrivateAddress(rpaRotationIrk_, rpa)) {
+    rpaRotationLastMs_ = previousLastMs;
+    rpaRotationAddressValid_ = previousAddressValid;
     return false;
   }
 
-  rpaRotationLastMs_ = nowMs;
-  rpaRotationAddressValid_ = true;
   if (addressOut != nullptr) {
     memcpy(addressOut, rpa, sizeof(rpa));
   }

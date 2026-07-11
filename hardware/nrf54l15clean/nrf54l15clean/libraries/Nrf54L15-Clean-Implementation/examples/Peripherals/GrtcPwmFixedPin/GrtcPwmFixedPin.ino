@@ -6,15 +6,12 @@ using namespace xiao_nrf54l15;
 
 namespace {
 
-#if defined(PIN_WIRE1_SCL)
-static constexpr uint8_t kGrtcPwmPin = PIN_WIRE1_SCL;
-static constexpr char kGrtcPwmPinLabel[] = "PIN_WIRE1_SCL / P0.03";
-#elif defined(PIN_D11)
-static constexpr uint8_t kGrtcPwmPin = PIN_D11;
-static constexpr char kGrtcPwmPinLabel[] = "PIN_D11 / P0.03";
-#else
-#error "This board variant does not expose a known Arduino alias for the fixed GRTC PWM pin."
+#if !defined(PIN_GRTC_PWM)
+#error "This board variant must expose PIN_GRTC_PWM for the fixed P0.03 GRTC PWM output."
 #endif
+
+static constexpr uint8_t kGrtcPwmPin = PIN_GRTC_PWM;
+static constexpr char kGrtcPwmPinLabel[] = "PIN_GRTC_PWM / P0.03";
 
 static constexpr uint8_t kDutyCodes[] = {32U, 64U, 128U, 192U, 224U};
 static constexpr uint32_t kDutyHoldMs = 2000UL;

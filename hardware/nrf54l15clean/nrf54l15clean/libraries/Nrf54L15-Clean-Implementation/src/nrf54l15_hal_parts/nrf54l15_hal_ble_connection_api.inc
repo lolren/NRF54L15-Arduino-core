@@ -768,6 +768,7 @@ bool BleRadio::clearBondRecord(bool clearPersistentStorage) {
   bondRecordValid_ = false;
   bondStorageLoaded_ = true;
   bondKeyPrimedForConnection_ = false;
+  bondIdentityMatchedForConnection_ = false;
   if (clearPersistentStorage) {
     return clearPersistentBondRecord();
   }
@@ -1362,6 +1363,7 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   connectionPendingTxLlid_ = 0x01U;
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
+  connectionPendingTxSmpFragment_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
   clearPendingL2capTxFragment();
   connectionAttMtu_ = kBleDefaultAttMtu;
@@ -1627,6 +1629,8 @@ void BleRadio::serviceDeferredApplicationWork() {
   }
 
   serviceSecureConnectionsWork();
+  serviceSmpKeyDistribution();
+  (void)completeSmpKeyDistributionIfDone();
   bool postponeNonCriticalWork = false;
   if (connected_) {
     const uint32_t nowUs = bleTimingUs();
@@ -1644,6 +1648,25 @@ void BleRadio::serviceDeferredApplicationWork() {
   }
 
   if (!postponeNonCriticalWork) {
+    if (connected_ &&
+        (!smpPrefetchedLocalRandomValid_ ||
+         !connectionPrefetchedEncMaterialValid_)) {
+      prefetchConnectionSecurityMaterial(kBleSecurityRandomSpinLimit);
+    }
+    const uint32_t migrationNowUs = bleTimingUs();
+    if (connected_ && bondLocalIdentityMigrationPending_ &&
+        (bondLocalIdentityMigrationRetryAtUs_ == 0U ||
+         timeReachedUs(migrationNowUs,
+                       bondLocalIdentityMigrationRetryAtUs_))) {
+      const BleBondRecord normalizedRecord = bondRecord_;
+      if (persistBondRecord(normalizedRecord)) {
+        bondLocalIdentityMigrationPending_ = false;
+        bondLocalIdentityMigrationRetryAtUs_ = 0U;
+      } else {
+        bondLocalIdentityMigrationRetryAtUs_ = migrationNowUs + 1000000UL;
+        emitBleTrace("BOND_LOCAL_RPA_MIGRATE_PERSIST_FAILED");
+      }
+    }
     dispatchDeferredGattWrites();
     dispatchDeferredTraces();
   }

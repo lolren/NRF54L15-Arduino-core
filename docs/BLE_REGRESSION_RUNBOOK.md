@@ -2,6 +2,13 @@
 
 Purpose: run repeatable BLE security checks with minimal manual interaction.
 
+For the release-candidate two-board matrix, including Numeric Comparison
+accept/reject, all LE SC OOB directions, RPA rotation, identity-key exchange,
+and privacy-aware bonded reconnect, use the
+[two-board release gate](TWO_BOARD_RELEASE_GATE.md). This runbook remains the
+focused Linux-host pair/bond workflow for phone/desktop-style interoperability
+and A/B debugging.
+
 ## Prerequisites
 
 - XIAO nRF54L15 connected over USB (appears as `/dev/ttyACM*`).

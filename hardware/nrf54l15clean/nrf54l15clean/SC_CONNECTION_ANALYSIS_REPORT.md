@@ -1,6 +1,11 @@
 # BLE Secure Connections (SC) Connection Failure Analysis Report
 
-> Current status note, 2026-06-26: this report documents the first HID pairing
+> Historical debugging record for 0.9.208-0.9.211. The described failure was
+> superseded by the 0.9.220-0.9.221 interoperability fixes and the 1.0.0-rc1
+> two-board security/privacy gate. See `docs/BLE_COMPLIANCE_RESUME.md` and
+> `docs/TWO_BOARD_RELEASE_GATE.md` for current status.
+>
+> Historical status note, 2026-06-26: this report documents the first HID pairing
 > root cause that was found during LE Secure Connections work. That issue was
 > real, but it is no longer the whole current failure. For the active Pixel /
 > Snapdragon HID pairing state, test commands, traces, and remaining hypotheses,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile advertised Thread/Matter features from an exact release archive."""
+"""Compile advertised wireless features from an exact release archive."""
 
 from __future__ import annotations
 
@@ -13,6 +13,34 @@ from pathlib import Path
 
 
 FEATURE_BUILDS = (
+    (
+        "xiao_nrf54l15",
+        "libraries/Bluefruit52Lib/examples/Security/pairing_numeric_comparison",
+    ),
+    (
+        "xiao_nrf54l15",
+        "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Security/BleOobPairPeripheral",
+    ),
+    (
+        "xiao_nrf54lm20b",
+        "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Security/BleOobPairCentral",
+    ),
+    (
+        "xiao_nrf54l15",
+        "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Privacy/BleResolvablePrivateAddress",
+    ),
+    (
+        "xiao_nrf54lm20b",
+        "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Scanning/BleActiveScanner",
+    ),
+    (
+        "xiao_nrf54l15:clean_ble=on,cpu_freq=128m",
+        "libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator",
+    ),
+    (
+        "xiao_nrf54lm20b:clean_ble=on,cpu_freq=128m",
+        "libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingReflector",
+    ),
     (
         "xiao_nrf54l15:clean_thread=stage",
         "libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadCoreStageProbe",
@@ -90,13 +118,16 @@ def main() -> int:
             raise SystemExit(f"release archive omits advertised feature sources: {missing}")
 
         user = temp / "user"
-        data = temp / "data"
+        data = Path(
+            os.environ.get("ARDUINO_DATA_DIR", str(Path.home() / ".arduino15"))
+        ).expanduser().resolve()
+        if not data.is_dir():
+            raise SystemExit(f"Arduino data directory does not exist: {data}")
         downloads = temp / "downloads"
         # Keep the extracted archive in a distinct namespace so an installed
         # Board Manager core cannot satisfy these compiles by accident.
         hardware = user / "hardware" / LOCAL_PACKAGER
         hardware.mkdir(parents=True)
-        data.mkdir()
         downloads.mkdir()
         (hardware / "nrf54l15clean").symlink_to(platform, target_is_directory=True)
         config = temp / "arduino-cli.yaml"

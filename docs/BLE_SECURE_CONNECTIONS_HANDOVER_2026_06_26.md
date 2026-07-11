@@ -1,5 +1,10 @@
 # BLE Secure Connections Handover - 2026-06-26
 
+> Historical debugging record for 0.9.208-0.9.211. The described failure was
+> superseded by the 0.9.220-0.9.221 interoperability fixes and the 1.0.0-rc1
+> two-board security/privacy gate. See `BLE_COMPLIANCE_RESUME.md` and
+> `TWO_BOARD_RELEASE_GATE.md` for current status.
+
 This is the current handover for the BLE HID / LE Secure Connections pairing bug.
 
 Current repo state when this was written:

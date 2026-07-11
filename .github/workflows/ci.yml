@@ -218,6 +218,9 @@ jobs:
       - name: Upload recovery and platform recipe contracts
         run: python3 ./scripts/test_upload_helper.py
 
+      - name: Release version and prerelease contracts
+        run: python3 ./scripts/test_release_versions.py
+
   audit-contract-compiles:
     runs-on: ubuntu-latest
     strategy:
@@ -382,13 +385,27 @@ jobs:
           print(manifest['platform']['archivePath'])
           PY
           )"
-          for INDEX in \
-            dist/package_nrf54l15clean_index.json \
-            dist/package_nrf54l15clean_stable_index.json \
-            dist/package_nrf54l15clean_archive_index.json; do
+          VERSION="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('dist/release-manifest.json').read_text())
+          print(manifest['version'])
+          PY
+          )"
+          INDEX_LIST="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('dist/release-manifest.json').read_text())
+          print(*manifest['indexes']['artifact'], sep='\n')
+          PY
+          )"
+          test -n "${INDEX_LIST}"
+          mapfile -t INDEXES <<< "${INDEX_LIST}"
+          for INDEX in "${INDEXES[@]}"; do
             python3 ./scripts/verify_package_index.py \
               --index "${INDEX}" \
-              --archive "${PLATFORM_ARCHIVE}"
+              --archive "${PLATFORM_ARCHIVE}" \
+              --version "${VERSION}"
           done
 
       - name: Compile advertised features from exact archive

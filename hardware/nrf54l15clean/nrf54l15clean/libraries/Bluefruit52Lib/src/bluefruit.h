@@ -523,6 +523,11 @@ class BLESecurity {
   void setIOCaps(uint8_t ioCaps);
   void setIOCaps(bool display, bool yesNo, bool keyboard);
   void setPIN(const char* pin);
+  // Poll/reply form for asynchronous passkey display and Numeric Comparison.
+  // match_request is true when the user must confirm that both values match.
+  bool getPendingPairingPasskey(uint8_t passkey[6],
+                                bool* match_request) const;
+  bool replyPendingPairingPasskey(bool accept) const;
 
   // OOB (Out-of-Band) pairing for LE Secure Connections
   // Generate and store local OOB data. Returns the r and c values.
@@ -538,6 +543,7 @@ class BLESecurity {
   bool getOobRemoteData(uint8_t oob_r[16], uint8_t oob_c[16]) const;
   // Enable or disable OOB pairing
   bool setOobFlag(bool enable);
+  void clearOobData();
   bool requestPairing() const;
   bool isEncrypted(uint16_t conn_hdl = 0) const;
   bool isAuthenticated(uint16_t conn_hdl = 0) const;
@@ -546,9 +552,15 @@ class BLESecurity {
   bool getBondPeerAddress(ble_gap_addr_t* outAddress) const;
   bool getBondPeerIdentityAddress(ble_gap_addr_t* outAddress) const;
   bool getBondPeerIrk(uint8_t outIrk[16]) const;
-  // BLE privacy helpers. Local RPA rotation and bonded peer resolving are
-  // opt-in; full controller resolving-list policy remains application-level.
-  bool getLocalIdentityRoot(uint8_t irk[16]) const;
+  // BLE privacy helpers. Identity stays stable while the over-the-air address
+  // rotates; peer resolving remains application-managed on the clean LL path.
+  bool getLocalIdentityAddress(ble_gap_addr_t* outAddress) const;
+  bool getLocalIdentityRoot(uint8_t root[16]) const;
+  bool getLocalIdentityIrk(uint8_t irk[16]) const;
+  bool setPrivacyEnabled(bool enabled = true,
+                         uint32_t intervalMs = 900000UL,
+                         bool rotateNow = true);
+  bool privacyEnabled() const;
   bool generateResolvablePrivateAddress(const uint8_t irk[16],
                                         uint8_t addressOut[6]) const;
   bool setResolvablePrivateAddress(const uint8_t irk[16],
@@ -588,6 +600,8 @@ class BLESecurity {
   void setOobDataRequestCallback(oob_data_request_callback_t fp);
 
  private:
+  void retireOobData();
+  void removeAutoBondedPeerResolvingIrk();
   secured_callback_t secured_callback_;
   pair_passkey_callback_t pair_passkey_callback_;
   pair_complete_callback_t pair_complete_callback_;
@@ -604,6 +618,8 @@ class BLESecurity {
   uint8_t oob_remote_c_[16];
   oob_data_request_callback_t oob_data_request_callback_;
   bool auto_bonded_peer_resolving_;
+  bool auto_bonded_peer_irk_owned_;
+  uint8_t auto_bonded_peer_irk_[16];
   uint8_t resolving_list_count_;
   uint8_t resolving_list_irks_[kResolvingListMaxEntries][16];
 

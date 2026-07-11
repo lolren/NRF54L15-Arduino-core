@@ -33,6 +33,45 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          if [[ "${VERSION}" == *-* ]]; then
+            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Verify tag matches tracked source version
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          platform = Path("hardware/nrf54l15clean/nrf54l15clean")
+          platform_version = next(
+              line.split("=", 1)[1]
+              for line in (platform / "platform.txt").read_text().splitlines()
+              if line.startswith("version=")
+          )
+          if platform_version != version:
+              raise SystemExit(
+                  f"tag version {version!r} != tracked platform version "
+                  f"{platform_version!r}"
+              )
+          for header in sorted((platform / "cores").glob("*/CoreVersionGenerated.h")):
+              match = re.search(
+                  r'^#define ARDUINO_NRF54L15_CLEAN_VERSION_STRING "([^"]+)"$',
+                  header.read_text(),
+                  flags=re.MULTILINE,
+              )
+              if match is None or match.group(1) != version:
+                  actual = match.group(1) if match is not None else "<missing>"
+                  raise SystemExit(
+                      f"tag version {version!r} != {header} version {actual!r}"
+                  )
+          PY
 
       - name: Reset dist
         run: |
@@ -53,6 +92,13 @@ jobs:
             --release-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v{version}" \
             --reuse-existing-hosttools
 
+      - name: Verify release build did not rewrite tracked version files
+        run: |
+          git diff --exit-code -- \
+            hardware/nrf54l15clean/nrf54l15clean/platform.txt \
+            hardware/nrf54l15clean/nrf54l15clean/cores/nrf54l15/CoreVersionGenerated.h \
+            hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/CoreVersionGenerated.h
+
       - name: Verify checksum and size
         run: |
           PLATFORM_ARCHIVE="$(python3 - <<'PY'
@@ -62,13 +108,20 @@ jobs:
           print(manifest['platform']['archivePath'])
           PY
           )"
-          for INDEX in \
-            dist/package_nrf54l15clean_index.json \
-            dist/package_nrf54l15clean_stable_index.json \
-            dist/package_nrf54l15clean_archive_index.json; do
+          INDEX_LIST="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('dist/release-manifest.json').read_text())
+          print(*manifest['indexes']['artifact'], sep='\n')
+          PY
+          )"
+          test -n "${INDEX_LIST}"
+          mapfile -t INDEXES <<< "${INDEX_LIST}"
+          for INDEX in "${INDEXES[@]}"; do
             python3 ./scripts/verify_package_index.py \
               --index "${INDEX}" \
-              --archive "${PLATFORM_ARCHIVE}"
+              --archive "${PLATFORM_ARCHIVE}" \
+              --version "${{ steps.vars.outputs.version }}"
           done
 
       - name: Compile advertised features from exact archive
@@ -111,14 +164,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           overwrite_files: true
+          prerelease: ${{ steps.vars.outputs.prerelease }}
+          make_latest: ${{ steps.vars.outputs.prerelease == 'false' }}
           files: |
             dist/*
           generate_release_notes: true
 
       - name: Verify public release bytes
         run: |
+          RELEASE_INDEX="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('dist/release-manifest.json').read_text())
+          print(manifest['indexes']['release'])
+          PY
+          )"
           python3 ./scripts/verify_public_release.py \
-            --index dist/package_nrf54l15clean_index.json \
+            --index "${RELEASE_INDEX}" \
             --version "${{ steps.vars.outputs.version }}" \
             --include-tools \
             --retries 12 \

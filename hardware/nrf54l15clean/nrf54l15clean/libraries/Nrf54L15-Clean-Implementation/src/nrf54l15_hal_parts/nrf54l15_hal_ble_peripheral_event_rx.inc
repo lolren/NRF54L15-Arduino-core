@@ -497,10 +497,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       connectionLastTxEncryptedLength_ = 0U;
       memset(connectionLastTxEncryptedPayload_, 0,
              sizeof(connectionLastTxEncryptedPayload_));
-      connectionEncPrecomputedEmptyValid_ = false;
-      connectionEncPrecomputedCounter_ = 0ULL;
-      memset(connectionEncPrecomputedPayload_, 0,
-             sizeof(connectionEncPrecomputedPayload_));
       connectionEncPrecomputedStartRspValid_ = false;
       memset(connectionEncPrecomputedStartRsp_, 0,
              sizeof(connectionEncPrecomputedStartRsp_));
@@ -583,9 +579,10 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
               connectionEncAltKeyValid_ ? 1U : 0U;
           encDebug_.encLastRxDir = connectionEncRxDirection_;
           encDebug_.encLastTxDir = connectionEncTxDirection_;
+          primeStartEncryptionResponseCiphertext();
           if (connectionRole_ == BleConnectionRole::kPeripheral) {
-            connectionEncStartReqPending_ = false;
-            connectionEncStartReqTxPending_ = true;
+            connectionEncStartReqPending_ = true;
+            connectionEncStartReqTxPending_ = false;
             connectionEncAwaitingStartRsp_ = false;
             emitBleTrace("LL_START_ENC_REQ_PENDING");
           }
@@ -806,6 +803,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
             connectionExpectedRxSn_ ^= 0x01U;
           }
           if (peerAckedLastTxFollow) {
+            noteLastSmpTxAcknowledged();
             connectionTxSn_ ^= 0x01U;
             connectionFreshTxAllowed_ = true;
           } else {
@@ -884,14 +882,22 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
                 connectionEncTxEnabled_ = true;
                 connectionEncEnableTxOnNextEvent_ = false;
                 uint8_t encryptedLength = 0U;
-                encryptedFollowTx =
-                    bleCcmEncryptPayload(connectionEncSessionKey_,
-                                         connectionEncIv_, followTxCounter,
-                                         connectionEncTxDirection_,
-                                         txPacket_[0], connectionTxPayload_,
-                                         responseLength,
-                                         connectionLastTxEncryptedPayload_,
-                                         &encryptedLength);
+                if (connectionEncPrecomputedStartRspTxValid_ &&
+                    (connectionEncPrecomputedStartRspTxCounter_ == followTxCounter)) {
+                  encryptedLength = sizeof(connectionEncPrecomputedStartRspTx_);
+                  memcpy(connectionLastTxEncryptedPayload_,
+                         connectionEncPrecomputedStartRspTx_, encryptedLength);
+                  encryptedFollowTx = true;
+                } else {
+                  encryptedFollowTx =
+                      bleCcmEncryptPayload(connectionEncSessionKey_,
+                                           connectionEncIv_, followTxCounter,
+                                           connectionEncTxDirection_,
+                                           txPacket_[0], connectionTxPayload_,
+                                           responseLength,
+                                           connectionLastTxEncryptedPayload_,
+                                           &encryptedLength);
+                }
                 if (encryptedFollowTx) {
                   connectionLastTxWasEncrypted_ = true;
                   connectionLastTxEncryptedLength_ = encryptedLength;
@@ -960,17 +966,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
                   connectionEncStartReqPending_ = false;
                   connectionEncPrecomputedStartRspValid_ = false;
                   connectionEncPrecomputedStartRspTxValid_ = false;
-                  connectionEncPrecomputedCounter_ = connectionEncTxCounter_;
-                  uint8_t preLen = 0U;
-                  connectionEncPrecomputedEmptyValid_ =
-                      bleCcmEncryptPayload(connectionEncSessionKey_,
-                                           connectionEncIv_,
-                                           connectionEncPrecomputedCounter_,
-                                           connectionEncTxDirection_,
-                                           0x01U, nullptr, 0U,
-                                           connectionEncPrecomputedPayload_,
-                                           &preLen) &&
-                      (preLen == kBleMicLen);
                   emitBleTrace("LL_START_ENC_RSP_FAST_FOLLOW_TX_OK");
                 }
                 radio_->SHORTS = 0U;
@@ -1557,9 +1552,10 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         encDebug_.encLastSessionAltKeyValid = connectionEncAltKeyValid_ ? 1U : 0U;
         encDebug_.encLastRxDir = connectionEncRxDirection_;
         encDebug_.encLastTxDir = connectionEncTxDirection_;
+        primeStartEncryptionResponseCiphertext();
         if (connectionRole_ == BleConnectionRole::kPeripheral) {
-          connectionEncStartReqPending_ = false;
-          connectionEncStartReqTxPending_ = true;
+          connectionEncStartReqPending_ = true;
+          connectionEncStartReqTxPending_ = false;
           connectionEncAwaitingStartRsp_ = false;
           emitBleTrace("LL_START_ENC_REQ_PENDING");
         }
@@ -1716,7 +1712,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
 
   bool packetIsNew = false;
   if (canConsumeNewPayload) {
-    connectionExpectedRxSn_ ^= 0x01U;
     packetIsNew = true;
   }
   g_ble_periph_last_rx_llid = llid;
@@ -1736,13 +1731,6 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       (llid == kBlePduDataStartOrComplete) &&
       (rxLengthRaw >= kBleMicLen) &&
       (connectionEncRxCounter_ <= 1ULL);
-  if (peerAckedLastTx) {
-    connectionTxSn_ ^= 0x01U;
-    connectionFreshTxAllowed_ = true;
-  } else {
-    connectionFreshTxAllowed_ = !connectionTxHistoryValid_;
-  }
-
   bool terminateInd = false;
   bool peerTerminateIndReceived = false;
   uint8_t peerTerminateErrorCode = 0U;
@@ -1789,9 +1777,10 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     encDebug_.encLastSessionAltKeyValid = connectionEncAltKeyValid_ ? 1U : 0U;
     encDebug_.encLastRxDir = connectionEncRxDirection_;
     encDebug_.encLastTxDir = connectionEncTxDirection_;
+    primeStartEncryptionResponseCiphertext();
     if (connectionRole_ == BleConnectionRole::kPeripheral) {
-      connectionEncStartReqPending_ = false;
-      connectionEncStartReqTxPending_ = true;
+      connectionEncStartReqPending_ = true;
+      connectionEncStartReqTxPending_ = false;
       connectionEncAwaitingStartRsp_ = false;
       emitBleTrace("LL_START_ENC_REQ_PENDING");
     }
@@ -1822,8 +1811,14 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       connectionEncAwaitingStartRsp_ &&
       (llid == kBlePduLlControl) &&
       (rxLengthRaw >= kBleMicLen);
+  const bool validPlainEmptyPdu =
+      (llid == kBlePduDataContinuation) && (rxLengthRaw == 0U);
+  const bool encryptedPduNeedsAuthentication =
+      connectionEncSessionValid_ && connectionEncRxEnabled_ &&
+      !validPlainEmptyPdu;
   const bool shouldAttemptRxDecrypt =
-      packetIsNew || attemptDecryptStartEncReq || deferAwaitingStartRspDecrypt;
+      packetIsNew || attemptDecryptStartEncReq || deferAwaitingStartRspDecrypt ||
+      encryptedPduNeedsAuthentication;
   bool fastStartEncRspMatched = false;
   if (deferAwaitingStartRspDecrypt &&
       packetIsNew &&
@@ -1851,26 +1846,10 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
 
     if (!allowPlainStartEncRsp) {
       if (rxLengthRaw < kBleMicLen) {
-        const bool finalStartRspQueued =
-            connectionPendingTxValid_ &&
-            (connectionPendingTxLlid_ == kBlePduLlControl) &&
-            (connectionPendingTxLength_ >= 1U) &&
-            (connectionPendingTxPayload_[0] == kBleLlCtrlStartEncRsp);
-        const bool allowStartProcedurePlainZeroLen =
-            connectionEncRxEnabled_ &&
-            (rxLengthRaw == 0U) &&
-            (connectionEncAwaitingStartRsp_ ||
-             connectionEncStartReqPending_ ||
-             connectionEncStartReqTxPending_ ||
-             finalStartRspQueued) &&
-            (connectionEncRxCounter_ <= 1ULL);
-        const bool allowEncryptedEmptyPdu =
-            connectionEncRxEnabled_ &&
-            (rxLengthRaw == 0U) &&
-            ((llid == kBlePduDataStartOrComplete) || (llid == 0x01U));
+        const bool allowEmptyPdu =
+            (llid == kBlePduDataContinuation) && (rxLengthRaw == 0U);
         if (connectionEncRxEnabled_ &&
-            !allowStartProcedurePlainZeroLen &&
-            !allowEncryptedEmptyPdu) {
+            !allowEmptyPdu) {
           terminateInd = true;
           terminateMicFailure = true;
           ++encDebug_.encRxShortPduCount;
@@ -2021,4 +2000,23 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         }
       }
     }
+  }
+
+  // Do not trust SN/NESN from a non-empty encrypted PDU until its MIC has
+  // validated. New data intentionally deferred for the T_IFS response is
+  // authenticated immediately after that response and disconnects on failure.
+  if (!terminateInd) {
+    if (packetIsNew) {
+      connectionExpectedRxSn_ ^= 0x01U;
+    }
+    if (peerAckedLastTx) {
+      noteLastSmpTxAcknowledged();
+      connectionTxSn_ ^= 0x01U;
+      connectionFreshTxAllowed_ = true;
+    } else {
+      connectionFreshTxAllowed_ = !connectionTxHistoryValid_;
+    }
+  } else {
+    peerAckedLastTx = false;
+    packetIsNew = false;
   }

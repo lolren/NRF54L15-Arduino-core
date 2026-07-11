@@ -29,6 +29,7 @@ static constexpr uint32_t kNotifyIntervalMs = 1200;
 static constexpr uint32_t kPhyRequestRetryMs = 500;
 static constexpr uint32_t kHold1MBeforeReturnMs = 3500;
 static constexpr uint16_t kRequestedMtu = 247U;
+static constexpr uint16_t kLongNotificationValueLength = 244U;
 static constexpr uint16_t kNotifyServiceUuid = 0xFFE0U;
 static constexpr uint16_t kNotifyCharacteristicUuid = 0xFFE1U;
 static constexpr char kAddressText[] = "C0:DE:54:15:22:4D";
@@ -107,7 +108,7 @@ static void printConnectionState(const char* prefix, const BleConnectionInfo& in
   Serial.print("\r\n");
 }
 
-static void buildNotifyValue(uint32_t sequence, uint8_t* value, uint8_t* valueLength) {
+static void buildNotifyValue(uint32_t sequence, uint8_t* value, uint16_t* valueLength) {
   if (value == nullptr || valueLength == nullptr) {
     return;
   }
@@ -119,10 +120,10 @@ static void buildNotifyValue(uint32_t sequence, uint8_t* value, uint8_t* valueLe
   value[5] = static_cast<uint8_t>((sequence >> 8U) & 0xFFU);
   value[6] = static_cast<uint8_t>((sequence >> 16U) & 0xFFU);
   value[7] = static_cast<uint8_t>((sequence >> 24U) & 0xFFU);
-  for (uint16_t i = 8U; i < BleRadio::kCustomGattMaxValueLength; ++i) {
+  for (uint16_t i = 8U; i < kLongNotificationValueLength; ++i) {
     value[i] = static_cast<uint8_t>('a' + ((i + sequence) % 26U));
   }
-  *valueLength = BleRadio::kCustomGattMaxValueLength;
+  *valueLength = kLongNotificationValueLength;
 }
 
 static bool longNotifyReady(const BleConnectionInfo& info) {
@@ -140,8 +141,8 @@ static bool initial2MRequestReady() {
 }
 
 static void queueLongNotify(const BleConnectionInfo& info) {
-  uint8_t value[BleRadio::kCustomGattMaxValueLength];
-  uint8_t valueLength = 0U;
+  uint8_t value[kLongNotificationValueLength];
+  uint16_t valueLength = 0U;
   buildNotifyValue(g_notifySequence, value, &valueLength);
 
   if (!g_ble.setCustomGattCharacteristicValue(g_notifyValueHandle, value, valueLength)) {
@@ -250,6 +251,8 @@ void setup() {
   bool ok = g_ble.begin(kTxPowerDbm);
   if (ok) {
     g_power.setLatencyMode(PowerLatencyMode::kLowPower);
+    g_ble.setPeripheralPreferredDataLength(251U);
+    g_ble.setPeripheralPreferredAttMtu(kRequestedMtu);
     ok = g_ble.setDeviceAddressString(kAddressText, BleAddressType::kRandomStatic) &&
          g_ble.setAdvertisingPduType(BleAdvPduType::kAdvInd) &&
          g_ble.setAdvertisingName("XIAO54-2M", true) &&

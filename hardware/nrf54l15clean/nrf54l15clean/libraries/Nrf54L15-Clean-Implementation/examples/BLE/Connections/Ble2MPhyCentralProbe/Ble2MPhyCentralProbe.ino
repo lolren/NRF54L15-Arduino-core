@@ -22,6 +22,7 @@ static constexpr uint32_t kStatusIntervalMs = 1000UL;
 static constexpr uint32_t kDiscoveryDelayMs = 1000UL;
 static constexpr uint32_t kPhyRequestRetryMs = 500UL;
 static constexpr uint16_t kRequestedMtu = 247U;
+static constexpr uint16_t kLongNotificationValueLength = 244U;
 static constexpr uint16_t kNotifyServiceUuid = 0xFFE0U;
 static constexpr uint16_t kNotifyCharacteristicUuid = 0xFFE1U;
 static constexpr uint16_t kUuidPrimaryService = 0x2800U;
@@ -59,6 +60,7 @@ static PhyCyclePhase g_cyclePhase = PhyCyclePhase::kWaitForInitial2MTraffic;
 static bool g_requestInFlight = false;
 static bool g_wasConnected = false;
 static bool g_phyRequestIssued = false;
+static bool g_dataLengthRequestIssued = false;
 static bool g_mtuRequestIssued = false;
 static bool g_flexiblePreferenceSet = false;
 static bool g_returnBaselineSet = false;
@@ -187,6 +189,7 @@ static void resetDiscovery() {
   g_cyclePhase = PhyCyclePhase::kWaitForInitial2MTraffic;
   g_requestInFlight = false;
   g_phyRequestIssued = false;
+  g_dataLengthRequestIssued = false;
   g_mtuRequestIssued = false;
   g_flexiblePreferenceSet = false;
   g_returnBaselineSet = false;
@@ -397,7 +400,7 @@ static void handleNotification(const BleConnectionEvent& evt) {
     return;
   }
   const uint8_t valueLength = static_cast<uint8_t>(evt.payloadLength - 7U);
-  if ((valueLength == BleRadio::kCustomGattMaxValueLength) &&
+  if ((valueLength == kLongNotificationValueLength) &&
       (evt.payload[7] == '2') &&
       (evt.payload[8] == 'M') &&
       (evt.payload[9] == 'P') &&
@@ -483,6 +486,8 @@ void setup() {
   bool ok = g_ble.begin(kTxPowerDbm);
   if (ok) {
     g_power.setLatencyMode(PowerLatencyMode::kLowPower);
+    g_ble.setCentralPreferredDataLength(251U);
+    g_ble.setCentralPreferredAttMtu(kRequestedMtu);
   }
   resetDiscovery();
 
@@ -521,7 +526,15 @@ void loop() {
     printConnectionState("connected", info);
   }
 
-  if (!g_mtuRequestIssued && g_ble.currentAttMtu() < kRequestedMtu) {
+  if (!g_dataLengthRequestIssued && g_ble.currentDataLength() < 251U) {
+    g_dataLengthRequestIssued = g_ble.requestDataLengthUpdate();
+    if (g_dataLengthRequestIssued) {
+      Serial.print("request data length 251: queued\r\n");
+    }
+  }
+
+  if (g_ble.currentDataLength() >= 251U &&
+      !g_mtuRequestIssued && g_ble.currentAttMtu() < kRequestedMtu) {
     g_mtuRequestIssued = g_ble.requestAttMtuExchange(kRequestedMtu);
     if (g_mtuRequestIssued) {
       Serial.print("request mtu 247: queued\r\n");

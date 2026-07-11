@@ -5,11 +5,21 @@ Remediation update: 2026-07-11
 Repository: `/home/lolren/Desktop/eport_nrf54/nrf54-arduino-core`  
 Local reference set: `/home/lolren/Desktop/eport_nrf54/datasheets`
 
-This report is based only on the repository, the supplied local PDFs/text extracts and locally reproduced compiler/linker output. No web material or remembered register descriptions were used. The supplied reference set contains product specifications and two XIAO schematics, but no standalone Nordic anomaly/errata document and no HOLYIOT or PCA10156 schematic. Claims that require those missing documents are explicitly marked as unverified.
+The original audit below used only the repository, supplied local PDFs/text
+extracts, and locally reproduced compiler/linker output. The v1.0.0-rc1 BLE
+security follow-up additionally checked the official Bluetooth Core 6.2 HTML
+for SMP transaction timing, repeated-attempt handling, and encrypted data-PDU
+semantics. The supplied local reference set contains product specifications and
+two XIAO schematics, but no standalone Nordic anomaly/errata document and no
+HOLYIOT or PCA10156 schematic. Claims that require those missing documents are
+explicitly marked as unverified.
 
 ## Remediation Update - 2026-07-11
 
-Current status for this checkout: **all 71 audit items have been addressed in the 0.9.223 source tree**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218 through 0.9.223 follow-ups together record the current source-tree result.
+Current status for this checkout: **all 71 original audit items have been
+addressed in the 1.0.0-rc1 source tree**. The findings below are retained as the
+original audit record; the 0.9.216 remediation baseline and subsequent
+follow-ups together record the current source-tree result.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation tooling, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -123,7 +133,53 @@ The timing-critical sounding phase is a controller-executed Bluetooth LE CS Test
 
 This evidence establishes repeatable operation of the two-board Arduino test path on the attached hardware. It does not claim Bluetooth SIG qualification, RF conformance or certification, connected-procedure interoperability, universal antenna-delay calibration, certified distance accuracy, or production power performance. The reported PBR/RTT ranges remain engineering measurements that require calibration and validation for each board, antenna, placement and enclosure.
 
-The remainder of this document is retained as the pre-remediation audit record. Present-tense defect descriptions and priority tables below describe the audited baseline, not the corrected 0.9.223 source tree.
+### BLE Security and Privacy RC Follow-up - 2026-07-11 (v1.0.0-rc1)
+
+The release candidate adds asynchronous Numeric Comparison accept/reject, mutual
+and both one-way LE Secure Connections OOB modes, and host privacy built around
+a stable identity, a `d1(IR, 1, 0)`-derived local IRK, rotating RPAs, role-ordered
+identity-key distribution, hardware AAR resolution, and retained bonded
+reconnect. Security hardening also applies negotiated 7-16 octet encryption-key
+sizes to derived, received, persisted, and restored keys; uses the Bluetooth
+30-second SMP transaction timer and bounded single-peer repeated-attempt
+backoff; and obtains security nonces, OOB records, and LL encryption material
+only from fail-closed CRACEN entropy. Encrypted RX/TX paths retain exact
+ciphertext, SN, and CCM counters across retransmission and authenticate
+duplicates without advancing counters.
+
+The final full hardware gate is
+`measurements/two_board_release_gate_20260711_v1.0.0-rc1_full`. It ran for
+1,093.872 seconds on XIAO nRF54L15 UID `761FDE87` and XIAO nRF54LM20A UID
+`3377B9D6`; all 14 phases passed:
+
+* both boards booted and reported `1.0.0-rc1`;
+* ATT discovery/CCCD, MTU 247, DLE 251, and the 2M/1M/2M long-notification cycle;
+* fresh Just Works pairing, bond save/load, encrypted reconnect, subscription,
+  and write;
+* matching Numeric Comparison value `157817`, authenticated traffic, retained
+  reconnect, and a separate rejection run with no encryption or bond save;
+* mutual OOB and both one-way OOB directions with encrypted bidirectional UART;
+* RPA self-test and over-air rotation across two addresses;
+* stable identities, IRK distribution, AAR bond resolution, changed RPAs, and
+  encrypted reconnect without re-pairing;
+* reset recovery, timed System OFF wake on both boards, and positive,
+  silent-reflector-negative, and recovery Channel Sounding checks.
+
+The canonical release build produced
+`dist/nrf54l15clean-1.0.0-rc1-f6f3430c4342.tar.bz2`, size `27516689`, SHA-256
+`f6f3430c43422c6e745e775c64076a12d95d3e51e4b6d0aa4bd991493f854b7f`.
+Exact-archive compilation passed for Numeric Comparison, both OOB board roles,
+RPA/active scanning, both public Channel Sounding roles, OpenThread, and Matter
+on the applicable L15 and LM20 profiles.
+
+This is two-board regression evidence for the documented single-link LE Secure
+Connections/privacy surface, not complete Bluetooth Core conformance, PTS/BQB,
+or product qualification. CSRK/signed writes, locally generated legacy bond-key
+distribution, a multi-bond/controller privacy policy, an in-place stored-bond
+security-upgrade hardware test, and broad cross-vendor negative testing remain
+outside the claim.
+
+The remainder of this document is retained as the pre-remediation audit record. Present-tense defect descriptions and priority tables below describe the audited baseline, not the corrected 1.0.0-rc1 source tree.
 
 ## Executive Summary
 

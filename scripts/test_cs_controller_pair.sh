@@ -26,6 +26,8 @@ run_negative="${CS_RUN_SILENT_PEER_TEST:-1}"
 build_root="${CS_BUILD_ROOT:-${TMPDIR:-/tmp}/cs_controller_pair_build}"
 log_dir="${CS_LOG_DIR:-}"
 pyocd_bin="${CS_PYOCD:-pyocd}"
+arduino_cli_config="${CS_ARDUINO_CLI_CONFIG:-}"
+compiler_path="${CS_COMPILER_PATH:-}"
 
 initiator_sketch="${examples_root}/BleChannelSoundingInitiator"
 reflector_sketch="${examples_root}/BleChannelSoundingReflector"
@@ -106,6 +108,12 @@ require_port() {
 }
 
 register_source_core() {
+  if [[ -n "${arduino_cli_config}" ]]; then
+    [[ -f "${arduino_cli_config}" ]] || die "Arduino CLI config not found: ${arduino_cli_config}"
+    arduino-cli board details --config-file "${arduino_cli_config}" \
+      --fqbn "localnrf54:nrf54l15clean:xiao_nrf54l15" >/dev/null
+    return
+  fi
   local hardware_parent="${HOME}/Arduino/hardware/localnrf54"
   local link="${hardware_parent}/nrf54l15clean"
   mkdir -p "${hardware_parent}"
@@ -125,8 +133,20 @@ build_role() {
   local sketch="$4"
   echo "build_role=${role} fqbn=${fqbn}"
   rm -rf "${build_path}"
-  arduino-cli compile --warnings all --fqbn "${fqbn}" \
-    --build-path "${build_path}" "${sketch}"
+  local -a cmd=(arduino-cli compile --warnings all --fqbn "${fqbn}"
+    --build-path "${build_path}")
+  if [[ -n "${arduino_cli_config}" ]]; then
+    cmd+=(--config-file "${arduino_cli_config}")
+  fi
+  if [[ -n "${compiler_path}" ]]; then
+    [[ -x "${compiler_path}/arm-none-eabi-g++" ]] || \
+      die "compiler path is invalid: ${compiler_path}"
+    cmd+=(--build-property "compiler.path=${compiler_path}/")
+  fi
+  cmd+=(--build-property \
+    "recipe.hooks.savehex.postsavehex.1.pattern=/usr/bin/true")
+  cmd+=("${sketch}")
+  "${cmd[@]}"
 }
 
 vector_words_from_bin() {

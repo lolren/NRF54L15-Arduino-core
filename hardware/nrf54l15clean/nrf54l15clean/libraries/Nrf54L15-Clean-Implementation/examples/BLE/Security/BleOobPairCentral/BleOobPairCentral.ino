@@ -8,6 +8,23 @@
 // Paste the peripheral's printed "peer <r> <c>" line into this serial monitor,
 // then paste this board's printed "peer <r> <c>" line into the peripheral.
 // The central starts scanning only after peer OOB data is configured.
+//
+// BLE_OOB_MODE selects which OOB payloads cross the out-of-band channel:
+//   0: mutual (default)
+//   1: peripheral -> central only
+//   2: central -> peripheral only
+
+#ifndef BLE_OOB_MODE
+#define BLE_OOB_MODE 0
+#endif
+
+#ifndef BLE_OOB_CLEAR_BONDS_ON_BOOT
+#define BLE_OOB_CLEAR_BONDS_ON_BOOT 1
+#endif
+
+#ifndef BLE_OOB_REQUEST_DLE
+#define BLE_OOB_REQUEST_DLE 1
+#endif
 
 BLEClientUart clientUart;
 
@@ -15,14 +32,24 @@ namespace {
 
 constexpr uint32_t kSerialWaitMs = 1500UL;
 constexpr uint32_t kPingPeriodMs = 3000UL;
+constexpr uint32_t kPairRequestDelayMs =
+    (BLE_OOB_REQUEST_DLE != 0) ? 1500UL : 500UL;
+constexpr uint8_t kOobMode = BLE_OOB_MODE;
+static_assert(kOobMode <= 2U, "BLE_OOB_MODE must be 0, 1, or 2");
+constexpr bool kPublishLocalOob = (kOobMode == 0U) || (kOobMode == 2U);
+constexpr bool kNeedsPeerOob = (kOobMode == 0U) || (kOobMode == 1U);
 
 uint8_t localR[16] = {0};
 uint8_t localC[16] = {0};
 uint8_t peerR[16] = {0};
 uint8_t peerC[16] = {0};
-bool peerOobReady = false;
+bool peerOobReady = !kNeedsPeerOob;
 bool scanningStarted = false;
 bool uartReady = false;
+bool uartDiscoveryPending = false;
+bool pairingRequestPending = false;
+uint16_t connectedHandle = BLE_CONN_HANDLE_INVALID;
+uint32_t connectedAtMs = 0U;
 uint32_t lastPingMs = 0;
 uint32_t pingSeq = 0;
 
@@ -57,18 +84,30 @@ void printHex16(const uint8_t value[16]) {
 void printLocalOob() {
   Serial.println();
   Serial.println("BLE OOB central");
-  Serial.print("local_r=");
-  printHex16(localR);
-  Serial.println();
-  Serial.print("local_c=");
-  printHex16(localC);
-  Serial.println();
-  Serial.print("paste_on_peer: peer ");
-  printHex16(localR);
-  Serial.write(' ');
-  printHex16(localC);
-  Serial.println();
-  Serial.println("Waiting for peer <r> <c> from the peripheral...");
+  Serial.print("OOB mode=");
+  Serial.println(kOobMode == 0U ? "mutual" :
+                 (kOobMode == 1U ? "peripheral-to-central"
+                                  : "central-to-peripheral"));
+  if (kPublishLocalOob) {
+    Serial.print("local_r=");
+    printHex16(localR);
+    Serial.println();
+    Serial.print("local_c=");
+    printHex16(localC);
+    Serial.println();
+    Serial.print("paste_on_peer: peer ");
+    printHex16(localR);
+    Serial.write(' ');
+    printHex16(localC);
+    Serial.println();
+  } else {
+    Serial.println("local_oob=not-sent");
+  }
+  if (kNeedsPeerOob) {
+    Serial.println("Waiting for peer <r> <c> from the peripheral...");
+  } else {
+    Serial.println("peer_oob=not-required");
+  }
 }
 
 void startScan() {
@@ -88,6 +127,10 @@ void handlePeerLine(char* line) {
   if (cmd == nullptr) return;
   if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
     printLocalOob();
+    return;
+  }
+  if (!kNeedsPeerOob) {
+    Serial.println("Peer OOB data is not used in this one-way mode");
     return;
   }
   if (strcmp(cmd, "peer") != 0) {
@@ -142,15 +185,22 @@ void connectCallback(uint16_t connHandle) {
   BLEConnection* conn = Bluefruit.Connection(connHandle);
   Serial.println("Connected");
   uartReady = false;
-  if (peerOobReady && conn != nullptr) {
-    Serial.println("Requesting OOB pairing");
-    conn->requestPairing();
+  uartDiscoveryPending = false;
+  connectedHandle = connHandle;
+  connectedAtMs = millis();
+  pairingRequestPending = peerOobReady && conn != nullptr;
+  if (conn != nullptr && BLE_OOB_REQUEST_DLE != 0) {
+    Serial.print("Requesting data length update: ");
+    Serial.println(conn->requestDataLengthUpdate() ? "queued" : "failed");
   }
 }
 
 void disconnectCallback(uint16_t connHandle, uint8_t reason) {
   (void)connHandle;
   uartReady = false;
+  uartDiscoveryPending = false;
+  pairingRequestPending = false;
+  connectedHandle = BLE_CONN_HANDLE_INVALID;
   scanningStarted = false;
   Serial.print("Disconnected reason=0x");
   Serial.println(reason, HEX);
@@ -159,19 +209,17 @@ void disconnectCallback(uint16_t connHandle, uint8_t reason) {
 
 void securedCallback(uint16_t connHandle) {
   Serial.println("Connection encrypted with OOB pairing");
-  if (clientUart.discover(connHandle)) {
-    clientUart.enableTXD();
-    uartReady = true;
-    Serial.println("BLE UART discovered");
-  } else {
-    Serial.println("BLE UART discovery failed");
-  }
+  Serial.print("OOB mutually authenticated=");
+  Serial.println(Bluefruit.Security.isAuthenticated(connHandle) ? "yes" : "no");
 }
 
 void pairCompleteCallback(uint16_t connHandle, uint8_t status) {
-  (void)connHandle;
   Serial.print("Pair complete status=0x");
   Serial.println(status, HEX);
+  if (status == BLE_GAP_SEC_STATUS_SUCCESS) {
+    connectedHandle = connHandle;
+    uartDiscoveryPending = true;
+  }
 }
 
 void clientUartRxCallback(BLEClientUart& uart) {
@@ -192,16 +240,21 @@ void setup() {
 
   Bluefruit.autoConnLed(false);
   Bluefruit.begin(0, 1);
+  if (BLE_OOB_CLEAR_BONDS_ON_BOOT != 0) {
+    Bluefruit.Central.clearBonds();
+  }
   Bluefruit.setTxPower(0);
 
   Bluefruit.Security.setIOCaps(false, false, false);
   Bluefruit.Security.setPairCompleteCallback(pairCompleteCallback);
   Bluefruit.Security.setSecuredCallback(securedCallback);
-  if (!Bluefruit.Security.generateOobData(localR, localC)) {
-    Serial.println("ERROR: failed to generate local OOB data");
-    while (true) delay(1000);
+  if (kPublishLocalOob) {
+    if (!Bluefruit.Security.generateOobData(localR, localC)) {
+      Serial.println("ERROR: failed to generate local OOB data");
+      while (true) delay(1000);
+    }
+    Bluefruit.Security.setOobFlag(true);
   }
-  Bluefruit.Security.setOobFlag(true);
 
   clientUart.begin();
   clientUart.setRxCallback(clientUartRxCallback);
@@ -210,10 +263,32 @@ void setup() {
   Bluefruit.Central.setDisconnectCallback(disconnectCallback);
 
   printLocalOob();
+  if (!kNeedsPeerOob) startScan();
 }
 
 void loop() {
   pollSerialCommands();
+
+  if (pairingRequestPending && Bluefruit.connected() &&
+      (millis() - connectedAtMs >= kPairRequestDelayMs)) {
+    BLEConnection* conn = Bluefruit.Connection(connectedHandle);
+    pairingRequestPending = false;
+    Serial.println("Requesting OOB pairing");
+    if (conn == nullptr || !conn->requestPairing()) {
+      Serial.println("ERROR: OOB pairing request was not queued");
+    }
+  }
+
+  if (uartDiscoveryPending && Bluefruit.connected()) {
+    uartDiscoveryPending = false;
+    if (clientUart.discover(connectedHandle)) {
+      clientUart.enableTXD();
+      uartReady = true;
+      Serial.println("BLE UART discovered");
+    } else {
+      Serial.println("BLE UART discovery failed");
+    }
+  }
 
   if (uartReady && Bluefruit.connected() &&
       (millis() - lastPingMs >= kPingPeriodMs)) {

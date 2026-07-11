@@ -4,11 +4,12 @@
 // BLE privacy helper demo.
 //
 // This sketch shows the currently supported privacy primitives:
-// - read the factory identity root as a demo IRK
+// - derive the stable local IRK from the factory identity root with d1(IR,1,0)
+// - keep the stable identity address separate from the active private address
 // - generate a Resolvable Private Address (RPA)
 // - resolve the RPA through the hardware AAR block
 // - keep a small application-managed resolving list of peer IRKs
-// - enable opt-in automatic local RPA rotation for advertising
+// - enable automatic local RPA rotation for advertising
 //
 // This is still not a full controller privacy policy: the list is explicit
 // sketch state, not an automatic bonded-identity controller policy.
@@ -71,12 +72,15 @@ void setup() {
   uint8_t irk[16] = {};
   uint8_t previewRpa[6] = {};
   uint8_t activeRpa[6] = {};
+  ble_gap_addr_t localIdentity{};
   bool resolved = false;
   uint16_t resolvedIndex = 0xFFFFU;
   bool listResolved = false;
   uint16_t listResolvedIndex = 0xFFFFU;
 
-  const bool irkOk = Bluefruit.Security.getLocalIdentityRoot(irk);
+  const bool identityOk =
+      Bluefruit.Security.getLocalIdentityAddress(&localIdentity);
+  const bool irkOk = Bluefruit.Security.getLocalIdentityIrk(irk);
   const bool generateOk =
       Bluefruit.Security.generateResolvablePrivateAddress(irk, previewRpa);
   const bool resolveOk =
@@ -87,12 +91,19 @@ void setup() {
   const bool listResolveOk =
       Bluefruit.Security.resolveResolvablePrivateAddress(
           previewRpa, &listResolved, &listResolvedIndex);
-  const bool rotationOk =
-      Bluefruit.Security.enableResolvablePrivateAddressRotation(
-          irk, kDemoRpaRotationMs, true, activeRpa);
+  const bool privacyOk = Bluefruit.Security.setPrivacyEnabled(
+      true, kDemoRpaRotationMs, true);
+  const ble_gap_addr_t activeAddress = Bluefruit.getAddr();
+  memcpy(activeRpa, activeAddress.addr, sizeof(activeRpa));
+  const bool rotationOk = privacyOk && Bluefruit.Security.privacyEnabled() &&
+                          activeAddress.addr_type ==
+                              BLE_GAP_ADDR_TYPE_RANDOM_PRIVATE_RESOLVABLE;
 
   Serial.println();
   Serial.println("BleResolvablePrivateAddress");
+  Serial.print("local_identity=");
+  printBleAddress(localIdentity.addr);
+  Serial.println();
   Serial.print("local_irk=");
   printHex16(irk);
   Serial.println();
@@ -111,8 +122,10 @@ void setup() {
   Serial.println();
   Serial.print("rotation_ms=");
   Serial.println(kDemoRpaRotationMs);
+  Serial.print("privacy_enabled=");
+  Serial.println(privacyOk && Bluefruit.Security.privacyEnabled() ? "yes" : "no");
   Serial.print("result=");
-  Serial.println((irkOk && generateOk && resolveOk && resolved &&
+  Serial.println((identityOk && irkOk && generateOk && resolveOk && resolved &&
                   resolvedIndex == 0U && addListOk && listResolveOk &&
                   listResolved && listResolvedIndex == 0U && rotationOk)
                      ? "PASS"

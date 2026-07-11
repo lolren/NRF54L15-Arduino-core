@@ -48,8 +48,21 @@ namespace {
 #if !defined(BLE_PAIR_AUTO_ACCEPT_PROMPTS)
 #define BLE_PAIR_AUTO_ACCEPT_PROMPTS 1
 #endif
+
+#if !defined(BLE_PAIR_PROMPT_REPLY_DELAY_MS)
+#define BLE_PAIR_PROMPT_REPLY_DELAY_MS 0
+#endif
+#if !defined(BLE_PAIR_USE_PRIVACY)
+#define BLE_PAIR_USE_PRIVACY 0
+#endif
+#if !defined(BLE_PAIR_PRIVACY_ROTATION_MS)
+#define BLE_PAIR_PRIVACY_ROTATION_MS 5000UL
+#endif
 #if BLE_PAIR_USE_STATIC_PIN && BLE_PAIR_USE_NUMERIC_COMPARISON
 #error "BLE_PAIR_USE_STATIC_PIN and BLE_PAIR_USE_NUMERIC_COMPARISON are mutually exclusive"
+#endif
+#if BLE_PAIR_USE_PRIVACY && (BLE_PAIR_USE_STATIC_PIN || BLE_PAIR_USE_NUMERIC_COMPARISON)
+#error "BLE_PAIR_USE_PRIVACY is a separate release-gate mode"
 #endif
 
 constexpr uint8_t kIoCapDisplayOnly = 0x00U;
@@ -68,6 +81,7 @@ constexpr int8_t kTxPowerDbm = 0;
 constexpr uint32_t kStatusMs = 3000U;
 constexpr uint32_t kNotifyMs = 4000U;
 constexpr uint32_t kPairRetryMs = 3000U;
+constexpr uint32_t kInitialPairDelayMs = 500U;
 constexpr uint32_t kConnectionPollUs = 450000UL;
 constexpr uint16_t kTestConnIntervalUnits = 24U;
 constexpr uint16_t kTestConnTimeoutUnits = 1000U;
@@ -84,7 +98,9 @@ constexpr uint16_t kTestConnTimeoutUnits = 1000U;
 #define BLE_PAIR_CENTRAL_WRITE_WITH_RESPONSE 0
 #endif
 #if !defined(BLE_PAIR_ENABLE_BACKGROUND_CONN_SERVICE)
-#define BLE_PAIR_ENABLE_BACKGROUND_CONN_SERVICE 1
+// Pairing uses an explicit foreground poll loop. Letting the background
+// service consume setup packets can race the SMP Secure Connections exchange.
+#define BLE_PAIR_ENABLE_BACKGROUND_CONN_SERVICE 0
 #endif
 #if !defined(BLE_PAIR_VERBOSE_LINK_LOGS)
 #define BLE_PAIR_VERBOSE_LINK_LOGS 0
@@ -130,12 +146,23 @@ uint32_t g_lastSecurityRequestMs = 0U;
 bool g_prevConnected = false;
 bool g_prevEncrypted = false;
 bool g_centralSeen = false;
+bool g_dataLengthRequestIssued = false;
 char g_traceBuffer[kTraceBufferDepth][kTraceBufferEntryLen] = {};
 uint8_t g_traceBufferHead = 0U;
 uint8_t g_traceBufferCount = 0U;
 uint8_t g_lastPromptPasskey[6] = {0};
 bool g_lastPromptValid = false;
 bool g_lastPromptMatchRequest = false;
+uint32_t g_promptFirstSeenMs = 0U;
+#if BLE_PAIR_USE_PRIVACY
+uint8_t g_privacyIdentity[6] = {0};
+uint8_t g_privacyIrk[16] = {0};
+uint8_t g_privacyRpa[6] = {0};
+bool g_privacyIdInfoSeen = false;
+bool g_privacyIdAddressSeen = false;
+bool g_privacyBondAarSeen = false;
+bool g_privacyBondPrimedSeen = false;
+#endif
 
 extern "C" {
 extern volatile uint32_t g_ble_central_posttx_observe_count;
@@ -163,7 +190,9 @@ extern volatile uint16_t g_ble_periph_tx_trace_cid[32];
 
 // ─── Bond persistence ─────────────────────────────────────────
 
-#if BLE_PAIR_USE_NUMERIC_COMPARISON
+#if BLE_PAIR_USE_PRIVACY
+static constexpr char kNs[] = "ble_pair_priv";
+#elif BLE_PAIR_USE_NUMERIC_COMPARISON
 static constexpr char kNs[] = "ble_pair_nc";
 #elif BLE_PAIR_USE_STATIC_PIN
 static constexpr char kNs[] = "ble_pair_pin";
@@ -196,7 +225,7 @@ bool clearBondStored(void*) {
 
 // ─── Peripheral: GATT write handler ──────────────────────────
 
-void onGattWrite(uint16_t h, const uint8_t* d, uint8_t n, bool, void*) {
+void onGattWrite(uint16_t h, const uint8_t* d, uint16_t n, bool, void*) {
   if (h != g_writeHandle || !d) return;
   Serial.print("ble_pair gatt-write val=");
   if (n == 1U) {
@@ -224,6 +253,7 @@ void clearPromptState() {
   memset(g_lastPromptPasskey, 0, sizeof(g_lastPromptPasskey));
   g_lastPromptValid = false;
   g_lastPromptMatchRequest = false;
+  g_promptFirstSeenMs = 0U;
 }
 
 void printPasskey(const uint8_t passkey[6]) {
@@ -253,10 +283,21 @@ void servicePairingPrompt() {
     printPasskey(passkey);
     Serial.print(" auto=");
     Serial.println(kAutoAcceptSecurityPrompts ? 1 : 0);
+    memcpy(g_lastPromptPasskey, passkey, sizeof(g_lastPromptPasskey));
+    g_lastPromptValid = true;
+    g_lastPromptMatchRequest = matchRequest;
+    g_promptFirstSeenMs = millis();
   }
 
+#if BLE_PAIR_PROMPT_REPLY_DELAY_MS > 0
+  if ((millis() - g_promptFirstSeenMs) <
+      static_cast<unsigned long>(BLE_PAIR_PROMPT_REPLY_DELAY_MS)) {
+    return;
+  }
+#endif
+
   const bool accept = kAutoAcceptSecurityPrompts;
-  if (g_ble.replyPendingPairingPasskey(accept) && !repeated) {
+  if (g_ble.replyPendingPairingPasskey(accept)) {
     Serial.print("ble_pair prompt-");
     if (matchRequest) {
       Serial.println(accept ? "accepted" : "rejected");
@@ -265,9 +306,6 @@ void servicePairingPrompt() {
     }
   }
 
-  memcpy(g_lastPromptPasskey, passkey, sizeof(g_lastPromptPasskey));
-  g_lastPromptValid = true;
-  g_lastPromptMatchRequest = matchRequest;
 }
 
 void servicePairingFailure() {
@@ -285,6 +323,7 @@ void servicePairingFailure() {
 void printStatus() {
   const bool connected = g_ble.isConnected();
   const bool encrypted = g_ble.isConnectionEncrypted();
+  const bool authenticated = g_ble.isConnectionAuthenticated();
   const bool bonded = g_ble.hasBondRecord();
 
   Serial.print("ble_pair role=");
@@ -293,6 +332,8 @@ void printStatus() {
   Serial.print(connected?1:0);
   Serial.print(" enc=");
   Serial.print(encrypted?1:0);
+  Serial.print(" auth=");
+  Serial.print(authenticated?1:0);
   Serial.print(" bond=");
   Serial.print(bonded?1:0);
   Serial.print(" notif=");
@@ -327,6 +368,36 @@ void printHexBytes(const uint8_t* data, size_t len) {
     Serial.print(data[i], HEX);
   }
 }
+
+#if BLE_PAIR_USE_PRIVACY
+bool configurePrivacy() {
+  const bool identityOk = g_ble.getLocalIdentityAddress(g_privacyIdentity);
+  const bool irkOk = g_ble.getLocalIdentityIrk(g_privacyIrk);
+  const bool rotationOk = irkOk && g_ble.enableResolvablePrivateAddressRotation(
+      g_privacyIrk, BLE_PAIR_PRIVACY_ROTATION_MS, true, g_privacyRpa);
+  Serial.print("ble_pair PRIVACY_ENABLED local_identity=");
+  printAddr(g_privacyIdentity);
+  Serial.print(" active_rpa=");
+  printAddr(g_privacyRpa);
+  Serial.print(" rotation_ms=");
+  Serial.println(BLE_PAIR_PRIVACY_ROTATION_MS);
+  Serial.print("ble_pair local_irk=");
+  printHexBytes(g_privacyIrk, sizeof(g_privacyIrk));
+  Serial.println();
+  return identityOk && irkOk && rotationOk;
+}
+
+void printPrivacyEvidence() {
+  Serial.print("ble_pair privacy_evidence id_info=");
+  Serial.print(g_privacyIdInfoSeen ? 1 : 0);
+  Serial.print(" id_addr=");
+  Serial.print(g_privacyIdAddressSeen ? 1 : 0);
+  Serial.print(" bond_aar=");
+  Serial.print(g_privacyBondAarSeen ? 1 : 0);
+  Serial.print(" bond_primed=");
+  Serial.println(g_privacyBondPrimedSeen ? 1 : 0);
+}
+#endif
 
 void printHex64(uint64_t value) {
   for (int i = 15; i >= 0; --i) {
@@ -583,6 +654,16 @@ void printEncDiag() {
   Serial.print(dbg.encLastTxWasFresh);
   Serial.print(" tx_enc=");
   Serial.print(dbg.encLastTxWasEncrypted);
+  Serial.print(" fail_hdr=0x");
+  if (dbg.encRxLastMicFailHdr < 16U) Serial.print('0');
+  Serial.print(dbg.encRxLastMicFailHdr, HEX);
+  Serial.print(" fail_len=");
+  Serial.print(dbg.encRxLastMicFailLenRaw);
+  Serial.print(" fail_ctr=");
+  Serial.print(dbg.encRxLastMicFailCounterLo);
+  Serial.print(" fail_state=0x");
+  if (dbg.encRxLastMicFailState < 16U) Serial.print('0');
+  Serial.print(dbg.encRxLastMicFailState, HEX);
   Serial.println();
 }
 
@@ -637,7 +718,16 @@ void dumpTraceBuffer() {
   }
 }
 
-void onBleTrace(const char* message, void*) { appendTraceBuffer(message); }
+void onBleTrace(const char* message, void*) {
+  appendTraceBuffer(message);
+#if BLE_PAIR_USE_PRIVACY
+  if (message == nullptr) return;
+  if (strcmp(message, "SMP_ID_INFO_RX") == 0) g_privacyIdInfoSeen = true;
+  if (strcmp(message, "SMP_ID_ADDR_RX") == 0) g_privacyIdAddressSeen = true;
+  if (strcmp(message, "BOND_AAR_RESOLVED") == 0) g_privacyBondAarSeen = true;
+  if (strcmp(message, "BOND_PRIMED") == 0) g_privacyBondPrimedSeen = true;
+#endif
+}
 
 void printKeyProbe() {
   Secp256r1Scalar priv{};
@@ -821,6 +911,9 @@ void handleCmd(const char* c) {
   if (strcmp(c,"disc")==0) { printDisconnectDebug(); return; }
   if (strcmp(c,"trace")==0) { dumpTraceBuffer(); return; }
   if (strcmp(c,"keyprobe")==0) { printKeyProbe(); return; }
+#if BLE_PAIR_USE_PRIVACY
+  if (strcmp(c,"privacy")==0) { printPrivacyEvidence(); return; }
+#endif
   if (strcmp(c,"clear")==0) {
     g_ble.clearBondRecord(true);
     Serial.println("ble_pair bond-cleared");
@@ -848,14 +941,40 @@ void pollCmds() {
 
 // ─── Central: scan helper ────────────────────────────────────
 
-bool scanForPeer(uint8_t peerAddr[6], bool* addrRandom) {
+bool scanResultHasExpectedName(const BleActiveScanResult& result);
+
+[[maybe_unused]] bool scanForPeer(uint8_t peerAddr[6], bool* addrRandom) {
   BleActiveScanResult r;
-  if (g_ble.scanActiveCycle(&r, 300000UL, 300000UL)) {
+  if (g_ble.scanActiveCycle(&r, 300000UL, 300000UL) &&
+      scanResultHasExpectedName(r)) {
     memcpy(peerAddr, r.advertiserAddress, 6);
     *addrRandom = r.advertiserAddressRandom;
     return true;
   }
   return false;
+}
+
+bool adDataHasExpectedName(const uint8_t* data, uint8_t length) {
+  if (data == nullptr) return false;
+  for (uint8_t offset = 0U; offset < length;) {
+    const uint8_t fieldLength = data[offset];
+    if (fieldLength == 0U) break;
+    const uint16_t next = static_cast<uint16_t>(offset) + fieldLength + 1U;
+    if (next > length) return false;
+    if (fieldLength > 1U &&
+        (data[offset + 1U] == 0x08U || data[offset + 1U] == 0x09U) &&
+        static_cast<size_t>(fieldLength - 1U) == strlen(kAdvName) &&
+        memcmp(&data[offset + 2U], kAdvName, fieldLength - 1U) == 0) {
+      return true;
+    }
+    offset = static_cast<uint8_t>(next);
+  }
+  return false;
+}
+
+bool scanResultHasExpectedName(const BleActiveScanResult& result) {
+  return adDataHasExpectedName(result.advData(), result.advDataLength()) ||
+         adDataHasExpectedName(result.scanRspData(), result.scanRspDataLength());
 }
 
 }  // namespace
@@ -885,6 +1004,13 @@ void setup() {
   g_ble.setBackgroundConnectionServiceEnabled(kEnableBackgroundConnService);
   g_ble.setTraceCallback(onBleTrace, nullptr);
   g_ble.loadAddressFromFicr(true);
+#if BLE_PAIR_USE_PRIVACY
+  if (!configurePrivacy()) {
+    Serial.println("ble_pair FATAL: privacy init failed");
+    return;
+  }
+#endif
+  g_ble.setCentralPreferredDataLength(251U);
   g_ble.setBondPersistenceCallbacks(loadBond, saveBond, clearBondStored, nullptr);
 #if BLE_PAIR_USE_NUMERIC_COMPARISON
   g_ble.setSecurityFixedPasskey(nullptr);
@@ -1024,6 +1150,10 @@ void loop() {
         clearTraceBuffer();
         Serial.println("ble_pair central: connected");
         g_centralSeen = true;
+        g_dataLengthRequestIssued = g_ble.requestDataLengthUpdate();
+        g_lastSecurityRequestMs = millis();
+        Serial.print("ble_pair central: request-data-length=");
+        Serial.println(g_dataLengthRequestIssued ? "1" : "0");
         g_ble.setPreferredConnectionParameters(kTestConnIntervalUnits,
                                                kTestConnIntervalUnits,
                                                0U,
@@ -1035,6 +1165,7 @@ void loop() {
         printControllerTraceRing();
         printDisconnectDebug();
         g_centralSeen = false;
+        g_dataLengthRequestIssued = false;
         g_ble.clearEncryptionDebugCounters();
       }
     }
@@ -1050,7 +1181,8 @@ void loop() {
       if ((millis() - g_lastScan) >= 500U) {
         g_lastScan = millis();
         BleActiveScanResult r;
-        if (g_ble.scanActiveCycle(&r, 300000UL, 300000UL)) {
+        if (g_ble.scanActiveCycle(&r, 300000UL, 300000UL) &&
+            scanResultHasExpectedName(r)) {
           Serial.print("ble_pair central: found rssi=");
           Serial.print(r.advRssiDbm);
           Serial.print("dBm connecting... ");
@@ -1067,7 +1199,9 @@ void loop() {
       }
     } else {
       if (!encrypted) {
-        if ((millis() - g_lastSecurityRequestMs) >= kPairRetryMs) {
+        if ((millis() - g_lastSecurityRequestMs) >=
+            ((g_lastSecurityRequestMs == 0U) ? kInitialPairDelayMs
+                                              : kPairRetryMs)) {
           g_lastSecurityRequestMs = millis();
           bool queued = g_ble.requestPairing();
           Serial.print("ble_pair central: request-pairing=");

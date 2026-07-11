@@ -11,8 +11,8 @@
  *   - Reading duty and frequency info
  *   - Event-driven period counting
  *
- * Hardware: XIAO nRF54L15
- * Pin:      P0.28 (GRTC PWM output)
+ * Hardware: Board variant exposing PIN_GRTC_PWM
+ * Pin:      P0.03 (GRTC PWM output)
  * Serial:   115200 baud
  */
 
@@ -20,6 +20,10 @@
 #include "nrf54l15_hal.h"
 
 using namespace xiao_nrf54l15;
+
+#if !defined(PIN_GRTC_PWM)
+#error "This board variant must expose PIN_GRTC_PWM for the fixed P0.03 GRTC PWM output."
+#endif
 
 void setup() {
   Serial.begin(115200);
@@ -41,23 +45,22 @@ void setup() {
 
   // Check if GRTC PWM is supported on this board
   Serial.println(F("--- Pin Support Check ---"));
-  bool p28Supported = pwm.supportsPin({0, 28});
-  Serial.print(F("  P0.28 supported: "));
-  Serial.println(p28Supported ? F("Yes") : F("No"));
+  const bool grtcPwmSupported = pwm.supportsArduinoPin(PIN_GRTC_PWM);
+  Serial.print(F("  PIN_GRTC_PWM / P0.03 supported: "));
+  Serial.println(grtcPwmSupported ? F("Yes") : F("No"));
   Serial.println();
 
-  if (!p28Supported) {
+  if (!grtcPwmSupported) {
     Serial.println(F("  GRTC PWM pin not available on this board."));
-    Serial.println(F("  (XIAO nRF54L15: check datasheet for GRTC PWM pin)"));
   } else {
     // Start PWM at 50% duty
     Serial.println(F("--- Starting PWM at 50% Duty ---"));
-    bool ok = pwm.begin({0, 28}, 128);  // 128/256 = 50%
+    bool ok = pwm.beginArduinoPin(PIN_GRTC_PWM, 128);  // 128/256 = 50%
     Serial.print(F("  begin() result: "));
     Serial.println(ok ? F("OK") : F("FAIL"));
 
     if (ok) {
-      Serial.println(F("  PWM running on P0.28 at 50% duty"));
+      Serial.println(F("  PWM running on PIN_GRTC_PWM / P0.03 at 50% duty"));
       Serial.println();
 
       // Sweep duty cycle from 0% to 100% in 10 steps

@@ -1956,6 +1956,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionPendingTxLlid_ = 0x01U;
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
+  connectionPendingTxSmpFragment_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
   clearPendingL2capTxFragment();
   connectionUpdatePending_ = false;
@@ -1988,6 +1989,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   clearQueuedConnectionEvents();
   clearCustomGattConnectionState();
   clearConnectionSecurityState();
+  smpTimedOutForConnection_ = false;
   smpPairingFailureReasonPending_ = false;
   smpLastPairingFailureReason_ = 0U;
   smpPrefetchedLocalRandomValid_ = false;
@@ -2113,6 +2115,7 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   connectionPendingTxLlid_ = 0x01U;
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
+  connectionPendingTxSmpFragment_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
   clearPendingL2capTxFragment();
   connectionUpdatePending_ = false;
@@ -2140,6 +2143,7 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   clearQueuedConnectionEvents();
   clearCustomGattConnectionState();
   clearConnectionSecurityState();
+  smpTimedOutForConnection_ = false;
   smpPairingFailureReasonPending_ = false;
   smpLastPairingFailureReason_ = 0U;
   smpPrefetchedLocalRandomValid_ = false;

@@ -1,3 +1,47 @@
+namespace {
+
+bool localHasPeerSecureConnectionsOobData(bool localInitiator,
+                                          const uint8_t pairingReq[7],
+                                          const uint8_t pairingRsp[7]) {
+  // The OOB flag means "I have the peer's OOB authentication data". It does
+  // not advertise locally generated OOB data.
+  return localInitiator ? (pairingReq[2] != 0U) : (pairingRsp[2] != 0U);
+}
+
+bool peerHasLocalSecureConnectionsOobData(bool localInitiator,
+                                          const uint8_t pairingReq[7],
+                                          const uint8_t pairingRsp[7]) {
+  return localInitiator ? (pairingRsp[2] != 0U) : (pairingReq[2] != 0U);
+}
+
+bool validateSecureConnectionsOobCommitment(
+    const uint8_t peerPublicKey[65], const BleOobData& remoteOob) {
+  uint8_t expectedConfirm[16] = {0};
+  return bleSecureConnectionsF4(&peerPublicKey[1], &peerPublicKey[1],
+                                remoteOob.r, 0x00U, expectedConfirm) &&
+         (memcmp(expectedConfirm, remoteOob.c, sizeof(expectedConfirm)) == 0);
+}
+
+void invalidateSecureConnectionsKeypairAndOob(
+    bool& localKeyReady, bool& localKeyInProgress,
+    uint8_t (&privateKey)[32], uint8_t (&publicKey)[65],
+    bool& localOobValid, bool& remoteOobValid,
+    BleOobData& localOob, BleOobData& remoteOob) {
+  localKeyReady = false;
+  localKeyInProgress = false;
+  memset(privateKey, 0, sizeof(privateKey));
+  memset(publicKey, 0, sizeof(publicKey));
+
+  // c is bound to the retired public key, and the peer is required to retire
+  // its key after this pairing attempt too. Never reuse either OOB payload.
+  localOobValid = false;
+  remoteOobValid = false;
+  memset(&localOob, 0, sizeof(localOob));
+  memset(&remoteOob, 0, sizeof(remoteOob));
+}
+
+}  // namespace
+
 bool BleRadio::buildAttErrorResponse(uint8_t requestOpcode, uint16_t handle,
                                      uint8_t errorCode, uint8_t* outAttResponse,
                                      uint16_t* outAttResponseLength) const {
@@ -1961,6 +2005,8 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
     return false;
   }
 
+  serviceSmpTimer();
+
   const uint16_t declaredL2capLength = readLe16(&l2capPayload[0]);
   const uint16_t cid = readLe16(&l2capPayload[2]);
   if (cid != kBleL2capCidSmp) {
@@ -2004,44 +2050,47 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
     latchSecureConnectionsDebugState();
     smpPairingFailureReasonPending_ = true;
     smpLastPairingFailureReason_ = reason;
-    clearConnectionSecurityState();
     uint8_t failed[2] = {kSmpCodePairingFailed, reason};
+    const bool built = buildSmpResponse(failed, sizeof(failed));
+    invalidateSecureConnectionsKeypairAndOob(
+        smpSecureConnectionsLocalKeyReady_,
+        smpSecureConnectionsLocalKeyInProgress_,
+        smpSecureConnectionsPrivateKey_, smpSecureConnectionsPublicKey_,
+        smpOobDataLocalValid_, smpOobDataRemoteValid_, smpOobLocal_,
+        smpOobRemote_);
+    clearSmpSecurityState();
     emitBleTrace("SMP_PAIRING_FAILED");
-    return buildSmpResponse(failed, sizeof(failed));
+    return built;
   };
-  auto completeSmpKeyDistributionIfDone = [&]() {
-    if (smpPairingState_ == kSmpPairingStateIdle ||
-        !connectionEncSessionValid_ ||
-        !connectionEncRxEnabled_) {
-      return;
+  if (smpTimedOutForConnection_) {
+    return false;
+  }
+  if (smpCode == kSmpCodePairingRequest ||
+      smpCode == kSmpCodeSecurityRequest) {
+    if (smpBackoffActiveForCurrentPeer()) {
+      smpPairingFailureReasonPending_ = true;
+      smpLastPairingFailureReason_ = kSmpReasonRepeatedAttempts;
+      const uint8_t repeatedAttempts[2] = {
+          kSmpCodePairingFailed, kSmpReasonRepeatedAttempts};
+      emitBleTrace("SMP_REPEATED_ATTEMPTS");
+      return buildSmpResponse(repeatedAttempts, sizeof(repeatedAttempts));
     }
-
-    const bool initiatorEncDone =
-        !smpExpectInitiatorEncKey_ ||
-        (smpPeerLtkValid_ && !smpPeerLtkAwaitMasterId_);
-    const bool initiatorIdDone =
-        !smpExpectInitiatorIdKey_ ||
-        (smpPeerIrkValid_ && smpPeerIdentityAddressValid_);
-    const bool responderIdDone =
-        !smpDistributeResponderIdKey_ ||
-        (smpResponderIdInfoSent_ && smpResponderIdAddressSent_);
-    if (initiatorEncDone && initiatorIdDone && responderIdDone) {
-      smpExpectInitiatorEncKey_ = false;
-      smpExpectInitiatorIdKey_ = false;
-      smpDistributeResponderIdKey_ = false;
-      smpResponderIdInfoSent_ = false;
-      smpResponderIdAddressSent_ = false;
-      smpPairingState_ = kSmpPairingStateIdle;
-      armConnectionResyncWindow(kBleConnResyncExtraListenUs, 16U);
-      emitBleTrace("SMP_KEY_DIST_DONE");
-    }
-  };
+    restartSmpTimer();
+  }
   if (smpCode == kSmpCodePairingFailed) {
     latchSecureConnectionsDebugState();
     smpPairingFailureReasonPending_ = true;
     smpLastPairingFailureReason_ =
         (smpLength >= 2U) ? smp[1] : kSmpReasonUnspecified;
-    clearConnectionSecurityState();
+    noteSmpPairingFailure(smpLastPairingFailureReason_);
+    stopSmpTimer();
+    invalidateSecureConnectionsKeypairAndOob(
+        smpSecureConnectionsLocalKeyReady_,
+        smpSecureConnectionsLocalKeyInProgress_,
+        smpSecureConnectionsPrivateKey_, smpSecureConnectionsPublicKey_,
+        smpOobDataLocalValid_, smpOobDataRemoteValid_, smpOobLocal_,
+        smpOobRemote_);
+    clearSmpSecurityState();
     emitBleTrace("SMP_PAIRING_FAILED_RX");
     return false;
   }
@@ -2064,18 +2113,37 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       const uint8_t maxKeySize = smp[4];
       const bool peerRequestedSecureConnections =
           (smp[3] & kSmpAuthReqSecureConnectionsMask) != 0U;
-      const bool localOobReady = smpOobEnabled_ && smpOobDataLocalValid_ &&
-                                 smpOobDataRemoteValid_ &&
-                                 peerRequestedSecureConnections;
-      if (oobFlag != 0x00U && !localOobReady) {
+      if (oobFlag > 0x01U) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      const bool peerHasLocalOobData = oobFlag != 0x00U;
+      const bool localHasPeerOobData =
+          smpOobEnabled_ && smpOobDataRemoteValid_ &&
+          peerRequestedSecureConnections;
+      if (smpOobEnabled_ && !smpOobDataLocalValid_ &&
+          !smpOobDataRemoteValid_) {
+        return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+      }
+      if (!peerRequestedSecureConnections && smpOobEnabled_ &&
+          (smpOobDataLocalValid_ || smpOobDataRemoteValid_)) {
+        // This API carries LE SC r/c values, not a legacy 128-bit TK.
+        return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+      }
+      if (peerHasLocalOobData &&
+          (!peerRequestedSecureConnections || !smpOobEnabled_ ||
+           !smpOobDataLocalValid_)) {
         return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
       }
       if (maxKeySize < 7U || maxKeySize > 16U) {
         return buildSmpPairingFailed(kSmpReasonEncryptionKeySize);
       }
+      if (connectionEncSessionValid_ || connectionEncRxEnabled_ ||
+          connectionEncTxEnabled_) {
+        return buildSmpPairingFailed(kSmpReasonPairingNotSupported);
+      }
 
       const bool replacingPrimedBond = bondKeyPrimedForConnection_;
-      clearConnectionSecurityState();
+      clearSmpSecurityState();
       if (replacingPrimedBond && bondRecordValid_) {
         // Keep the old bond until replacement pairing succeeds. Some Android
         // stacks retry pairing after a clean disconnect; erasing the previous
@@ -2108,13 +2176,15 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpLastPairingFailureReason_ = 0U;
       smpPairingRsp_[0] = kSmpCodePairingResponse;
       smpPairingRsp_[1] = smpLocalIoCapabilities_;
-      smpPairingRsp_[2] = (oobFlag != 0x00U && localOobReady) ? 0x01U : 0x00U;
+      // The response flag reports remote data already held by this device.
+      // The request flag independently reports whether the peer holds ours.
+      smpPairingRsp_[2] = localHasPeerOobData ? 0x01U : 0x00U;
       const uint8_t peerBonding = smp[3] & kSmpAuthReqBondingMask;
       const bool peerRequestedMitm =
           (smp[3] & kSmpAuthReqMitmMask) != 0U;
       smpPairingRsp_[3] = (peerBonding != 0U) ? 0x01U : 0x00U;
       if ((peerRequestedMitm &&
-           (localOobReady ||
+           ((peerHasLocalOobData || localHasPeerOobData) ||
             smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput)) ||
           smpPairingRsp_[2] != 0x00U) {
         smpPairingRsp_[3] |= kSmpAuthReqMitmMask;
@@ -2125,42 +2195,56 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       uint8_t responderKeyDist = 0x00U;
       if (smpBondingRequested_) {
         initiatorKeyDist = static_cast<uint8_t>(
-            smp[5] &
-            static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
-                                 kSmpKeyDistIdKeyMask |
-                                 kSmpKeyDistSignKeyMask));
+            smp[5] & static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
+                                          kSmpKeyDistIdKeyMask));
         responderKeyDist = static_cast<uint8_t>(
-            smp[6] &
-            static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
-                                 kSmpKeyDistIdKeyMask |
-                                 kSmpKeyDistSignKeyMask));
+            smp[6] & static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
+                                          kSmpKeyDistIdKeyMask));
+        // This host has no independent legacy responder LTK state. Do not
+        // advertise EncKey and then omit its two required PDUs.
+        responderKeyDist = static_cast<uint8_t>(
+            responderKeyDist & kSmpKeyDistIdKeyMask);
       }
       if (peerRequestedSecureConnections) {
         smpSecureConnectionsActive_ = true;
         smpPairingRsp_[3] |= kSmpAuthReqSecureConnectionsMask;
-        // LE Secure Connections derives the link key from DHKey. Keep the
-        // central identity-key request so bonded phones using RPAs can be
-        // resolved after reset. Local responder ID distribution is disabled
-        // until its timing is fully validated; advertising it without sending
-        // promptly leaves Android waiting in the pairing procedure.
+        // LE Secure Connections derives the link key from DHKey. Identity
+        // keys remain bidirectional so either role can resolve a bonded RPA.
         initiatorKeyDist = static_cast<uint8_t>(
             smp[5] & kSmpKeyDistIdKeyMask);
-        responderKeyDist = 0U;
+        responderKeyDist = static_cast<uint8_t>(
+            smp[6] & kSmpKeyDistIdKeyMask);
+      }
+      if (!localIdentityDistributionAvailable()) {
+        responderKeyDist = static_cast<uint8_t>(
+            responderKeyDist & ~kSmpKeyDistIdKeyMask);
       }
       smpPairingRsp_[5] = initiatorKeyDist;
       smpPairingRsp_[6] = responderKeyDist;
-      smpExpectInitiatorEncKey_ = peerRequestedSecureConnections
+      smpExpectPeerEncKey_ = peerRequestedSecureConnections
                                       ? false
                                       : ((smpPairingRsp_[5] &
                                           kSmpKeyDistEncKeyMask) != 0U);
-      smpExpectInitiatorIdKey_ = ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
-      smpDistributeResponderIdKey_ =
+      smpExpectPeerIdKey_ = ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
+      smpDistributeLocalIdKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
-      smpResponderIdInfoSent_ = false;
-      smpResponderIdAddressSent_ = false;
+      smpLocalIdInfoSent_ = false;
+      smpLocalIdAddressSent_ = false;
+      smpLocalIdAddressAcked_ = false;
       smpKeySize_ = maxKeySize;
       if (peerRequestedSecureConnections) {
         const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
+        if ((smpPairingRsp_[3] & kSmpAuthReqMitmMask) != 0U &&
+            pairAlg == kSmpScPairAlgJustWorks) {
+          emitBleTrace("SMP_SC_AUTH_REQUIREMENTS");
+          return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+        }
+        if (smpOobEnabled_ &&
+            (smpOobDataLocalValid_ || smpOobDataRemoteValid_) &&
+            pairAlg != kSmpScPairAlgOob) {
+          emitBleTrace("SMP_SC_OOB_INCONSISTENT");
+          return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+        }
         if (!secureConnectionsPairAlgorithmSupported(pairAlg)) {
           emitBleTrace("SMP_SC_ALG_UNSUPPORTED");
           return buildSmpPairingFailed(
@@ -2244,6 +2328,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       memset(smpSecureConnectionsReceivedDhKeyCheck_, 0,
              sizeof(smpSecureConnectionsReceivedDhKeyCheck_));
 
+      const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
+      if (pairAlg == kSmpScPairAlgOob &&
+          localHasPeerSecureConnectionsOobData(
+              smpLocalInitiator_, smpPairingReq_, smpPairingRsp_)) {
+        if (!smpOobDataRemoteValid_ ||
+            !validateSecureConnectionsOobCommitment(
+                smpSecureConnectionsPeerPublicKey_, smpOobRemote_)) {
+          emitBleTrace("SMP_SC_OOB_CONFIRM_FAILED");
+          return buildSmpPairingFailed(kSmpReasonConfirmValueFailed);
+        }
+        emitBleTrace("SMP_SC_OOB_CONFIRM_OK");
+      }
+
       if (!smpSecureConnectionsLocalKeyReady_) {
         smpSecureConnectionsDeferredPublicKey_ = true;
         return false;
@@ -2260,8 +2357,13 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
 
       emitBleTrace("SMP_SC_PUBKEY_RX");
       if (smpLocalInitiator_) {
-        smpSecureConnectionsDeferredConfirm_ =
-            secureConnectionsInitiatorTransmitsConfirm();
+        if (pairAlg == kSmpScPairAlgOob) {
+          smpSecureConnectionsDeferredConfirm_ = false;
+          smpSecureConnectionsDeferredRandom_ = true;
+        } else {
+          smpSecureConnectionsDeferredConfirm_ =
+              secureConnectionsInitiatorTransmitsConfirm();
+        }
         if (buildLocalSecureConnectionsPublicKeyResponse()) {
           return true;
         }
@@ -2272,7 +2374,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
 
       smpSecureConnectionsDeferredConfirm_ =
-          !secureConnectionsInitiatorTransmitsConfirm();
+          (pairAlg == kSmpScPairAlgOob)
+              ? false
+              : !secureConnectionsInitiatorTransmitsConfirm();
       if (buildLocalSecureConnectionsPublicKeyResponse()) {
         return true;
       }
@@ -2283,6 +2387,13 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
     case kSmpCodePairingConfirm: {
       if (smpLength != kSmpPairingConfirmLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (smpSecureConnectionsActive_ &&
+          resolveCurrentSecureConnectionsPairAlgorithm() ==
+              kSmpScPairAlgOob) {
+        // LE SC OOB commitments are exchanged through the OOB channel. The
+        // in-band phase starts with Pairing Random (Na/Nb), not Pairing Confirm.
+        return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
       const bool expectingResponderConfirm =
           smpLocalInitiator_ &&
@@ -2352,54 +2463,48 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       const bool expectingResponderRandom =
           smpLocalInitiator_ &&
           (smpPairingState_ == kSmpPairingStateRandomSent);
+      const uint8_t incomingPairAlg =
+          smpSecureConnectionsActive_
+              ? resolveCurrentSecureConnectionsPairAlgorithm()
+              : kSmpScPairAlgJustWorks;
+      const bool expectingOobInitiatorRandom =
+          !smpLocalInitiator_ && smpSecureConnectionsActive_ &&
+          incomingPairAlg == kSmpScPairAlgOob &&
+          smpPairingState_ == kSmpPairingStateRspSent &&
+          smpSecureConnectionsPeerPublicKeyValid_ &&
+          smpSecureConnectionsPublicKeySent_;
       if (smpPairingState_ != kSmpPairingStateConfirmSent &&
-          !expectingResponderRandom) {
+          !expectingResponderRandom && !expectingOobInitiatorRandom) {
         return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
 
       memcpy(smpPeerRandom_, &smp[1], sizeof(smpPeerRandom_));
       if (smpSecureConnectionsActive_) {
-        const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
+        const uint8_t pairAlg = incomingPairAlg;
         const bool requireLocalConfirmSent =
-            !smpLocalInitiator_ || secureConnectionsInitiatorTransmitsConfirm();
+            pairAlg != kSmpScPairAlgOob &&
+            (!smpLocalInitiator_ ||
+             secureConnectionsInitiatorTransmitsConfirm());
         if (requireLocalConfirmSent && !smpSecureConnectionsConfirmSent_) {
           return buildSmpPairingFailed(kSmpReasonUnspecified);
         }
 
-        if (smpLocalInitiator_ || secureConnectionsResponderVerifiesRandom()) {
+        if (pairAlg != kSmpScPairAlgOob &&
+            (smpLocalInitiator_ ||
+             secureConnectionsResponderVerifiesRandom())) {
           uint8_t expectedRemoteConfirm[16] = {0};
           uint8_t confirmZ = 0U;
-          if (pairAlg == kSmpScPairAlgOob) {
-            if (!smpOobDataRemoteValid_) {
-              return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+          if (pairAlg == kSmpScPairAlgPasskey) {
+            if (!prepareSecureConnectionsPasskey()) {
+              return buildSmpPairingFailed(kSmpReasonAuthRequirements);
             }
-            if (memcmp(smpPeerRandom_, smpOobRemote_.r,
-                       sizeof(smpPeerRandom_)) != 0) {
-              return buildSmpPairingFailed(kSmpReasonConfirmValueFailed);
-            }
-            if (!bleSecureConnectionsF4(&smpSecureConnectionsPeerPublicKey_[1],
-                                        &smpSecureConnectionsPeerPublicKey_[1],
-                                        smpPeerRandom_, 0x00U,
-                                        expectedRemoteConfirm)) {
-              return buildSmpPairingFailed(kSmpReasonUnspecified);
-            }
-            if (memcmp(expectedRemoteConfirm, smpOobRemote_.c,
-                       sizeof(expectedRemoteConfirm)) != 0) {
-              return buildSmpPairingFailed(kSmpReasonConfirmValueFailed);
-            }
-          } else {
-            if (pairAlg == kSmpScPairAlgPasskey) {
-              if (!prepareSecureConnectionsPasskey()) {
-                return buildSmpPairingFailed(kSmpReasonAuthRequirements);
-              }
-              confirmZ = secureConnectionsPasskeyRoundZ();
-            }
-            if (!bleSecureConnectionsF4(&smpSecureConnectionsPeerPublicKey_[1],
-                                        &smpSecureConnectionsPublicKey_[1],
-                                        smpPeerRandom_, confirmZ,
-                                        expectedRemoteConfirm)) {
-              return buildSmpPairingFailed(kSmpReasonUnspecified);
-            }
+            confirmZ = secureConnectionsPasskeyRoundZ();
+          }
+          if (!bleSecureConnectionsF4(&smpSecureConnectionsPeerPublicKey_[1],
+                                      &smpSecureConnectionsPublicKey_[1],
+                                      smpPeerRandom_, confirmZ,
+                                      expectedRemoteConfirm)) {
+            return buildSmpPairingFailed(kSmpReasonUnspecified);
           }
           if (memcmp(expectedRemoteConfirm, smpPeerConfirm_,
                      sizeof(smpPeerConfirm_)) != 0) {
@@ -2524,6 +2629,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         if (!smpS1(tk, smpPeerRandom_, smpLocalRandom_, smpStk_)) {
           return buildSmpPairingFailed(kSmpReasonUnspecified);
         }
+        reduceSmpEncryptionKey(smpStk_);
         smpStkValid_ = true;
         connectionEncAuthenticated_ = currentPairingIsAuthenticated();
         memcpy(encDebug_.encLastStk, smpStk_, sizeof(encDebug_.encLastStk));
@@ -2536,6 +2642,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (!smpS1(tk, smpLocalRandom_, smpPeerRandom_, smpStk_)) {
         return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
+      reduceSmpEncryptionKey(smpStk_);
       smpStkValid_ = true;
       connectionEncAuthenticated_ = currentPairingIsAuthenticated();
       memcpy(encDebug_.encLastStk, smpStk_, sizeof(encDebug_.encLastStk));
@@ -2558,6 +2665,13 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       memcpy(smpSecureConnectionsReceivedDhKeyCheck_, &smp[1],
              sizeof(smpSecureConnectionsReceivedDhKeyCheck_));
       smpSecureConnectionsReceivedDhKeyCheckValid_ = true;
+      if (smpPendingUserPasskey_ && smpPendingUserPasskeyMatchRequest_ &&
+          resolveCurrentSecureConnectionsPairAlgorithm() ==
+              kSmpScPairAlgNumericComparison) {
+        smpSecureConnectionsDeferredDhKeyCheck_ = true;
+        emitBleTrace("SMP_SC_DHKEY_CHECK_WAIT_USER");
+        return false;
+      }
       if (!smpSecureConnectionsCheckValuesReady_) {
         smpSecureConnectionsDeferredDhKeyCheck_ = true;
         emitBleTrace("SMP_SC_DHKEY_CHECK_DEFERRED");
@@ -2570,12 +2684,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpLocalInitiator_) {
         smpSecureConnectionsDeferredDhKeyCheck_ = false;
         smpSecureConnectionsReceivedDhKeyCheckValid_ = false;
-        if (smpBondingRequested_ && !smpExpectInitiatorIdKey_) {
-          BleBondRecord record{};
-          if (buildCurrentBondRecord(&record)) {
-            persistBondRecord(record);
-          }
-        }
+        invalidateSecureConnectionsKeypairAndOob(
+            smpSecureConnectionsLocalKeyReady_,
+            smpSecureConnectionsLocalKeyInProgress_,
+            smpSecureConnectionsPrivateKey_, smpSecureConnectionsPublicKey_,
+            smpOobDataLocalValid_, smpOobDataRemoteValid_, smpOobLocal_,
+            smpOobRemote_);
         emitBleTrace("SMP_SC_DHKEY_CHECK_RX");
         return false;
       }
@@ -2587,12 +2701,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpSecureConnectionsDeferredDhKeyCheck_ = false;
       smpSecureConnectionsReceivedDhKeyCheckValid_ = false;
       smpSecureConnectionsDhKeyCheckSent_ = true;
-      if (smpBondingRequested_ && !smpExpectInitiatorIdKey_) {
-        BleBondRecord record{};
-        if (buildCurrentBondRecord(&record)) {
-          persistBondRecord(record);
-        }
-      }
+      invalidateSecureConnectionsKeypairAndOob(
+          smpSecureConnectionsLocalKeyReady_,
+          smpSecureConnectionsLocalKeyInProgress_,
+          smpSecureConnectionsPrivateKey_, smpSecureConnectionsPublicKey_,
+          smpOobDataLocalValid_, smpOobDataRemoteValid_, smpOobLocal_,
+          smpOobRemote_);
       emitBleTrace("SMP_SC_DHKEY_CHECK_RX");
       emitBleTrace("SMP_SC_DHKEY_CHECK_TX");
       return buildSmpResponse(localDhKeyCheck, sizeof(localDhKeyCheck));
@@ -2602,11 +2716,13 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpLength != kSmpEncryptionInformationLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (!smpBondingRequested_ || !smpExpectInitiatorEncKey_ ||
-          !connectionEncSessionValid_ || !connectionEncRxEnabled_) {
+      if (!smpBondingRequested_ || !smpExpectPeerEncKey_ ||
+          !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
+          !connectionEncTxEnabled_) {
         return false;
       }
       memcpy(smpPeerLtk_, &smp[1], sizeof(smpPeerLtk_));
+      reduceSmpEncryptionKey(smpPeerLtk_);
       smpPeerLtkValid_ = true;
       smpPeerLtkAwaitMasterId_ = true;
       emitBleTrace("SMP_ENC_INFO_RX");
@@ -2616,72 +2732,78 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpLength != kSmpMasterIdentificationLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (!smpBondingRequested_ || !smpPeerLtkValid_ || !smpPeerLtkAwaitMasterId_) {
+      if (!smpBondingRequested_ || !smpPeerLtkValid_ ||
+          !smpPeerLtkAwaitMasterId_ || !connectionEncSessionValid_ ||
+          !connectionEncRxEnabled_ || !connectionEncTxEnabled_) {
         return false;
       }
       smpEncReqEdiv_ = readLe16(&smp[1]);
       memcpy(smpEncReqRand_, &smp[3], sizeof(smpEncReqRand_));
       smpPeerLtkAwaitMasterId_ = false;
-      {
-        BleBondRecord record{};
-        if (buildCurrentBondRecord(&record)) {
-          persistBondRecord(record);
-        }
-      }
       emitBleTrace("SMP_MASTER_ID_RX");
-      completeSmpKeyDistributionIfDone();
+      (void)completeSmpKeyDistributionIfDone();
       return false;
 
     case kSmpCodeIdentityInformation:
       if (smpLength != kSmpIdentityInformationLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (!smpBondingRequested_ || !smpExpectInitiatorIdKey_ ||
-          !connectionEncSessionValid_ || !connectionEncRxEnabled_) {
+      if (!smpBondingRequested_ || !smpExpectPeerIdKey_ ||
+          !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
+          !connectionEncTxEnabled_) {
         return false;
       }
       memcpy(smpPeerIrk_, &smp[1], sizeof(smpPeerIrk_));
       smpPeerIrkValid_ = true;
-      {
-        BleBondRecord record{};
-        if (buildCurrentBondRecord(&record)) {
-          persistBondRecord(record);
-        }
-      }
       emitBleTrace("SMP_ID_INFO_RX");
-      completeSmpKeyDistributionIfDone();
+      (void)completeSmpKeyDistributionIfDone();
       return false;
 
     case kSmpCodeIdentityAddressInformation:
       if (smpLength != kSmpIdentityAddressInformationLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (!smpBondingRequested_ || !smpExpectInitiatorIdKey_ ||
-          !connectionEncSessionValid_ || !connectionEncRxEnabled_) {
+      if (!smpBondingRequested_ || !smpExpectPeerIdKey_ ||
+          !smpPeerIrkValid_ ||
+          !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
+          !connectionEncTxEnabled_) {
         return false;
       }
       if (smp[1] > 0x01U) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
+      if (smp[1] == 0x01U && (smp[7] & 0xC0U) != 0xC0U) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
       memcpy(smpPeerIdentityAddress_, &smp[2], sizeof(smpPeerIdentityAddress_));
       smpPeerIdentityAddressRandom_ = (smp[1] != 0U);
       smpPeerIdentityAddressValid_ = true;
-      {
-        BleBondRecord record{};
-        if (buildCurrentBondRecord(&record)) {
-          persistBondRecord(record);
-        }
-      }
       emitBleTrace("SMP_ID_ADDR_RX");
-      completeSmpKeyDistributionIfDone();
+      (void)completeSmpKeyDistributionIfDone();
       return false;
 
     case kSmpCodePairingResponse:
       if (smpLength != kSmpPairingResponseLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
+      if (smp[2] > 0x01U) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (smp[4] < 7U || smp[4] > 16U) {
+        return buildSmpPairingFailed(kSmpReasonEncryptionKeySize);
+      }
       if (!smpLocalInitiator_) {
         return buildSmpPairingFailed(kSmpReasonCommandNotSupported);
+      }
+      if ((smp[5] & static_cast<uint8_t>(
+                         ~(kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask))) !=
+              0U ||
+          (smp[6] & static_cast<uint8_t>(
+                         ~(kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask))) !=
+              0U ||
+          (smp[5] & static_cast<uint8_t>(~smpPairingReq_[5])) != 0U ||
+          (smp[6] & static_cast<uint8_t>(~smpPairingReq_[6])) != 0U) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (smpPairingState_ != kSmpPairingStateReqSent) {
         if (memcmp(smpPairingRsp_, smp, kSmpPairingResponseLen) != 0) {
@@ -2719,27 +2841,42 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpSecureConnectionsActive_ =
           ((smpPairingReq_[3] & kSmpAuthReqSecureConnectionsMask) != 0U) &&
           ((smpPairingRsp_[3] & kSmpAuthReqSecureConnectionsMask) != 0U);
+      if (!smpSecureConnectionsActive_ && smpOobEnabled_ &&
+          (smpOobDataLocalValid_ || smpOobDataRemoteValid_)) {
+        return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+      }
       smpKeySize_ =
           (smpPairingRsp_[4] < smpPairingReq_[4]) ? smpPairingRsp_[4]
                                                   : smpPairingReq_[4];
-      smpExpectInitiatorEncKey_ = smpSecureConnectionsActive_
+      smpExpectPeerEncKey_ = smpSecureConnectionsActive_
                                       ? false
                                       : ((smpPairingRsp_[6] &
                                           kSmpKeyDistEncKeyMask) != 0U);
-      smpExpectInitiatorIdKey_ =
+      smpExpectPeerIdKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
+      smpDistributeLocalIdKey_ =
+          ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
+      smpLocalIdInfoSent_ = false;
+      smpLocalIdAddressSent_ = false;
+      smpLocalIdAddressAcked_ = false;
       if (!prepareLocalPairingRandom()) {
         return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
       smpPairingState_ = kSmpPairingStateRspSent;
       emitBleTrace("SMP_PAIRING_RESPONSE_RX");
       if (smpSecureConnectionsActive_) {
+        const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
         if ((smpPairingReq_[3] & kSmpAuthReqMitmMask) != 0U &&
-            (smpPairingRsp_[3] & kSmpAuthReqMitmMask) == 0U) {
-          emitBleTrace("SMP_SC_MITM_DOWNGRADE");
+            pairAlg == kSmpScPairAlgJustWorks) {
+          emitBleTrace("SMP_SC_AUTH_REQUIREMENTS");
           return buildSmpPairingFailed(kSmpReasonAuthRequirements);
         }
-        const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
+        if (smpOobEnabled_ &&
+            (smpOobDataLocalValid_ || smpOobDataRemoteValid_) &&
+            pairAlg != kSmpScPairAlgOob) {
+          emitBleTrace("SMP_SC_OOB_INCONSISTENT");
+          return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+        }
         if (!secureConnectionsPairAlgorithmSupported(pairAlg)) {
           emitBleTrace("SMP_SC_ALG_UNSUPPORTED");
           return buildSmpPairingFailed(
@@ -2768,11 +2905,26 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpResponse(localConfirm, sizeof(localConfirm));
       }
 
-    case kSmpCodeSecurityRequest:
+    case kSmpCodeSecurityRequest: {
       if (smpLength != 2U) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if ((connectionRole_ == BleConnectionRole::kCentral) && smpStkValid_) {
+      const uint8_t peerAuthReq = smp[1];
+      const bool storedBondMeetsMitm =
+          (peerAuthReq & kSmpAuthReqMitmMask) == 0U ||
+          connectionEncAuthenticated_;
+      const bool storedBondMeetsSc =
+          (peerAuthReq & kSmpAuthReqSecureConnectionsMask) == 0U ||
+          ((bondRecord_.reserved[0] &
+            kBleBondRecordFlagSecureConnections) != 0U);
+      if (connectionRole_ == BleConnectionRole::kCentral &&
+          (connectionEncSessionValid_ || connectionEncRxEnabled_ ||
+           connectionEncTxEnabled_)) {
+        emitBleTrace("SMP_SECURITY_REQUEST_RX_ENCRYPTED");
+        return buildSmpPairingFailed(kSmpReasonPairingNotSupported);
+      }
+      if ((connectionRole_ == BleConnectionRole::kCentral) && smpStkValid_ &&
+          storedBondMeetsMitm && storedBondMeetsSc) {
         emitBleTrace("SMP_SECURITY_REQUEST_RX_BONDED");
         connectionBondedEncryptionRequested_ = true;
         if (!connectionEncSessionValid_ &&
@@ -2786,35 +2938,64 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         }
         return false;
       }
+      if ((connectionRole_ == BleConnectionRole::kCentral) && smpStkValid_) {
+        clearSmpPairingState();
+        connectionEncAuthenticated_ = false;
+        connectionBondedEncryptionRequested_ = false;
+        emitBleTrace("SMP_SECURITY_REQUEST_BOND_UPGRADE");
+      }
       if (smpPairingState_ == kSmpPairingStateIdle) {
         uint8_t pairingReq[kSmpPairingRequestLen] = {0};
-        const uint8_t peerAuthReq = smp[1];
-        const bool localOobReady = smpOobEnabled_ && smpOobDataLocalValid_ &&
-                                   smpOobDataRemoteValid_ &&
-                                   ((peerAuthReq &
-                                     kSmpAuthReqSecureConnectionsMask) != 0U);
+        const bool peerSupportsSecureConnections =
+            (peerAuthReq & kSmpAuthReqSecureConnectionsMask) != 0U;
+        if (smpOobEnabled_ && !smpOobDataLocalValid_ &&
+            !smpOobDataRemoteValid_) {
+          return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+        }
+        const bool localHasPeerOobData =
+            smpOobEnabled_ && smpOobDataRemoteValid_ &&
+            peerSupportsSecureConnections;
+        const bool localOobConfigured =
+            smpOobEnabled_ &&
+            (smpOobDataLocalValid_ || smpOobDataRemoteValid_);
+        if (localOobConfigured && !peerSupportsSecureConnections) {
+          return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+        }
         pairingReq[0] = kSmpCodePairingRequest;
         pairingReq[1] = smpLocalIoCapabilities_;
-        pairingReq[2] = localOobReady ? 0x01U : 0x00U;
+        pairingReq[2] = localHasPeerOobData ? 0x01U : 0x00U;
         pairingReq[3] =
             ((peerAuthReq & kSmpAuthReqBondingMask) != 0U) ? 0x01U : 0x00U;
         if (((peerAuthReq & kSmpAuthReqMitmMask) != 0U &&
-             (localOobReady ||
+             (localOobConfigured ||
               smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput)) ||
-            localOobReady) {
+            localOobConfigured) {
           pairingReq[3] |= kSmpAuthReqMitmMask;
         }
         if ((peerAuthReq & kSmpAuthReqSecureConnectionsMask) != 0U) {
           pairingReq[3] |= kSmpAuthReqSecureConnectionsMask;
-          // SC does not need distributed EncKey. Request only the peer identity
-          // key so bonded peripherals using RPAs can be resolved after reset.
-          pairingReq[5] = 0U;
-          pairingReq[6] = ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U)
-                              ? kSmpKeyDistIdKeyMask
+          // SC does not distribute EncKey. Exchange both identity keys so
+          // either role can resolve a bonded peer after its RPA rotates.
+          const uint8_t peerIdKey =
+              ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U)
+                  ? kSmpKeyDistIdKeyMask
+                  : 0U;
+          pairingReq[5] = localIdentityDistributionAvailable()
+                              ? peerIdKey
                               : 0U;
+          pairingReq[6] = peerIdKey;
         } else {
-          pairingReq[5] = kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask;
-          pairingReq[6] = kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask;
+          // The local legacy LTK distribution path is not implemented; offer
+          // only local identity and accept the responder's EncKey/IdKey.
+          if ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U) {
+            pairingReq[5] = localIdentityDistributionAvailable()
+                                ? kSmpKeyDistIdKeyMask
+                                : 0U;
+            pairingReq[6] = kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask;
+          } else {
+            pairingReq[5] = 0U;
+            pairingReq[6] = 0U;
+          }
         }
         pairingReq[4] = 16U;
         memcpy(smpPairingReq_, pairingReq, sizeof(smpPairingReq_));
@@ -2829,9 +3010,15 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpResponse(pairingReq, kSmpPairingRequestLen);
       }
       return false;
+    }
 
     default:
-      return buildSmpPairingFailed(kSmpReasonPairingNotSupported);
+      if (smpCode == kSmpCodeSigningInformation ||
+          smpCode == kSmpCodeKeypressNotification) {
+        return buildSmpPairingFailed(kSmpReasonCommandNotSupported);
+      }
+      emitBleTrace("SMP_RESERVED_CODE_IGNORED");
+      return false;
   }
 }
 

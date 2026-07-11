@@ -2363,18 +2363,25 @@ class BluefruitCompatManager {
     uint8_t passkey[6] = {0};
     bool matchRequest = false;
     if (radio_.getPendingPairingPasskey(passkey, &matchRequest)) {
-      bool accept = !matchRequest;
       if (Bluefruit.Security.pair_passkey_callback_ != nullptr) {
         ScopedBluefruitUserCallback scope;
-        accept = Bluefruit.Security.pair_passkey_callback_(0U, passkey,
-                                                           matchRequest);
+        const bool accept =
+            Bluefruit.Security.pair_passkey_callback_(0U, passkey,
+                                                       matchRequest);
+        (void)radio_.replyPendingPairingPasskey(accept);
+      } else if (!matchRequest) {
+        // Display-only passkeys do not require a yes/no response. Clear the
+        // notification so pairing can continue even without a callback.
+        (void)radio_.replyPendingPairingPasskey(true);
       }
-      (void)radio_.replyPendingPairingPasskey(accept);
       return;
     }
 
     uint8_t failureReason = 0U;
     if (radio_.consumePairingFailureReason(&failureReason)) {
+      if (Bluefruit.Security.oob_enabled_) {
+        Bluefruit.Security.retireOobData();
+      }
       if (Bluefruit.Security.pair_complete_callback_ != nullptr) {
         invokeBluefruitUserCallback(Bluefruit.Security.pair_complete_callback_,
                                     0U, failureReason);
@@ -2410,6 +2417,9 @@ class BluefruitCompatManager {
       }
       if (encrypted) {
         (void)Bluefruit.Security.refreshBondedPeerResolving();
+      }
+      if (Bluefruit.Security.oob_enabled_) {
+        Bluefruit.Security.retireOobData();
       }
       if (Bluefruit.Security.pair_complete_callback_ != nullptr) {
         invokeBluefruitUserCallback(
@@ -2532,6 +2542,9 @@ class BluefruitCompatManager {
     Bluefruit.last_disconnect_reason_valid_ = true;
     Bluefruit.last_disconnect_reason_remote_ = remoteTerminated;
     g_bluefruitBleIdleDiagLastDisconnectReason = reason;
+    if (Bluefruit.Security.oob_enabled_) {
+      Bluefruit.Security.retireOobData();
+    }
     rssi_monitor_enabled_ = false;
     rssi_monitor_threshold_ = 0xFFU;
     last_reported_rssi_dbm_ = 0;
@@ -2638,6 +2651,8 @@ BLESecurity::BLESecurity()
       oob_remote_c_{0},
       oob_data_request_callback_(nullptr),
       auto_bonded_peer_resolving_(false),
+      auto_bonded_peer_irk_owned_(false),
+      auto_bonded_peer_irk_{0},
       resolving_list_count_(0),
       resolving_list_irks_{{0}} {}
 
@@ -2696,9 +2711,22 @@ void BLESecurity::setPIN(const char* pin) {
   }
 }
 
+bool BLESecurity::getPendingPairingPasskey(uint8_t passkey[6],
+                                           bool* match_request) const {
+  return manager().radio().getPendingPairingPasskey(passkey, match_request);
+}
+
+bool BLESecurity::replyPendingPairingPasskey(bool accept) const {
+  return manager().radio().replyPendingPairingPasskey(accept);
+}
+
 bool BLESecurity::generateOobData(uint8_t oob_r[16], uint8_t oob_c[16]) {
-  if (oob_r == nullptr || oob_c == nullptr) return false;
-  if (!manager().radio().generateSecurityOobData(oob_r, oob_c)) return false;
+  if (oob_r == nullptr || oob_c == nullptr) {
+    return false;
+  }
+  if (!manager().radio().generateSecurityOobData(oob_r, oob_c)) {
+    return false;
+  }
   memcpy(oob_local_r_, oob_r, 16);
   memcpy(oob_local_c_, oob_c, 16);
   oob_local_valid_ = true;
@@ -2707,47 +2735,96 @@ bool BLESecurity::generateOobData(uint8_t oob_r[16], uint8_t oob_c[16]) {
 }
 
 bool BLESecurity::setOobData(const uint8_t oob_r[16], const uint8_t oob_c[16]) {
-  if (oob_r == nullptr || oob_c == nullptr) return false;
+  if (oob_r == nullptr || oob_c == nullptr ||
+      !manager().radio().setSecurityOobLocalData(oob_r, oob_c)) {
+    return false;
+  }
   memcpy(oob_local_r_, oob_r, 16);
   memcpy(oob_local_c_, oob_c, 16);
   oob_local_valid_ = true;
   oob_enabled_ = true;
-  manager().radio().setSecurityOobEnabled(true);
-  manager().radio().setSecurityOobLocalData(oob_r, oob_c);
   return true;
 }
 
 bool BLESecurity::setOobRemoteData(const uint8_t oob_r[16], const uint8_t oob_c[16]) {
-  if (oob_r == nullptr || oob_c == nullptr) return false;
+  if (oob_r == nullptr || oob_c == nullptr ||
+      !manager().radio().setSecurityOobRemoteData(oob_r, oob_c)) {
+    return false;
+  }
   memcpy(oob_remote_r_, oob_r, 16);
   memcpy(oob_remote_c_, oob_c, 16);
   oob_remote_valid_ = true;
   oob_enabled_ = true;
-  manager().radio().setSecurityOobRemoteData(oob_r, oob_c);
   return true;
 }
 
 bool BLESecurity::getOobData(uint8_t oob_r[16], uint8_t oob_c[16]) const {
-  if (!oob_local_valid_) return false;
+  if (oob_r == nullptr || oob_c == nullptr || !oob_local_valid_) {
+    return false;
+  }
   memcpy(oob_r, oob_local_r_, 16);
   memcpy(oob_c, oob_local_c_, 16);
   return true;
 }
 
 bool BLESecurity::getOobRemoteData(uint8_t oob_r[16], uint8_t oob_c[16]) const {
-  if (!oob_remote_valid_) return false;
+  if (oob_r == nullptr || oob_c == nullptr || !oob_remote_valid_) {
+    return false;
+  }
   memcpy(oob_r, oob_remote_r_, 16);
   memcpy(oob_c, oob_remote_c_, 16);
   return true;
 }
 
 bool BLESecurity::setOobFlag(bool enable) {
-  oob_enabled_ = enable;
-  manager().radio().setSecurityOobEnabled(enable);
+  if (!enable) {
+    clearOobData();
+    return true;
+  }
+  if (!oob_local_valid_ && !oob_remote_valid_) {
+    return false;
+  }
+
+  manager().radio().setSecurityOobEnabled(true);
+  if (oob_local_valid_ &&
+      !manager().radio().setSecurityOobLocalData(oob_local_r_, oob_local_c_)) {
+    return false;
+  }
+  if (oob_remote_valid_ &&
+      !manager().radio().setSecurityOobRemoteData(oob_remote_r_, oob_remote_c_)) {
+    return false;
+  }
+  oob_enabled_ = true;
   return true;
 }
 
+void BLESecurity::clearOobData() {
+  manager().radio().setSecurityOobEnabled(false);
+  oob_enabled_ = false;
+  oob_local_valid_ = false;
+  oob_remote_valid_ = false;
+  memset(oob_local_r_, 0, sizeof(oob_local_r_));
+  memset(oob_local_c_, 0, sizeof(oob_local_c_));
+  memset(oob_remote_r_, 0, sizeof(oob_remote_r_));
+  memset(oob_remote_c_, 0, sizeof(oob_remote_c_));
+}
+
+void BLESecurity::retireOobData() {
+  manager().radio().retireSecurityOobData();
+  oob_local_valid_ = false;
+  oob_remote_valid_ = false;
+  memset(oob_local_r_, 0, sizeof(oob_local_r_));
+  memset(oob_local_c_, 0, sizeof(oob_local_c_));
+  memset(oob_remote_r_, 0, sizeof(oob_remote_r_));
+  memset(oob_remote_c_, 0, sizeof(oob_remote_c_));
+}
+
 bool BLESecurity::requestPairing() const {
+  if (oob_enabled_ && oob_local_valid_ &&
+      oob_data_request_callback_ != nullptr) {
+    invokeBluefruitUserCallback(oob_data_request_callback_, 0U, oob_local_r_,
+                                oob_local_c_);
+  }
   return manager().radio().requestPairing();
 }
 
@@ -2814,10 +2891,57 @@ bool BLESecurity::getBondPeerIrk(uint8_t outIrk[16]) const {
   return true;
 }
 
-bool BLESecurity::getLocalIdentityRoot(uint8_t irk[16]) const {
-  if (irk == nullptr) return false;
-  xiao_nrf54l15::Ficr::identityRoot(irk);
+bool BLESecurity::getLocalIdentityAddress(ble_gap_addr_t* outAddress) const {
+  if (outAddress == nullptr) {
+    return false;
+  }
+  xiao_nrf54l15::BleAddressType type =
+      xiao_nrf54l15::BleAddressType::kPublic;
+  if (!manager().radio().getLocalIdentityAddress(outAddress->addr, &type)) {
+    return false;
+  }
+  outAddress->addr_type =
+      bluefruitAddressTypeFromHal(type, outAddress->addr);
   return true;
+}
+
+bool BLESecurity::getLocalIdentityRoot(uint8_t root[16]) const {
+  if (root == nullptr) return false;
+  xiao_nrf54l15::Ficr::identityRoot(root);
+  return true;
+}
+
+bool BLESecurity::getLocalIdentityIrk(uint8_t irk[16]) const {
+  return manager().radio().getLocalIdentityIrk(irk);
+}
+
+bool BLESecurity::setPrivacyEnabled(bool enabled, uint32_t intervalMs,
+                                    bool rotateNow) {
+  if (manager().radio().isConnected()) {
+    return false;
+  }
+  if (!enabled) {
+    if (!manager().radio().restoreLocalIdentityAddress()) {
+      return false;
+    }
+    removeAutoBondedPeerResolvingIrk();
+    auto_bonded_peer_resolving_ = false;
+    return true;
+  }
+
+  uint8_t irk[16] = {};
+  if (!getLocalIdentityIrk(irk) ||
+      !manager().radio().enableResolvablePrivateAddressRotation(
+          irk, intervalMs, rotateNow)) {
+    return false;
+  }
+  auto_bonded_peer_resolving_ = true;
+  (void)refreshBondedPeerResolving();
+  return true;
+}
+
+bool BLESecurity::privacyEnabled() const {
+  return manager().radio().isResolvablePrivateAddressRotationEnabled();
 }
 
 bool BLESecurity::generateResolvablePrivateAddress(const uint8_t irk[16],
@@ -2833,7 +2957,7 @@ bool BLESecurity::setResolvablePrivateAddress(const uint8_t irk[16],
 bool BLESecurity::enableResolvablePrivateAddressRotation(
     uint32_t intervalMs, bool rotateNow, uint8_t addressOut[6]) const {
   uint8_t irk[16] = {};
-  if (!getLocalIdentityRoot(irk)) {
+  if (!getLocalIdentityIrk(irk)) {
     return false;
   }
   return enableResolvablePrivateAddressRotation(irk, intervalMs, rotateNow,
@@ -2874,6 +2998,8 @@ bool BLESecurity::resolveResolvablePrivateAddress(const uint8_t address[6],
 void BLESecurity::clearResolvingList() {
   resolving_list_count_ = 0U;
   memset(resolving_list_irks_, 0, sizeof(resolving_list_irks_));
+  auto_bonded_peer_irk_owned_ = false;
+  memset(auto_bonded_peer_irk_, 0, sizeof(auto_bonded_peer_irk_));
 }
 
 uint8_t BLESecurity::resolvingListCount() const {
@@ -2913,6 +3039,9 @@ bool BLESecurity::addBondedPeerIrkToResolvingList() {
 }
 
 bool BLESecurity::setBondedPeerResolvingEnabled(bool enabled) {
+  if (!enabled) {
+    removeAutoBondedPeerResolvingIrk();
+  }
   auto_bonded_peer_resolving_ = enabled;
   if (!enabled) {
     return true;
@@ -2926,10 +3055,41 @@ bool BLESecurity::bondedPeerResolvingEnabled() const {
 }
 
 bool BLESecurity::refreshBondedPeerResolving() {
+  removeAutoBondedPeerResolvingIrk();
   if (!auto_bonded_peer_resolving_) {
     return false;
   }
-  return addBondedPeerIrkToResolvingList();
+
+  uint8_t irk[16] = {0};
+  if (!getBondPeerIrk(irk)) {
+    return false;
+  }
+  for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
+    if (memcmp(resolving_list_irks_[i], irk, sizeof(irk)) == 0) {
+      return true;
+    }
+  }
+  if (!addResolvingIrk(irk)) {
+    return false;
+  }
+  memcpy(auto_bonded_peer_irk_, irk, sizeof(auto_bonded_peer_irk_));
+  auto_bonded_peer_irk_owned_ = true;
+  return true;
+}
+
+void BLESecurity::removeAutoBondedPeerResolvingIrk() {
+  if (!auto_bonded_peer_irk_owned_) {
+    return;
+  }
+  for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
+    if (memcmp(resolving_list_irks_[i], auto_bonded_peer_irk_,
+               sizeof(auto_bonded_peer_irk_)) == 0) {
+      (void)removeResolvingIrk(i);
+      break;
+    }
+  }
+  auto_bonded_peer_irk_owned_ = false;
+  memset(auto_bonded_peer_irk_, 0, sizeof(auto_bonded_peer_irk_));
 }
 
 bool BLESecurity::removeResolvingIrk(uint8_t index) {
@@ -4678,6 +4838,7 @@ bool BLEPeriph::setConnSupervisionTimeoutMS(uint16_t timeout_ms) {
 
 void BLEPeriph::clearBonds() {
   (void)manager().radio().clearBondRecord();
+  (void)Bluefruit.Security.refreshBondedPeerResolving();
 }
 
 BLEConnection::BLEConnection() : handle_(INVALID_CONNECTION_HANDLE) {}
@@ -4835,6 +4996,7 @@ void BLECentral::setMissingPeerDisconnectEvents(uint16_t events) {
 
 void BLECentral::clearBonds() {
   (void)manager().radio().clearBondRecord();
+  (void)Bluefruit.Security.refreshBondedPeerResolving();
 }
 
 BLEScanner::BLEScanner()
