@@ -65,6 +65,25 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 
 ---
 
+## v0.9.223 Highlights
+
+- Controller-backed Bluetooth LE Channel Sounding Test is now available through
+  the two public Arduino examples: `BleChannelSoundingInitiator` and
+  `BleChannelSoundingReflector`.
+- Nordic SDC/MPSL runs the timing-critical LE CS Test. The examples establish a
+  per-cycle session token before the test and verify that same token when the
+  reflector returns its controller result, so delayed results are not paired
+  with a new sounding cycle.
+- The public pair is hardware-validated with XIAO nRF54L15 and XIAO nRF54LM20A
+  in both initiator and reflector roles. It requires the 128 MHz CPU profile.
+
+This is an experimental two-board LE CS Test path, not a connected-ACL Channel
+Sounding implementation or a Bluetooth qualification claim. See the
+[Channel Sounding status](docs/CHANNEL_SOUNDING_CURRENT_STATUS.md) for the
+protocol boundary, measurements, and validation evidence.
+
+---
+
 ## 🖥️ Supported Boards
 
 <div align="center">
@@ -119,13 +138,16 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
 | **LE Secure Connections** | ✅ | — | — | — | — | — |
 | **OOB + Numeric Comparison** | ⚠️ | — | — | — | — | — |
 | **Privacy / RPA** | ⚠️ | — | — | — | — | — |
-| **Channel Sounding Mode 2** | ⚠️ | — | — | — | — | ⚠️ |
+| **Controller LE CS Test (Mode 2 / PBR)** | — | — | — | — | — | ⚠️ |
 | **MAC / NWK / APS** | — | ✅ | ⚠️ | ⚠️ | — | — |
 | **Coordinator / Router** | — | — | ⚠️ | ⚠️ | — | — |
 | **End Device** | — | — | ⚠️ | ⚠️ | — | — |
 | **UDP Transport** | — | — | ✅ | — | ⚠️ | — |
 | **ZCL (OnOff / Level / Temp)** | — | — | — | ⚠️ | — | — |
 | **On/Off Light + commissioning** | — | — | — | — | ⚠️ | — |
+
+`CS` is limited to the controller-backed, single-antenna two-board test path
+described below. It is not a general connected BLE Channel Sounding API.
 
 ### 🔐 Crypto
 
@@ -239,7 +261,7 @@ Examples:
 | **Zigbee** | ~40K | ⚠️ Good | Partial — HA/Zigbee2MQTT device demos, ZDO descriptors/binding/sketch-configurable management tables, no OTA |
 | **Thread** | ~30K | ⚠️ Staged | Partial — OpenThread FTD/MeshCoP/SRP/UDP examples compile and have two-board validation paths |
 | **Matter** | ~25K | ⚠️ Staged | Partial — custom on-network On/Off/PASE/CASE demos compile; local two-board SRP readiness works, HA/OTBR commissioning still needs full validation |
-| **Channel Sounding** | Nordic controller + Arduino glue | ⚠️ Experimental | Two-board LE CS Test through bundled Nordic SDC/MPSL; no Bluetooth qualification or connected-ACL interoperability claim |
+| **Channel Sounding** | Nordic controller + Arduino glue | ⚠️ Experimental | Hardware-validated two-board LE CS Test on XIAO nRF54L15 and nRF54LM20A; no Bluetooth qualification or connected-ACL interoperability claim |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes — all nPM1300 features, GPIO bit‑bang I²C |
 
 ---
@@ -272,6 +294,11 @@ The only public Channel Sounding examples are:
 
 - `BleChannelSoundingInitiator`
 - `BleChannelSoundingReflector`
+
+The supported profile is single-antenna Mode 2/Submode 1 with AA-only RTT.
+The test uses a proprietary CRC-protected session/result exchange before and
+after the controller-owned sounding operation. It is intentionally separate
+from the core's normal connected BLE stack.
 
 The controller binaries are Nordic components, revision
 `7a07f89ee8c32658ebfd2034b4cae92fde63e122`
