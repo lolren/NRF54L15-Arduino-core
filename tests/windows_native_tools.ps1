@@ -109,7 +109,9 @@ exit /b 0
         -File (Join-Path $tools "upload_windows.ps1") `
         -HexPath $hex -Port "COM42" -Target "nrf54lm20a" `
         -NrfOcd $mock -RetryDelayMs 0
-    Assert-Equal $LASTEXITCODE 23 "native upload final failure propagation"
+    $failedExitCode = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    Assert-Equal $failedExitCode 23 "native upload final failure propagation"
     $failedCalls = @(Get-Content -LiteralPath $mockLog)
     Assert-Equal $failedCalls.Count 2 "failed upload attempt count"
     Write-Host "PASS Windows native upload failure propagation"
