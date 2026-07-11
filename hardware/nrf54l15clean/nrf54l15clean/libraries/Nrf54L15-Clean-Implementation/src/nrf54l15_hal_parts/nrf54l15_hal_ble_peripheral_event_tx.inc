@@ -90,6 +90,8 @@
   bool l2capHandledImmediate = false;
   bool immediateL2capResponseValid = false;
   uint8_t immediateL2capResponseLength = 0U;
+  const bool l2capFragmentWasActiveBeforeImmediate =
+      connectionPendingL2capTxFragmentActive_;
   const bool encryptionProcedureBusy =
       connectionEncSessionValid_ &&
       (connectionEncKeyDerivationPending_ ||
@@ -412,7 +414,7 @@
         (findCustomCharacteristicByCccdHandle(handle) != nullptr);
     rxL2capCanUseImmediateResponse = isCccdHandle;
   }
-  if (rxL2capCanUseImmediateResponse) {
+  if (rxL2capCanUseImmediateResponse && !l2capHandledImmediate) {
     l2capHandledImmediate = true;
     if (buildL2capResponse(llid, &rxPacket_[2], rxLength, packetIsNew,
                            connectionTxPayload_,
@@ -634,6 +636,18 @@
       !currentLlControlResponseIsSecurityCritical();
   const bool pendingStartEncryptionControlHasPriority =
       pendingTxIsStartEncryptionControlPdu;
+  const bool immediateResponseStartedFragment =
+      immediateL2capResponseValid &&
+      !l2capFragmentWasActiveBeforeImmediate &&
+      connectionPendingL2capTxFragmentActive_;
+  bool immediateFragmentDeferred = false;
+  if (immediateResponseStartedFragment && connectionPendingTxValid_) {
+    // Do not send fragment 1 ahead of an older pending PDU. Rewind the stored
+    // SDU; draining that PDU will queue its LLID=start fragment in order.
+    (void)rewindPendingL2capTxFragment();
+    immediateL2capResponseValid = false;
+    immediateFragmentDeferred = true;
+  }
   bool immediateLlControlResponseSent = false;
   bool immediateL2capResponseSent = false;
   if (txCanUseFreshPayload) {
@@ -653,8 +667,11 @@
       connectionPendingTxValid_ = false;
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
+      (void)queueNextPendingL2capTxFragment();
       llControlHandledImmediate = false;
-      l2capHandledImmediate = false;
+      if (!immediateFragmentDeferred) {
+        l2capHandledImmediate = false;
+      }
       emitL2capTxChoiceTrace(connectionTxPayload_, txLength, "PERIPH_TX_PENDING");
     } else if (pendingStartEncryptionControlHasPriority) {
       txLlid = connectionPendingTxLlid_;
@@ -665,8 +682,11 @@
       connectionPendingTxValid_ = false;
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
+      (void)queueNextPendingL2capTxFragment();
       llControlHandledImmediate = false;
-      l2capHandledImmediate = false;
+      if (!immediateFragmentDeferred) {
+        l2capHandledImmediate = false;
+      }
       emitBleTrace("PERIPH_TX_PENDING_LL");
     } else if (immediateLlControlResponseValid) {
       txLlid = kBlePduLlControl;
@@ -693,6 +713,7 @@
       connectionPendingTxValid_ = false;
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
+      (void)queueNextPendingL2capTxFragment();
       emitL2capTxChoiceTrace(connectionTxPayload_, txLength, "PERIPH_TX_PENDING");
     } else if (connectionPendingTxValid_ &&
                suppressPendingServerPushForDeferredWrite) {
@@ -705,7 +726,7 @@
     if (!immediateLlControlResponseSent) {
       llControlHandledImmediate = false;
     }
-    if (!immediateL2capResponseSent) {
+    if (!immediateL2capResponseSent && !immediateFragmentDeferred) {
       l2capHandledImmediate = false;
     }
 
@@ -744,9 +765,12 @@
     }
   }
 
+  if (txPayloadIsNewPlain && !connectionPendingTxValid_) {
+    (void)queueNextPendingL2capTxFragment();
+  }
   const bool txHasFollowingPayload =
-      txPayloadIsNewPlain &&
-      connectionPendingTxValid_;
+      txPayloadIsNewPlain ? connectionPendingTxValid_
+                          : connectionLastTxMoreData_;
   txPacket_[0] = static_cast<uint8_t>((txLlid & 0x03U) |
                                       ((connectionExpectedRxSn_ & 0x01U) << 2U) |
                                       ((connectionTxSn_ & 0x01U) << 3U) |
@@ -1000,15 +1024,25 @@
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
     waitRadioDisabledBudgeted(radio_, kBleConnTxDisableWaitUs, spinLimit / 2U + 1U);
   }
-  if (txOk) {
+  const bool preserveFailedDataTx =
+      !txOk && txPayloadIsNewPlain && (txLength > 0U) &&
+      ((txLlid == kBlePduDataStartOrComplete) ||
+       (txLlid == kBlePduDataContinuation));
+  if (txOk || preserveFailedDataTx) {
     connectionTxHistoryValid_ = true;
+    connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
     connectionLastTxSn_ = txSnBit;
     if (txPayloadIsNewPlain && txLength > 0U) {
       connectionFreshTxAllowed_ = false;
     }
-    blePeriphTxTracePushPacket(txLlid, txLength,
-                               txPayloadIsNewPlain ? &connectionTxPayload_[0]
-                                                   : &connectionLastTxPlainPayload_[0]);
+    if (txOk) {
+      blePeriphTxTracePushPacket(txLlid, txLength,
+                                 txPayloadIsNewPlain
+                                     ? &connectionTxPayload_[0]
+                                     : &connectionLastTxPlainPayload_[0]);
+    } else {
+      emitBleTrace("DATA_TX_TIMEOUT_RETAINED");
+    }
   }
   bool followRxAlreadyDone = false;
   if (!doPostTxRxTurnaround || !txOk) {
@@ -1333,7 +1367,8 @@
                sizeof(connectionLastTxEncryptedPayload_));
         connectionLastTxPlainLlid_ = txFollowLlid;
         connectionLastTxPlainLength_ = txFollowLength;
-	        if (txFollowLength > 0U) {
+        connectionLastTxMoreData_ = false;
+        if (txFollowLength > 0U) {
 	          memcpy(connectionLastTxPlainPayload_, connectionTxPayload_, txFollowLength);
 	        }
 
@@ -1390,15 +1425,24 @@
                                     spinLimit / 2U + 1U);
         }
         radio_->SHORTS = 0U;
-        if (txFollowOk) {
+        const bool preserveFailedFollowDataTx =
+            !txFollowOk && (txFollowLength > 0U) &&
+            ((txFollowLlid == kBlePduDataStartOrComplete) ||
+             (txFollowLlid == kBlePduDataContinuation));
+        if (txFollowOk || preserveFailedFollowDataTx) {
           connectionTxHistoryValid_ = true;
+          connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
           connectionLastTxSn_ =
               static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
           if (txFollowLength > 0U) {
             connectionFreshTxAllowed_ = false;
           }
-	          blePeriphTxTracePushPacket(txFollowLlid, txFollowLength,
-	                                     &connectionLastTxPlainPayload_[0]);
+	          if (txFollowOk) {
+	            blePeriphTxTracePushPacket(txFollowLlid, txFollowLength,
+	                                       &connectionLastTxPlainPayload_[0]);
+	          } else {
+	            emitBleTrace("DATA_FOLLOW_TX_TIMEOUT_RETAINED");
+	          }
 	          if (encryptFollowTx && followTxCounterValid) {
 	            connectionEncTxCounter_ =
 	                (followTxCounter + 1ULL) & kBleEncPacketCounterMask;
@@ -1409,11 +1453,11 @@
 	              connectionEncPrecomputedStartRspTxValid_ = false;
 	            }
 	            ++encDebug_.encTxPacketCount;
-	            if (txFollowIsStartEncRspPlain) {
+	            if (txFollowOk && txFollowIsStartEncRspPlain) {
 	              ++encDebug_.followupStartEncRspTxOk;
 	            }
 	          }
-          if (!terminateInd) {
+          if (txFollowOk && !terminateInd) {
             // Same-event follow-up traffic can legitimately continue after an
             // immediate response, for example SMP Pairing Response followed by
             // Pairing Public Key. Restore the RX buffer and re-arm listening.
@@ -1777,6 +1821,8 @@
                         ((llidFollow == 0x01U) && (rxLengthFollow > 0U)))) {
               uint8_t responseLength = 0U;
               uint8_t followResponsePayload[kBleDataPduMaxPayload] = {0};
+              const bool fragmentWasActive =
+                  connectionPendingL2capTxFragmentActive_;
               uint8_t* responsePayload =
                   ((connectionPendingTxValid_ && !followCanDisplacePendingServerPush) ||
                    followCanDisplacePendingServerPush ||
@@ -1802,6 +1848,15 @@
                   connectionPendingTxLlid_ = kBlePduDataStartOrComplete;
                   connectionPendingTxLength_ = responseLength;
                   connectionPendingTxValid_ = true;
+                } else if (!fragmentWasActive &&
+                           connectionPendingL2capTxFragmentActive_) {
+                  // The first fragment was built in temporary storage while
+                  // another PDU occupied the pending slot. Requeue the whole
+                  // SDU so LLID=start is emitted before its continuations.
+                  (void)rewindPendingL2capTxFragment();
+                } else if (!fragmentWasActive) {
+                  (void)deferL2capTxPayload(followResponsePayload,
+                                            responseLength);
                 }
               }
             }
@@ -1909,6 +1964,7 @@
                 connectionPendingTxValid_ = false;
                 connectionPendingTxLlid_ = 0x01U;
                 connectionPendingTxLength_ = 0U;
+                (void)queueNextPendingL2capTxFragment();
               }
               connectionLastTxLlid_ = txFollowLlid;
               connectionLastTxLength_ = txFollowLength;
@@ -1930,5 +1986,5 @@
             }
 
             const bool txFollowHasMoreData =
-                txFollowCanUseFreshPayload &&
-                connectionPendingTxValid_;
+                txFollowCanUseFreshPayload ? connectionPendingTxValid_
+                                           : connectionLastTxMoreData_;

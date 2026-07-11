@@ -3109,9 +3109,18 @@ class BleRadio {
   bool advanceSecureConnectionsPasskeyRound();
   bool secureConnectionsInitiatorTransmitsConfirm() const;
   bool secureConnectionsResponderVerifiesRandom() const;
+  void clearPendingL2capTxFragment();
+  bool deferL2capTxPayload(const uint8_t* l2capPayload,
+                           uint8_t l2capPayloadLength);
+  bool rewindPendingL2capTxFragment();
+  bool queueNextPendingL2capTxFragment();
+  bool prepareL2capTxPayload(const uint8_t* l2capPayload,
+                             uint8_t l2capPayloadLength,
+                             uint8_t* outPayload,
+                             uint8_t* outPayloadLength);
   bool buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLength,
                              uint8_t* outPayload,
-                             uint8_t* outPayloadLength) const;
+                             uint8_t* outPayloadLength);
   bool queuePendingSmpL2capResponse(const uint8_t* smpPayload,
                                     uint8_t smpLength);
   bool isChannelSoundingLlControlOpcode(uint8_t opcode) const;
@@ -3386,6 +3395,7 @@ class BleRadio {
   uint32_t connectionCentralLinkSetupNotBeforeMs_;
   uint8_t connectionLastTxLlid_;
   uint8_t connectionLastTxLength_;
+  bool connectionLastTxMoreData_;
   // Snapshot of the last transmitted plaintext payload (before any encryption),
   // so callers can safely inspect `BleConnectionEvent::txPayload` even though
   // `connectionTxPayload_` is reused later in the connection event.
@@ -3396,6 +3406,10 @@ class BleRadio {
   uint8_t connectionPendingTxLength_;
   bool connectionPendingTxValid_;
   uint8_t connectionPendingTxPayload_[255];
+  bool connectionPendingL2capTxFragmentActive_;
+  uint16_t connectionPendingL2capTxFragmentLength_;
+  uint16_t connectionPendingL2capTxFragmentOffset_;
+  uint8_t connectionPendingL2capTxFragmentPayload_[255];
   static constexpr uint8_t kChannelSoundingLlControlQueueDepth = 4U;
   uint8_t channelSoundingLlControlTxPayloads_[kChannelSoundingLlControlQueueDepth][255];
   uint8_t channelSoundingLlControlTxLengths_[kChannelSoundingLlControlQueueDepth];

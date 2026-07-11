@@ -1902,6 +1902,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionTxSn_ = 0U;
   connectionLastTxSn_ = 0U;
   connectionTxHistoryValid_ = false;
+  connectionLastTxMoreData_ = false;
   connectionFreshTxAllowed_ = true;
   connectionEventCounter_ = 0U;
   connectionMissedEventCount_ = 0U;
@@ -1948,6 +1949,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionLastTxLlid_ = 0x01U;
   connectionLastTxLength_ = 0U;
   connectionLastTxSn_ = 0U;
+  connectionLastTxMoreData_ = false;
   connectionLastTxPlainLlid_ = 0x01U;
   connectionLastTxPlainLength_ = 0U;
   memset(connectionLastTxPlainPayload_, 0, sizeof(connectionLastTxPlainPayload_));
@@ -1955,6 +1957,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
+  clearPendingL2capTxFragment();
   connectionUpdatePending_ = false;
   connectionUpdateInstant_ = 0U;
   connectionPendingWinSize_ = 0U;
@@ -2103,6 +2106,7 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   connectionCentralLinkSetupNotBeforeMs_ = millis() + 1000UL;
   connectionLastTxLlid_ = 0x01U;
   connectionLastTxLength_ = 0U;
+  connectionLastTxMoreData_ = false;
   connectionLastTxPlainLlid_ = 0x01U;
   connectionLastTxPlainLength_ = 0U;
   memset(connectionLastTxPlainPayload_, 0, sizeof(connectionLastTxPlainPayload_));
@@ -2110,6 +2114,7 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
+  clearPendingL2capTxFragment();
   connectionUpdatePending_ = false;
   connectionUpdateInstant_ = 0U;
   connectionPendingWinSize_ = 0U;

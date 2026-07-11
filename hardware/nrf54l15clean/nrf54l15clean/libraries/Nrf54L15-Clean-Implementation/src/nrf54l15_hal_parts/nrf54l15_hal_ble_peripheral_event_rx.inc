@@ -492,6 +492,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
       connectionPendingTxValid_ = false;
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
+      clearPendingL2capTxFragment();
       connectionLastTxWasEncrypted_ = false;
       connectionLastTxEncryptedLength_ = 0U;
       memset(connectionLastTxEncryptedPayload_, 0,
@@ -678,6 +679,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     memset(connectionLastTxEncryptedPayload_, 0,
            sizeof(connectionLastTxEncryptedPayload_));
     connectionTxHistoryValid_ = true;
+    connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
     connectionLastTxSn_ = static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
     connectionFreshTxAllowed_ = false;
     blePeriphTxTracePushPacket(txLlidFast, txLengthFast, &connectionTxPayload_[0]);
@@ -941,6 +943,8 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
                   emitBleTrace("LL_START_ENC_RSP_FAST_FOLLOW_TX_TIMEOUT");
                 } else {
                   connectionTxHistoryValid_ = true;
+                  connectionLastTxMoreData_ =
+                      (txPacket_[0] & 0x10U) != 0U;
                   connectionLastTxSn_ =
                       static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
                   connectionFreshTxAllowed_ = false;
@@ -1241,6 +1245,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     memset(connectionLastTxEncryptedPayload_, 0,
            sizeof(connectionLastTxEncryptedPayload_));
     connectionTxHistoryValid_ = true;
+    connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
     connectionLastTxSn_ = static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
     connectionFreshTxAllowed_ = false;
     blePeriphTxTracePushPacket(txLlidFast, txLengthFast, &connectionTxPayload_[0]);
@@ -1514,6 +1519,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     memset(connectionLastTxEncryptedPayload_, 0,
            sizeof(connectionLastTxEncryptedPayload_));
     connectionTxHistoryValid_ = true;
+    connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
     connectionLastTxSn_ = static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
     connectionFreshTxAllowed_ = false;
     blePeriphTxTracePushPacket(txLlidFast, txLengthFast, &connectionTxPayload_[0]);

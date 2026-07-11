@@ -1,15 +1,15 @@
 # nRF54 Arduino Core Deep Audit Report
 
 Audit date: 2026-07-09  
-Remediation update: 2026-07-10  
+Remediation update: 2026-07-11
 Repository: `/home/lolren/Desktop/eport_nrf54/nrf54-arduino-core`  
 Local reference set: `/home/lolren/Desktop/eport_nrf54/datasheets`
 
 This report is based only on the repository, the supplied local PDFs/text extracts and locally reproduced compiler/linker output. No web material or remembered register descriptions were used. The supplied reference set contains product specifications and two XIAO schematics, but no standalone Nordic anomaly/errata document and no HOLYIOT or PCA10156 schematic. Claims that require those missing documents are explicitly marked as unverified.
 
-## Remediation Update - 2026-07-10
+## Remediation Update - 2026-07-11
 
-Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.220**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline, the 0.9.218 source and hardware follow-up, the 0.9.219 LM20A power follow-up, and the 0.9.220 BLE HID interoperability follow-up together record the current source-tree result.
+Current status for this checkout: **all 71 audit items have been addressed locally for release 0.9.221**. The findings below are retained as the original audit record; the 0.9.216 remediation baseline and the 0.9.218, 0.9.219, 0.9.220, and 0.9.221 follow-ups together record the current source-tree result.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -41,7 +41,7 @@ Hardware evidence from this follow-up:
 * L15 serial-fabric initialization passed for UARTE22/UARTE30, TWIM22/TWIM30 and SPIM22/SPIM30; the runtime probe now reports the all-pass status every second for CLI monitoring.
 * LM20A passed timed System OFF wake, QSPI JEDEC/status/deep-power-down, IMU `WHO_AM_I=0x6A`, live PDM microphone capture, and a BLE-disabled IMU regression run.
 
-This does not change the explicit remaining limits below: Windows PowerShell execution, external UART loopback, BLE HID pairing, RF/protocol conformance, current characterization and other board-specific lab tests still need their relevant external equipment or reporters.
+At the v0.9.218 checkpoint, this did not change the explicit remaining limits below: Windows PowerShell execution, external UART loopback, BLE HID pairing, RF/protocol conformance, current characterization and other board-specific lab tests still needed their relevant external equipment or reporters.
 
 ### LM20A Power Follow-up - 2026-07-10 (v0.9.219)
 
@@ -66,7 +66,22 @@ Connected-board evidence on XIAO nRF54L15 UID `761FDE87`:
 * Source-local builds passed for `Bluefruit52Lib/examples/Diagnostics/hid_pairing_probe` with BLE trace enabled, `Bluefruit52Lib/examples/HID/blehid_mouse`, and `Bluefruit52Lib/examples/Peripheral/bleuart`.
 * `./tools/release.sh 0.9.220` passed package-index verification, release-archive verification, and the archive Thread/Matter stage-probe compiles. Its archive is `nrf54l15clean-0.9.220-181902d5c1e0.tar.bz2`, SHA-256 `181902d5c1e0731d7f15169d8f1231f0207d2eddfd3309c0b87474ac08e7b06f`, size `26940757`.
 
-This follow-up does not claim full Bluetooth qualification or RF conformance. It closes the reported Android HID interoperability regression locally and leaves external retesting to users on their affected phones.
+This v0.9.220 follow-up does not claim full Bluetooth qualification or RF conformance. It addressed the initial Android HID interoperability regression; the v0.9.221 follow-up below records the additional fragmentation, retransmission, and multi-phone bond-selection fixes found during broader handset cycling.
+
+### BLE Multi-Phone Pairing Follow-up - 2026-07-11 (v0.9.221)
+
+Version 0.9.221 extends outbound fixed-channel L2CAP handling so SMP responses larger than the negotiated link-layer payload, including the 65-byte Secure Connections public-key message plus its L2CAP header, are split into an initial data PDU and LLID `0x01` continuation PDUs. Immediate, deferred and same-event follow-up response paths preserve the complete SDU when another PDU already occupies the pending slot. The link layer also retains the original More Data bit, SN, payload and encryption counter for ordinary retransmissions and uncertain local RADIO TX completion, preventing a continuation from advancing ahead of its predecessor.
+
+Bond reuse for rotating peer addresses is now deterministic. The core selects the stored LTK only after an exact connection-address match, an exact distributed identity-address match, hardware AAR resolution, or a software `ah(IRK, prand)` check. It no longer treats `LL_ENC_REQ` EDIV/Rand as peer identity proof, because LE Secure Connections bonds use zero for both fields. An unresolved phone therefore receives a Security Request and can pair afresh instead of attempting encryption with another phone's LTK.
+
+Connected-board evidence on XIAO nRF54L15 UID `761FDE87`:
+
+* The BLE-trace HID pairing probe compiled, flashed, completed Secure Connections public-key fragmentation, paired, encrypted, completed HID discovery, enabled the HID CCCD, and transmitted mouse reports.
+* Five successful traced HID sessions ended with clean phone-initiated disconnects. Operation was user-confirmed on Google Pixel, Fairphone 5, Huawei P30 Pro, Sony Xperia, and iPhone handsets.
+* Clean source-local builds passed for `Bluefruit52Lib/examples/HID/blehid_mouse` and `Bluefruit52Lib/examples/Peripheral/bleuart` without warnings.
+* `./tools/release.sh 0.9.221` passed package-index verification, release-archive verification, and the archive Thread/Matter stage-probe compiles. Its archive is `nrf54l15clean-0.9.221-89ab4ffaf500.tar.bz2`, SHA-256 `89ab4ffaf5006ead5dc0587155fb339f43f3c346981339cd580c8cfdb23ccda7`, size `26941243`.
+
+The current persistence format stores one bond and one associated CCCD record. Switching to a phone whose older bond was replaced may require forgetting and pairing again; transparent retained switching among several hosts requires a future multi-bond storage migration. This follow-up does not claim full Bluetooth qualification or RF conformance, and affected users should retest the published package on their devices.
 
 ## Executive Summary
 

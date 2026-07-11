@@ -630,6 +630,7 @@ constexpr uint8_t kBleExtendedClockAccuracy500Ppm = 0x00U;
 constexpr uint8_t kBlePduScanRsp = 0x04U;
 constexpr uint8_t kBlePduConnectInd = 0x05U;
 constexpr uint8_t kBlePduLlControl = 0x03U;
+constexpr uint8_t kBlePduDataContinuation = 0x01U;
 constexpr uint8_t kBlePduDataStartOrComplete = 0x02U;
 constexpr uint8_t kBleLlCtrlTerminateInd = 0x02U;
 constexpr uint8_t kBleLlCtrlEncReq = 0x03U;

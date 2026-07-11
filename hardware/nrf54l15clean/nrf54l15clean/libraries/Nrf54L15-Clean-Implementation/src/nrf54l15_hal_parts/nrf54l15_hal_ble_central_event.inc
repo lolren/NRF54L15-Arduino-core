@@ -149,6 +149,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       connectionPendingTxLlid_ = 0x01U;
       connectionPendingTxLength_ = 0U;
       connectionPendingTxValid_ = false;
+      (void)queueNextPendingL2capTxFragment();
     }
     connectionLastTxLlid_ = txLlid;
     connectionLastTxLength_ = txLength;
@@ -167,10 +168,11 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   }
 
   const bool txHasFollowingPayload =
-      canSendNewPayloadThisEvent &&
-      (connectionPendingTxValid_ ||
-       (channelSoundingLlControlTxCount_ > 0U) ||
-       (connectionCustomNotificationQueueCount_ > 0U));
+      canSendNewPayloadThisEvent
+          ? (connectionPendingTxValid_ ||
+             (channelSoundingLlControlTxCount_ > 0U) ||
+             (connectionCustomNotificationQueueCount_ > 0U))
+          : connectionLastTxMoreData_;
   txPacket_[0] = static_cast<uint8_t>((txLlid & 0x03U) |
                                       ((connectionExpectedRxSn_ & 0x01U) << 2U) |
                                       ((connectionTxSn_ & 0x01U) << 3U) |
@@ -258,8 +260,22 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     txOk = waitRadioDisabledBudgeted(radio_, kBleConnTxDisableWaitUs,
                                      spinLimit / 2U + 1U);
   }
+  const bool preserveFailedDataTx =
+      !txOk && canSendNewPayloadThisEvent &&
+      (connectionLastTxPlainLength_ > 0U) &&
+      ((txLlid == kBlePduDataStartOrComplete) ||
+       (txLlid == kBlePduDataContinuation));
+  if (txBuiltFreshEncrypted && (txOk || preserveFailedDataTx)) {
+    connectionEncTxCounter_ =
+        (txEncryptedCounter + 1ULL) & kBleEncPacketCounterMask;
+  }
   if (!txOk) {
-    if (canSendNewPayloadThisEvent &&
+    if (preserveFailedDataTx) {
+      connectionTxHistoryValid_ = true;
+      connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
+      connectionFreshTxAllowed_ = false;
+      emitBleTrace("CENTRAL_DATA_TX_TIMEOUT_RETAINED");
+    } else if (canSendNewPayloadThisEvent &&
         (txLength > 0U) && !connectionPendingTxValid_) {
       memcpy(connectionPendingTxPayload_, connectionTxPayload_, txLength);
       connectionPendingTxLlid_ = txLlid;
@@ -273,10 +289,6 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     radio_->SHORTS = 0U;
     clearRadioCoreEvents(radio_);
     return false;
-  }
-  if (txBuiltFreshEncrypted) {
-    connectionEncTxCounter_ =
-        (txEncryptedCounter + 1ULL) & kBleEncPacketCounterMask;
   }
   if ((txLlid == kBlePduLlControl) &&
       (connectionLastTxPlainLength_ >= 1U)) {
@@ -292,6 +304,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     }
   }
   connectionTxHistoryValid_ = true;
+  connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
 
   // With DISABLED->RXEN armed for the central turnaround, a fast peer response
   // can complete before we finish TX cleanup. Preserve that real RX completion
@@ -938,6 +951,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         connectionPendingTxLlid_ = 0x01U;
         connectionPendingTxLength_ = 0U;
         connectionPendingTxValid_ = false;
+        (void)queueNextPendingL2capTxFragment();
         emitBleTrace("CENTRAL_FOLLOW_TX_HVCFM");
       } else if (!followMustAckPeerServerPush &&
                  !currentFollowupPeerMoreData &&
@@ -951,6 +965,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         connectionPendingTxLlid_ = 0x01U;
         connectionPendingTxLength_ = 0U;
         connectionPendingTxValid_ = false;
+        (void)queueNextPendingL2capTxFragment();
         emitBleTrace("CENTRAL_FOLLOW_TX_PENDING");
       } else if (connectionPendingTxValid_) {
         emitBleTrace("CENTRAL_FOLLOW_HOLD_PENDING");
@@ -966,8 +981,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       }
 
       const bool txFollowHasFollowingPayload =
-          (connectionPendingTxValid_ ||
-           (connectionCustomNotificationQueueCount_ > 0U));
+          connectionPendingTxValid_ ||
+          (connectionCustomNotificationQueueCount_ > 0U);
       txPacket_[0] = static_cast<uint8_t>((txFollowLlid & 0x03U) |
                                           ((connectionExpectedRxSn_ & 0x01U) << 2U) |
                                           ((connectionTxSn_ & 0x01U) << 3U) |
@@ -1063,6 +1078,26 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
         waitRadioDisabledBudgeted(radio_, kBleConnTxDisableWaitUs,
                                   spinLimit / 2U + 1U);
         radio_->SHORTS = 0U;
+      }
+      const bool preserveFailedFollowDataTx =
+          !txFollowOk && (txFollowLength > 0U) &&
+          ((txFollowLlid == kBlePduDataStartOrComplete) ||
+           (txFollowLlid == kBlePduDataContinuation));
+      if (txFollowOk || preserveFailedFollowDataTx) {
+        connectionTxHistoryValid_ = true;
+        connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
+        if (txFollowLength > 0U) {
+          connectionFreshTxAllowed_ = false;
+        }
+      }
+      if ((txFollowOk || preserveFailedFollowDataTx) && encryptFollowTx) {
+        connectionEncTxCounter_ =
+            (followTxCounter + 1ULL) & kBleEncPacketCounterMask;
+      }
+      if (!txFollowOk) {
+        if (preserveFailedFollowDataTx) {
+          emitBleTrace("CENTRAL_DATA_FOLLOW_TX_TIMEOUT_RETAINED");
+        }
         break;
       }
       const bool followRxAlreadyDone =
@@ -1070,11 +1105,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       if (followRxAlreadyDone) {
         followRxEndTimestampUs = bleTimingUs();
       }
-      if (encryptFollowTx) {
-        connectionEncTxCounter_ =
-            (followTxCounter + 1ULL) & kBleEncPacketCounterMask;
-      }
       connectionTxHistoryValid_ = true;
+      connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
       const bool txFollowCarriesAttRequest =
           (txFollowLlid == kBlePduDataStartOrComplete) &&
           (txFollowLength >= (kBleL2capHeaderLen + 1U)) &&

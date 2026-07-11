@@ -1352,6 +1352,7 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   connectionLastTxLength_ = 0U;
   connectionLastTxSn_ = 0U;
   connectionTxHistoryValid_ = false;
+  connectionLastTxMoreData_ = false;
   connectionFreshTxAllowed_ = true;
   connectionLastTxPlainLlid_ = 0x01U;
   connectionLastTxPlainLength_ = 0U;
@@ -1360,6 +1361,7 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
+  clearPendingL2capTxFragment();
   connectionAttMtu_ = kBleDefaultAttMtu;
   connectionUseChSel2_ = false;
   connectionChannelId_ = 0U;

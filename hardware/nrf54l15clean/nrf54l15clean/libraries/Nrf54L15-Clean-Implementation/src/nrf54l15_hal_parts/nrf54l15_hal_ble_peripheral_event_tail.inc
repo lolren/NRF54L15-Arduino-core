@@ -69,16 +69,25 @@
               waitRadioDisabledBudgeted(radio_, kBleConnTxDisableWaitUs,
                                         spinLimit / 2U + 1U);
               radio_->SHORTS = 0U;
-              break;
             }
 
-	            connectionTxHistoryValid_ = true;
-	            connectionLastTxSn_ =
-	                static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
-	            if (txFollowCanUseFreshPayload && txFollowLength > 0U) {
-	              connectionFreshTxAllowed_ = false;
+	            const bool preserveFailedFollowDataTx =
+	                !txFollowOk && txFollowCanUseFreshPayload &&
+	                (txFollowLength > 0U) &&
+	                ((txFollowLlid == kBlePduDataStartOrComplete) ||
+	                 (txFollowLlid == kBlePduDataContinuation));
+	            if (txFollowOk || preserveFailedFollowDataTx) {
+	              connectionTxHistoryValid_ = true;
+	              connectionLastTxMoreData_ =
+	                  (txPacket_[0] & 0x10U) != 0U;
+	              connectionLastTxSn_ =
+	                  static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
+	              if (txFollowCanUseFreshPayload && txFollowLength > 0U) {
+	                connectionFreshTxAllowed_ = false;
+	              }
 	            }
-	            if (txFollowEncrypted && txFollowCounterValid) {
+	            if ((txFollowOk || preserveFailedFollowDataTx) &&
+	                txFollowEncrypted && txFollowCounterValid) {
 	              connectionEncTxCounter_ =
 	                  (txFollowCounterUsed + 1ULL) & kBleEncPacketCounterMask;
 	              if (connectionEncPrecomputedCounter_ != connectionEncTxCounter_) {
@@ -88,9 +97,15 @@
 	                connectionEncPrecomputedStartRspTxValid_ = false;
 	              }
 	              ++encDebug_.encTxPacketCount;
-	              if (txFollowIsStartEncRspPlain) {
+	              if (txFollowOk && txFollowIsStartEncRspPlain) {
 	                ++encDebug_.followupStartEncRspTxOk;
 	              }
+	            }
+	            if (!txFollowOk) {
+	              if (preserveFailedFollowDataTx) {
+	                emitBleTrace("DATA_FOLLOW_TX_TIMEOUT_RETAINED");
+	              }
+	              break;
 	            }
 	            radio_->EVENTS_DISABLED = 0U;
             radio_->EVENTS_CRCOK = 0U;
@@ -278,6 +293,7 @@
 
   uint8_t deferredLlid = 0x01U;
   uint8_t deferredLength = 0U;
+  bool deferredL2capStartedFragment = false;
 
   if (!terminateInd) {
     if (packetIsNew &&
@@ -299,11 +315,16 @@
                  (rxLength >= kBleL2capHeaderLen)) ||
                 ((llid == 0x01U) && (rxLength > 0U)))) {
       uint8_t responseLength = 0U;
+      const bool fragmentWasActive =
+          connectionPendingL2capTxFragmentActive_;
       if (buildL2capResponse(llid, &rxPacket_[2], rxLength, packetIsNew,
                              connectionTxPayload_, &responseLength) &&
           responseLength > 0U) {
         deferredLlid = kBlePduDataStartOrComplete;
-          deferredLength = responseLength;
+        deferredLength = responseLength;
+        deferredL2capStartedFragment =
+            !fragmentWasActive &&
+            connectionPendingL2capTxFragmentActive_;
       }
     }
 
@@ -459,10 +480,19 @@
     }
 
     if (deferredLength > 0U) {
-      connectionPendingTxLlid_ = deferredLlid;
-      connectionPendingTxLength_ = deferredLength;
-      memcpy(connectionPendingTxPayload_, connectionTxPayload_, deferredLength);
-      connectionPendingTxValid_ = true;
+      if (connectionPendingTxValid_ &&
+          deferredLlid == kBlePduDataStartOrComplete) {
+        if (deferredL2capStartedFragment) {
+          (void)rewindPendingL2capTxFragment();
+        } else {
+          (void)deferL2capTxPayload(connectionTxPayload_, deferredLength);
+        }
+      } else {
+        connectionPendingTxLlid_ = deferredLlid;
+        connectionPendingTxLength_ = deferredLength;
+        memcpy(connectionPendingTxPayload_, connectionTxPayload_, deferredLength);
+        connectionPendingTxValid_ = true;
+      }
     }
   }
 

@@ -185,6 +185,9 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         const uint16_t ediv = readLe16(&payload[9]);
         if ((ediv != bondRecord_.ediv) ||
             (memcmp(&payload[1], bondRecord_.rand, sizeof(bondRecord_.rand)) != 0)) {
+          bondKeyPrimedForConnection_ = false;
+          smpStkValid_ = false;
+          smpPeerLtkValid_ = false;
           return rejectPinOrKeyMissing();
         }
       }
@@ -259,6 +262,7 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         connectionPendingTxValid_ = false;
         connectionPendingTxLlid_ = 0x01U;
         connectionPendingTxLength_ = 0U;
+        clearPendingL2capTxFragment();
         connectionLastTxWasEncrypted_ = false;
         connectionLastTxEncryptedLength_ = 0U;
         memset(connectionLastTxEncryptedPayload_, 0, sizeof(connectionLastTxEncryptedPayload_));
@@ -1558,25 +1562,155 @@ bool BleRadio::computeSecureConnectionsCheckValues() {
   return true;
 }
 
+void BleRadio::clearPendingL2capTxFragment() {
+  connectionPendingL2capTxFragmentActive_ = false;
+  connectionPendingL2capTxFragmentLength_ = 0U;
+  connectionPendingL2capTxFragmentOffset_ = 0U;
+  memset(connectionPendingL2capTxFragmentPayload_, 0,
+         sizeof(connectionPendingL2capTxFragmentPayload_));
+}
+
+bool BleRadio::deferL2capTxPayload(const uint8_t* l2capPayload,
+                                   uint8_t l2capPayloadLength) {
+  if (l2capPayload == nullptr || l2capPayloadLength == 0U ||
+      connectionPendingL2capTxFragmentActive_ ||
+      l2capPayloadLength > sizeof(connectionPendingL2capTxFragmentPayload_)) {
+    return false;
+  }
+
+  memcpy(connectionPendingL2capTxFragmentPayload_, l2capPayload,
+         l2capPayloadLength);
+  connectionPendingL2capTxFragmentLength_ = l2capPayloadLength;
+  connectionPendingL2capTxFragmentOffset_ = 0U;
+  connectionPendingL2capTxFragmentActive_ = true;
+  emitBleTrace("L2CAP_TX_DEFER_Q");
+  return true;
+}
+
+bool BleRadio::rewindPendingL2capTxFragment() {
+  if (!connectionPendingL2capTxFragmentActive_) {
+    return false;
+  }
+  connectionPendingL2capTxFragmentOffset_ = 0U;
+  emitBleTrace("L2CAP_TX_FRAG_REWIND_Q");
+  return true;
+}
+
+bool BleRadio::queueNextPendingL2capTxFragment() {
+  if (!connected_ || connectionPendingTxValid_ ||
+      !connectionPendingL2capTxFragmentActive_) {
+    return false;
+  }
+
+  if (connectionPendingL2capTxFragmentOffset_ >=
+      connectionPendingL2capTxFragmentLength_) {
+    clearPendingL2capTxFragment();
+    return false;
+  }
+
+  uint16_t maxPayload = currentTxDataPduPayloadLength();
+  if (maxPayload == 0U) {
+    return false;
+  }
+  if (maxPayload > kBleDataPduMaxPayload) {
+    maxPayload = kBleDataPduMaxPayload;
+  }
+
+  const bool startsL2capSdu =
+      connectionPendingL2capTxFragmentOffset_ == 0U;
+  const uint16_t remaining = static_cast<uint16_t>(
+      connectionPendingL2capTxFragmentLength_ -
+      connectionPendingL2capTxFragmentOffset_);
+  const uint8_t fragmentLength =
+      static_cast<uint8_t>(minU16(maxPayload, remaining));
+  if (fragmentLength == 0U) {
+    return false;
+  }
+
+  memcpy(connectionPendingTxPayload_,
+         &connectionPendingL2capTxFragmentPayload_[
+             connectionPendingL2capTxFragmentOffset_],
+         fragmentLength);
+  connectionPendingL2capTxFragmentOffset_ = static_cast<uint16_t>(
+      connectionPendingL2capTxFragmentOffset_ + fragmentLength);
+  connectionPendingTxLlid_ = startsL2capSdu
+                                 ? kBlePduDataStartOrComplete
+                                 : kBlePduDataContinuation;
+  connectionPendingTxLength_ = fragmentLength;
+  connectionPendingTxValid_ = true;
+
+  if (connectionPendingL2capTxFragmentOffset_ >=
+      connectionPendingL2capTxFragmentLength_) {
+    clearPendingL2capTxFragment();
+    emitBleTrace("L2CAP_TX_FRAG_DONE_Q");
+  } else {
+    emitBleTrace("L2CAP_TX_FRAG_CONT_Q");
+  }
+  return true;
+}
+
+bool BleRadio::prepareL2capTxPayload(const uint8_t* l2capPayload,
+                                     uint8_t l2capPayloadLength,
+                                     uint8_t* outPayload,
+                                     uint8_t* outPayloadLength) {
+  if (l2capPayload == nullptr || outPayload == nullptr ||
+      outPayloadLength == nullptr || l2capPayloadLength == 0U) {
+    return false;
+  }
+
+  uint16_t maxPayload = currentTxDataPduPayloadLength();
+  if (maxPayload == 0U) {
+    return false;
+  }
+  if (maxPayload > kBleDataPduMaxPayload) {
+    maxPayload = kBleDataPduMaxPayload;
+  }
+
+  if (l2capPayloadLength <= maxPayload) {
+    memcpy(outPayload, l2capPayload, l2capPayloadLength);
+    *outPayloadLength = l2capPayloadLength;
+    return true;
+  }
+
+  if (connectionPendingL2capTxFragmentActive_ ||
+      (l2capPayloadLength > sizeof(connectionPendingL2capTxFragmentPayload_))) {
+    return false;
+  }
+
+  const uint8_t firstFragmentLength = static_cast<uint8_t>(maxPayload);
+  memcpy(outPayload, l2capPayload, firstFragmentLength);
+  *outPayloadLength = firstFragmentLength;
+
+  memcpy(connectionPendingL2capTxFragmentPayload_, l2capPayload,
+         l2capPayloadLength);
+  connectionPendingL2capTxFragmentLength_ = l2capPayloadLength;
+  connectionPendingL2capTxFragmentOffset_ = firstFragmentLength;
+  connectionPendingL2capTxFragmentActive_ = true;
+  emitBleTrace("L2CAP_TX_FRAG_START_Q");
+  return true;
+}
+
 bool BleRadio::buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLength,
                                      uint8_t* outPayload,
-                                     uint8_t* outPayloadLength) const {
+                                     uint8_t* outPayloadLength) {
   if (smpPayload == nullptr || outPayload == nullptr ||
       outPayloadLength == nullptr) {
     return false;
   }
 
   const uint16_t l2capLength = smpLength;
-  if ((static_cast<uint16_t>(kBleL2capHeaderLen) + l2capLength) >
-      kBleDataPduMaxPayload) {
+  const uint16_t totalLength =
+      static_cast<uint16_t>(kBleL2capHeaderLen + l2capLength);
+  if (totalLength > kBleDataPduMaxPayload) {
     return false;
   }
 
-  writeLe16(&outPayload[0], l2capLength);
-  writeLe16(&outPayload[2], kBleL2capCidSmp);
-  memcpy(&outPayload[4], smpPayload, smpLength);
-  *outPayloadLength = static_cast<uint8_t>(kBleL2capHeaderLen + l2capLength);
-  return true;
+  uint8_t l2capPayload[kBleDataPduMaxPayload] = {0};
+  writeLe16(&l2capPayload[0], l2capLength);
+  writeLe16(&l2capPayload[2], kBleL2capCidSmp);
+  memcpy(&l2capPayload[4], smpPayload, smpLength);
+  return prepareL2capTxPayload(l2capPayload, static_cast<uint8_t>(totalLength),
+                               outPayload, outPayloadLength);
 }
 
 bool BleRadio::queuePendingSmpL2capResponse(const uint8_t* smpPayload,
@@ -1977,6 +2111,7 @@ void BleRadio::clearConnectionSecurityState() {
   if (captureScState) {
     latchSecureConnectionsDebugState();
   }
+  clearPendingL2capTxFragment();
   clearSmpPairingState();
   clearEncryptionState();
 }
@@ -2173,52 +2308,56 @@ bool BleRadio::primeBondForCurrentPeer() {
     return false;
   }
 
-  // For random peer addresses (e.g. Android resolvable private addresses that
-  // rotate between connections) prefer the silicon AAR resolver when an IRK
-  // is available, then fall back to exact current-address match. If no peer
-  // IRK was ever distributed, keep the old behavior and rely on EDIV/Rand in
-  // the later LL_ENC_REQ handler.
-  // For public peer addresses require an exact address and type match.
+  // Reuse a key only after the current peer is identified. LE Secure
+  // Connections stores zero EDIV/Rand, so those LL_ENC_REQ fields cannot
+  // distinguish bonds belonging to different phones.
   const bool bondPeerIsRandom = (bondRecord_.peerAddressRandom & 0x01U) != 0U;
-  if (!bondPeerIsRandom) {
-    if (connectionPeerAddressRandom_) {
-      emitBleTrace("BOND_PRIME_TYPE_MISMATCH");
-      return false;
+  bool peerIdentityMatches =
+      (bondPeerIsRandom == connectionPeerAddressRandom_) &&
+      (memcmp(bondRecord_.peerAddress, connectionPeerAddress_,
+              sizeof(connectionPeerAddress_)) == 0);
+
+  if (!peerIdentityMatches && (bondRecord_.peerIrkValid != 0U)) {
+    const bool identityAddressRandom =
+        (bondRecord_.peerIdentityAddressRandom & 0x01U) != 0U;
+    peerIdentityMatches =
+        (identityAddressRandom == connectionPeerAddressRandom_) &&
+        (memcmp(bondRecord_.peerIdentityAddress, connectionPeerAddress_,
+                sizeof(connectionPeerAddress_)) == 0);
+    if (peerIdentityMatches) {
+      emitBleTrace("BOND_IDENTITY_ADDR_MATCH");
     }
-    if (memcmp(bondRecord_.peerAddress, connectionPeerAddress_,
-               sizeof(connectionPeerAddress_)) != 0) {
-      emitBleTrace("BOND_PRIME_PUBLIC_ADDR_MISMATCH");
-      return false;
-    }
-  } else {
-    if (!connectionPeerAddressRandom_) {
-      emitBleTrace("BOND_PRIME_TYPE_MISMATCH");
-      return false;
-    }
-    const bool exactRandomAddressMatch =
-        memcmp(bondRecord_.peerAddress, connectionPeerAddress_,
-               sizeof(connectionPeerAddress_)) == 0;
-    if (!exactRandomAddressMatch && (bondRecord_.peerIrkValid != 0U)) {
-      ++encDebug_.connAarResolveAttemptCount;
-      bool resolved = false;
-      bool aarOk = false;
-      if (bleAddressLooksResolvablePrivate(connectionPeerAddress_)) {
-        Aar aar;
-        aarOk = aar.resolveSingle(connectionPeerAddress_, bondRecord_.peerIrk,
-                                  &resolved, kBleBondAarSpinLimit);
-        encDebug_.connAarLastErrorStatus = aar.errorStatus();
+  }
+
+  if (!peerIdentityMatches && connectionPeerAddressRandom_ &&
+      (bondRecord_.peerIrkValid != 0U) &&
+      bleAddressLooksResolvablePrivate(connectionPeerAddress_)) {
+    ++encDebug_.connAarResolveAttemptCount;
+    bool resolved = false;
+    Aar aar;
+    const bool aarOk =
+        aar.resolveSingle(connectionPeerAddress_, bondRecord_.peerIrk,
+                          &resolved, kBleBondAarSpinLimit);
+    encDebug_.connAarLastErrorStatus = aar.errorStatus();
+    if (aarOk && resolved) {
+      ++encDebug_.connAarResolveSuccessCount;
+      peerIdentityMatches = true;
+      emitBleTrace("BOND_AAR_RESOLVED");
+    } else {
+      ++encDebug_.connAarResolveFailureCount;
+      uint8_t softwareHash[3] = {0};
+      if (computeBleResolvablePrivateAddressHash(
+              bondRecord_.peerIrk, &connectionPeerAddress_[3], softwareHash) &&
+          memcmp(softwareHash, &connectionPeerAddress_[0],
+                 sizeof(softwareHash)) == 0) {
+        peerIdentityMatches = true;
+        emitBleTrace("BOND_AH_RESOLVED");
       }
-      if (aarOk && resolved) {
-        ++encDebug_.connAarResolveSuccessCount;
-        emitBleTrace("BOND_AAR_RESOLVED");
-      } else {
-        ++encDebug_.connAarResolveFailureCount;
-        // Some Android stacks rotate to an address the local AAR path cannot
-        // resolve immediately. Still prime the stored LTK and let LL_ENC_REQ
-        // EDIV/Rand prove whether this is the bonded central.
-        emitBleTrace("BOND_AAR_FALLBACK");
-      }
     }
+  }
+  if (!peerIdentityMatches) {
+    emitBleTrace("BOND_PRIME_PEER_UNRESOLVED");
+    return false;
   }
   if (memcmp(bondRecord_.localAddress, address_, sizeof(address_)) != 0) {
     emitBleTrace("BOND_PRIME_LOCAL_ADDR_MISMATCH");
@@ -2606,6 +2745,7 @@ void BleRadio::restoreAdvertisingLinkDefaults() {
   connectionAttMtu_ = kBleDefaultAttMtu;
   connectionLastTxLlid_ = 0x01U;
   connectionLastTxLength_ = 0U;
+  connectionLastTxMoreData_ = false;
   connectionLastTxPlainLlid_ = 0x01U;
   connectionLastTxPlainLength_ = 0U;
   memset(connectionLastTxPlainPayload_, 0, sizeof(connectionLastTxPlainPayload_));
@@ -2613,6 +2753,7 @@ void BleRadio::restoreAdvertisingLinkDefaults() {
   connectionPendingTxLength_ = 0U;
   connectionPendingTxValid_ = false;
   memset(connectionPendingTxPayload_, 0, sizeof(connectionPendingTxPayload_));
+  clearPendingL2capTxFragment();
   connectionUpdatePending_ = false;
   connectionUpdateInstant_ = 0U;
   connectionPendingWinSize_ = 0U;
