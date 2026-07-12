@@ -200,11 +200,12 @@ direct register access.
 
 ---
 
-## v1.0.0 Highlights
+## Current BLE Highlights
 
 - LE Secure Connections security now includes asynchronous Numeric Comparison
-  accept/reject handling and OOB records supplied mutually or in either
-  one-way direction.
+  accept/reject handling, request-scoped keyboard/passkey input, explicit
+  bonding/MITM/SC/key-size policy, and OOB records supplied mutually or in
+  either one-way direction.
 - SMP security now reduces encryption keys to the negotiated 7-16 octet size,
   enforces the 30-second transaction timeout with single-peer repeated-attempt
   throttling, and aborts without deterministic fallback if CRACEN entropy is
@@ -216,11 +217,18 @@ direct register access.
 - SMP can exchange and retain CSRKs for both roles. ATT Signed Write Commands
   use AES-CMAC signatures, monotonically persisted counters, replay rejection,
   and a Bluefruit client `writeSigned()` entry point.
+- Bond storage now retains up to eight peers with power-loss-safe replicated
+  records, per-peer CCCDs and Service Changed state, role-correct legacy key
+  tuples, LRU replacement, indexed inspection/deletion, and RPA resolution.
+- Bluefruit central support now includes safe service/characteristic object
+  lifetimes, handle-range discovery, bulk characteristic discovery,
+  `readCharByUuid()`, central indications, and bonded reconnect encryption.
 - Custom GATT characteristics now enforce fixed and maximum lengths for local
   updates, remote writes, and prepare/execute writes. Service permissions are
-  inherited by their characteristics, while unsupported dynamic authorization
-  callbacks fail explicitly during `begin()`. Battery Service database writes
-  and explicit notifications now have distinct behavior.
+  inherited by their characteristics. Dynamic read/write authorization runs
+  callbacks outside the radio ISR, supports approve, reject, and replacement
+  values, and fails closed on timeout or disconnect. Battery Service database
+  writes and explicit notifications now have distinct behavior.
 - `BLEUart::bufferTXD(true)` now coalesces small writes into the current ATT
   notification payload, sends a full packet automatically, and lets sketches
   explicitly flush a partial packet without discarding it on backpressure.
@@ -427,7 +435,7 @@ sketches can be moved to nRF54L with limited changes.
 | **ATT/GATT** | Server and client discovery, 16-bit and 128-bit UUIDs, services, characteristics, descriptors, CCCDs, long reads/writes, fixed/maximum value lengths, notifications, indications, MTU 247, and DLE 251 paths |
 | **Compatibility services** | BLE UART/NUS, Device Information, Battery, HID keyboard/mouse/gamepad, Current Time, ANCS notification and fragmented attribute handling, beacons, and custom services |
 | **Security** | LE Secure Connections, Just Works, passkey/PIN flows, asynchronous Numeric Comparison, mutual and one-way OOB, bonding, negotiated 7-16-byte key sizes, CSRK signed writes, and authenticated access permissions |
-| **Privacy** | Stable identity, local IRK derivation, rotating RPAs, identity-key distribution, hardware AAR resolution, and privacy-aware bonded reconnect |
+| **Privacy** | Stable identity, local IRK derivation, rotating RPAs, identity-key distribution, eight-peer bond storage, direct/identity/RPA selection, and privacy-aware directed reconnect |
 | **Reliability** | Encrypted retransmission/counter handling, signed-write anti-replay counters, SMP timeout and repeated-attempt controls, fail-closed CRACEN entropy, and release-gate positive/negative pairing tests |
 
 The two-board release gate checks advertising, discovery, CCCDs, PHY changes,
@@ -451,6 +459,9 @@ test procedure.
   encrypted or authenticated. Numeric Comparison requires an explicit
   asynchronous accept/reject response; the bundled example shows the complete
   flow.
+- Use `Bluefruit.Security.enumerateBonds()`, `getBondInfo()`, `deleteBond()`,
+  and `clearBonds()` to manage up to eight built-in peer records. The legacy
+  custom persistence callback interface remains intentionally capacity-one.
 - Use the lower-level examples under `Nrf54L15-Clean-Implementation` for radio,
   privacy, crypto, and hardware diagnostics where compatibility wrappers would
   hide the behavior being tested.
@@ -468,17 +479,21 @@ A normal peripheral sketch follows this order:
 
 ### BLE Scope Boundary
 
-The `1.0.0` claim is intentionally narrower than "all Bluetooth LE." It does
+The core's BLE claim is intentionally narrower than "all Bluetooth LE." It does
 not claim Bluetooth SIG qualification or complete Core conformance. Locally
-generated full legacy bond-key distribution, a multi-bond privacy policy,
-controller-enforced allow-list policy, broad cross-vendor negative testing,
-and PTS/BQB remain outside the validated scope. The signed-write claim covers
-CSRK exchange and ATT Signed Write Commands for the core's single retained bond;
-it is not a general multi-peer signing-policy claim. Nordic secure DFU is not
-implemented, and `BLEDfu::begin()` returns `ERROR_NOT_SUPPORTED`. Directed
-advertising and automatic Service Changed database-epoch management are also
-not implemented. Channel Sounding is separate from the normal connected BLE
-stack and remains experimental, as documented below.
+generated legacy bond-key distribution and the built-in multi-bond privacy
+store are implemented; automatic controller-enforced allow-list policy, broad
+cross-vendor negative testing, and PTS/BQB remain outside the validated scope.
+The built-in store retains up
+to eight peers with isolated signing counters, CCCDs, privacy identities, and
+Service Changed state. Nordic secure DFU is not
+implemented, and `BLEDfu::begin()` returns `ERROR_NOT_SUPPORTED`. Legacy
+directed advertising is supported with explicit target selection and compliant
+high-duty scheduling. Service Changed tracking persists a structural database
+fingerprint and pending handle range per bond, retries on encrypted
+reconnects, and clears the range only after ATT confirmation. Channel Sounding
+is separate from the normal connected BLE stack and remains experimental, as
+documented below.
 
 ---
 

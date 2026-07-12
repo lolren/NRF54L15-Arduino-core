@@ -27,6 +27,10 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
 - [x] Bluefruit asynchronous Numeric Comparison through
       `getPendingPairingPasskey()` / `replyPendingPairingPasskey()`, with the
       phone-facing `Security > pairing_numeric_comparison` example
+- [x] Request-scoped passkey input through
+      `getPendingPairingPasskeyRequest()` and the request-ID reply overload,
+      including stale-reply rejection and the non-blocking
+      `Security > pairing_passkey_input` example
 - [x] LE Secure Connections OOB through HAL and Bluefruit APIs in mutual,
       peripheral-to-central one-way, and central-to-peripheral one-way modes.
       Mutual OOB is authenticated; one-way OOB encrypts but remains
@@ -108,10 +112,10 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
       encrypted-link and authenticated/MITM access checks for secured
       characteristics. Authenticated bond metadata is retained for reconnects.
 - [x] `BLEService::setPermission()` supplies the minimum inherited security for
-      characteristics and their descriptors. Dynamic authorize callbacks are
-      not silently ignored: a characteristic configured with one fails
-      `begin()` with `ERROR_NOT_SUPPORTED` until a request/reply transaction is
-      implemented.
+      characteristics and their descriptors. Dynamic authorize callbacks use a
+      deferred request/reply transaction, so sketch callbacks never run in the
+      radio ISR and an operation cannot mutate its value before approval.
+      Rejections, stale replies, disconnects, and reply timeouts fail closed.
 - [x] Bluefruit Battery Service semantics separate database updates from
       notifications: `BLEBas::write()` changes the readable level without
       notifying, while `BLEBas::notify()` requires an active subscriber and can
@@ -190,17 +194,29 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
 
 ## Remaining BLE Compliance Work
 
-- [ ] Directed advertising
-- [ ] Service Changed database-epoch management; the characteristic and bonded
-      CCCD path exist, but `configServiceChanged()` does not yet track database
-      revisions or schedule change-range indications after a schema update
+- [x] Directed advertising, including high-duty timeout enforcement, explicit
+      peer targeting, bonded-peer identity/RPA helpers, and a Bluefruit example
+- [x] Service Changed database-revision management; structural fingerprints and
+      pending ranges persist with the retained bond, retry after encrypted
+      reconnect, and clear only after ATT Handle Value Confirmation
 - [ ] Broader authenticated-pairing interoperability: passkey, Numeric
       Comparison, and NFC/QR OOB workflows against phone/desktop peers, plus a
       larger malformed/timeout/retry matrix
-- [ ] Locally generated legacy LTK/EDIV/Rand distribution, a multi-peer
-      repeated-attempt policy, and a multi-peer bond database
+- [x] Locally generated legacy LTK/EDIV/Rand distribution in negotiated
+      EncInfo/MasterID order, with ACK-gated phase 3 and role-correct retained
+      tuples
+- [x] Eight-peer replicated bond database with durable clear/tombstones,
+      legacy migration, LRU replacement, per-peer CCCDs/signing counters, and
+      indexed Bluefruit inventory/delete APIs
+- [ ] Persisted per-peer repeated-attempt throttling; the current bounded SMP
+      backoff is connection-runtime state
 - [ ] Automatic controller-enforced resolving-list/allow-list policy and
       privacy/bond-database behavior against a broad phone/desktop matrix
+- [ ] GATT Robust Caching: Client Supported Features, Database Hash, and
+      change-aware request enforcement are not implemented yet
+- [ ] LE Credit Based Connection-Oriented Channels and extended/periodic
+      advertising data paths. The periodic API is an explicit unsupported
+      capability probe and does not claim to transmit periodic advertisements.
 - [ ] Formal ATT/GATT edge cases: host-app interop for long read/write and
       prepare/execute write, descriptor host-app interop, and broader
       error-code coverage

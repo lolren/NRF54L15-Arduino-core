@@ -1,10 +1,10 @@
 # nRF54L15 Clean Implementation — New Silicon Features
 
-Catalog of newly implemented HAL wrappers and Arduino IDE examples for the
+Catalog of HAL wrappers, capability probes, and Arduino IDE examples for the
 nRF54L15 family. Compile and hardware status is tracked per feature; inclusion
 in this catalog does not imply that every board/feature combination was flashed.
 
-## 27/27 Plan Items Complete
+## 27/27 Plan Items Accounted For
 
 ### New HAL Wrapper Headers (9 inline headers)
 
@@ -18,7 +18,7 @@ in this catalog does not imply that every board/feature combination was flashed.
 | `nrf54l15_hal_cracen_pke.h` | CracenPke | PKE data/code RAM |
 | `nrf54l15_hal_timer00.h` | Timer00 | 128 MHz MCU-domain timer |
 | `nrf54l15_hal_twis.h` | Twis | I2C slave with EasyDMA |
-| `nrf54l15_hal_ble_periodic.h` | BlePeriodicAdvertising | BLE periodic advertising |
+| `nrf54l15_hal_ble_periodic.h` | BlePeriodicAdvertising | Unsupported capability stub (fails closed) |
 
 ### Existing HAL Classes (new examples added)
 
@@ -65,7 +65,7 @@ in this catalog does not imply that every board/feature combination was flashed.
 | SpuProtectDomain | SPU architecture doc |
 | MpcMemoryProtection | MPC architecture doc |
 | KmuKeyManagement | KMU/CRACEN IKG status |
-| BlePeriodicAdvertising | BLE periodic advertising |
+| BlePeriodicAdvertising | Unsupported capability probe (no radio transmission) |
 | SiliconFeatureSelfTest | Self-test across all features |
 
 ### Existing Example Categories
@@ -146,7 +146,7 @@ Nfct::setNfcId3rdLast(value);         // NFC tag config
 CracenPke::writeDataBytes(off, data); // PKE data RAM
 Timer00 timer;                        // 128 MHz timer
 Twis twis(nrf54l15::TWIS21_BASE);     // I2C slave
-BlePeriodicAdvertising adv;           // Periodic advertising
+BlePeriodicAdvertising adv;           // Capability probe; supported() is false
 
 // Existing classes with new instances:
 Pdm pdm21(nrf54l15::PDM21_BASE);      // Second PDM
@@ -164,7 +164,8 @@ Twis twis30(nrf54l15::TWIS30_BASE);   // Third I2C slave
 - SPIM22/SPIM30 reuse the existing `Spim` class with alternate base
 - TWIS supports 2 programmable addresses and EasyDMA
 - GRTC PWM: 128 Hz from 32.768 kHz LFCLK, 8-bit duty (256 ticks)
-- Periodic advertising uses raw RADIO for PDU transmission
+- Periodic advertising is not implemented. It requires controller-managed
+  `AUX_SYNC_IND` scheduling and event counters; the legacy wrapper fails closed.
 - Thread UDP communication verified between 2 boards with ping/pong protocol
 
 ### Secure-Only Peripherals (No NS Alias)

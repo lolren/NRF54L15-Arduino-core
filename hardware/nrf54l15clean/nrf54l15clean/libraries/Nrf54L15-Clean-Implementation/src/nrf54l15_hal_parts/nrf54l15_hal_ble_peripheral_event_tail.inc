@@ -343,12 +343,10 @@
       writeLe16(&connectionTxPayload_[0], 2U);           // L2CAP length = 2
       writeLe16(&connectionTxPayload_[2], kBleL2capCidSmp);
       connectionTxPayload_[4] = kSmpCodeSecurityRequest; // opcode 0x0B
-      uint8_t authReq =
-          static_cast<uint8_t>(0x01U | kSmpAuthReqSecureConnectionsMask);
-      if (smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput) {
-        authReq |= kSmpAuthReqMitmMask;
+      if (!smpSecurityPolicyLatched_) {
+        latchSecurityPolicyForPairing();
       }
-      connectionTxPayload_[5] = authReq;
+      connectionTxPayload_[5] = buildLocalPairingAuthReq(true);
       deferredLlid = kBlePduDataStartOrComplete;
       deferredLength = 6U;
       connectionSmpSecurityRequestPending_ = false;
@@ -371,21 +369,44 @@
 
     if ((deferredLength == 0U) &&
         !connectionPendingTxValid_ &&
+        !connectionPendingL2capTxFragmentActive_ &&
+        !encryptionProcedureBusy &&
+        !connectionEncStartReqTxPending_ &&
+        !connectionEncAwaitingStartRsp_ &&
+        !connectionEncStartReqPending_ &&
+        takeCustomGattAuthorizationResponse(connectionTxPayload_,
+                                            &deferredLength)) {
+      deferredLlid = kBlePduDataStartOrComplete;
+      emitBleTrace("ATT_AUTHORIZE_RSP_TXQ");
+    }
+
+    if ((deferredLength == 0U) &&
+        !connectionPendingTxValid_ &&
         !encryptionProcedureBusy &&
         !connectionEncStartReqTxPending_ &&
         !connectionEncAwaitingStartRsp_ &&
         !connectionEncStartReqPending_ &&
         connectionServiceChangedIndicationsEnabled_ &&
+        connectionServiceChangedCccdRestored_ &&
         connectionServiceChangedIndicationPending_ &&
-        !connectionServiceChangedIndicationAwaitingConfirm_) {
+        connectionEncRxEnabled_ && connectionEncTxEnabled_ &&
+        bondedServiceChangedStartHandle_ != 0U &&
+        !connectionServiceChangedIndicationAwaitingConfirm_ &&
+        connectionCustomIndicationAwaitingHandle_ == 0U) {
       writeLe16(&connectionTxPayload_[0], 7U);
       writeLe16(&connectionTxPayload_[2], kBleL2capCidAtt);
       connectionTxPayload_[4] = kAttOpHandleValueInd;
       writeLe16(&connectionTxPayload_[5], kHandleGattServiceChangedValue);
-      writeLe16(&connectionTxPayload_[7], 0x0001U);
-      writeLe16(&connectionTxPayload_[9], 0xFFFFU);
+      writeLe16(&connectionTxPayload_[7], bondedServiceChangedStartHandle_);
+      writeLe16(&connectionTxPayload_[9], bondedServiceChangedEndHandle_);
       deferredLlid = kBlePduDataStartOrComplete;
       deferredLength = 11U;
+      connectionServiceChangedIndicationStartHandle_ =
+          bondedServiceChangedStartHandle_;
+      connectionServiceChangedIndicationEndHandle_ =
+          bondedServiceChangedEndHandle_;
+      connectionServiceChangedIndicationGeneration_ =
+          bondedServiceChangedGeneration_;
       connectionServiceChangedIndicationPending_ = false;
       connectionServiceChangedIndicationAwaitingConfirm_ = true;
     }

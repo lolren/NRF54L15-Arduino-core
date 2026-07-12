@@ -3828,6 +3828,48 @@ For compactness, `P` below means `hardware/nrf54l15clean/nrf54l15clean`, and `HA
 * State explicitly that nRF54L10/L05 are recognized by PART ID but are not build targets.
 * Add the missing HOLYIOT/PCA10156 schematics, Nordic errata and security/protocol requirements to the local audit reference set.
 
+## BLE Completion Follow-up - 2026-07-12
+
+The current source tree closes another set of concrete BLE implementation and
+compatibility gaps. This is an implementation and regression-test statement,
+not a Bluetooth SIG qualification claim.
+
+* Bond storage now supports eight peers with A/B power-loss-safe replicas,
+  legacy-record migration, LRU replacement, indexed inspection/deletion, and
+  per-peer privacy, signing, CCCD, and Service Changed state.
+* Pairing policy is explicit per transaction: bonding, MITM, Secure
+  Connections allowed/required, and minimum/maximum encryption-key sizes are
+  snapshotted when pairing starts. Request-scoped passkey input rejects stale
+  replies and preserves leading zeroes.
+* Legacy SMP now performs association-model selection and role-correct local
+  and peer encryption-, identity-, and signing-key distribution. Exact
+  retransmissions are idempotent; conflicting or out-of-order key PDUs fail
+  closed.
+* Directed advertising, deferred dynamic GATT authorization, peripheral
+  indications, central indication confirmation, Service Changed persistence,
+  and bounded central service/characteristic discovery are implemented with
+  new examples and contract tests.
+* Central client object lifetime and deferred-event handling now use connection
+  generations and deregistration, preventing stale callbacks and slot reuse
+  from targeting destroyed client objects.
+* Periodic advertising remains unsupported and now reports that fact
+  fail-closed. The compatibility API no longer stores data or reports success
+  for a radio procedure that the controller does not transmit.
+
+Two connected boards were used for runtime verification: a XIAO nRF54L15 and a
+XIAO nRF54LM20A. A fresh Just Works pairing completed key distribution, saved
+the bond, and carried encrypted notifications and writes. After reset, both
+boards selected the saved peer and restored encryption without a new pairing.
+A separate Bluefruit fixed-PIN run completed with encryption and authenticated
+MITM state on both boards, discovered the secure UART service, exchanged GATT
+traffic, and then repeated the encrypted bonded reconnect without another PIN
+prompt.
+
+Remaining BLE work is tracked honestly in `docs/BLE_COMPLIANCE_RESUME.md`.
+Important gaps include GATT Robust Caching, LE Credit Based L2CAP Channels,
+extended/periodic advertising, persisted per-peer repeated-attempt throttling,
+and broader phone/controller interoperability and conformance testing.
+
 ## Machine-Readable Summary
 
 The following is the valid JSON snapshot of the original 2026-07-09 audit. It

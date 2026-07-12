@@ -39,6 +39,25 @@ starting points.
 For the simplest custom notification flow, use `notify_peripheral` together
 with `central_notify`.
 
+For confirmed GATT delivery, flash `Peripheral > indication_peripheral` on one
+board and `Central > central_indication` on the other. The client exposes
+separate notification and indication callbacks, generic `writeCCCD()` control,
+and `enableIndicate()` / `disableIndicate()` helpers. Existing sketches that
+only install a notification callback continue to receive indications through
+that callback until they install a distinct indication callback. Typed client
+reads and writes (`read16()`, `read32()`, `write16()`, `write32()`, and the
+`*_resp` forms) use the same discovered characteristic and ATT transaction
+path.
+
+For generic central discovery, `Bluefruit.Discovery` exposes a bounded handle
+range plus bulk discovery of up to eight characteristic objects per call.
+`BLEClientService::getHandleRange()` can feed that range directly, while
+`Bluefruit.Gatt.readCharByUuid()` discovers and reads a one-off characteristic
+without retaining another callback object. Client services, characteristics,
+and UART clients deregister when their C++ lifetime ends, so deferred callbacks
+and the implicit last-service parent never retain a destroyed object. See
+`Central > central_gatt_discovery` for both discovery forms.
+
 BLE PHY requests are available through the nRF52840-style connection object:
 
 ```cpp
@@ -86,6 +105,24 @@ if (Bluefruit.Security.getPendingPairingPasskey(passkey, &matchRequest) &&
 Use `Security > pairing_numeric_comparison` for a phone-facing peripheral that
 accepts `yes` or `no` over Serial. A rejected comparison stops the security
 procedure before link encryption and does not save a bond.
+
+### Passkey Input
+
+Keyboard-capable devices can provide the six digits displayed by the peer
+without blocking BLE servicing. Each request has a monotonically changing ID,
+so a delayed UI reply cannot cross a disconnect or a newer pairing attempt:
+
+```cpp
+uint32_t requestId = 0;
+uint8_t passkey[6] = {'0', '0', '0', '0', '4', '2'};
+if (Bluefruit.Security.getPendingPairingPasskeyRequest(&requestId)) {
+  Bluefruit.Security.replyPendingPairingPasskey(requestId, passkey);
+}
+```
+
+`Security > pairing_passkey_input` is a non-blocking Serial example. The
+upstream-compatible `setPairPasskeyRequestCallback()` can also fill its mutable
+six-byte buffer immediately when the application already has the value.
 
 ### LE Secure Connections OOB
 
@@ -140,7 +177,8 @@ The clean HAL uses AES-CMAC with the retained local CSRK, persists the next
 sender counter before making the command eligible for transmission, verifies
 the peer signature in constant time, and rejects stale or replayed counters
 before changing the GATT value. The current policy is deliberately bounded to
-the single retained bond. `writeSigned()` returns zero when the characteristic
+the currently selected bond, with independent counters for each of up to eight
+stored peers. `writeSigned()` returns zero when the characteristic
 does not advertise the property, no signing bond exists, the link is encrypted,
 or the value does not fit the negotiated ATT MTU.
 
@@ -148,6 +186,26 @@ For bonded peers, CCCD subscriptions are restored automatically when the saved
 bond identity matches the reconnecting peer. This lets notify/indicate
 characteristics keep the same Bluefruit callback behavior after a bonded
 reconnect without requiring the central to rewrite every CCCD immediately.
+CCCDs, signing counters, GATT fingerprints, and pending Service Changed ranges
+are isolated per peer.
+
+The built-in store exposes stable bond IDs and MRU-ordered enumeration:
+
+```cpp
+ble_gap_bond_info_t bonds[8] = {};
+uint8_t count = Bluefruit.Security.enumerateBonds(bonds, 8);
+for (uint8_t i = 0; i < count; ++i) {
+  Serial.println(bonds[i].bond_id);
+}
+Bluefruit.Security.deleteBond(bonds[0].bond_id);  // Delete one peer.
+// Bluefruit.Security.clearBonds();               // Delete every peer.
+```
+
+Each logical bond has two CRC-checked RRAM replicas. An interrupted update
+leaves the previous committed replica intact, and a ninth peer evicts the
+least-recently-used inactive peer. Ordinary encrypted reconnects update RAM
+recency only; they do not write RRAM every time. Applications using the legacy
+custom persistence callbacks retain the original capacity of one bond.
 
 Bond identity helpers are available for host privacy debugging:
 
@@ -159,8 +217,8 @@ bool hasIrk = Bluefruit.Security.getBondPeerIrk(peerIrk);
 bool inResolver = Bluefruit.Security.addBondedPeerIrkToResolvingList();
 ```
 
-If you want the stored bonded peer IRK kept in the resolving list automatically
-after boot and after pairing completes:
+If you want all stored peer IRKs kept in the resolving list automatically after
+boot and after pairing completes:
 
 ```cpp
 Bluefruit.Security.setBondedPeerResolvingEnabled(true);
@@ -183,9 +241,9 @@ During bonding, the clean SMP path distributes and receives Identity
 Information plus Identity Address Information in role-correct order. A retained
 bond stores the peer IRK and identity address, allowing AAR resolution and an
 encrypted reconnect after either board starts with a new RPA. The public
-resolving list remains application-managed and holds up to eight IRKs; automatic
-multi-bond controller policy and allow-list enforcement are outside this
-compatibility layer's current scope.
+resolving list holds up to eight IRKs. Automatic refresh preserves manually
+added IRKs, then fills remaining entries from stored bonds in most-recently-used
+order. Internal bonded reconnect selection still checks all eight stored IRKs.
 
 Use `Diagnostics > bond_identity_probe` to pair with a phone or desktop host
 and print the saved peer address, identity address, IRK presence, and
@@ -288,13 +346,14 @@ if (Bluefruit.getLastDisconnectReason(&reason, &remote)) {
 
 The broader Bluefruit menus now ship the practical wrapper examples by role:
 
-- `Advertising`: `adv_advanced`, `beacon`, `eddystone_url`
-- `Central`: `central_bleuart_multi`, `central_custom_hrm`, `central_hid`, `central_pairing`, `central_scan_advanced`, `central_throughput`
+- `Advertising`: `adv_advanced`, `beacon`, `directed_advertising`, `eddystone_url`
+- `Central`: `central_bleuart_multi`, `central_custom_hrm`, `central_gatt_discovery`, `central_hid`, `central_indication`, `central_pairing`, `central_scan_advanced`, `central_throughput`
 - `Diagnostics`: `bond_identity_probe`, `gatt_descriptor_helpers`, `gatt_edge_cases`, `throughput`, `rssi_callback`, `rssi_poll`
 - `DualRoles`: `dual_bleuart`
 - `HID`: `blehid_keyboard`, `blehid_mouse`, `blehid_gamepad`, `blehid_camerashutter`
 - `Projects`: `rssi_proximity_central`, `rssi_proximity_peripheral`
-- `Security`: `pairing_numeric_comparison`, `pairing_passkey`, `pairing_pin`, `clearbonds`
+- `Peripheral`: `bleuart`, `indication_peripheral`, `nrf_blinky`
+- `Security`: `pairing_numeric_comparison`, `pairing_passkey`, `pairing_passkey_input`, `pairing_pin`, `clearbonds`
 - `Services`: `bleuart`, `bleuart_multi`, `custom_hrm`, `custom_htm`, `client_cts`, `ancs`
 
 The supported surface is the shipped example set above plus the documented
@@ -304,26 +363,40 @@ two-board gate and are the recommended starting point for nRF52 sketch ports.
 This compatibility statement is not Bluetooth SIG qualification or a claim of
 complete nRF52 Bluefruit behavioral parity.
 
-### Known compatibility limits
+### Dynamic GATT authorization
 
-Dynamic GATT read/write authorization callbacks are not implemented. The clean
-HAL does not yet expose the request/reply transaction needed to let a callback
-approve or reject an ATT operation before the value changes. If
-`setReadAuthorizeCallback()` or `setWriteAuthorizeCallback()` is configured,
-`BLECharacteristic::begin()` returns `ERROR_NOT_SUPPORTED` instead of silently
-creating an unprotected characteristic. Use `setPermission()` for static GATT
-access control.
+`setReadAuthorizeCallback()` and `setWriteAuthorizeCallback()` defer matching
+ATT Read, Read Blob, and Write Request operations to sketch context. Reply with
+`sd_ble_gatts_rw_authorize_reply()` to approve, reject, or replace the value.
+The value remains unchanged until a successful reply; stale replies,
+disconnects, missing callbacks, and the 30-second reply timeout fail closed.
+See `Diagnostics > gatt_authorization` for a complete request/reply example.
+
+ATT Write Commands cannot carry an ATT error response and therefore do not run
+the write-authorization callback. Prepare/Execute Write remains controller
+owned, matching the nRF52 Bluefruit behavior: fragments are validated and
+queued by the stack, then one normal write callback runs after a successful
+execute. Use `setPermission()` when every write form needs static access
+control.
+
+### Known compatibility limits
 
 Nordic secure DFU is not implemented by this core. `BLEDfu::begin()` returns
 `ERROR_NOT_SUPPORTED`, and the bundled examples do not advertise a non-working
 DFU service.
 
-Directed advertising is not implemented. Service Changed is present as a GATT
-characteristic and its bonded CCCD can be retained, but
-`configServiceChanged()` does not track a database-change epoch or schedule
-schema-range indications.
+Legacy low- and high-duty directed advertising is supported through
+`setPeerAddress()` plus the canonical Bluefruit directed advertising types.
+Directed starts reject missing/invalid targets and non-empty advertising or
+scan-response payloads. High-duty operation uses a maximum 3.75 ms interval,
+omits random advertising delay, and terminates within 1.28 seconds.
 
-The compatibility layer keeps one retained bond. Automatic multi-bond policy,
-controller-enforced allow-list behavior, locally generated full legacy
-LTK/EDIV/Rand distribution, complete nRF52 API parity, and Bluetooth PTS/BQB
-qualification are outside the documented `1.0.0` scope.
+`configServiceChanged(true)` enables structural database fingerprint tracking
+per bond. Schema changes and explicit `Gatt.serviceChanged()` ranges remain
+pending across reconnects until that bonded central confirms the encrypted
+Service Changed indication.
+
+The compatibility layer keeps up to eight retained bonds with automatic
+direct/identity/RPA selection. Controller-enforced allow-list behavior, locally
+generated full legacy LTK/EDIV/Rand distribution, complete nRF52 API parity,
+and Bluetooth PTS/BQB qualification are outside the documented `1.0.0` scope.

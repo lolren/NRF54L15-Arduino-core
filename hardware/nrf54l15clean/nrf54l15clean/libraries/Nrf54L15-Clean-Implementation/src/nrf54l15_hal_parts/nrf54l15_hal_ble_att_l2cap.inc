@@ -42,6 +42,29 @@ void invalidateSecureConnectionsKeypairAndOob(
 
 }  // namespace
 
+namespace {
+
+constexpr uint32_t kGattAuthorizationTimeoutMs = 30000UL;
+
+bool gattAuthorizeStatusToAttError(uint16_t gattStatus,
+                                   uint8_t* outError) {
+  if (outError == nullptr) {
+    return false;
+  }
+  if (gattStatus == 0U) {
+    *outError = 0U;
+    return true;
+  }
+  if ((gattStatus & 0xFF00U) != 0x0100U ||
+      (gattStatus & 0x00FFU) == 0U) {
+    return false;
+  }
+  *outError = static_cast<uint8_t>(gattStatus & 0x00FFU);
+  return true;
+}
+
+}  // namespace
+
 bool BleRadio::buildAttErrorResponse(uint8_t requestOpcode, uint16_t handle,
                                      uint8_t errorCode, uint8_t* outAttResponse,
                                      uint16_t* outAttResponseLength) const {
@@ -98,6 +121,306 @@ void BleRadio::clearPreparedWriteState() {
   connectionPreparedWriteLength_ = 0U;
   connectionPreparedWriteMask_ = 0U;
   connectionPreparedWriteIsCustomVariable_ = false;
+}
+
+bool BleRadio::beginCustomGattAuthorization(
+    BleGattAuthorizeType type, uint8_t requestOpcode, uint8_t operation,
+    const BleCustomCharacteristicState* characteristic, uint16_t offset,
+    const uint8_t* value, uint16_t valueLength) {
+  if (characteristic == nullptr || type == BleGattAuthorizeType::kInvalid ||
+      valueLength > kCustomGattMaxValueLength ||
+      (valueLength > 0U && value == nullptr)) {
+    return false;
+  }
+
+  const uint32_t irqState = bleEnterCritical();
+  if (connectionGattAuthorization_.pending ||
+      connectionGattAuthorization_.responseReady) {
+    bleExitCritical(irqState);
+    return false;
+  }
+
+  clearCustomGattAuthorizationState();
+  ++connectionGattAuthorizationGeneration_;
+  if (connectionGattAuthorizationGeneration_ == 0U) {
+    ++connectionGattAuthorizationGeneration_;
+  }
+  connectionGattAuthorization_.pending = true;
+  connectionGattAuthorization_.callbackPending = true;
+  connectionGattAuthorization_.type = type;
+  connectionGattAuthorization_.operation = operation;
+  connectionGattAuthorization_.requestOpcode = requestOpcode;
+  connectionGattAuthorization_.uuidSize = characteristic->uuidSize;
+  connectionGattAuthorization_.handle = characteristic->valueHandle;
+  connectionGattAuthorization_.offset = offset;
+  connectionGattAuthorization_.valueLength = valueLength;
+  connectionGattAuthorization_.generation =
+      connectionGattAuthorizationGeneration_;
+  connectionGattAuthorization_.deadlineMs = millis() +
+                                               kGattAuthorizationTimeoutMs;
+  memcpy(connectionGattAuthorization_.uuid, characteristic->uuid,
+         sizeof(connectionGattAuthorization_.uuid));
+  if (valueLength > 0U) {
+    memcpy(connectionGattAuthorization_.value, value, valueLength);
+  }
+  bleExitCritical(irqState);
+  emitBleTrace(type == BleGattAuthorizeType::kRead
+                   ? "ATT_READ_AUTHORIZE_DEFER"
+                   : "ATT_WRITE_AUTHORIZE_DEFER");
+  return true;
+}
+
+BleGattAuthorizeReplyResult BleRadio::replyCustomGattAuthorization(
+    BleGattAuthorizeType type, uint16_t gattStatus, bool update,
+    uint16_t offset, const uint8_t* value, uint16_t valueLength) {
+  if (!connected_ || connectionRole_ != BleConnectionRole::kPeripheral) {
+    return BleGattAuthorizeReplyResult::kInvalidConnection;
+  }
+  if (valueLength > kCustomGattMaxValueLength ||
+      (valueLength > 0U && value == nullptr)) {
+    return BleGattAuthorizeReplyResult::kInvalidParameter;
+  }
+
+  uint8_t attError = 0U;
+  if (!gattAuthorizeStatusToAttError(gattStatus, &attError)) {
+    return BleGattAuthorizeReplyResult::kInvalidParameter;
+  }
+
+  const uint32_t irqState = bleEnterCritical();
+  if (!connectionGattAuthorization_.pending ||
+      connectionGattAuthorization_.type != type) {
+    bleExitCritical(irqState);
+    return BleGattAuthorizeReplyResult::kInvalidState;
+  }
+  const bool timedOut = static_cast<int32_t>(
+                            millis() -
+                            connectionGattAuthorization_.deadlineMs) >= 0;
+  const uint16_t requestHandle = connectionGattAuthorization_.handle;
+  const uint16_t requestOffset = connectionGattAuthorization_.offset;
+  const uint8_t requestOpcode =
+      connectionGattAuthorization_.requestOpcode;
+  const uint32_t requestGeneration =
+      connectionGattAuthorization_.generation;
+  bleExitCritical(irqState);
+
+  if (timedOut) {
+    const uint32_t timeoutIrqState = bleEnterCritical();
+    const bool stillExpiredRequest =
+        connectionGattAuthorization_.pending &&
+        connectionGattAuthorization_.generation == requestGeneration &&
+        connectionGattAuthorization_.type == type;
+    if (stillExpiredRequest) {
+      clearCustomGattAuthorizationState();
+    }
+    bleExitCritical(timeoutIrqState);
+    if (!stillExpiredRequest) {
+      return BleGattAuthorizeReplyResult::kInvalidState;
+    }
+    emitBleTrace("ATT_AUTHORIZE_TIMEOUT");
+    (void)disconnectWithReason(BleDisconnectReason::kInternalTerminate,
+                               0x21U, 100000UL);
+    return BleGattAuthorizeReplyResult::kTimeout;
+  }
+
+  uint8_t response[255] = {0};
+  uint16_t responseLength = 0U;
+  BleCustomCharacteristicState* commitCharacteristic = nullptr;
+  uint8_t readCandidate[kCustomGattMaxValueLength] = {0};
+  uint16_t readCandidateLength = 0U;
+  bool commitReadUpdate = false;
+  bool commitWrite = false;
+  if (attError != 0U) {
+    if (!buildAttErrorResponse(requestOpcode, requestHandle, attError,
+                               response, &responseLength)) {
+      return BleGattAuthorizeReplyResult::kInvalidState;
+    }
+  } else if (type == BleGattAuthorizeType::kRead) {
+    BleCustomCharacteristicState* characteristic =
+        findCustomCharacteristicByValueHandle(requestHandle);
+    if (characteristic == nullptr ||
+        (characteristic->properties & kBleGattPropRead) == 0U) {
+      return BleGattAuthorizeReplyResult::kInvalidState;
+    }
+
+    readCandidateLength = characteristic->valueLength;
+    if (readCandidateLength > 0U) {
+      memcpy(readCandidate, characteristic->value, readCandidateLength);
+    }
+    if (update) {
+      if (offset > characteristic->maxValueLength ||
+          valueLength >
+              static_cast<uint16_t>(characteristic->maxValueLength - offset)) {
+        return BleGattAuthorizeReplyResult::kInvalidParameter;
+      }
+      if (characteristic->fixedValueLength && offset == 0U &&
+          valueLength != characteristic->maxValueLength) {
+        return BleGattAuthorizeReplyResult::kInvalidParameter;
+      }
+      if (valueLength > 0U) {
+        memcpy(&readCandidate[offset], value, valueLength);
+      }
+      if (offset == 0U) {
+        readCandidateLength = characteristic->fixedValueLength
+                                  ? characteristic->maxValueLength
+                                  : valueLength;
+      } else if (static_cast<uint16_t>(offset + valueLength) >
+                 readCandidateLength) {
+        readCandidateLength = static_cast<uint16_t>(offset + valueLength);
+      }
+    }
+    if (requestOffset > readCandidateLength) {
+      return BleGattAuthorizeReplyResult::kInvalidParameter;
+    }
+
+    const uint16_t maxAttResponseLen = minU16(
+        minU16(connectionAttMtu_, currentMaxAttPayloadLength()), 251U);
+    if (maxAttResponseLen < 1U || maxAttResponseLen > sizeof(response)) {
+      return BleGattAuthorizeReplyResult::kBusy;
+    }
+    const uint16_t available =
+        static_cast<uint16_t>(readCandidateLength - requestOffset);
+    const uint16_t toCopy =
+        minU16(available, static_cast<uint16_t>(maxAttResponseLen - 1U));
+    response[0] = (requestOpcode == kAttOpReadBlobReq)
+                      ? kAttOpReadBlobRsp
+                      : kAttOpReadRsp;
+    if (toCopy > 0U) {
+      memcpy(&response[1], &readCandidate[requestOffset], toCopy);
+    }
+    responseLength = static_cast<uint16_t>(1U + toCopy);
+    commitCharacteristic = characteristic;
+    commitReadUpdate = update;
+  } else if (type == BleGattAuthorizeType::kWrite) {
+    if (!update || offset != 0U) {
+      return BleGattAuthorizeReplyResult::kInvalidParameter;
+    }
+    BleCustomCharacteristicState* characteristic =
+        findCustomCharacteristicByValueHandle(requestHandle);
+    if (characteristic == nullptr ||
+        (characteristic->properties & kBleGattPropWrite) == 0U ||
+        (characteristic->fixedValueLength
+             ? (valueLength != characteristic->maxValueLength)
+             : (valueLength > characteristic->maxValueLength))) {
+      return BleGattAuthorizeReplyResult::kInvalidParameter;
+    }
+    uint8_t permissionError = kAttErrWriteNotPermitted;
+    if (!customGattWritePermissionSatisfied(characteristic,
+                                            &permissionError)) {
+      return BleGattAuthorizeReplyResult::kInvalidParameter;
+    }
+    commitCharacteristic = characteristic;
+    commitWrite = true;
+    response[0] = kAttOpWriteRsp;
+    responseLength = 1U;
+  } else {
+    return BleGattAuthorizeReplyResult::kInvalidParameter;
+  }
+
+  const uint32_t storeIrqState = bleEnterCritical();
+  if (!connectionGattAuthorization_.pending ||
+      connectionGattAuthorization_.handle != requestHandle ||
+      connectionGattAuthorization_.type != type ||
+      connectionGattAuthorization_.generation != requestGeneration ||
+      !connected_ || connectionRole_ != BleConnectionRole::kPeripheral) {
+    bleExitCritical(storeIrqState);
+    return BleGattAuthorizeReplyResult::kInvalidState;
+  }
+  if (static_cast<int32_t>(millis() -
+                           connectionGattAuthorization_.deadlineMs) >= 0) {
+    clearCustomGattAuthorizationState();
+    bleExitCritical(storeIrqState);
+    emitBleTrace("ATT_AUTHORIZE_TIMEOUT");
+    (void)disconnectWithReason(BleDisconnectReason::kInternalTerminate,
+                               0x21U, 100000UL);
+    return BleGattAuthorizeReplyResult::kTimeout;
+  }
+
+  if (commitWrite) {
+    const BleCustomWriteHandlerState* handler =
+        findCustomGattWriteHandler(requestHandle);
+    const bool callbackNeeded =
+        (handler != nullptr && handler->callback != nullptr) ||
+        customGattWriteCallback_ != nullptr;
+    const uint8_t deferredDepth = static_cast<uint8_t>(
+        sizeof(deferredGattWrites_) / sizeof(deferredGattWrites_[0]));
+    if (callbackNeeded && deferredGattWriteCount_ >= deferredDepth) {
+      bleExitCritical(storeIrqState);
+      return BleGattAuthorizeReplyResult::kBusy;
+    }
+    uint8_t writeError = kAttErrWriteNotPermitted;
+    if (!applyCustomGattCharacteristicValueWrite(
+            requestHandle, value, valueLength, true, &writeError, true)) {
+      bleExitCritical(storeIrqState);
+      return BleGattAuthorizeReplyResult::kInvalidParameter;
+    }
+  } else if (commitReadUpdate) {
+    commitCharacteristic->valueLength = readCandidateLength;
+    memset(commitCharacteristic->value, 0,
+           sizeof(commitCharacteristic->value));
+    if (readCandidateLength > 0U) {
+      memcpy(commitCharacteristic->value, readCandidate,
+             readCandidateLength);
+    }
+  }
+  memcpy(connectionGattAuthorization_.response, response, responseLength);
+  connectionGattAuthorization_.responseLength = responseLength;
+  connectionGattAuthorization_.pending = false;
+  connectionGattAuthorization_.callbackPending = false;
+  connectionGattAuthorization_.responseReady = true;
+  bleExitCritical(storeIrqState);
+  emitBleTrace(attError == 0U ? "ATT_AUTHORIZE_ACCEPT"
+                              : "ATT_AUTHORIZE_REJECT");
+  return BleGattAuthorizeReplyResult::kSuccess;
+}
+
+bool BleRadio::takeCustomGattAuthorizationResponse(
+    uint8_t* outL2capPayload, uint8_t* outPayloadLength) {
+  if (outL2capPayload == nullptr || outPayloadLength == nullptr) {
+    return false;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  if (!connectionGattAuthorization_.responseReady ||
+      connectionGattAuthorization_.responseLength == 0U ||
+      connectionGattAuthorization_.responseLength > connectionAttMtu_) {
+    bleExitCritical(irqState);
+    return false;
+  }
+  const uint16_t totalLength = static_cast<uint16_t>(
+      kBleL2capHeaderLen + connectionGattAuthorization_.responseLength);
+  if (totalLength > 255U || totalLength > currentTxDataPduPayloadLength()) {
+    bleExitCritical(irqState);
+    return false;
+  }
+  writeLe16(&outL2capPayload[0],
+            connectionGattAuthorization_.responseLength);
+  writeLe16(&outL2capPayload[2], kBleL2capCidAtt);
+  memcpy(&outL2capPayload[kBleL2capHeaderLen],
+         connectionGattAuthorization_.response,
+         connectionGattAuthorization_.responseLength);
+  *outPayloadLength = static_cast<uint8_t>(totalLength);
+  clearCustomGattAuthorizationState();
+  bleExitCritical(irqState);
+  return true;
+}
+
+void BleRadio::serviceCustomGattAuthorizationTimeout() {
+  const uint32_t irqState = bleEnterCritical();
+  const bool expired =
+      (connectionGattAuthorization_.pending ||
+       connectionGattAuthorization_.responseReady) &&
+      static_cast<int32_t>(millis() -
+                           connectionGattAuthorization_.deadlineMs) >= 0;
+  if (!expired) {
+    bleExitCritical(irqState);
+    return;
+  }
+  clearCustomGattAuthorizationState();
+  bleExitCritical(irqState);
+  emitBleTrace("ATT_AUTHORIZE_TIMEOUT");
+  if (connected_) {
+    (void)disconnectWithReason(BleDisconnectReason::kInternalTerminate,
+                               0x21U, 100000UL);
+  }
 }
 
 void BleRadio::clearIncomingL2capReassembly() {
@@ -224,8 +547,14 @@ bool BleRadio::applyCccdState(uint16_t handle, uint16_t cccd) {
     if (!enableIndication) {
       connectionServiceChangedIndicationPending_ = false;
       connectionServiceChangedIndicationAwaitingConfirm_ = false;
+      connectionServiceChangedIndicationStartHandle_ = 0U;
+      connectionServiceChangedIndicationEndHandle_ = 0U;
+      connectionServiceChangedIndicationGeneration_ = 0U;
     }
     connectionServiceChangedIndicationsEnabled_ = enableIndication;
+    if (enableIndication) {
+      scheduleBondedServiceChangedIfReady();
+    }
     return true;
   }
   if (handle == kHandleBatteryLevelCccd) {
@@ -1404,6 +1733,8 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         return buildAttErrorResponse(opcode, handle, kAttErrInvalidHandle,
                                      outAttResponse, outAttResponseLength);
       }
+      const BleCustomCharacteristicState* authorizeTarget =
+          findCustomCharacteristicByValueHandle(handle);
       outAttResponse[0] = kAttOpReadRsp;
       const uint8_t vlen =
           readAttributeValue(handle, 0U, &outAttResponse[1], maxAttValueLen);
@@ -1412,6 +1743,18 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       if (readError != 0U) {
         return buildAttErrorResponse(opcode, handle, readError,
                                      outAttResponse, outAttResponseLength);
+      }
+      if (authorizeTarget != nullptr && authorizeTarget->readAuthorize) {
+        if (!beginCustomGattAuthorization(
+                BleGattAuthorizeType::kRead, opcode, 0U, authorizeTarget, 0U,
+                nullptr, 0U)) {
+          return buildAttErrorResponse(opcode, handle,
+                                       kAttErrInsufficientAuthorization,
+                                       outAttResponse,
+                                       outAttResponseLength);
+        }
+        *outAttResponseLength = 0U;
+        return false;
       }
       *outAttResponseLength = static_cast<uint16_t>(1U + vlen);
       return true;
@@ -1431,6 +1774,8 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
                                      outAttResponse, outAttResponseLength);
       }
 
+      const BleCustomCharacteristicState* authorizeTarget =
+          findCustomCharacteristicByValueHandle(handle);
       outAttResponse[0] = kAttOpReadBlobRsp;
       const uint8_t vlen =
           readAttributeValue(handle, offset, &outAttResponse[1], maxAttValueLen);
@@ -1439,6 +1784,18 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       if (readError != 0U) {
         return buildAttErrorResponse(opcode, handle, readError,
                                      outAttResponse, outAttResponseLength);
+      }
+      if (authorizeTarget != nullptr && authorizeTarget->readAuthorize) {
+        if (!beginCustomGattAuthorization(
+                BleGattAuthorizeType::kRead, opcode, 0U, authorizeTarget,
+                offset, nullptr, 0U)) {
+          return buildAttErrorResponse(opcode, handle,
+                                       kAttErrInsufficientAuthorization,
+                                       outAttResponse,
+                                       outAttResponseLength);
+        }
+        *outAttResponseLength = 0U;
+        return false;
       }
       *outAttResponseLength = static_cast<uint16_t>(1U + vlen);
       return true;
@@ -1704,8 +2061,19 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       emitBleTrace("ATT_RX_HANDLE_CFM");
       // Confirmation for ATT Handle Value Indication. This opcode has no response.
       if (requestLength == 1U) {
+        const bool confirmsServiceChanged =
+            connectionServiceChangedIndicationAwaitingConfirm_;
+        const uint32_t confirmedGeneration =
+            connectionServiceChangedIndicationGeneration_;
         connectionServiceChangedIndicationAwaitingConfirm_ = false;
-        connectionCustomIndicationAwaitingHandle_ = 0U;
+        connectionServiceChangedIndicationStartHandle_ = 0U;
+        connectionServiceChangedIndicationEndHandle_ = 0U;
+        connectionServiceChangedIndicationGeneration_ = 0U;
+        if (confirmsServiceChanged) {
+          (void)confirmBondedServiceChanged(confirmedGeneration);
+        } else {
+          connectionCustomIndicationAwaitingHandle_ = 0U;
+        }
       }
       *outAttResponseLength = 0U;
       return false;
@@ -1745,6 +2113,43 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
         outAttResponse[0] = kAttOpWriteRsp;
         *outAttResponseLength = 1U;
         return true;
+      }
+      BleCustomCharacteristicState* authorizeTarget =
+          findCustomCharacteristicByValueHandle(handle);
+      if (authorizeTarget != nullptr && authorizeTarget->writeAuthorize) {
+        if ((authorizeTarget->properties & kBleGattPropWrite) == 0U) {
+          return buildAttErrorResponse(opcode, handle,
+                                       kAttErrWriteNotPermitted,
+                                       outAttResponse,
+                                       outAttResponseLength);
+        }
+        uint8_t permissionError = kAttErrWriteNotPermitted;
+        if (!customGattWritePermissionSatisfied(authorizeTarget,
+                                                &permissionError)) {
+          return buildAttErrorResponse(opcode, handle, permissionError,
+                                       outAttResponse,
+                                       outAttResponseLength);
+        }
+        const bool lengthAllowed =
+            authorizeTarget->fixedValueLength
+                ? (valueLen == authorizeTarget->maxValueLength)
+                : (valueLen <= authorizeTarget->maxValueLength);
+        if (!lengthAllowed) {
+          return buildAttErrorResponse(opcode, handle,
+                                       kAttErrInvalidAttrValueLen,
+                                       outAttResponse,
+                                       outAttResponseLength);
+        }
+        if (!beginCustomGattAuthorization(
+                BleGattAuthorizeType::kWrite, opcode, 0x01U,
+                authorizeTarget, 0U, value, valueLen)) {
+          return buildAttErrorResponse(opcode, handle,
+                                       kAttErrInsufficientAuthorization,
+                                       outAttResponse,
+                                       outAttResponseLength);
+        }
+        *outAttResponseLength = 0U;
+        return false;
       }
       uint8_t errorCode = kAttErrWriteNotPermitted;
       if (writeCustomGattCharacteristic(handle, value, valueLen, true, &errorCode)) {
@@ -2143,6 +2548,14 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       const uint8_t maxKeySize = smp[4];
       const bool peerRequestedSecureConnections =
           (smp[3] & kSmpAuthReqSecureConnectionsMask) != 0U;
+      const BleSecurityPolicy requestedPolicy = securityPolicy_;
+      if (requestedPolicy.secureConnectionsRequired &&
+          !peerRequestedSecureConnections) {
+        return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+      }
+      if (smpOobEnabled_ && !requestedPolicy.secureConnectionsEnabled) {
+        return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
+      }
       if (oobFlag > 0x01U) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
@@ -2174,14 +2587,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
 
       const bool replacingPrimedBond = bondKeyPrimedForConnection_;
       clearSmpSecurityState();
+      latchSecurityPolicyForPairing();
       if (replacingPrimedBond && bondRecordValid_) {
         // Keep the old bond until replacement pairing succeeds. Some Android
         // stacks retry pairing after a clean disconnect; erasing the previous
         // keys here leaves both sides with mismatched bond state if the retry
         // is interrupted.
         connectionServiceChangedIndicationsEnabled_ = false;
+        connectionServiceChangedCccdRestored_ = false;
         connectionServiceChangedIndicationPending_ = false;
         connectionServiceChangedIndicationAwaitingConfirm_ = false;
+        connectionServiceChangedIndicationStartHandle_ = 0U;
+        connectionServiceChangedIndicationEndHandle_ = 0U;
+        connectionServiceChangedIndicationGeneration_ = 0U;
         connectionBatteryNotificationsEnabled_ = false;
         connectionBatteryNotificationPending_ = false;
         clearCustomGattConnectionState();
@@ -2205,22 +2623,23 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpPairingFailureReasonPending_ = false;
       smpLastPairingFailureReason_ = 0U;
       smpPairingRsp_[0] = kSmpCodePairingResponse;
-      smpPairingRsp_[1] = smpLocalIoCapabilities_;
+      smpPairingRsp_[1] = smpPairingLocalIoCapabilities_;
       // The response flag reports remote data already held by this device.
       // The request flag independently reports whether the peer holds ours.
       smpPairingRsp_[2] = localHasPeerOobData ? 0x01U : 0x00U;
       const uint8_t peerBonding = smp[3] & kSmpAuthReqBondingMask;
       const bool peerRequestedMitm =
           (smp[3] & kSmpAuthReqMitmMask) != 0U;
-      smpPairingRsp_[3] = (peerBonding != 0U) ? 0x01U : 0x00U;
-      if ((peerRequestedMitm &&
-           ((peerHasLocalOobData || localHasPeerOobData) ||
-            smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput)) ||
-          smpPairingRsp_[2] != 0x00U) {
-        smpPairingRsp_[3] |= kSmpAuthReqMitmMask;
+      smpPairingRsp_[3] = buildLocalPairingAuthReq(peerBonding != 0U);
+      smpBondingRequested_ =
+          (smpPairingRsp_[3] & kSmpAuthReqBondingMask) != 0U;
+      smpPairingRsp_[4] =
+          maxKeySize < smpSecurityPolicy_.maxEncryptionKeySize
+              ? maxKeySize
+              : smpSecurityPolicy_.maxEncryptionKeySize;
+      if (smpPairingRsp_[4] < smpSecurityPolicy_.minEncryptionKeySize) {
+        return buildSmpPairingFailed(kSmpReasonEncryptionKeySize);
       }
-      smpBondingRequested_ = (peerBonding != 0U);
-      smpPairingRsp_[4] = maxKeySize;
       uint8_t initiatorKeyDist = 0x00U;
       uint8_t responderKeyDist = 0x00U;
       if (smpBondingRequested_) {
@@ -2232,13 +2651,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
             smp[6] & static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
                                           kSmpKeyDistIdKeyMask |
                                           kSmpKeyDistSignKeyMask));
-        // This host has no independent legacy responder LTK state. Do not
-        // advertise EncKey and then omit its two required PDUs.
-        responderKeyDist = static_cast<uint8_t>(
-            responderKeyDist & static_cast<uint8_t>(
-                kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask));
       }
-      if (peerRequestedSecureConnections) {
+      if (peerRequestedSecureConnections &&
+          smpSecurityPolicy_.secureConnectionsEnabled) {
         smpSecureConnectionsActive_ = true;
         smpPairingRsp_[3] |= kSmpAuthReqSecureConnectionsMask;
         // LE Secure Connections derives the link key from DHKey. Identity
@@ -2249,6 +2664,14 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         responderKeyDist = static_cast<uint8_t>(
             smp[6] & static_cast<uint8_t>(
                 kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask));
+      } else {
+        smpPairingRsp_[3] &=
+            static_cast<uint8_t>(~kSmpAuthReqSecureConnectionsMask);
+        if (smpBondingRequested_ &&
+            (responderKeyDist & kSmpKeyDistEncKeyMask) != 0U &&
+            !prepareLocalLegacyEncryptionKey()) {
+          return buildSmpPairingFailed(kSmpReasonUnspecified);
+        }
       }
       if (!localIdentityDistributionAvailable()) {
         responderKeyDist = static_cast<uint8_t>(
@@ -2256,24 +2679,32 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
       smpPairingRsp_[5] = initiatorKeyDist;
       smpPairingRsp_[6] = responderKeyDist;
-      smpExpectPeerEncKey_ = peerRequestedSecureConnections
-                                      ? false
-                                      : ((smpPairingRsp_[5] &
-                                          kSmpKeyDistEncKeyMask) != 0U);
+      smpExpectPeerEncKey_ = smpSecureConnectionsActive_
+                                  ? false
+                                  : ((smpPairingRsp_[5] &
+                                      kSmpKeyDistEncKeyMask) != 0U);
       smpExpectPeerIdKey_ = ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
       smpExpectPeerSignKey_ =
           ((smpPairingRsp_[5] & kSmpKeyDistSignKeyMask) != 0U);
+      smpDistributeLocalEncKey_ =
+          ((smpPairingRsp_[6] & kSmpKeyDistEncKeyMask) != 0U);
       smpDistributeLocalIdKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
       smpDistributeLocalSignKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistSignKeyMask) != 0U);
+      smpLocalEncInfoSent_ = false;
+      smpLocalEncInfoAcked_ = false;
+      smpLocalMasterIdSent_ = false;
+      smpLocalMasterIdAcked_ = false;
       smpLocalIdInfoSent_ = false;
+      smpLocalIdInfoAcked_ = false;
       smpLocalIdAddressSent_ = false;
       smpLocalIdAddressAcked_ = false;
       smpLocalSignInfoSent_ = false;
       smpLocalSignInfoAcked_ = false;
-      smpKeySize_ = maxKeySize;
-      if (peerRequestedSecureConnections) {
+      smpKeySize_ = smpPairingRsp_[4];
+      smpPairingState_ = kSmpPairingStateRspSent;
+      if (smpSecureConnectionsActive_) {
         const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
         if ((smpPairingRsp_[3] & kSmpAuthReqMitmMask) != 0U &&
             pairAlg == kSmpScPairAlgJustWorks) {
@@ -2293,6 +2724,20 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
                                             : kSmpReasonAuthRequirements);
         }
         emitBleTrace("SMP_SC_REQUEST_RX");
+      } else {
+        const uint8_t legacyAction = resolveLegacyPairingIoAction();
+        if (smpSecurityPolicy_.mitmRequired &&
+            legacyAction == kSmpScIoActionNone) {
+          emitBleTrace("SMP_LEGACY_AUTH_REQUIREMENTS");
+          return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+        }
+        const BleSmpPasskeyPreparationResult passkeyResult =
+            preparePairingPasskeyForAction(legacyAction);
+        if (passkeyResult == BleSmpPasskeyPreparationResult::Fatal) {
+          return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+        }
+        smpLegacyConfirmDeferred_ =
+            passkeyResult == BleSmpPasskeyPreparationResult::Pending;
       }
       if (peerRequestedMitm &&
           ((smpPairingRsp_[3] & kSmpAuthReqMitmMask) == 0U)) {
@@ -2309,17 +2754,21 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
       if (!peerRequestedSecureConnections) {
-        uint8_t tk[16] = {0};
-        buildLegacyTemporaryKey(tk);
-        const uint8_t iat = connectionPeerAddressRandom_ ? 0x01U : 0x00U;
-        const uint8_t rat = bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U;
-        if (!smpC1(tk, smpLocalRandom_, smpPairingReq_, smpPairingRsp_, iat,
-                   connectionPeerAddress_, rat, address_, smpLocalConfirm_)) {
-          return buildSmpPairingFailed(kSmpReasonUnspecified);
+        if (!smpLegacyConfirmDeferred_) {
+          uint8_t tk[16] = {0};
+          buildLegacyTemporaryKey(tk);
+          const uint8_t iat =
+              connectionPeerAddressRandom_ ? 0x01U : 0x00U;
+          const uint8_t rat =
+              bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U;
+          if (!smpC1(tk, smpLocalRandom_, smpPairingReq_, smpPairingRsp_, iat,
+                     connectionPeerAddress_, rat, address_,
+                     smpLocalConfirm_)) {
+            return buildSmpPairingFailed(kSmpReasonUnspecified);
+          }
         }
       }
 
-      smpPairingState_ = kSmpPairingStateRspSent;
       emitBleTrace("SMP_PAIRING_REQUEST_RX");
       emitBleTrace("SMP_PAIRING_RESPONSE_TX");
       return buildSmpResponse(smpPairingRsp_, kSmpPairingResponseLen);
@@ -2392,7 +2841,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         emitBleTrace("SMP_SC_PUBKEY_REJECTED");
         return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
-      if (!prepareSecureConnectionsPasskey()) {
+      const BleSmpPasskeyPreparationResult passkeyResult =
+          prepareSecureConnectionsPasskey();
+      if (passkeyResult == BleSmpPasskeyPreparationResult::Fatal) {
         return buildSmpPairingFailed(kSmpReasonAuthRequirements);
       }
 
@@ -2445,12 +2896,21 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
 
       memcpy(smpPeerConfirm_, &smp[1], sizeof(smpPeerConfirm_));
+      smpPeerConfirmReceived_ = true;
       if (smpSecureConnectionsActive_) {
         if (!smpSecureConnectionsPeerPublicKeyValid_ ||
             !smpSecureConnectionsPublicKeySent_) {
           return buildSmpPairingFailed(kSmpReasonUnspecified);
         }
-        if (!computeSecureConnectionsLocalConfirm()) {
+        const BleSmpPasskeyPreparationResult passkeyResult =
+            prepareSecureConnectionsPasskey();
+        if (passkeyResult == BleSmpPasskeyPreparationResult::Pending) {
+          smpSecureConnectionsDeferredConfirm_ = true;
+          emitBleTrace("SMP_SC_CONFIRM_WAIT_PASSKEY");
+          return false;
+        }
+        if (passkeyResult == BleSmpPasskeyPreparationResult::Fatal ||
+            !computeSecureConnectionsLocalConfirm()) {
           return buildSmpPairingFailed(kSmpReasonUnspecified);
         }
 
@@ -2466,6 +2926,35 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
 
         smpSecureConnectionsDeferredConfirm_ = true;
         return false;
+      }
+
+      if (resolveLegacyPairingIoAction() == kSmpScIoActionInput &&
+          !smpPairingPasskeyValid_) {
+        smpLegacyConfirmDeferred_ = true;
+        emitBleTrace("SMP_CONFIRM_WAIT_PASSKEY");
+        return false;
+      }
+      if (smpLegacyConfirmDeferred_) {
+        uint8_t tk[16] = {0};
+        buildLegacyTemporaryKey(tk);
+        const uint8_t initiatorType =
+            smpLocalInitiator_
+                ? (bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U)
+                : (connectionPeerAddressRandom_ ? 0x01U : 0x00U);
+        const uint8_t responderType =
+            smpLocalInitiator_
+                ? (connectionPeerAddressRandom_ ? 0x01U : 0x00U)
+                : (bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U);
+        const uint8_t* initiatorAddress =
+            smpLocalInitiator_ ? address_ : connectionPeerAddress_;
+        const uint8_t* responderAddress =
+            smpLocalInitiator_ ? connectionPeerAddress_ : address_;
+        if (!smpC1(tk, smpLocalRandom_, smpPairingReq_, smpPairingRsp_,
+                   initiatorType, initiatorAddress, responderType,
+                   responderAddress, smpLocalConfirm_)) {
+          return buildSmpPairingFailed(kSmpReasonUnspecified);
+        }
+        smpLegacyConfirmDeferred_ = false;
       }
 
       if (smpLocalInitiator_) {
@@ -2536,7 +3025,8 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           uint8_t expectedRemoteConfirm[16] = {0};
           uint8_t confirmZ = 0U;
           if (pairAlg == kSmpScPairAlgPasskey) {
-            if (!prepareSecureConnectionsPasskey()) {
+            if (prepareSecureConnectionsPasskey() !=
+                BleSmpPasskeyPreparationResult::Ready) {
               return buildSmpPairingFailed(kSmpReasonAuthRequirements);
             }
             confirmZ = secureConnectionsPasskeyRoundZ();
@@ -2605,6 +3095,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
             smpPendingUserPasskeyValue_ = passkey;
             smpPendingUserPasskeyMatchRequest_ = true;
             smpPendingUserPasskey_ = true;
+            smpPendingUserAction_ = BleSmpUserAction::NumericComparison;
             emitBleTrace("SMP_SC_NUMCOMP_PENDING");
             return false;
           }
@@ -2618,6 +3109,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           smpPendingUserPasskeyValue_ = passkey;
           smpPendingUserPasskeyMatchRequest_ = true;
           smpPendingUserPasskey_ = true;
+          smpPendingUserAction_ = BleSmpUserAction::NumericComparison;
           if (smpSecureConnectionsRandomSent_) {
             smpPairingState_ = kSmpPairingStateRandomSent;
             emitBleTrace("SMP_SC_NUMCOMP_PENDING");
@@ -2759,10 +3251,21 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpLength != kSmpEncryptionInformationLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (!smpBondingRequested_ || !smpExpectPeerEncKey_ ||
+      if (!smpBondingRequested_ || smpSecureConnectionsActive_ ||
+          !smpExpectPeerEncKey_ ||
           !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
           !connectionEncTxEnabled_) {
-        return false;
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (smpPeerLtkValid_) {
+        uint8_t repeatedLtk[16] = {0};
+        memcpy(repeatedLtk, &smp[1], sizeof(repeatedLtk));
+        reduceSmpEncryptionKey(repeatedLtk);
+        if (memcmp(repeatedLtk, smpPeerLtk_, sizeof(repeatedLtk)) == 0) {
+          emitBleTrace("SMP_ENC_INFO_RETRY");
+          return false;
+        }
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       memcpy(smpPeerLtk_, &smp[1], sizeof(smpPeerLtk_));
       reduceSmpEncryptionKey(smpPeerLtk_);
@@ -2775,10 +3278,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpLength != kSmpMasterIdentificationLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (!smpBondingRequested_ || !smpPeerLtkValid_ ||
-          !smpPeerLtkAwaitMasterId_ || !connectionEncSessionValid_ ||
+      if (!smpBondingRequested_ || smpSecureConnectionsActive_ ||
+          !smpExpectPeerEncKey_ || !smpPeerLtkValid_ ||
+          !connectionEncSessionValid_ ||
           !connectionEncRxEnabled_ || !connectionEncTxEnabled_) {
-        return false;
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (!smpPeerLtkAwaitMasterId_) {
+        if (smpEncReqEdiv_ == readLe16(&smp[1]) &&
+            memcmp(smpEncReqRand_, &smp[3], sizeof(smpEncReqRand_)) == 0) {
+          emitBleTrace("SMP_MASTER_ID_RETRY");
+          return false;
+        }
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       smpEncReqEdiv_ = readLe16(&smp[1]);
       memcpy(smpEncReqRand_, &smp[3], sizeof(smpEncReqRand_));
@@ -2792,9 +3304,18 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (!smpBondingRequested_ || !smpExpectPeerIdKey_ ||
+          (smpExpectPeerEncKey_ &&
+           (!smpPeerLtkValid_ || smpPeerLtkAwaitMasterId_)) ||
           !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
           !connectionEncTxEnabled_) {
-        return false;
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (smpPeerIrkValid_) {
+        if (memcmp(smpPeerIrk_, &smp[1], sizeof(smpPeerIrk_)) == 0) {
+          emitBleTrace("SMP_ID_INFO_RETRY");
+          return false;
+        }
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       memcpy(smpPeerIrk_, &smp[1], sizeof(smpPeerIrk_));
       smpPeerIrkValid_ = true;
@@ -2810,12 +3331,24 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           !smpPeerIrkValid_ ||
           !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
           !connectionEncTxEnabled_) {
-        return false;
+        emitBleTrace("SMP_ID_ADDR_STATE_INVALID");
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (smp[1] > 0x01U) {
+        emitBleTrace("SMP_ID_ADDR_TYPE_INVALID");
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (smp[1] == 0x01U && (smp[7] & 0xC0U) != 0xC0U) {
+        emitBleTrace("SMP_ID_ADDR_STATIC_INVALID");
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (smpPeerIdentityAddressValid_) {
+        if (smpPeerIdentityAddressRandom_ == (smp[1] != 0U) &&
+            memcmp(smpPeerIdentityAddress_, &smp[2],
+                   sizeof(smpPeerIdentityAddress_)) == 0) {
+          emitBleTrace("SMP_ID_ADDR_RETRY");
+          return false;
+        }
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       memcpy(smpPeerIdentityAddress_, &smp[2], sizeof(smpPeerIdentityAddress_));
@@ -2830,9 +3363,20 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (!smpBondingRequested_ || !smpExpectPeerSignKey_ ||
+          (smpExpectPeerEncKey_ &&
+           (!smpPeerLtkValid_ || smpPeerLtkAwaitMasterId_)) ||
+          (smpExpectPeerIdKey_ &&
+           (!smpPeerIrkValid_ || !smpPeerIdentityAddressValid_)) ||
           !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
           !connectionEncTxEnabled_) {
-        return false;
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (smpPeerCsrkValid_) {
+        if (memcmp(smpPeerCsrk_, &smp[1], sizeof(smpPeerCsrk_)) == 0) {
+          emitBleTrace("SMP_SIGN_INFO_RETRY");
+          return false;
+        }
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       memcpy(smpPeerCsrk_, &smp[1], sizeof(smpPeerCsrk_));
       smpPeerCsrkValid_ = true;
@@ -2887,6 +3431,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         if (smpPairingState_ == kSmpPairingStateRandomSent) {
           return false;
         }
+        if (smpLegacyConfirmDeferred_) {
+          return false;
+        }
         uint8_t localConfirm[17] = {0};
         localConfirm[0] = kSmpCodePairingConfirm;
         memcpy(&localConfirm[1], smpLocalConfirm_, sizeof(smpLocalConfirm_));
@@ -2904,6 +3451,10 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpSecureConnectionsActive_ =
           ((smpPairingReq_[3] & kSmpAuthReqSecureConnectionsMask) != 0U) &&
           ((smpPairingRsp_[3] & kSmpAuthReqSecureConnectionsMask) != 0U);
+      if (smpSecurityPolicy_.secureConnectionsRequired &&
+          !smpSecureConnectionsActive_) {
+        return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+      }
       if (!smpSecureConnectionsActive_ && smpOobEnabled_ &&
           (smpOobDataLocalValid_ || smpOobDataRemoteValid_)) {
         return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
@@ -2911,6 +3462,10 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       smpKeySize_ =
           (smpPairingRsp_[4] < smpPairingReq_[4]) ? smpPairingRsp_[4]
                                                   : smpPairingReq_[4];
+      if (smpKeySize_ < smpSecurityPolicy_.minEncryptionKeySize ||
+          smpKeySize_ > smpSecurityPolicy_.maxEncryptionKeySize) {
+        return buildSmpPairingFailed(kSmpReasonEncryptionKeySize);
+      }
       smpExpectPeerEncKey_ = smpSecureConnectionsActive_
                                       ? false
                                       : ((smpPairingRsp_[6] &
@@ -2919,11 +3474,26 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
       smpExpectPeerSignKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistSignKeyMask) != 0U);
+      smpDistributeLocalEncKey_ = !smpSecureConnectionsActive_ &&
+          ((smpPairingRsp_[5] & kSmpKeyDistEncKeyMask) != 0U);
       smpDistributeLocalIdKey_ =
           ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
       smpDistributeLocalSignKey_ =
           ((smpPairingRsp_[5] & kSmpKeyDistSignKeyMask) != 0U);
+      if (smpSecureConnectionsActive_) {
+        smpExpectPeerEncKey_ = false;
+        smpDistributeLocalEncKey_ = false;
+      }
+      if (smpDistributeLocalEncKey_ &&
+          !prepareLocalLegacyEncryptionKey()) {
+        return buildSmpPairingFailed(kSmpReasonUnspecified);
+      }
+      smpLocalEncInfoSent_ = false;
+      smpLocalEncInfoAcked_ = false;
+      smpLocalMasterIdSent_ = false;
+      smpLocalMasterIdAcked_ = false;
       smpLocalIdInfoSent_ = false;
+      smpLocalIdInfoAcked_ = false;
       smpLocalIdAddressSent_ = false;
       smpLocalIdAddressAcked_ = false;
       smpLocalSignInfoSent_ = false;
@@ -2958,6 +3528,21 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       }
 
       {
+      const uint8_t legacyAction = resolveLegacyPairingIoAction();
+      if (smpSecurityPolicy_.mitmRequired &&
+          legacyAction == kSmpScIoActionNone) {
+        emitBleTrace("SMP_LEGACY_AUTH_REQUIREMENTS");
+        return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+      }
+      const BleSmpPasskeyPreparationResult passkeyResult =
+          preparePairingPasskeyForAction(legacyAction);
+      if (passkeyResult == BleSmpPasskeyPreparationResult::Fatal) {
+        return buildSmpPairingFailed(kSmpReasonAuthRequirements);
+      }
+      if (passkeyResult == BleSmpPasskeyPreparationResult::Pending) {
+        smpLegacyConfirmDeferred_ = true;
+        return false;
+      }
         uint8_t tk[16] = {0};
         buildLegacyTemporaryKey(tk);
         const uint8_t iat = bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U;
@@ -2990,6 +3575,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           (peerAuthReq & kSmpAuthReqSecureConnectionsMask) == 0U ||
           ((bondRecord_.reserved[0] &
             kBleBondRecordFlagSecureConnections) != 0U);
+      activeBondMeetsSecurityPolicy_ =
+          bondKeyPrimedForConnection_ &&
+          bondMeetsSecurityPolicy(bondRecord_, securityPolicy_);
       if (connectionRole_ == BleConnectionRole::kCentral &&
           (connectionEncSessionValid_ || connectionEncRxEnabled_ ||
            connectionEncTxEnabled_)) {
@@ -2997,7 +3585,8 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpPairingFailed(kSmpReasonPairingNotSupported);
       }
       if ((connectionRole_ == BleConnectionRole::kCentral) && smpStkValid_ &&
-          storedBondMeetsMitm && storedBondMeetsSc) {
+          activeBondMeetsSecurityPolicy_ && storedBondMeetsMitm &&
+          storedBondMeetsSc) {
         emitBleTrace("SMP_SECURITY_REQUEST_RX_BONDED");
         connectionBondedEncryptionRequested_ = true;
         if (!connectionEncSessionValid_ &&
@@ -3018,6 +3607,11 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         emitBleTrace("SMP_SECURITY_REQUEST_BOND_UPGRADE");
       }
       if (smpPairingState_ == kSmpPairingStateIdle) {
+        latchSecurityPolicyForPairing();
+        if (smpSecurityPolicy_.bondingEnabled &&
+            !smpSecurityPolicy_.secureConnectionsRequired) {
+          (void)prepareLocalLegacyEncryptionKey();
+        }
         uint8_t pairingReq[kSmpPairingRequestLen] = {0};
         const bool peerSupportsSecureConnections =
             (peerAuthReq & kSmpAuthReqSecureConnectionsMask) != 0U;
@@ -3035,23 +3629,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           return buildSmpPairingFailed(kSmpReasonOobNotAvailable);
         }
         pairingReq[0] = kSmpCodePairingRequest;
-        pairingReq[1] = smpLocalIoCapabilities_;
+        pairingReq[1] = smpPairingLocalIoCapabilities_;
         pairingReq[2] = localHasPeerOobData ? 0x01U : 0x00U;
-        pairingReq[3] =
-            ((peerAuthReq & kSmpAuthReqBondingMask) != 0U) ? 0x01U : 0x00U;
-        if (((peerAuthReq & kSmpAuthReqMitmMask) != 0U &&
-             (localOobConfigured ||
-              smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput)) ||
-            localOobConfigured) {
+        pairingReq[3] = buildLocalPairingAuthReq(true);
+        if ((peerAuthReq & kSmpAuthReqMitmMask) != 0U) {
           pairingReq[3] |= kSmpAuthReqMitmMask;
         }
-        if ((peerAuthReq & kSmpAuthReqSecureConnectionsMask) != 0U) {
-          pairingReq[3] |= kSmpAuthReqSecureConnectionsMask;
+        if (smpSecurityPolicy_.secureConnectionsEnabled) {
           // SC does not distribute EncKey. Exchange both identity keys so
           // either role can resolve a bonded peer after its RPA rotates.
           const uint8_t peerKeys =
               ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U)
-                  ? static_cast<uint8_t>(kSmpKeyDistIdKeyMask |
+                  ? static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
+                                         kSmpKeyDistIdKeyMask |
                                          kSmpKeyDistSignKeyMask)
                   : 0U;
           pairingReq[5] =
@@ -3061,15 +3651,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           if (localIdentityDistributionAvailable()) {
             pairingReq[5] |= kSmpKeyDistIdKeyMask;
           }
+          if (smpLocalLtkValid_) {
+            pairingReq[5] |= kSmpKeyDistEncKeyMask;
+          }
           pairingReq[6] = peerKeys;
         } else {
-          // The local legacy LTK distribution path is not implemented; offer
-          // only local identity and accept the responder's EncKey/IdKey.
           if ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U) {
             pairingReq[5] = localIdentityDistributionAvailable()
                                 ? kSmpKeyDistIdKeyMask
                                 : 0U;
             pairingReq[5] |= kSmpKeyDistSignKeyMask;
+            if (smpLocalLtkValid_) {
+              pairingReq[5] |= kSmpKeyDistEncKeyMask;
+            }
             pairingReq[6] = static_cast<uint8_t>(
                 kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask |
                 kSmpKeyDistSignKeyMask);
@@ -3078,7 +3672,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
             pairingReq[6] = 0U;
           }
         }
-        pairingReq[4] = 16U;
+        pairingReq[4] = smpSecurityPolicy_.maxEncryptionKeySize;
         memcpy(smpPairingReq_, pairingReq, sizeof(smpPairingReq_));
         smpLocalInitiator_ = true;
         smpBondingRequested_ =

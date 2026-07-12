@@ -285,6 +285,7 @@ class BLEAdvertising : public BLEAdvertisingData {
   void setIntervalMS(uint16_t fast_ms, uint16_t slow_ms = 0);
   void setFastTimeout(uint16_t seconds);
   void setType(uint8_t type);
+  void setPeerAddress(const ble_gap_addr_t& peer_addr);
   void setSlowCallback(slow_callback_t cb);
   void setStopCallback(stop_callback_t cb);
   uint16_t getInterval() const;
@@ -302,6 +303,8 @@ class BLEAdvertising : public BLEAdvertisingData {
   uint16_t fast_timeout_s_;
   uint16_t stop_timeout_s_;
   uint8_t adv_type_;
+  ble_gap_addr_t peer_addr_;
+  bool peer_addr_set_;
   bool running_;
   slow_callback_t slow_callback_;
   stop_callback_t stop_callback_;
@@ -491,8 +494,78 @@ class BLEScanner {
   friend class BluefruitCompatManager;
 };
 
-class BLEDiscovery {};
-class BLEGatt {};
+class BLEDiscovery {
+ public:
+  BLEDiscovery();
+
+  void begin();
+  bool begun() const { return begun_; }
+  void setHandleRange(ble_gattc_handle_range_t handle_range);
+  ble_gattc_handle_range_t getHandleRange() const { return handle_range_; }
+
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic* characteristics[],
+                                 uint8_t count);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2,
+                                 BLEClientCharacteristic& chr3);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2,
+                                 BLEClientCharacteristic& chr3,
+                                 BLEClientCharacteristic& chr4);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2,
+                                 BLEClientCharacteristic& chr3,
+                                 BLEClientCharacteristic& chr4,
+                                 BLEClientCharacteristic& chr5);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2,
+                                 BLEClientCharacteristic& chr3,
+                                 BLEClientCharacteristic& chr4,
+                                 BLEClientCharacteristic& chr5,
+                                 BLEClientCharacteristic& chr6);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2,
+                                 BLEClientCharacteristic& chr3,
+                                 BLEClientCharacteristic& chr4,
+                                 BLEClientCharacteristic& chr5,
+                                 BLEClientCharacteristic& chr6,
+                                 BLEClientCharacteristic& chr7);
+  uint8_t discoverCharacteristic(uint16_t conn_handle,
+                                 BLEClientCharacteristic& chr1,
+                                 BLEClientCharacteristic& chr2,
+                                 BLEClientCharacteristic& chr3,
+                                 BLEClientCharacteristic& chr4,
+                                 BLEClientCharacteristic& chr5,
+                                 BLEClientCharacteristic& chr6,
+                                 BLEClientCharacteristic& chr7,
+                                 BLEClientCharacteristic& chr8);
+
+ private:
+  ble_gattc_handle_range_t handle_range_;
+  bool begun_;
+};
+class BLEGatt {
+ public:
+  uint16_t readCharByUuid(uint16_t conn_hdl, BLEUuid bleuuid, void* buffer,
+                          uint16_t bufsize, uint16_t start_hdl = 0x0001U,
+                          uint16_t end_hdl = 0xFFFFU);
+  bool serviceChanged(uint16_t start_handle = 0x0001U,
+                      uint16_t end_handle = 0xFFFFU);
+  bool serviceChangedPending(uint16_t* start_handle = nullptr,
+                             uint16_t* end_handle = nullptr) const;
+  uint32_t serviceChangedFingerprint() const;
+};
 
 class BLESecurity {
  public:
@@ -502,6 +575,8 @@ class BLESecurity {
   typedef bool (*pair_passkey_callback_t)(uint16_t conn_hdl,
                                           uint8_t const passkey[6],
                                           bool match_request);
+  typedef void (*pair_passkey_req_cb_t)(uint16_t conn_hdl,
+                                        uint8_t passkey[6]);
   typedef void (*pair_complete_callback_t)(uint16_t conn_hdl,
                                            uint8_t auth_status);
 
@@ -512,10 +587,15 @@ class BLESecurity {
   void setSecuredCallback(T fp) {
     setSecuredCallback(static_cast<secured_callback_t>(fp));
   }
-  void setPairPasskeyCallback(pair_passkey_callback_t fp);
+  bool setPairPasskeyCallback(pair_passkey_callback_t fp);
   template <typename T>
-  void setPairPasskeyCallback(T fp) {
-    setPairPasskeyCallback(static_cast<pair_passkey_callback_t>(fp));
+  bool setPairPasskeyCallback(T fp) {
+    return setPairPasskeyCallback(static_cast<pair_passkey_callback_t>(fp));
+  }
+  void setPairPasskeyRequestCallback(pair_passkey_req_cb_t fp);
+  template <typename T>
+  void setPairPasskeyRequestCallback(T fp) {
+    setPairPasskeyRequestCallback(static_cast<pair_passkey_req_cb_t>(fp));
   }
   void setPairCompleteCallback(pair_complete_callback_t fp);
   template <typename T>
@@ -524,12 +604,22 @@ class BLESecurity {
   }
   void setIOCaps(uint8_t ioCaps);
   void setIOCaps(bool display, bool yesNo, bool keyboard);
-  void setPIN(const char* pin);
+  void setMITM(bool enabled);
+  bool setBondingEnabled(bool enabled);
+  bool setSecureConnectionsEnabled(bool enabled);
+  bool setSecureConnectionsRequired(bool required);
+  bool setEncryptionKeySize(uint8_t min_size, uint8_t max_size);
+  bool setPIN(const char* pin);
   // Poll/reply form for asynchronous passkey display and Numeric Comparison.
   // match_request is true when the user must confirm that both values match.
   bool getPendingPairingPasskey(uint8_t passkey[6],
                                 bool* match_request) const;
   bool replyPendingPairingPasskey(bool accept) const;
+  // Poll/reply form for keyboard/passkey-input association models. Request
+  // IDs prevent a delayed UI response from crossing a new pairing session.
+  bool getPendingPairingPasskeyRequest(uint32_t* request_id) const;
+  bool replyPendingPairingPasskey(uint32_t request_id,
+                                  const uint8_t passkey[6]) const;
 
   // OOB (Out-of-Band) pairing for LE Secure Connections
   // Generate and store local OOB data. Returns the r and c values.
@@ -550,10 +640,18 @@ class BLESecurity {
   bool isEncrypted(uint16_t conn_hdl = 0) const;
   bool isAuthenticated(uint16_t conn_hdl = 0) const;
   bool hasBond() const;
+  uint8_t bondCount() const;
+  uint8_t enumerateBonds(ble_gap_bond_info_t* out_bonds,
+                         uint8_t capacity) const;
+  bool getBondInfo(uint8_t bond_id, ble_gap_bond_info_t* out_info) const;
+  bool deleteBond(uint8_t bond_id);
+  bool clearBonds();
+  uint8_t activeBondId() const;
   bool bondAuthenticated() const;
   bool getBondPeerAddress(ble_gap_addr_t* outAddress) const;
   bool getBondPeerIdentityAddress(ble_gap_addr_t* outAddress) const;
   bool getBondPeerIrk(uint8_t outIrk[16]) const;
+  bool getBondPeerIrk(uint8_t bond_id, uint8_t outIrk[16]) const;
   // BLE privacy helpers. Identity stays stable while the over-the-air address
   // rotates; peer resolving remains application-managed on the clean LL path.
   bool getLocalIdentityAddress(ble_gap_addr_t* outAddress) const;
@@ -602,10 +700,13 @@ class BLESecurity {
   void setOobDataRequestCallback(oob_data_request_callback_t fp);
 
  private:
+  static constexpr uint8_t kResolvingSourceManual = 0x01U;
+  static constexpr uint8_t kResolvingSourceBond = 0x02U;
   void retireOobData();
   void removeAutoBondedPeerResolvingIrk();
   secured_callback_t secured_callback_;
   pair_passkey_callback_t pair_passkey_callback_;
+  pair_passkey_req_cb_t pair_passkey_request_callback_;
   pair_complete_callback_t pair_complete_callback_;
   uint8_t io_caps_;
   bool fixed_pin_valid_;
@@ -624,6 +725,7 @@ class BLESecurity {
   uint8_t auto_bonded_peer_irk_[16];
   uint8_t resolving_list_count_;
   uint8_t resolving_list_irks_[kResolvingListMaxEntries][16];
+  uint8_t resolving_list_sources_[kResolvingListMaxEntries];
 
   friend class BluefruitCompatManager;
 };
@@ -694,17 +796,25 @@ struct ATTR_PACKED AncsNotification_t {
 class BLEClientCharacteristic {
  public:
   typedef void (*notify_cb_t)(BLEClientCharacteristic* chr, uint8_t* data, uint16_t len);
+  typedef void (*indicate_cb_t)(BLEClientCharacteristic* chr, uint8_t* data,
+                                uint16_t len);
 
   BLEUuid uuid;
 
   BLEClientCharacteristic();
   explicit BLEClientCharacteristic(BLEUuid bleuuid);
+  ~BLEClientCharacteristic();
+  BLEClientCharacteristic(const BLEClientCharacteristic&) = delete;
+  BLEClientCharacteristic& operator=(const BLEClientCharacteristic&) = delete;
 
   bool begin();
   bool begin(BLEClientService* parent_service);
   bool discover(uint16_t conn_hdl);
   bool discover();
   bool discovered() const { return discovered_; }
+  uint16_t connHandle() const { return conn_handle_; }
+  uint16_t valueHandle() const { return value_handle_; }
+  uint8_t properties() const { return properties_; }
   // Deferred callbacks run from the normal Bluefruit user-callback pump.
   // Immediate callbacks are intended for protocol response streams that a
   // synchronous client API is actively waiting for (for example ANCS Data
@@ -713,24 +823,42 @@ class BLEClientCharacteristic {
     notify_callback_ = fp;
     notify_deferred_ = deferred;
   }
+  void setIndicateCallback(indicate_cb_t fp, bool deferred = true) {
+    indicate_callback_ = fp;
+    indicate_deferred_ = deferred;
+  }
   BLEClientService& parentService();
   const BLEClientService& parentService() const;
   uint16_t read(void* buffer, uint16_t len);
   uint8_t read8();
+  uint16_t read16();
+  uint32_t read32();
   uint16_t write(const void* buffer, uint16_t len);
   uint16_t write(const void* buffer, uint16_t len, bool withResponse);
   uint16_t writeWithoutResponse(const void* buffer, uint16_t len);
   uint16_t writeSigned(const void* buffer, uint16_t len);
   uint16_t write8(uint8_t value);
+  uint16_t write16(uint16_t value);
+  uint16_t write32(uint32_t value);
+  uint16_t write32(int value);
   uint16_t write8(uint8_t value, bool withResponse);
   uint16_t write8WithoutResponse(uint8_t value);
+  uint16_t write_resp(const void* buffer, uint16_t len);
+  uint16_t write8_resp(uint8_t value);
+  uint16_t write16_resp(uint16_t value);
+  uint16_t write32_resp(uint32_t value);
+  uint16_t write32_resp(int value);
+  bool writeCCCD(uint16_t value);
   bool enableNotify();
   bool disableNotify();
+  bool enableIndicate();
+  bool disableIndicate();
 
  protected:
   bool begun_;
   bool discovered_;
   notify_cb_t notify_callback_;
+  indicate_cb_t indicate_callback_;
   BLEClientService* service_;
   uint16_t conn_handle_;
   uint16_t decl_handle_;
@@ -741,8 +869,15 @@ class BLEClientCharacteristic {
   uint8_t last_value_[BLUEFRUIT_GATT_VALUE_MAX_LEN];
   uint16_t last_value_len_;
   bool notify_deferred_;
+  bool indicate_deferred_;
+  uint16_t cccd_value_;
+  uint32_t discovery_generation_;
 
-  void handleNotify(const uint8_t* data, uint16_t len);
+  notify_cb_t callbackForValueEvent(uint8_t att_opcode) const;
+  bool callbackForValueEventIsDeferred(uint8_t att_opcode) const;
+  void dispatchValueEventCallback(uint8_t att_opcode);
+  void handleValueEvent(const uint8_t* data, uint16_t len,
+                        uint8_t att_opcode, uint32_t connection_generation);
   void resetDiscovery();
 
   friend class BluefruitCompatManager;
@@ -750,6 +885,7 @@ class BLEClientCharacteristic {
   friend class BLEClientDis;
   friend class BLEClientBas;
   friend class BLEClientHidAdafruit;
+  friend class BLEDiscovery;
 };
 
 class BLEClientService {
@@ -760,11 +896,16 @@ class BLEClientService {
 
   BLEClientService();
   explicit BLEClientService(BLEUuid bleuuid);
+  virtual ~BLEClientService();
+  BLEClientService(const BLEClientService&) = delete;
+  BLEClientService& operator=(const BLEClientService&) = delete;
 
   bool begin();
   bool discover(uint16_t conn_hdl);
   bool discovered() const { return discovered_; }
   uint16_t connHandle() const { return conn_handle_; }
+  void setHandleRange(ble_gattc_handle_range_t handle_range);
+  ble_gattc_handle_range_t getHandleRange() const;
 
  protected:
   bool begun_;
@@ -780,12 +921,16 @@ class BLEClientService {
   friend class BLEClientUart;
   friend class BLEClientDis;
   friend class BLEClientBas;
+  friend class BLEDiscovery;
 };
 class BLEClientUart : public Stream {
  public:
   typedef void (*rx_callback_t)(BLEClientUart& uart_svc);
 
   BLEClientUart();
+  ~BLEClientUart() override;
+  BLEClientUart(const BLEClientUart&) = delete;
+  BLEClientUart& operator=(const BLEClientUart&) = delete;
 
   bool begin();
   bool discover(uint16_t conn_hdl);
@@ -819,6 +964,7 @@ class BLEClientUart : public Stream {
   BLEClientCharacteristic rxd_;
   static BLEClientUart* instances_[kMaxInstances];
   static uint8_t instance_count_;
+  bool instance_registered_;
   bool discovered_;
   rx_callback_t rx_callback_;
   uint8_t rx_fifo_[kRxFifoDepth];
@@ -1276,6 +1422,7 @@ class AdafruitBluefruit {
   uint16_t central_requested_mtu_;
   bool central_request_data_length_;
   bool central_request_mtu_;
+  bool service_changed_enabled_;
   uint8_t last_disconnect_reason_;
   bool last_disconnect_reason_valid_;
   bool last_disconnect_reason_remote_;

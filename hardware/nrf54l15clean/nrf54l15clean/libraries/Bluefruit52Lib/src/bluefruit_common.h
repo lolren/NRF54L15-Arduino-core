@@ -30,6 +30,25 @@ struct ble_gap_addr_t {
   uint8_t addr_type;
 };
 
+enum ble_gap_bond_info_flag_t : uint8_t {
+  BLE_GAP_BOND_AUTHENTICATED = 0x01U,
+  BLE_GAP_BOND_SECURE_CONNECTIONS = 0x02U,
+  BLE_GAP_BOND_IDENTITY_VALID = 0x04U,
+  BLE_GAP_BOND_IRK_VALID = 0x08U,
+  BLE_GAP_BOND_SERVICE_CHANGED_PENDING = 0x10U,
+};
+
+struct ble_gap_bond_info_t {
+  uint8_t bond_id;
+  ble_gap_addr_t peer_addr;
+  ble_gap_addr_t peer_identity_addr;
+  uint8_t flags;
+  uint32_t last_used_generation;
+  uint32_t schema_fingerprint;
+  uint16_t service_changed_start_handle;
+  uint16_t service_changed_end_handle;
+};
+
 struct ble_gap_adv_report_type_t {
   uint8_t connectable : 1;
   uint8_t scannable : 1;
@@ -44,10 +63,50 @@ struct ble_data_t {
   uint16_t len;
 };
 
-struct ble_gatts_evt_read_t {};
-struct ble_gatts_evt_write_t {};
+struct ble_uuid_t {
+  uint16_t uuid;
+  uint8_t type;
+};
+
+struct ble_gatts_evt_read_t {
+  uint16_t handle;
+  ble_uuid_t uuid;
+  uint16_t offset;
+};
+
+struct ble_gatts_evt_write_t {
+  uint16_t handle;
+  ble_uuid_t uuid;
+  uint8_t op;
+  uint8_t auth_required;
+  uint16_t offset;
+  uint16_t len;
+  uint8_t data[1];
+};
+
+struct ble_gatts_authorize_params_t {
+  uint16_t gatt_status;
+  uint8_t update : 1;
+  uint16_t offset;
+  uint16_t len;
+  const uint8_t* p_data;
+};
+
+struct ble_gatts_rw_authorize_reply_params_t {
+  uint8_t type;
+  union {
+    ble_gatts_authorize_params_t read;
+    ble_gatts_authorize_params_t write;
+  } params;
+};
+
+extern "C" uint32_t sd_ble_gatts_rw_authorize_reply(
+    uint16_t conn_handle,
+    const ble_gatts_rw_authorize_reply_params_t* reply_params);
+
 struct ble_gap_evt_adv_report_t {
   ble_gap_addr_t peer_addr;
+  ble_gap_addr_t direct_addr;
   int8_t rssi;
   ble_data_t data;
   ble_gap_adv_report_type_t type;
@@ -58,6 +117,11 @@ struct ble_gatts_char_handles_t {
   uint16_t value_handle;
   uint16_t cccd_handle;
   uint16_t user_desc_handle;
+};
+
+struct ble_gattc_handle_range_t {
+  uint16_t start_handle;
+  uint16_t end_handle;
 };
 
 enum SecureMode_t {
@@ -81,6 +145,70 @@ enum SecureMode_t {
 
 #define BLE_MAX_CONNECTION 20
 #define BLE_CONN_HANDLE_INVALID INVALID_CONNECTION_HANDLE
+
+#ifndef NRF_SUCCESS
+#define NRF_SUCCESS 0U
+#define NRF_ERROR_INVALID_PARAM 7U
+#define NRF_ERROR_INVALID_STATE 8U
+#define NRF_ERROR_TIMEOUT 13U
+#define NRF_ERROR_INVALID_ADDR 16U
+#define NRF_ERROR_BUSY 17U
+#endif
+
+#ifndef BLE_ERROR_INVALID_CONN_HANDLE
+#define BLE_ERROR_INVALID_CONN_HANDLE 0x3002U
+#endif
+
+#ifndef BLE_UUID_TYPE_UNKNOWN
+#define BLE_UUID_TYPE_UNKNOWN 0x00U
+#define BLE_UUID_TYPE_BLE 0x01U
+#define BLE_UUID_TYPE_VENDOR_BEGIN 0x02U
+#endif
+
+#ifndef BLE_GATTS_OP_INVALID
+#define BLE_GATTS_OP_INVALID 0x00U
+#define BLE_GATTS_OP_WRITE_REQ 0x01U
+#define BLE_GATTS_OP_WRITE_CMD 0x02U
+#define BLE_GATTS_OP_SIGN_WRITE_CMD 0x03U
+#define BLE_GATTS_OP_PREP_WRITE_REQ 0x04U
+#define BLE_GATTS_OP_EXEC_WRITE_REQ_CANCEL 0x05U
+#define BLE_GATTS_OP_EXEC_WRITE_REQ_NOW 0x06U
+#endif
+
+#ifndef BLE_GATTS_AUTHORIZE_TYPE_INVALID
+#define BLE_GATTS_AUTHORIZE_TYPE_INVALID 0x00U
+#define BLE_GATTS_AUTHORIZE_TYPE_READ 0x01U
+#define BLE_GATTS_AUTHORIZE_TYPE_WRITE 0x02U
+#endif
+
+#ifndef BLE_GATT_STATUS_SUCCESS
+#define BLE_GATT_STATUS_SUCCESS 0x0000U
+#define BLE_GATT_STATUS_UNKNOWN 0x0001U
+#define BLE_GATT_STATUS_ATTERR_INVALID 0x0100U
+#define BLE_GATT_STATUS_ATTERR_INVALID_HANDLE 0x0101U
+#define BLE_GATT_STATUS_ATTERR_READ_NOT_PERMITTED 0x0102U
+#define BLE_GATT_STATUS_ATTERR_WRITE_NOT_PERMITTED 0x0103U
+#define BLE_GATT_STATUS_ATTERR_INVALID_PDU 0x0104U
+#define BLE_GATT_STATUS_ATTERR_INSUF_AUTHENTICATION 0x0105U
+#define BLE_GATT_STATUS_ATTERR_REQUEST_NOT_SUPPORTED 0x0106U
+#define BLE_GATT_STATUS_ATTERR_INVALID_OFFSET 0x0107U
+#define BLE_GATT_STATUS_ATTERR_INSUF_AUTHORIZATION 0x0108U
+#define BLE_GATT_STATUS_ATTERR_PREPARE_QUEUE_FULL 0x0109U
+#define BLE_GATT_STATUS_ATTERR_ATTRIBUTE_NOT_FOUND 0x010AU
+#define BLE_GATT_STATUS_ATTERR_ATTRIBUTE_NOT_LONG 0x010BU
+#define BLE_GATT_STATUS_ATTERR_INSUF_ENC_KEY_SIZE 0x010CU
+#define BLE_GATT_STATUS_ATTERR_INVALID_ATT_VAL_LENGTH 0x010DU
+#define BLE_GATT_STATUS_ATTERR_UNLIKELY_ERROR 0x010EU
+#define BLE_GATT_STATUS_ATTERR_INSUF_ENCRYPTION 0x010FU
+#define BLE_GATT_STATUS_ATTERR_UNSUPPORTED_GROUP_TYPE 0x0110U
+#define BLE_GATT_STATUS_ATTERR_INSUF_RESOURCES 0x0111U
+#define BLE_GATT_STATUS_ATTERR_APP_BEGIN 0x0180U
+#define BLE_GATT_STATUS_ATTERR_APP_END 0x019FU
+#define BLE_GATT_STATUS_ATTERR_CPS_WRITE_REQ_REJECTED 0x01FCU
+#define BLE_GATT_STATUS_ATTERR_CPS_CCCD_CONFIG_ERROR 0x01FDU
+#define BLE_GATT_STATUS_ATTERR_CPS_PROC_ALR_IN_PROG 0x01FEU
+#define BLE_GATT_STATUS_ATTERR_CPS_OUT_OF_RANGE 0x01FFU
+#endif
 
 #define MS100TO125(ms100) (((ms100) * 4) / 5)
 #define MS125TO100(ms125) (((ms125) * 5) / 4)
@@ -115,12 +243,16 @@ enum SecureMode_t {
 #define BLE_GAP_PHY_2MBPS 0x02U
 #define BLE_GAP_PHY_CODED 0x04U
 
-#define BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED 0x00U
+#define BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED 0x01U
 #define BLE_GAP_ADV_TYPE_ADV_IND BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED
-#define BLE_GAP_ADV_TYPE_ADV_NONCONN_IND 0x02U
-#define BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED \
-  BLE_GAP_ADV_TYPE_ADV_NONCONN_IND
-#define BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED 0x06U
+#define BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED_HIGH_DUTY_CYCLE 0x02U
+#define BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED 0x03U
+#define BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED 0x04U
+#define BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED 0x05U
+#define BLE_GAP_ADV_TYPE_ADV_SCAN_IND \
+  BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED
+#define BLE_GAP_ADV_TYPE_ADV_NONCONN_IND \
+  BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED
 
 #define BLE_GAP_AD_TYPE_FLAGS 0x01U
 #define BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_MORE_AVAILABLE 0x02U

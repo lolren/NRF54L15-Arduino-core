@@ -8,6 +8,13 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       localIdentityAddress_{0},
       pduType_(BleAdvPduType::kAdvInd),
       useChSel2_(true),
+      directedTargetValid_(false),
+      directedTargetAddressType_(BleAddressType::kPublic),
+      directedTargetAddress_{0},
+      directedTargetBondId_(kBleInvalidBondId),
+      directedTargetBondGeneration_(0U),
+      directedTargetPeerIrkValid_(false),
+      directedTargetPeerIrk_{0},
       rpaRotationEnabled_(false),
       rpaRotationAddressValid_(false),
       rpaRotationIntervalMs_(900000UL),
@@ -130,11 +137,24 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionChannelMapInstant_(0U),
       connectionPendingChannelMap_{0},
       connectionPendingChannelCount_(0U),
+      gattServiceChangedEnabled_(false),
+      gattSchemaFingerprint_(0U),
+      bondedGattSchemaFingerprint_(0U),
+      bondedServiceChangedStartHandle_(0U),
+      bondedServiceChangedEndHandle_(0U),
+      bondedServiceChangedGeneration_(0U),
+      bondedGattSchemaStateLoaded_(false),
       connectionServiceChangedIndicationsEnabled_(false),
+      connectionServiceChangedCccdRestored_(false),
       connectionServiceChangedIndicationPending_(false),
       connectionServiceChangedIndicationAwaitingConfirm_(false),
+      connectionServiceChangedIndicationStartHandle_(0U),
+      connectionServiceChangedIndicationEndHandle_(0U),
+      connectionServiceChangedIndicationGeneration_(0U),
       connectionBatteryNotificationsEnabled_(false),
       connectionBatteryNotificationPending_(false),
+      connectionGattAuthorization_{},
+      connectionGattAuthorizationGeneration_(0U),
       connectionPreparedWriteActive_(false),
       connectionPreparedWriteHandle_(0U),
       connectionPreparedWriteValue_{0},
@@ -207,6 +227,8 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       smpLocalRandom_{0},
       smpPrefetchedLocalRandomValid_(false),
       smpPrefetchedLocalRandom_{0},
+      smpPrefetchedLegacyKeyValid_(false),
+      smpPrefetchedLegacyKeyMaterial_{0},
       smpLocalConfirm_{0},
       smpStk_{0},
       smpStkValid_(false),
@@ -247,8 +269,14 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       bondRecord_{},
       bondRecordValid_(false),
       bondStorageLoaded_(false),
+      activeBondId_(kBleInvalidBondId),
+      activeBondGeneration_(0U),
+      bondRuntimeUseCounter_(0U),
+      bondRuntimeLastUsed_{0},
+      activeBondUseNotedForConnection_(false),
       bondKeyPrimedForConnection_(false),
       bondIdentityMatchedForConnection_(false),
+      activeBondMeetsSecurityPolicy_(false),
       bondFlashPersistPending_(false),
       cccdFlashPersistPending_(false),
       bondLocalIdentityMigrationPending_(false),
@@ -257,21 +285,36 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionBondedEncryptionRequested_(false),
       traceCallback_(nullptr),
       traceCallbackContext_(nullptr),
+      securityPolicy_{},
+      smpSecurityPolicy_{},
+      smpSecurityPolicyLatched_(false),
       smpBondingRequested_(false),
       smpLocalInitiator_(false),
       smpExpectPeerEncKey_(false),
       smpExpectPeerIdKey_(false),
       smpExpectPeerSignKey_(false),
+      smpDistributeLocalEncKey_(false),
       smpDistributeLocalIdKey_(false),
       smpDistributeLocalSignKey_(false),
+      smpLocalLtkValid_(false),
+      smpLocalEncInfoSent_(false),
+      smpLocalEncInfoAcked_(false),
+      smpLocalMasterIdSent_(false),
+      smpLocalMasterIdAcked_(false),
       smpLocalIdInfoSent_(false),
+      smpLocalIdInfoAcked_(false),
       smpLocalIdAddressSent_(false),
       smpLocalIdAddressAcked_(false),
       smpLocalSignInfoSent_(false),
       smpLocalSignInfoAcked_(false),
       smpLocalIoCapabilities_(kSmpIoCapNoInputNoOutput),
+      smpPairingLocalIoCapabilities_(kSmpIoCapNoInputNoOutput),
       smpPendingUserPasskey_(false),
       smpPendingUserPasskeyMatchRequest_(false),
+      smpPendingUserAction_(BleSmpUserAction::None),
+      smpPendingUserPasskeyCallbackDispatched_(false),
+      smpPeerConfirmReceived_(false),
+      smpLegacyConfirmDeferred_(false),
       smpDeferredPairingFailed_(false),
       smpPairingFailureReasonPending_(false),
       smpPeerLtkValid_(false),
@@ -282,6 +325,9 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       smpPeerCsrkValid_(false),
       smpLocalCsrkValid_(false),
       smpPeerSignCounterValid_(false),
+      smpLocalLtk_{0},
+      smpLocalRand_{0},
+      smpLocalEdiv_(0U),
       smpPeerLtk_{0},
       smpPeerIrk_{0},
       smpPeerIdentityAddress_{0},
@@ -310,6 +356,10 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       smpFixedPasskeyValid_(false),
       smpFixedPasskeyValue_(0UL),
       smpPendingUserPasskeyValue_(0UL),
+      smpPendingUserPasskeyRequestId_(0UL),
+      smpNextUserPasskeyRequestId_(0UL),
+      smpPairingPasskeyValid_(false),
+      smpPairingPasskeyValue_(0UL),
       smpSecureConnectionsActive_(false),
       smpSecureConnectionsLocalKeyReady_(false),
       smpSecureConnectionsLocalKeyInProgress_(false),
@@ -423,8 +473,17 @@ void BleRadio::captureLegacyAdvertisingConfigSnapshot(
   out->addressType = addressType_;
   out->pduType = pduType_;
   out->useChSel2 = useChSel2_;
+  out->directedTargetValid = directedTargetValid_;
+  out->directedTargetAddressType = directedTargetAddressType_;
+  out->directedTargetBondId = directedTargetBondId_;
+  out->directedTargetBondGeneration = directedTargetBondGeneration_;
+  out->directedTargetPeerIrkValid = directedTargetPeerIrkValid_;
   out->scanRspDataAutoDefault = scanRspDataAutoDefault_;
   memcpy(out->address, address_, sizeof(address_));
+  memcpy(out->directedTargetAddress, directedTargetAddress_,
+         sizeof(directedTargetAddress_));
+  memcpy(out->directedTargetPeerIrk, directedTargetPeerIrk_,
+         sizeof(directedTargetPeerIrk_));
   out->advDataLen = advDataLen_;
   if (advDataLen_ > 0U) {
     memcpy(out->advData, advData_, advDataLen_);
@@ -440,8 +499,17 @@ void BleRadio::restoreLegacyAdvertisingConfigSnapshot(
   addressType_ = snapshot.addressType;
   pduType_ = snapshot.pduType;
   useChSel2_ = snapshot.useChSel2;
+  directedTargetValid_ = snapshot.directedTargetValid;
+  directedTargetAddressType_ = snapshot.directedTargetAddressType;
+  directedTargetBondId_ = snapshot.directedTargetBondId;
+  directedTargetBondGeneration_ = snapshot.directedTargetBondGeneration;
+  directedTargetPeerIrkValid_ = snapshot.directedTargetPeerIrkValid;
   scanRspDataAutoDefault_ = snapshot.scanRspDataAutoDefault;
   memcpy(address_, snapshot.address, sizeof(address_));
+  memcpy(directedTargetAddress_, snapshot.directedTargetAddress,
+         sizeof(directedTargetAddress_));
+  memcpy(directedTargetPeerIrk_, snapshot.directedTargetPeerIrk,
+         sizeof(directedTargetPeerIrk_));
   advDataLen_ = snapshot.advDataLen;
   if (snapshot.advDataLen > 0U) {
     memcpy(advData_, snapshot.advData, snapshot.advDataLen);
@@ -1158,8 +1226,10 @@ bool BleRadio::resolveResolvablePrivateAddress(const uint8_t address[6],
 }
 
 bool BleRadio::setAdvertisingPduType(BleAdvPduType type) {
-  const uint8_t raw = static_cast<uint8_t>(type);
-  if (raw > 0x0FU) {
+  if (type != BleAdvPduType::kAdvInd &&
+      type != BleAdvPduType::kAdvDirectInd &&
+      type != BleAdvPduType::kAdvNonConnInd &&
+      type != BleAdvPduType::kAdvScanInd) {
     return false;
   }
 
@@ -1185,6 +1255,151 @@ bool BleRadio::setAdvertisingPduType(BleAdvPduType type) {
   restoreLegacyAdvertisingConfigSnapshot(configSnapshot);
   (void)restartBackgroundAdvertisingFromState(restartState);
   return false;
+}
+
+bool BleRadio::setDirectedAdvertisingTarget(const uint8_t address[6],
+                                            BleAddressType type) {
+  if (address == nullptr || static_cast<uint8_t>(type) >
+                                static_cast<uint8_t>(
+                                    BleAddressType::kRandomPrivateNonResolvable)) {
+    return false;
+  }
+  const uint8_t randomTypeBits = static_cast<uint8_t>(address[5] & 0xC0U);
+  if ((type == BleAddressType::kRandomStatic && randomTypeBits != 0xC0U) ||
+      (type == BleAddressType::kRandomPrivateResolvable &&
+       randomTypeBits != 0x40U) ||
+      (type == BleAddressType::kRandomPrivateNonResolvable &&
+       randomTypeBits != 0x00U)) {
+    return false;
+  }
+
+  BleLegacyAdvertisingConfigSnapshot configSnapshot{};
+  BleBackgroundAdvertisingRestartState restartState{};
+  captureLegacyAdvertisingConfigSnapshot(&configSnapshot);
+  captureBackgroundAdvertisingRestartState(&restartState);
+  if (restartState.active) {
+    stopBackgroundAdvertising();
+  }
+
+  memcpy(directedTargetAddress_, address, sizeof(directedTargetAddress_));
+  directedTargetAddressType_ = type;
+  directedTargetValid_ = true;
+  directedTargetBondId_ = kBleInvalidBondId;
+  directedTargetBondGeneration_ = 0U;
+  directedTargetPeerIrkValid_ = false;
+  memset(directedTargetPeerIrk_, 0, sizeof(directedTargetPeerIrk_));
+  uint8_t matchingBondCount = 0U;
+  for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+    BleBondDbPayload payload{};
+    uint32_t generation = 0U;
+    if (!readActiveBleBondDbPayload(bondId, &payload, &generation)) {
+      continue;
+    }
+    const bool targetRandom = bleAddressTypeIsRandom(type);
+    bool matches =
+        targetRandom == (payload.core.peerAddressRandom != 0U) &&
+        memcmp(address, payload.core.peerAddress, 6U) == 0;
+    if (!matches && bleBondDbAddressNonZero(payload.core.peerIdentityAddress)) {
+      matches =
+          targetRandom == (payload.core.peerIdentityAddressRandom != 0U) &&
+          memcmp(address, payload.core.peerIdentityAddress, 6U) == 0;
+    }
+    if (!matches && type == BleAddressType::kRandomPrivateResolvable &&
+        (payload.core.keyValidityFlags & kBleBondDbKeyPeerIrkValid) != 0U) {
+      uint8_t hash[3] = {0};
+      matches = computeBleResolvablePrivateAddressHash(
+                    payload.core.peerIrk, &address[3], hash) &&
+                memcmp(hash, address, sizeof(hash)) == 0;
+    }
+    if (!matches) {
+      continue;
+    }
+    ++matchingBondCount;
+    directedTargetBondId_ = bondId;
+    directedTargetBondGeneration_ = generation;
+    if ((payload.core.keyValidityFlags & kBleBondDbKeyPeerIrkValid) != 0U) {
+      memcpy(directedTargetPeerIrk_, payload.core.peerIrk,
+             sizeof(directedTargetPeerIrk_));
+      directedTargetPeerIrkValid_ = true;
+    }
+  }
+  if (matchingBondCount != 1U) {
+    directedTargetBondId_ = kBleInvalidBondId;
+    directedTargetBondGeneration_ = 0U;
+    directedTargetPeerIrkValid_ = false;
+    memset(directedTargetPeerIrk_, 0, sizeof(directedTargetPeerIrk_));
+  }
+  if (!buildAdvertisingPacket()) {
+    restoreLegacyAdvertisingConfigSnapshot(configSnapshot);
+    (void)restartBackgroundAdvertisingFromState(restartState);
+    return false;
+  }
+  if (restartBackgroundAdvertisingFromState(restartState)) {
+    return true;
+  }
+
+  restoreLegacyAdvertisingConfigSnapshot(configSnapshot);
+  (void)restartBackgroundAdvertisingFromState(restartState);
+  return false;
+}
+
+void BleRadio::clearDirectedAdvertisingTarget() {
+  directedTargetValid_ = false;
+  directedTargetAddressType_ = BleAddressType::kPublic;
+  memset(directedTargetAddress_, 0, sizeof(directedTargetAddress_));
+  directedTargetBondId_ = kBleInvalidBondId;
+  directedTargetBondGeneration_ = 0U;
+  directedTargetPeerIrkValid_ = false;
+  memset(directedTargetPeerIrk_, 0, sizeof(directedTargetPeerIrk_));
+  (void)buildAdvertisingPacket();
+}
+
+bool BleRadio::directedTargetMatchesLocalAddress(
+    const uint8_t targetAddress[6], bool targetAddressRandom) const {
+  if (targetAddress == nullptr) {
+    return false;
+  }
+  if (targetAddressRandom == bleAddressTypeIsRandom(addressType_) &&
+      memcmp(targetAddress, address_, 6U) == 0) {
+    return true;
+  }
+  if (localIdentityAddressValid_ &&
+      targetAddressRandom ==
+          bleAddressTypeIsRandom(localIdentityAddressType_) &&
+      memcmp(targetAddress, localIdentityAddress_, 6U) == 0) {
+    return true;
+  }
+  if (!targetAddressRandom ||
+      !bleAddressLooksResolvablePrivate(targetAddress)) {
+    return false;
+  }
+  uint8_t localIrk[16] = {0};
+  uint8_t hash[3] = {0};
+  return getLocalIdentityIrk(localIrk) &&
+         computeBleResolvablePrivateAddressHash(localIrk, &targetAddress[3],
+                                                hash) &&
+         memcmp(hash, targetAddress, sizeof(hash)) == 0;
+}
+
+bool BleRadio::directedInitiatorMatchesTarget(
+    const uint8_t initiatorAddress[6], bool initiatorAddressRandom) const {
+  if (!directedTargetValid_ || initiatorAddress == nullptr) {
+    return false;
+  }
+  if (initiatorAddressRandom ==
+          bleAddressTypeIsRandom(directedTargetAddressType_) &&
+      memcmp(initiatorAddress, directedTargetAddress_, 6U) == 0) {
+    return true;
+  }
+  if (!initiatorAddressRandom || !directedTargetPeerIrkValid_ ||
+      directedTargetBondId_ >= kBleMaxBonds ||
+      !bleAddressLooksResolvablePrivate(initiatorAddress)) {
+    return false;
+  }
+  uint8_t hash[3] = {0};
+  return computeBleResolvablePrivateAddressHash(
+             directedTargetPeerIrk_, &initiatorAddress[3], hash) &&
+         memcmp(hash, initiatorAddress, sizeof(hash)) == 0;
 }
 
 bool BleRadio::setAdvertisingChannelSelectionAlgorithm2(bool enabled) {

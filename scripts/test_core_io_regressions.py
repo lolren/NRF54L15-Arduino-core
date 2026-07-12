@@ -744,8 +744,10 @@ def validate_custom_gatt_initial_value_capacity_contracts() -> None:
     assert "return ERROR_INVALID_PARAM;" in bluefruit_begin
     assert "descriptors.maxValueLength = _max_len;" in bluefruit_begin
     assert "descriptors.fixedValueLength = _fixed_len;" in bluefruit_begin
-    assert "_rd_authorize_cb != nullptr || _wr_authorize_cb != nullptr" in bluefruit_begin
-    assert "return ERROR_NOT_SUPPORTED;" in bluefruit_begin
+    assert "setCustomGattAuthorization(" in bluefruit_begin
+    assert "_rd_authorize_cb != nullptr" in bluefruit_begin
+    assert "_wr_authorize_cb != nullptr" in bluefruit_begin
+    assert "return ERROR_NOT_SUPPORTED;" not in bluefruit_begin
     assert "min<uint16_t>(clampValueLen(_value_len), _max_len)" in bluefruit_begin
     assert "0xFFU" not in bluefruit_begin
 
@@ -765,7 +767,7 @@ def validate_custom_gatt_initial_value_capacity_contracts() -> None:
     assert "incompatible security modes must fail closed" in bluefruit
     print(
         "PASS custom GATT max/fixed lengths, service-security inheritance, "
-        "secure HVX, LESC permissions, authorization fail-closed, and notification narrowing"
+        "secure HVX, LESC permissions, authorization registration, and notification narrowing"
     )
 
 
@@ -1575,7 +1577,9 @@ def validate_ble_security_hardening_contracts() -> None:
     prefetch = function_body(
         ll_security, "void BleRadio::prefetchConnectionSecurityMaterial("
     )
-    assert "uint8_t material[28]" in prefetch
+    assert "uint8_t material[54]" in prefetch
+    assert "smpPrefetchedLegacyKeyMaterial_" in prefetch
+    assert "&material[28]" in prefetch
     assert prefetch.count("fillBleSecurityRandomBytes(") == 1
     bond_build = function_body(
         ll_security, "bool BleRadio::buildCurrentBondRecord("
@@ -1630,17 +1634,19 @@ def validate_ble_security_hardening_contracts() -> None:
     assert "writeRetainedBondRecord(bondRecord_)" in signing_persist
     assert "writeFlashBondRecord(bondRecord_)" in signing_persist
     assert "writeFlashBondSigningState(bondRecord_)" in signing_persist
+    assert "persistActiveBondDatabaseRecord(false)" in signing_persist
     assert "if (requireDurable)" in signing_persist
     assert "bondFlashPersistPending_ = true;" in signing_persist
     assert "bondSigningCounterPersistPending_ = true" not in signing_persist
     bond_load = function_body(
         ll_security, "bool BleRadio::loadBondRecordFromPersistence()"
     )
-    assert "only the matching, CRC-checked built-in extension" in bond_load
+    assert "matchingAuthority" in bond_load
+    assert "readFlashBondRecord(&signingAuthority)" in bond_load
     assert "memset(loaded.peerCsrk, 0, sizeof(loaded.peerCsrk));" in bond_load
     assert "memset(loaded.localCsrk, 0, sizeof(loaded.localCsrk));" in bond_load
     assert bond_load.index("loaded.peerCsrkValid = 0U;") < bond_load.index(
-        "if (sameFlashBond)"
+        "if (matchingAuthority)"
     )
     ll_control = function_body(
         ll_security, "bool BleRadio::buildLlControlResponse("
@@ -1764,9 +1770,13 @@ def validate_ble_security_hardening_contracts() -> None:
         ll_security, "bool BleRadio::flushDeferredBondStorage()"
     )
     assert "persistBondedCccdState(true)" in deferred_storage_flush
+    assert "persistActiveBondDatabaseRecord(true)" in deferred_storage_flush
+    first_cccd_clear = deferred_storage_flush.index(
+        "cccdFlashPersistPending_ = false;"
+    )
     assert deferred_storage_flush.index(
-        "persistBondedCccdState(true)"
-    ) < deferred_storage_flush.index("cccdFlashPersistPending_ = false;")
+        "persistActiveBondDatabaseRecord(true)"
+    ) < first_cccd_clear
 
     prime_bond = function_body(
         ll_security, "bool BleRadio::primeBondForCurrentPeer()"

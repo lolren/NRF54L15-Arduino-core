@@ -441,6 +441,13 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         return false;
       }
       if (bondKeyPrimedForConnection_) {
+        activeBondMeetsSecurityPolicy_ =
+            bondMeetsSecurityPolicy(bondRecord_, securityPolicy_);
+        if (!activeBondMeetsSecurityPolicy_) {
+          connectionSmpSecurityRequestPending_ = true;
+          ++encDebug_.fastEncRejectBuild;
+          return false;
+        }
         const uint16_t edivFast = readLe16(&rxPacket_[2 + 9U]);
         if ((edivFast != bondRecord_.ediv) ||
             (memcmp(&rxPacket_[2 + 1U], bondRecord_.rand,

@@ -622,6 +622,17 @@ bool BleRadio::isConnectionEncrypted() const {
                          connectionEncSessionValid_ &&
                          connectionEncRxEnabled_ &&
                          connectionEncTxEnabled_;
+  if (encrypted && !activeBondUseNotedForConnection_ &&
+      activeBondId_ < kBleMaxBonds && bondKeyPrimedForConnection_) {
+    BleRadio* const self = const_cast<BleRadio*>(this);
+    ++self->bondRuntimeUseCounter_;
+    if (self->bondRuntimeUseCounter_ == 0U) {
+      self->bondRuntimeUseCounter_ = 1U;
+    }
+    self->bondRuntimeLastUsed_[activeBondId_] =
+        self->bondRuntimeUseCounter_;
+    self->activeBondUseNotedForConnection_ = true;
+  }
   bleExitCritical(irqState);
   return encrypted;
 }
@@ -816,7 +827,12 @@ bool BleRadio::getDisconnectDebug(BleDisconnectDebug* out) const {
 
 void BleRadio::clearDisconnectDebug() { resetDisconnectDebugState(); }
 
-bool BleRadio::hasBondRecord() const { return bondRecordValid_; }
+bool BleRadio::hasBondRecord() const {
+  if (bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr) {
+    return bondRecordValid_;
+  }
+  return activeBleBondDbCount() != 0U;
+}
 
 bool BleRadio::getBondRecord(BleBondRecord* outRecord) const {
   if (outRecord == nullptr) {
@@ -832,13 +848,131 @@ bool BleRadio::getBondRecord(BleBondRecord* outRecord) const {
   return true;
 }
 
+bool BleRadio::getBondRecord(uint8_t bondId, BleBondRecord* outRecord,
+                             BleConnectionRole role) const {
+  if (outRecord == nullptr || bondId >= kBleMaxBonds) {
+    return false;
+  }
+  if (bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr) {
+    if (bondId != 0U || !bondRecordValid_) {
+      return false;
+    }
+    memcpy(outRecord, &bondRecord_, sizeof(*outRecord));
+    return true;
+  }
+  return loadBondProjection(bondId, role, outRecord);
+}
+
+uint8_t BleRadio::bondCount() const {
+  if (bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr) {
+    return bondRecordValid_ ? 1U : 0U;
+  }
+  return activeBleBondDbCount();
+}
+
+bool BleRadio::getBondInfo(uint8_t bondId, BleBondInfo* outInfo) const {
+  if (outInfo == nullptr || bondId >= kBleMaxBonds) {
+    return false;
+  }
+  if (bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr) {
+    if (bondId != 0U || !bondRecordValid_) {
+      return false;
+    }
+    BleBondDbPayload payload{};
+    bleBondDbUpdateCoreFromRecord(
+        bondRecord_, connectionRole_, &payload.core, false);
+    bleBondDbPayloadToInfo(0U, payload, outInfo);
+    return true;
+  }
+  BleBondDbPayload payload{};
+  if (!readActiveBleBondDbPayload(bondId, &payload)) {
+    return false;
+  }
+  bleBondDbPayloadToInfo(bondId, payload, outInfo);
+  return true;
+}
+
+uint8_t BleRadio::enumerateBonds(BleBondInfo* outBonds,
+                                 uint8_t capacity) const {
+  const uint8_t count = bondCount();
+  if (outBonds == nullptr || capacity == 0U) {
+    return count;
+  }
+  BleBondInfo available[kBleMaxBonds]{};
+  uint8_t availableCount = 0U;
+  for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+    if (getBondInfo(bondId, &available[availableCount])) {
+      ++availableCount;
+    }
+  }
+  for (uint8_t i = 0U; i < availableCount; ++i) {
+    uint8_t newest = i;
+    for (uint8_t j = static_cast<uint8_t>(i + 1U); j < availableCount; ++j) {
+      if (bleBondDbGenerationNewer(available[j].lastUsedGeneration,
+                                   available[newest].lastUsedGeneration)) {
+        newest = j;
+      }
+    }
+    if (newest != i) {
+      const BleBondInfo swap = available[i];
+      available[i] = available[newest];
+      available[newest] = swap;
+    }
+  }
+  const uint8_t copied = capacity < availableCount ? capacity : availableCount;
+  memcpy(outBonds, available, static_cast<size_t>(copied) * sizeof(*outBonds));
+  return copied;
+}
+
+bool BleRadio::deleteBond(uint8_t bondId) {
+  if (bleRunningInIsr() || bondId >= kBleMaxBonds ||
+      (connected_ && activeBondId_ == bondId)) {
+    return false;
+  }
+  if (bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr) {
+    return bondId == 0U && clearBondRecord(true);
+  }
+  if (!readActiveBleBondDbPayload(bondId, nullptr) ||
+      !eraseBleBondDbRecord(bondId)) {
+    return false;
+  }
+  if (directedTargetBondId_ == bondId) {
+    directedTargetBondId_ = kBleInvalidBondId;
+    directedTargetBondGeneration_ = 0U;
+    directedTargetPeerIrkValid_ = false;
+    memset(directedTargetPeerIrk_, 0, sizeof(directedTargetPeerIrk_));
+  }
+  bondRuntimeLastUsed_[bondId] = 0U;
+  if (activeBondId_ == bondId) {
+    activeBondId_ = kBleInvalidBondId;
+    activeBondGeneration_ = 0U;
+    memset(&bondRecord_, 0, sizeof(bondRecord_));
+    bondRecordValid_ = false;
+  }
+  emitBleTrace("BOND_DELETED");
+  return true;
+}
+
+uint8_t BleRadio::activeBondId() const {
+  return bondRecordValid_ ? activeBondId_ : kBleInvalidBondId;
+}
+
 bool BleRadio::clearBondRecord(bool clearPersistentStorage) {
+  if (bleRunningInIsr()) {
+    return false;
+  }
   memset(&bondRecord_, 0, sizeof(bondRecord_));
   bondRecordValid_ = false;
   bondStorageLoaded_ = true;
+  activeBondId_ = kBleInvalidBondId;
+  activeBondGeneration_ = 0U;
+  bondRuntimeUseCounter_ = 0U;
+  memset(bondRuntimeLastUsed_, 0, sizeof(bondRuntimeLastUsed_));
   bondKeyPrimedForConnection_ = false;
   bondIdentityMatchedForConnection_ = false;
+  activeBondMeetsSecurityPolicy_ = false;
   bondSigningCounterPersistPending_ = false;
+  resetBondedServiceChangedState();
   if (clearPersistentStorage) {
     return clearPersistentBondRecord();
   }
@@ -1458,8 +1592,12 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   memset(connectionPendingChannelMap_, 0, sizeof(connectionPendingChannelMap_));
   connectionPendingChannelCount_ = 0U;
   connectionServiceChangedIndicationsEnabled_ = false;
+  connectionServiceChangedCccdRestored_ = false;
   connectionServiceChangedIndicationPending_ = false;
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  connectionServiceChangedIndicationStartHandle_ = 0U;
+  connectionServiceChangedIndicationEndHandle_ = 0U;
+  connectionServiceChangedIndicationGeneration_ = 0U;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
   latestConnectionRssiDbm_ = 0;
@@ -1739,6 +1877,7 @@ void BleRadio::serviceDeferredApplicationWork() {
     return;
   }
 
+  serviceCustomGattAuthorizationTimeout();
   serviceSecureConnectionsWork();
   serviceSmpKeyDistribution();
   (void)completeSmpKeyDistributionIfDone();

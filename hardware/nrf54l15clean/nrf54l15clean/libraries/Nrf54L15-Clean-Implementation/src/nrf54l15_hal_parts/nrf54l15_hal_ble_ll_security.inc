@@ -193,6 +193,13 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         return rejectPinOrKeyMissing();
       }
       if (bondKeyPrimedForConnection_) {
+        activeBondMeetsSecurityPolicy_ =
+            bondMeetsSecurityPolicy(bondRecord_, securityPolicy_);
+        if (!activeBondMeetsSecurityPolicy_) {
+          connectionSmpSecurityRequestPending_ = true;
+          emitBleTrace("LL_ENC_REQ_BOND_POLICY_REJECT");
+          return rejectPinOrKeyMissing();
+        }
         const uint16_t ediv = readLe16(&payload[9]);
         if ((ediv != bondRecord_.ediv) ||
             (memcmp(&payload[1], bondRecord_.rand, sizeof(bondRecord_.rand)) != 0)) {
@@ -1071,8 +1078,9 @@ void BleRadio::buildLegacyTemporaryKey(uint8_t outTk[16]) const {
     return;
   }
   memset(outTk, 0, 16U);
-  if (smpFixedPasskeyValid_) {
-    writeLe32(&outTk[0], smpFixedPasskeyValue_);
+  if (resolveLegacyPairingIoAction() != kSmpScIoActionNone &&
+      smpPairingPasskeyValid_) {
+    writeLe32(&outTk[0], smpPairingPasskeyValue_);
   }
 }
 
@@ -1087,7 +1095,8 @@ bool BleRadio::computeSecureConnectionsLocalConfirm() {
 
   uint8_t z = 0U;
   if (resolveCurrentSecureConnectionsPairAlgorithm() == kSmpScPairAlgPasskey) {
-    if (!prepareSecureConnectionsPasskey()) {
+    if (prepareSecureConnectionsPasskey() !=
+        BleSmpPasskeyPreparationResult::Ready) {
       return false;
     }
     z = secureConnectionsPasskeyRoundZ();
@@ -1140,6 +1149,20 @@ constexpr uint8_t kSmpScRespIoActions[5][5] = {
     {kSmpScIoActionInput, kSmpScIoActionNumericComparison,
      kSmpScIoActionDisplay, kSmpScIoActionNone,
      kSmpScIoActionNumericComparison},
+};
+
+constexpr uint8_t kSmpLegacyIoActionRoleDependent = 0x05U;
+constexpr uint8_t kSmpLegacyIoActions[5][5] = {
+    {kSmpScIoActionNone, kSmpScIoActionNone, kSmpScIoActionInput,
+     kSmpScIoActionNone, kSmpScIoActionInput},
+    {kSmpScIoActionNone, kSmpScIoActionNone, kSmpScIoActionInput,
+     kSmpScIoActionNone, kSmpScIoActionInput},
+    {kSmpScIoActionDisplay, kSmpScIoActionDisplay, kSmpScIoActionInput,
+     kSmpScIoActionNone, kSmpScIoActionDisplay},
+    {kSmpScIoActionNone, kSmpScIoActionNone, kSmpScIoActionNone,
+     kSmpScIoActionNone, kSmpScIoActionNone},
+    {kSmpScIoActionDisplay, kSmpScIoActionDisplay, kSmpScIoActionInput,
+     kSmpScIoActionNone, kSmpLegacyIoActionRoleDependent},
 };
 
 uint8_t resolveSecureConnectionsIoAction(bool localInitiator,
@@ -1250,6 +1273,161 @@ void BleRadio::setSecurityFixedPasskey(const char* pin) {
   bleExitCritical(irqState);
 }
 
+bool BleRadio::setSecurityPolicy(const BleSecurityPolicy& policy) {
+  if (policy.minEncryptionKeySize < 7U ||
+      policy.maxEncryptionKeySize > 16U ||
+      policy.minEncryptionKeySize > policy.maxEncryptionKeySize ||
+      (policy.secureConnectionsRequired &&
+       !policy.secureConnectionsEnabled)) {
+    return false;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  securityPolicy_ = policy;
+  bleExitCritical(irqState);
+  return true;
+}
+
+BleSecurityPolicy BleRadio::getSecurityPolicy() const {
+  BleSecurityPolicy policy{};
+  getSecurityPolicy(&policy);
+  return policy;
+}
+
+void BleRadio::getSecurityPolicy(BleSecurityPolicy* outPolicy) const {
+  if (outPolicy == nullptr) {
+    return;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  *outPolicy = securityPolicy_;
+  bleExitCritical(irqState);
+}
+
+void BleRadio::latchSecurityPolicyForPairing() {
+  smpSecurityPolicy_ = securityPolicy_;
+  smpPairingLocalIoCapabilities_ = smpLocalIoCapabilities_;
+  smpPairingPasskeyValid_ = smpFixedPasskeyValid_;
+  smpPairingPasskeyValue_ =
+      smpFixedPasskeyValid_ ? smpFixedPasskeyValue_ : 0UL;
+  smpSecurityPolicyLatched_ = true;
+}
+
+uint8_t BleRadio::buildLocalPairingAuthReq(bool bondingAllowed) const {
+  const BleSecurityPolicy& policy =
+      smpSecurityPolicyLatched_ ? smpSecurityPolicy_ : securityPolicy_;
+  uint8_t authReq =
+      (bondingAllowed && policy.bondingEnabled) ? 0x01U : 0x00U;
+  if (policy.mitmRequired ||
+      (smpOobEnabled_ &&
+       (smpOobDataLocalValid_ || smpOobDataRemoteValid_))) {
+    authReq |= kSmpAuthReqMitmMask;
+  }
+  if (policy.secureConnectionsEnabled) {
+    authReq |= kSmpAuthReqSecureConnectionsMask;
+  }
+  return authReq;
+}
+
+bool BleRadio::bondMeetsSecurityPolicy(
+    const BleBondRecord& record, const BleSecurityPolicy& policy) const {
+  const bool authenticated =
+      (record.reserved[0] & kBleBondRecordFlagAuthenticated) != 0U;
+  const bool secureConnections =
+      (record.reserved[0] & kBleBondRecordFlagSecureConnections) != 0U;
+  const uint8_t keySize =
+      (record.keySize >= 7U && record.keySize <= 16U) ? record.keySize : 16U;
+  return (!policy.mitmRequired || authenticated) &&
+         (!policy.secureConnectionsRequired || secureConnections) &&
+         keySize >= policy.minEncryptionKeySize &&
+         keySize <= policy.maxEncryptionKeySize;
+}
+
+uint8_t BleRadio::resolveLegacyPairingIoAction() const {
+  if (((smpPairingReq_[3] | smpPairingRsp_[3]) &
+       kSmpAuthReqMitmMask) == 0U) {
+    return kSmpScIoActionNone;
+  }
+  const uint8_t localIo = smpLocalInitiator_ ? smpPairingReq_[1]
+                                             : smpPairingRsp_[1];
+  const uint8_t remoteIo = smpLocalInitiator_ ? smpPairingRsp_[1]
+                                              : smpPairingReq_[1];
+  if (localIo > kSmpIoCapKeyboardDisplay ||
+      remoteIo > kSmpIoCapKeyboardDisplay) {
+    return kSmpScIoActionNone;
+  }
+  const uint8_t action = kSmpLegacyIoActions[remoteIo][localIo];
+  if (action != kSmpLegacyIoActionRoleDependent) {
+    return action;
+  }
+  return connectionRole_ == BleConnectionRole::kCentral
+             ? kSmpScIoActionDisplay
+             : kSmpScIoActionInput;
+}
+
+bool BleRadio::requestPairingPasskeyInput() {
+  if (!connected_ || smpPairingState_ == kSmpPairingStateIdle ||
+      smpTimedOutForConnection_) {
+    return false;
+  }
+  if (smpPendingUserAction_ == BleSmpUserAction::PasskeyInput &&
+      smpPendingUserPasskeyRequestId_ != 0UL) {
+    return true;
+  }
+  ++smpNextUserPasskeyRequestId_;
+  if (smpNextUserPasskeyRequestId_ == 0UL) {
+    smpNextUserPasskeyRequestId_ = 1UL;
+  }
+  smpPendingUserPasskeyRequestId_ = smpNextUserPasskeyRequestId_;
+  smpPendingUserAction_ = BleSmpUserAction::PasskeyInput;
+  smpPendingUserPasskey_ = true;
+  smpPendingUserPasskeyMatchRequest_ = false;
+  smpPendingUserPasskeyCallbackDispatched_ = false;
+  smpPendingUserPasskeyValue_ = 0UL;
+  emitBleTrace("SMP_PASSKEY_INPUT_PENDING");
+  return true;
+}
+
+BleSmpPasskeyPreparationResult BleRadio::preparePairingPasskeyForAction(
+    uint8_t ioAction) {
+  if (ioAction == kSmpScIoActionNone) {
+    return BleSmpPasskeyPreparationResult::Ready;
+  }
+  if (ioAction != kSmpScIoActionInput &&
+      ioAction != kSmpScIoActionDisplay) {
+    return BleSmpPasskeyPreparationResult::Fatal;
+  }
+  if (!smpPairingPasskeyValid_) {
+    if (ioAction == kSmpScIoActionInput) {
+      return requestPairingPasskeyInput()
+                 ? BleSmpPasskeyPreparationResult::Pending
+                 : BleSmpPasskeyPreparationResult::Fatal;
+    }
+
+    uint8_t rawPasskey[4] = {0};
+    const uint32_t seed =
+        micros() ^ connectionAccessAddress_ ^
+        static_cast<uint32_t>(connectionEventCounter_ << 16U) ^
+        0x50415353UL;
+    if (!fillBleSecurityRandomBytes(rawPasskey, sizeof(rawPasskey), seed,
+                                    kBleSecurityRandomSpinLimit)) {
+      ++encDebug_.encRandomFallbackCount;
+      return BleSmpPasskeyPreparationResult::Fatal;
+    }
+    ++encDebug_.encRandomHardwareCount;
+    smpPairingPasskeyValue_ = readLe32(rawPasskey) % 1000000UL;
+    smpPairingPasskeyValid_ = true;
+  }
+
+  if (ioAction == kSmpScIoActionDisplay &&
+      smpPendingUserAction_ == BleSmpUserAction::None) {
+    smpPendingUserPasskeyValue_ = smpPairingPasskeyValue_;
+    smpPendingUserPasskeyMatchRequest_ = false;
+    smpPendingUserPasskey_ = true;
+    smpPendingUserAction_ = BleSmpUserAction::Display;
+    emitBleTrace("SMP_PASSKEY_DISPLAY_PENDING");
+  }
+  return BleSmpPasskeyPreparationResult::Ready;
+}
+
 bool BleRadio::prepareLocalPairingRandom() {
   // Na/Nb are fresh per-pairing nonces. LE SC OOB r is separate input to F6.
   const uint32_t seed =
@@ -1270,6 +1448,49 @@ bool BleRadio::prepareLocalPairingRandom() {
   memset(smpLocalRandom_, 0, sizeof(smpLocalRandom_));
   emitBleTrace("SMP_RANDOM_UNAVAILABLE");
   return false;
+}
+
+bool BleRadio::prepareLocalLegacyEncryptionKey() {
+  if (smpLocalLtkValid_) {
+    reduceSmpEncryptionKey(smpLocalLtk_);
+    return true;
+  }
+  if (!connected_) {
+    return false;
+  }
+
+  uint8_t material[26] = {};
+  if (smpPrefetchedLegacyKeyValid_) {
+    memcpy(material, smpPrefetchedLegacyKeyMaterial_, sizeof(material));
+    memset(smpPrefetchedLegacyKeyMaterial_, 0,
+           sizeof(smpPrefetchedLegacyKeyMaterial_));
+    smpPrefetchedLegacyKeyValid_ = false;
+  } else {
+    if (bleRunningInIsr()) {
+      return false;
+    }
+    const uint32_t seed =
+        micros() ^ connectionAccessAddress_ ^
+        static_cast<uint32_t>(connectionEventCounter_ << 16U) ^
+        0x4C544B31UL;
+    if (!fillBleSecurityRandomBytes(material, sizeof(material), seed,
+                                    kBleSecurityRandomSpinLimit)) {
+      return false;
+    }
+  }
+
+  if (isAllBytes(material, 16U, 0x00U)) {
+    memset(material, 0, sizeof(material));
+    return false;
+  }
+  memcpy(smpLocalLtk_, material, sizeof(smpLocalLtk_));
+  memcpy(smpLocalRand_, &material[16], sizeof(smpLocalRand_));
+  smpLocalEdiv_ = readLe16(&material[24]);
+  memset(material, 0, sizeof(material));
+  reduceSmpEncryptionKey(smpLocalLtk_);
+  smpLocalLtkValid_ = true;
+  emitBleTrace("SMP_LOCAL_LEGACY_KEY_READY");
+  return true;
 }
 
 bool BleRadio::localIdentityDistributionAvailable() const {
@@ -1407,6 +1628,21 @@ void BleRadio::noteLastSmpTxAcknowledged() {
     return;
   }
   const uint8_t code = connectionLastTxPlainPayload_[kBleL2capHeaderLen];
+  if (smpDistributeLocalEncKey_ && smpLocalEncInfoSent_ &&
+      !smpLocalEncInfoAcked_ && code == kSmpCodeEncryptionInformation) {
+    smpLocalEncInfoAcked_ = true;
+    emitBleTrace("SMP_LOCAL_ENC_INFO_ACK");
+  }
+  if (smpDistributeLocalEncKey_ && smpLocalMasterIdSent_ &&
+      !smpLocalMasterIdAcked_ && code == kSmpCodeMasterIdentification) {
+    smpLocalMasterIdAcked_ = true;
+    emitBleTrace("SMP_LOCAL_MASTER_ID_ACK");
+  }
+  if (smpDistributeLocalIdKey_ && smpLocalIdInfoSent_ &&
+      !smpLocalIdInfoAcked_ && code == kSmpCodeIdentityInformation) {
+    smpLocalIdInfoAcked_ = true;
+    emitBleTrace("SMP_LOCAL_ID_INFO_ACK");
+  }
   if (smpDistributeLocalIdKey_ && smpLocalIdAddressSent_ &&
       !smpLocalIdAddressAcked_ &&
       code == kSmpCodeIdentityAddressInformation) {
@@ -1465,9 +1701,11 @@ void BleRadio::serviceSmpTimer() {
 bool BleRadio::requestPairing() {
   serviceSmpTimer();
   if (connected_ && (!smpPrefetchedLocalRandomValid_ ||
-       !connectionPrefetchedEncMaterialValid_)) {
+       !connectionPrefetchedEncMaterialValid_ ||
+       !smpPrefetchedLegacyKeyValid_)) {
     prefetchConnectionSecurityMaterial(kBleSecurityRandomSpinLimit);
   }
+  const BleSecurityPolicy configuredPolicy = getSecurityPolicy();
   const uint32_t irqState = bleEnterCritical();
   if (!connected_ || connectionEncSessionValid_ || connectionEncRxEnabled_ ||
       connectionEncTxEnabled_ || connectionEncKeyDerivationPending_ ||
@@ -1488,14 +1726,9 @@ bool BleRadio::requestPairing() {
     bleExitCritical(irqState);
     return false;
   }
-  const bool localRequiresMitm =
-      smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput ||
-      smpOobEnabled_;
   const bool storedBondMeetsLocalPolicy =
       bondKeyPrimedForConnection_ && smpStkValid_ &&
-      (bondRecord_.reserved[0] &
-       kBleBondRecordFlagSecureConnections) != 0U &&
-      (!localRequiresMitm || connectionEncAuthenticated_);
+      bondMeetsSecurityPolicy(bondRecord_, configuredPolicy);
   if (!storedBondMeetsLocalPolicy && !smpPrefetchedLocalRandomValid_) {
     emitBleTrace("SMP_RANDOM_UNAVAILABLE");
     bleExitCritical(irqState);
@@ -1515,6 +1748,7 @@ bool BleRadio::requestPairing() {
   smpLastPairingFailureReason_ = 0U;
 
   if (connectionRole_ == BleConnectionRole::kPeripheral) {
+    latchSecurityPolicyForPairing();
     if (storedBondMeetsLocalPolicy) {
       connectionSmpSecurityRequestPending_ = true;
       emitBleTrace("SMP_PAIR_REQ_USE_BOND");
@@ -1544,25 +1778,31 @@ bool BleRadio::requestPairing() {
   }
 
   clearSmpPairingState();
+  latchSecurityPolicyForPairing();
+  if (smpSecurityPolicy_.bondingEnabled &&
+      !smpSecurityPolicy_.secureConnectionsRequired) {
+    (void)prepareLocalLegacyEncryptionKey();
+  }
 
   uint8_t pairingReq[kSmpPairingRequestLen] = {0};
   pairingReq[0] = kSmpCodePairingRequest;
-  pairingReq[1] = smpLocalIoCapabilities_;
+  pairingReq[1] = smpPairingLocalIoCapabilities_;
   pairingReq[2] =
       (smpOobEnabled_ && smpOobDataRemoteValid_) ? 0x01U : 0x00U;
-  pairingReq[3] = static_cast<uint8_t>(0x01U | kSmpAuthReqSecureConnectionsMask);
-  if (smpLocalIoCapabilities_ != kSmpIoCapNoInputNoOutput ||
-      (smpOobEnabled_ &&
-       (smpOobDataLocalValid_ || smpOobDataRemoteValid_))) {
-    pairingReq[3] |= kSmpAuthReqMitmMask;
+  pairingReq[3] = buildLocalPairingAuthReq(true);
+  pairingReq[4] = smpSecurityPolicy_.maxEncryptionKeySize;
+  if ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U) {
+    pairingReq[5] = kSmpKeyDistSignKeyMask;
+    if (smpLocalLtkValid_) {
+      pairingReq[5] |= kSmpKeyDistEncKeyMask;
+    }
+    if (localIdentityDistributionAvailable()) {
+      pairingReq[5] |= kSmpKeyDistIdKeyMask;
+    }
+    pairingReq[6] = static_cast<uint8_t>(
+        kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask |
+        kSmpKeyDistSignKeyMask);
   }
-  pairingReq[4] = 16U;
-  pairingReq[5] = kSmpKeyDistSignKeyMask;
-  if (localIdentityDistributionAvailable()) {
-    pairingReq[5] |= kSmpKeyDistIdKeyMask;
-  }
-  pairingReq[6] =
-      static_cast<uint8_t>(kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask);
 
   if (!queuePendingSmpL2capResponse(pairingReq, kSmpPairingRequestLen)) {
     bleExitCritical(irqState);
@@ -1571,9 +1811,11 @@ bool BleRadio::requestPairing() {
 
   memcpy(smpPairingReq_, pairingReq, sizeof(smpPairingReq_));
   smpLocalInitiator_ = true;
-  smpBondingRequested_ = true;
-  smpSecureConnectionsActive_ = true;
-  smpKeySize_ = 16U;
+  smpBondingRequested_ =
+      (pairingReq[3] & kSmpAuthReqBondingMask) != 0U;
+  smpSecureConnectionsActive_ =
+      (pairingReq[3] & kSmpAuthReqSecureConnectionsMask) != 0U;
+  smpKeySize_ = pairingReq[4];
   smpPairingState_ = kSmpPairingStateReqSent;
   emitBleTrace("SMP_PAIRING_REQUEST_TX");
   bleExitCritical(irqState);
@@ -1601,7 +1843,7 @@ bool BleRadio::secureConnectionsPairAlgorithmSupported(uint8_t pairAlg) const {
   if (pairAlg == kSmpScPairAlgPasskey) {
     const uint8_t ioAction = resolveCurrentSecureConnectionsIoAction();
     return (ioAction == kSmpScIoActionDisplay) ||
-           ((ioAction == kSmpScIoActionInput) && smpFixedPasskeyValid_);
+           (ioAction == kSmpScIoActionInput);
   }
   if (pairAlg == kSmpScPairAlgOob) {
     const bool localHasPeerData = localHasPeerSecureConnectionsOobData(
@@ -1631,54 +1873,40 @@ bool BleRadio::currentPairingIsAuthenticated() const {
            pairAlg == kSmpScPairAlgNumericComparison;
   }
 
-  return ((smpPairingReq_[3] & kSmpAuthReqMitmMask) != 0U) &&
-         ((smpPairingRsp_[3] & kSmpAuthReqMitmMask) != 0U) &&
-         smpFixedPasskeyValid_;
+  return (((smpPairingReq_[3] | smpPairingRsp_[3]) &
+           kSmpAuthReqMitmMask) != 0U) &&
+         resolveLegacyPairingIoAction() != kSmpScIoActionNone &&
+         smpPairingPasskeyValid_;
 }
 
-bool BleRadio::prepareSecureConnectionsPasskey() {
+BleSmpPasskeyPreparationResult BleRadio::prepareSecureConnectionsPasskey() {
   if (!smpSecureConnectionsActive_) {
-    return false;
+    return BleSmpPasskeyPreparationResult::Fatal;
   }
   if (resolveCurrentSecureConnectionsPairAlgorithm() != kSmpScPairAlgPasskey) {
-    return true;
+    return BleSmpPasskeyPreparationResult::Ready;
   }
   if (smpSecureConnectionsPasskeyValid_) {
-    return true;
+    return BleSmpPasskeyPreparationResult::Ready;
   }
 
   const uint8_t ioAction = resolveCurrentSecureConnectionsIoAction();
-  uint32_t passkey = 0UL;
-  if (smpFixedPasskeyValid_) {
-    passkey = smpFixedPasskeyValue_;
-  } else {
-    if (ioAction != kSmpScIoActionDisplay) {
-      return false;
-    }
-    uint8_t rawPasskey[4] = {0};
-    const uint32_t seed =
-        micros() ^ connectionAccessAddress_ ^
-        static_cast<uint32_t>(connectionEventCounter_ << 16U);
-    if (!fillBleSecurityRandomBytes(rawPasskey, sizeof(rawPasskey), seed,
-                                    kBleSecurityRandomSpinLimit)) {
-      ++encDebug_.encRandomFallbackCount;
-      return false;
-    } else {
-      ++encDebug_.encRandomHardwareCount;
-    }
-    passkey = readLe32(rawPasskey);
-    passkey %= 1000000UL;
+  const BleSmpPasskeyPreparationResult result =
+      preparePairingPasskeyForAction(ioAction);
+  if (result == BleSmpPasskeyPreparationResult::Pending &&
+      smpPendingUserAction_ == BleSmpUserAction::PasskeyInput) {
+    return BleSmpPasskeyPreparationResult::Pending;
   }
-
-  smpSecureConnectionsPasskeyValue_ = passkey;
+  if (result != BleSmpPasskeyPreparationResult::Ready) {
+    return result;
+  }
+  if (!smpPairingPasskeyValid_) {
+    return BleSmpPasskeyPreparationResult::Fatal;
+  }
+  smpSecureConnectionsPasskeyValue_ = smpPairingPasskeyValue_;
   smpSecureConnectionsPasskeyRound_ = 0U;
   smpSecureConnectionsPasskeyValid_ = true;
-  if (ioAction == kSmpScIoActionDisplay) {
-    smpPendingUserPasskeyValue_ = passkey;
-    smpPendingUserPasskeyMatchRequest_ = false;
-    smpPendingUserPasskey_ = true;
-  }
-  return true;
+  return BleSmpPasskeyPreparationResult::Ready;
 }
 
 uint8_t BleRadio::secureConnectionsPasskeyRoundZ() const {
@@ -1748,7 +1976,8 @@ bool BleRadio::getPendingPairingPasskey(uint8_t outPasskey[6],
     return false;
   }
   const uint32_t irqState = bleEnterCritical();
-  if (!smpPendingUserPasskey_) {
+  if (!smpPendingUserPasskey_ ||
+      smpPendingUserAction_ == BleSmpUserAction::PasskeyInput) {
     bleExitCritical(irqState);
     return false;
   }
@@ -1760,7 +1989,8 @@ bool BleRadio::getPendingPairingPasskey(uint8_t outPasskey[6],
 
 bool BleRadio::replyPendingPairingPasskey(bool accept) {
   const uint32_t irqState = bleEnterCritical();
-  if (!smpPendingUserPasskey_) {
+  if (!smpPendingUserPasskey_ ||
+      smpPendingUserAction_ == BleSmpUserAction::PasskeyInput) {
     bleExitCritical(irqState);
     return false;
   }
@@ -1769,6 +1999,7 @@ bool BleRadio::replyPendingPairingPasskey(bool accept) {
   smpPendingUserPasskey_ = false;
   smpPendingUserPasskeyMatchRequest_ = false;
   smpPendingUserPasskeyValue_ = 0UL;
+  smpPendingUserAction_ = BleSmpUserAction::None;
   if (!matchRequest) {
     bleExitCritical(irqState);
     return true;
@@ -1782,6 +2013,126 @@ bool BleRadio::replyPendingPairingPasskey(bool accept) {
                      : kSmpReasonPasskeyEntryFailed;
   }
   bleExitCritical(irqState);
+  serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+  return true;
+}
+
+bool BleRadio::getPendingPairingPasskeyRequest(
+    uint32_t* outRequestId) const {
+  if (outRequestId == nullptr) {
+    return false;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  const bool pending =
+      connected_ && smpTimerActive_ && !smpTimedOutForConnection_ &&
+      smpPairingState_ != kSmpPairingStateIdle &&
+      smpPendingUserPasskey_ &&
+      smpPendingUserAction_ == BleSmpUserAction::PasskeyInput &&
+      smpPendingUserPasskeyRequestId_ != 0UL;
+  if (pending) {
+    *outRequestId = smpPendingUserPasskeyRequestId_;
+  }
+  bleExitCritical(irqState);
+  return pending;
+}
+
+bool BleRadio::replyPendingPairingPasskey(uint32_t requestId,
+                                          const uint8_t passkey[6]) {
+  if (passkey == nullptr) {
+    return false;
+  }
+  uint32_t value = 0UL;
+  for (size_t i = 0U; i < 6U; ++i) {
+    if (passkey[i] < static_cast<uint8_t>('0') ||
+        passkey[i] > static_cast<uint8_t>('9')) {
+      return false;
+    }
+    value = (value * 10UL) +
+            static_cast<uint32_t>(passkey[i] - static_cast<uint8_t>('0'));
+  }
+
+  const uint32_t irqState = bleEnterCritical();
+  if (!connected_ || !smpTimerActive_ || smpTimedOutForConnection_ ||
+      smpPairingState_ == kSmpPairingStateIdle ||
+      !smpPendingUserPasskey_ ||
+      smpPendingUserAction_ != BleSmpUserAction::PasskeyInput ||
+      requestId == 0UL || requestId != smpPendingUserPasskeyRequestId_) {
+    bleExitCritical(irqState);
+    return false;
+  }
+
+  smpPairingPasskeyValue_ = value;
+  smpPairingPasskeyValid_ = true;
+  smpPendingUserPasskey_ = false;
+  smpPendingUserPasskeyMatchRequest_ = false;
+  smpPendingUserAction_ = BleSmpUserAction::None;
+  smpPendingUserPasskeyCallbackDispatched_ = false;
+  smpPendingUserPasskeyRequestId_ = 0UL;
+  smpPendingUserPasskeyValue_ = 0UL;
+  if (smpSecureConnectionsActive_) {
+    smpSecureConnectionsPasskeyValue_ = value;
+    smpSecureConnectionsPasskeyRound_ = 0U;
+    smpSecureConnectionsPasskeyValid_ = true;
+    if (smpSecureConnectionsPeerPublicKeyValid_ &&
+        smpSecureConnectionsPublicKeySent_ &&
+        (smpLocalInitiator_ || smpPeerConfirmReceived_)) {
+      smpSecureConnectionsDeferredConfirm_ = true;
+    }
+  } else {
+    smpLegacyConfirmDeferred_ = true;
+  }
+  bleExitCritical(irqState);
+
+  emitBleTrace("SMP_PASSKEY_INPUT_ACCEPTED");
+  serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+  return true;
+}
+
+bool BleRadio::serviceDeferredPairingConfirm() {
+  if (!connected_ || smpSecureConnectionsActive_ ||
+      !smpLegacyConfirmDeferred_ ||
+      smpPairingState_ == kSmpPairingStateIdle ||
+      smpTimedOutForConnection_ || connectionPendingTxValid_) {
+    return false;
+  }
+  const uint8_t action = resolveLegacyPairingIoAction();
+  if ((action == kSmpScIoActionInput || action == kSmpScIoActionDisplay) &&
+      !smpPairingPasskeyValid_) {
+    return false;
+  }
+  if (!smpLocalInitiator_ && !smpPeerConfirmReceived_) {
+    return false;
+  }
+
+  uint8_t tk[16] = {0};
+  buildLegacyTemporaryKey(tk);
+  const uint8_t initiatorType =
+      smpLocalInitiator_ ? (bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U)
+                         : (connectionPeerAddressRandom_ ? 0x01U : 0x00U);
+  const uint8_t responderType =
+      smpLocalInitiator_ ? (connectionPeerAddressRandom_ ? 0x01U : 0x00U)
+                         : (bleAddressTypeIsRandom(addressType_) ? 0x01U : 0x00U);
+  const uint8_t* initiatorAddress =
+      smpLocalInitiator_ ? address_ : connectionPeerAddress_;
+  const uint8_t* responderAddress =
+      smpLocalInitiator_ ? connectionPeerAddress_ : address_;
+  if (!smpC1(tk, smpLocalRandom_, smpPairingReq_, smpPairingRsp_,
+             initiatorType, initiatorAddress, responderType, responderAddress,
+             smpLocalConfirm_)) {
+    smpDeferredPairingFailed_ = true;
+    smpDeferredPairingFailedReason_ = kSmpReasonUnspecified;
+    return false;
+  }
+
+  uint8_t localConfirm[kSmpPairingConfirmLen] = {0};
+  localConfirm[0] = kSmpCodePairingConfirm;
+  memcpy(&localConfirm[1], smpLocalConfirm_, sizeof(smpLocalConfirm_));
+  if (!queuePendingSmpL2capResponse(localConfirm, sizeof(localConfirm))) {
+    return false;
+  }
+  smpLegacyConfirmDeferred_ = false;
+  smpPairingState_ = kSmpPairingStateConfirmSent;
+  emitBleTrace("SMP_CONFIRM_TX_DEFERRED");
   serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
   return true;
 }
@@ -1845,7 +2196,8 @@ bool BleRadio::computeSecureConnectionsCheckValues() {
   uint8_t peerCheckR[16] = {0};
   const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
   if (pairAlg == kSmpScPairAlgPasskey) {
-    if (!prepareSecureConnectionsPasskey()) {
+    if (prepareSecureConnectionsPasskey() !=
+        BleSmpPasskeyPreparationResult::Ready) {
       return false;
     }
     writeLe32(&localCheckR[0], smpSecureConnectionsPasskeyValue_);
@@ -2109,7 +2461,11 @@ bool BleRadio::queuePendingSmpL2capResponse(const uint8_t* smpPayload,
 
 void BleRadio::serviceSecureConnectionsWork() {
   serviceSmpTimer();
-  if (!connected_ || !smpSecureConnectionsActive_) {
+  if (!connected_) {
+    return;
+  }
+  if (!smpSecureConnectionsActive_) {
+    (void)serviceDeferredPairingConfirm();
     return;
   }
 
@@ -2167,7 +2523,9 @@ void BleRadio::serviceSecureConnectionsWork() {
           }
           return;
         }
-        if (!prepareSecureConnectionsPasskey()) {
+        const BleSmpPasskeyPreparationResult passkeyResult =
+            prepareSecureConnectionsPasskey();
+        if (passkeyResult == BleSmpPasskeyPreparationResult::Fatal) {
           const uint8_t fail[2] = {
               kSmpCodePairingFailed, kSmpReasonAuthRequirements};
           if (queuePendingSmpL2capResponse(fail, sizeof(fail))) {
@@ -2214,6 +2572,17 @@ void BleRadio::serviceSecureConnectionsWork() {
   }
 
   if (smpSecureConnectionsDeferredConfirm_) {
+    const BleSmpPasskeyPreparationResult passkeyResult =
+        prepareSecureConnectionsPasskey();
+    if (passkeyResult == BleSmpPasskeyPreparationResult::Pending) {
+      return;
+    }
+    if (passkeyResult == BleSmpPasskeyPreparationResult::Fatal) {
+      smpSecureConnectionsDeferredConfirm_ = false;
+      smpDeferredPairingFailed_ = true;
+      smpDeferredPairingFailedReason_ = kSmpReasonAuthRequirements;
+      return;
+    }
     if (computeSecureConnectionsLocalConfirm()) {
       uint8_t localConfirm[kSmpPairingConfirmLen] = {0};
       localConfirm[0] = kSmpCodePairingConfirm;
@@ -2349,7 +2718,7 @@ bool BleRadio::prepareLocalSigningKey() {
 }
 
 bool BleRadio::persistActiveSigningCounters(bool requireDurable) {
-  if (!bondRecordValid_ ||
+  if (bleRunningInIsr() || !bondRecordValid_ ||
       (!smpPeerCsrkValid_ && !smpLocalCsrkValid_)) {
     return false;
   }
@@ -2370,9 +2739,13 @@ bool BleRadio::persistActiveSigningCounters(bool requireDurable) {
   }
 
   if (requireDurable) {
-    const bool flashOk = bondFlashPersistPending_
-                             ? writeFlashBondRecord(bondRecord_)
-                             : writeFlashBondSigningState(bondRecord_);
+    const bool callbackMode =
+        bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr;
+    const bool flashOk = callbackMode
+                             ? (bondFlashPersistPending_
+                                    ? writeFlashBondRecord(bondRecord_)
+                                    : writeFlashBondSigningState(bondRecord_))
+                             : persistActiveBondDatabaseRecord(false);
     if (!flashOk) {
       bondFlashPersistPending_ = true;
       return false;
@@ -2381,9 +2754,8 @@ bool BleRadio::persistActiveSigningCounters(bool requireDurable) {
   } else {
     bondFlashPersistPending_ = true;
   }
-  // Generic persistence callbacks may use low-endurance storage and have no
-  // counter-reservation contract. The built-in signing slot is authoritative;
-  // callback records are merged with its higher counters when loaded.
+  // Legacy callbacks remain capacity-1 and use the frozen signing extension;
+  // the built-in eight-bond store commits counters in the selected replica.
   return true;
 }
 
@@ -2482,7 +2854,8 @@ void BleRadio::applyDeferredSignedGattWrite(uint16_t valueHandle,
 void BleRadio::serviceSmpKeyDistribution() {
   if (!connected_ || smpPairingState_ == kSmpPairingStateIdle ||
       !smpBondingRequested_ ||
-      (!smpDistributeLocalIdKey_ && !smpDistributeLocalSignKey_) ||
+      (!smpDistributeLocalEncKey_ && !smpDistributeLocalIdKey_ &&
+       !smpDistributeLocalSignKey_) ||
       !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
       !connectionEncTxEnabled_) {
     return;
@@ -2493,6 +2866,11 @@ void BleRadio::serviceSmpKeyDistribution() {
   if (smpDistributeLocalSignKey_ && !smpLocalCsrkValid_ &&
       !prepareLocalSigningKey()) {
     emitBleTrace("SMP_LOCAL_CSRK_UNAVAILABLE");
+    return;
+  }
+  if (smpDistributeLocalEncKey_ &&
+      (!smpLocalLtkValid_ || !prepareLocalLegacyEncryptionKey())) {
+    emitBleTrace("SMP_LOCAL_LTK_UNAVAILABLE");
     return;
   }
 
@@ -2510,6 +2888,41 @@ void BleRadio::serviceSmpKeyDistribution() {
     return;
   }
 
+  if (smpDistributeLocalEncKey_ && !smpLocalEncInfoSent_) {
+    uint8_t encryptionInfo[kSmpEncryptionInformationLen] = {0};
+    encryptionInfo[0] = kSmpCodeEncryptionInformation;
+    reduceSmpEncryptionKey(smpLocalLtk_);
+    memcpy(&encryptionInfo[1], smpLocalLtk_, sizeof(smpLocalLtk_));
+    if (queuePendingSmpL2capResponse(encryptionInfo,
+                                    sizeof(encryptionInfo))) {
+      smpLocalEncInfoSent_ = true;
+      smpLocalEncInfoAcked_ = false;
+      emitBleTrace("SMP_LOCAL_ENC_INFO_TX");
+      serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+    }
+    return;
+  }
+  if (smpDistributeLocalEncKey_ && !smpLocalEncInfoAcked_) {
+    return;
+  }
+
+  if (smpDistributeLocalEncKey_ && !smpLocalMasterIdSent_) {
+    uint8_t masterId[kSmpMasterIdentificationLen] = {0};
+    masterId[0] = kSmpCodeMasterIdentification;
+    writeLe16(&masterId[1], smpLocalEdiv_);
+    memcpy(&masterId[3], smpLocalRand_, sizeof(smpLocalRand_));
+    if (queuePendingSmpL2capResponse(masterId, sizeof(masterId))) {
+      smpLocalMasterIdSent_ = true;
+      smpLocalMasterIdAcked_ = false;
+      emitBleTrace("SMP_LOCAL_MASTER_ID_TX");
+      serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+    }
+    return;
+  }
+  if (smpDistributeLocalEncKey_ && !smpLocalMasterIdAcked_) {
+    return;
+  }
+
   if (smpDistributeLocalIdKey_ && !smpLocalIdInfoSent_) {
     uint8_t identityInfo[kSmpIdentityInformationLen] = {0};
     identityInfo[0] = kSmpCodeIdentityInformation;
@@ -2519,9 +2932,13 @@ void BleRadio::serviceSmpKeyDistribution() {
     }
     if (queuePendingSmpL2capResponse(identityInfo, sizeof(identityInfo))) {
       smpLocalIdInfoSent_ = true;
+      smpLocalIdInfoAcked_ = false;
       emitBleTrace("SMP_LOCAL_ID_INFO_TX");
       serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
     }
+    return;
+  }
+  if (smpDistributeLocalIdKey_ && !smpLocalIdInfoAcked_) {
     return;
   }
 
@@ -2582,13 +2999,18 @@ bool BleRadio::completeSmpKeyDistributionIfDone() {
   const bool peerSignDone = !smpExpectPeerSignKey_ || smpPeerCsrkValid_;
   const bool localIdDone =
       !smpDistributeLocalIdKey_ ||
-      (smpLocalIdInfoSent_ && smpLocalIdAddressSent_ &&
+      (smpLocalIdInfoSent_ && smpLocalIdInfoAcked_ &&
+       smpLocalIdAddressSent_ &&
        smpLocalIdAddressAcked_);
+  const bool localEncDone =
+      !smpDistributeLocalEncKey_ ||
+      (smpLocalEncInfoSent_ && smpLocalEncInfoAcked_ &&
+       smpLocalMasterIdSent_ && smpLocalMasterIdAcked_);
   const bool localSignDone =
       !smpDistributeLocalSignKey_ ||
       (smpLocalSignInfoSent_ && smpLocalSignInfoAcked_);
-  if (!peerEncDone || !peerIdDone || !peerSignDone || !localIdDone ||
-      !localSignDone) {
+  if (!peerEncDone || !peerIdDone || !peerSignDone || !localEncDone ||
+      !localIdDone || !localSignDone) {
     return false;
   }
 
@@ -2602,9 +3024,15 @@ bool BleRadio::completeSmpKeyDistributionIfDone() {
   smpExpectPeerEncKey_ = false;
   smpExpectPeerIdKey_ = false;
   smpExpectPeerSignKey_ = false;
+  smpDistributeLocalEncKey_ = false;
   smpDistributeLocalIdKey_ = false;
   smpDistributeLocalSignKey_ = false;
+  smpLocalEncInfoSent_ = false;
+  smpLocalEncInfoAcked_ = false;
+  smpLocalMasterIdSent_ = false;
+  smpLocalMasterIdAcked_ = false;
   smpLocalIdInfoSent_ = false;
+  smpLocalIdInfoAcked_ = false;
   smpLocalIdAddressSent_ = false;
   smpLocalIdAddressAcked_ = false;
   smpLocalSignInfoSent_ = false;
@@ -2629,21 +3057,37 @@ void BleRadio::clearSmpPairingState() {
   smpStkValid_ = false;
   smpBondingRequested_ = false;
   smpLocalInitiator_ = false;
+  smpSecurityPolicyLatched_ = false;
   smpExpectPeerEncKey_ = false;
   smpExpectPeerIdKey_ = false;
   smpExpectPeerSignKey_ = false;
+  smpDistributeLocalEncKey_ = false;
   smpDistributeLocalIdKey_ = false;
   smpDistributeLocalSignKey_ = false;
+  smpLocalLtkValid_ = false;
+  smpLocalEncInfoSent_ = false;
+  smpLocalEncInfoAcked_ = false;
+  smpLocalMasterIdSent_ = false;
+  smpLocalMasterIdAcked_ = false;
   smpLocalIdInfoSent_ = false;
+  smpLocalIdInfoAcked_ = false;
   smpLocalIdAddressSent_ = false;
   smpLocalIdAddressAcked_ = false;
   smpLocalSignInfoSent_ = false;
   smpLocalSignInfoAcked_ = false;
+  if (smpPendingUserAction_ == BleSmpUserAction::PasskeyInput) {
+    smpPendingUserPasskeyRequestId_ = 0UL;
+  }
   smpPendingUserPasskey_ = false;
   smpPendingUserPasskeyMatchRequest_ = false;
+  smpPendingUserAction_ = BleSmpUserAction::None;
+  smpPendingUserPasskeyCallbackDispatched_ = false;
+  smpPeerConfirmReceived_ = false;
+  smpLegacyConfirmDeferred_ = false;
   smpDeferredPairingFailed_ = false;
   smpDeferredPairingFailedReason_ = 0U;
   smpPendingUserPasskeyValue_ = 0UL;
+  smpPairingLocalIoCapabilities_ = kSmpIoCapNoInputNoOutput;
   smpPeerLtkValid_ = false;
   smpPeerLtkAwaitMasterId_ = false;
   smpPeerIrkValid_ = false;
@@ -2652,6 +3096,9 @@ void BleRadio::clearSmpPairingState() {
   smpPeerCsrkValid_ = false;
   smpLocalCsrkValid_ = false;
   smpPeerSignCounterValid_ = false;
+  memset(smpLocalLtk_, 0, sizeof(smpLocalLtk_));
+  memset(smpLocalRand_, 0, sizeof(smpLocalRand_));
+  smpLocalEdiv_ = 0U;
   memset(smpPeerLtk_, 0, sizeof(smpPeerLtk_));
   memset(smpPeerIrk_, 0, sizeof(smpPeerIrk_));
   memset(smpPeerIdentityAddress_, 0, sizeof(smpPeerIdentityAddress_));
@@ -2667,6 +3114,9 @@ void BleRadio::clearSmpPairingState() {
   if (!smpFixedPasskeyValid_) {
     smpFixedPasskeyValue_ = 0UL;
   }
+  smpPendingUserPasskeyRequestId_ = 0UL;
+  smpPairingPasskeyValid_ = false;
+  smpPairingPasskeyValue_ = 0UL;
   smpSecureConnectionsActive_ = false;
   smpSecureConnectionsPeerPublicKeyValid_ = false;
   smpSecureConnectionsDhKeyReady_ = false;
@@ -2786,7 +3236,35 @@ void BleRadio::clearConnectionSecurityState() {
 }
 
 bool BleRadio::buildCurrentBondRecord(BleBondRecord* outRecord) const {
-  if (outRecord == nullptr || !smpPeerLtkValid_) {
+  if (outRecord == nullptr) {
+    return false;
+  }
+
+  const uint8_t* projectedLtk = nullptr;
+  const uint8_t* projectedRand = nullptr;
+  uint16_t projectedEdiv = 0U;
+  uint8_t zeroRand[8] = {0};
+  if (smpSecureConnectionsActive_) {
+    if (!smpStkValid_) {
+      return false;
+    }
+    projectedLtk = smpStk_;
+    projectedRand = zeroRand;
+  } else if (connectionRole_ == BleConnectionRole::kPeripheral) {
+    if (!smpLocalLtkValid_) {
+      return false;
+    }
+    projectedLtk = smpLocalLtk_;
+    projectedRand = smpLocalRand_;
+    projectedEdiv = smpLocalEdiv_;
+  } else if (connectionRole_ == BleConnectionRole::kCentral) {
+    if (!smpPeerLtkValid_ || smpPeerLtkAwaitMasterId_) {
+      return false;
+    }
+    projectedLtk = smpPeerLtk_;
+    projectedRand = smpEncReqRand_;
+    projectedEdiv = smpEncReqEdiv_;
+  } else {
     return false;
   }
 
@@ -2804,9 +3282,9 @@ bool BleRadio::buildCurrentBondRecord(BleBondRecord* outRecord) const {
   }
   record.localAddressRandom =
       (localIdentityType == BleAddressType::kRandomStatic) ? 1U : 0U;
-  memcpy(record.ltk, smpPeerLtk_, sizeof(record.ltk));
+  memcpy(record.ltk, projectedLtk, sizeof(record.ltk));
   reduceSmpEncryptionKey(record.ltk);
-  memcpy(record.rand, smpEncReqRand_, sizeof(record.rand));
+  memcpy(record.rand, projectedRand, sizeof(record.rand));
   if (smpPeerIrkValid_) {
     memcpy(record.peerIrk, smpPeerIrk_, sizeof(record.peerIrk));
     record.peerIrkValid = 1U;
@@ -2822,7 +3300,7 @@ bool BleRadio::buildCurrentBondRecord(BleBondRecord* outRecord) const {
     record.localCsrkValid = 1U;
     record.localSignCounter = smpLocalSignCounterReservedUntil_;
   }
-  record.ediv = smpEncReqEdiv_;
+  record.ediv = projectedEdiv;
   record.keySize = (smpKeySize_ >= 7U && smpKeySize_ <= 16U) ? smpKeySize_ : 16U;
   memset(record.reserved, 0, sizeof(record.reserved));
   record.signingReserved = 0U;
@@ -2849,11 +3327,12 @@ void BleRadio::prefetchConnectionSecurityMaterial(uint32_t spinLimit) {
       static_cast<uint32_t>(connectionEventCounter_ << 16U) ^ connectionCrcInit_;
 
   if (smpPrefetchedLocalRandomValid_ &&
-      connectionPrefetchedEncMaterialValid_) {
+      connectionPrefetchedEncMaterialValid_ &&
+      smpPrefetchedLegacyKeyValid_) {
     return;
   }
 
-  uint8_t material[28] = {};
+  uint8_t material[54] = {};
   if (!fillBleSecurityRandomBytes(material, sizeof(material),
                                   seedBase ^ 0x13579BDFUL, spinLimit)) {
     ++encDebug_.encRandomFallbackCount;
@@ -2873,6 +3352,11 @@ void BleRadio::prefetchConnectionSecurityMaterial(uint32_t spinLimit) {
            sizeof(connectionPrefetchedIvs_));
     connectionPrefetchedEncMaterialValid_ = true;
   }
+  if (!smpPrefetchedLegacyKeyValid_) {
+    memcpy(smpPrefetchedLegacyKeyMaterial_, &material[28],
+           sizeof(smpPrefetchedLegacyKeyMaterial_));
+    smpPrefetchedLegacyKeyValid_ = true;
+  }
   ++encDebug_.encRandomPrefetchFillCount;
 }
 
@@ -2886,78 +3370,282 @@ bool BleRadio::loadBondRecordFromPersistence() {
   }
 
   bondLocalIdentityMigrationPending_ = false;
-  BleBondRecord loaded{};
-  BleBondRecord callbackRecord{};
-  BleBondRecord flashRecord{};
-  bool callbackLoaded = false;
-  if (bondLoadCallback_ != nullptr) {
-    callbackLoaded =
-        bondLoadCallback_(&callbackRecord, bondCallbackContext_);
-    if (callbackLoaded && !isBondRecordUsable(callbackRecord)) {
-      callbackLoaded = false;
-    }
-  }
-  const bool flashLoaded =
-      readFlashBondRecord(&flashRecord) && isBondRecordUsable(flashRecord);
-  bool loadedFromStore = callbackLoaded || flashLoaded;
-  if (callbackLoaded) {
-    loaded = callbackRecord;
-    const bool sameFlashBond =
-        flashLoaded &&
-        memcmp(loaded.peerAddress, flashRecord.peerAddress,
-               sizeof(loaded.peerAddress)) == 0 &&
-        loaded.peerAddressRandom == flashRecord.peerAddressRandom &&
-        memcmp(loaded.localAddress, flashRecord.localAddress,
-               sizeof(loaded.localAddress)) == 0 &&
-        loaded.localAddressRandom == flashRecord.localAddressRandom &&
-        memcmp(loaded.ltk, flashRecord.ltk, sizeof(loaded.ltk)) == 0;
+  activeBondId_ = kBleInvalidBondId;
+  activeBondGeneration_ = 0U;
+  memset(&bondRecord_, 0, sizeof(bondRecord_));
+  bondRecordValid_ = false;
 
-    // Per-command signing counters are intentionally not written through
-    // generic callbacks. Never trust their possibly stale signing tail after
-    // reboot; only the matching, CRC-checked built-in extension is
-    // authoritative. A missing extension therefore disables signing instead
-    // of rolling an anti-replay counter backward.
-    memset(loaded.peerCsrk, 0, sizeof(loaded.peerCsrk));
-    memset(loaded.localCsrk, 0, sizeof(loaded.localCsrk));
-    loaded.peerSignCounter = 0U;
-    loaded.localSignCounter = 0U;
-    loaded.peerCsrkValid = 0U;
-    loaded.localCsrkValid = 0U;
-    loaded.peerSignCounterValid = 0U;
-    loaded.signingReserved = 0U;
-    if (sameFlashBond) {
-      if (flashRecord.peerCsrkValid != 0U) {
-        memcpy(loaded.peerCsrk, flashRecord.peerCsrk,
+  // The legacy callback API remains an explicitly single-bond backend.
+  if (bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr) {
+    BleBondRecord loaded{};
+    const bool callbackRecordLoaded =
+        bondLoadCallback_ != nullptr &&
+        bondLoadCallback_(&loaded, bondCallbackContext_) &&
+        isBondRecordUsable(loaded);
+    bool loadedFromStore = callbackRecordLoaded;
+    if (callbackRecordLoaded) {
+      BleBondRecord signingAuthority{};
+      const bool matchingAuthority =
+          readFlashBondRecord(&signingAuthority) &&
+          isBondRecordUsable(signingAuthority) &&
+          loaded.peerAddressRandom == signingAuthority.peerAddressRandom &&
+          memcmp(loaded.peerAddress, signingAuthority.peerAddress,
+                 sizeof(loaded.peerAddress)) == 0 &&
+          memcmp(loaded.ltk, signingAuthority.ltk, sizeof(loaded.ltk)) == 0;
+      memset(loaded.peerCsrk, 0, sizeof(loaded.peerCsrk));
+      memset(loaded.localCsrk, 0, sizeof(loaded.localCsrk));
+      loaded.peerSignCounter = 0U;
+      loaded.localSignCounter = 0U;
+      loaded.peerCsrkValid = 0U;
+      loaded.localCsrkValid = 0U;
+      loaded.peerSignCounterValid = 0U;
+      loaded.signingReserved = 0U;
+      if (matchingAuthority) {
+        memcpy(loaded.peerCsrk, signingAuthority.peerCsrk,
                sizeof(loaded.peerCsrk));
-        loaded.peerCsrkValid = 1U;
-        loaded.peerSignCounter = flashRecord.peerSignCounter;
-        loaded.peerSignCounterValid = flashRecord.peerSignCounterValid;
-      }
-      if (flashRecord.localCsrkValid != 0U) {
-        memcpy(loaded.localCsrk, flashRecord.localCsrk,
+        memcpy(loaded.localCsrk, signingAuthority.localCsrk,
                sizeof(loaded.localCsrk));
-        loaded.localCsrkValid = 1U;
-        loaded.localSignCounter = flashRecord.localSignCounter;
+        loaded.peerSignCounter = signingAuthority.peerSignCounter;
+        loaded.localSignCounter = signingAuthority.localSignCounter;
+        loaded.peerCsrkValid = signingAuthority.peerCsrkValid;
+        loaded.localCsrkValid = signingAuthority.localCsrkValid;
+        loaded.peerSignCounterValid =
+            signingAuthority.peerSignCounterValid;
       }
     }
-  } else if (flashLoaded) {
-    loaded = flashRecord;
-  }
-  if (!loadedFromStore) {
-    loadedFromStore = readRetainedBondRecord(&loaded);
+    if (!loadedFromStore) {
+      loadedFromStore = readFlashBondRecord(&loaded) &&
+                        isBondRecordUsable(loaded);
+    }
+    if (!loadedFromStore) {
+      loadedFromStore = readRetainedBondRecord(&loaded) &&
+                        isBondRecordUsable(loaded);
+    }
+    if (loadedFromStore) {
+      memcpy(&bondRecord_, &loaded, sizeof(bondRecord_));
+      bondRecordValid_ = true;
+      activeBondId_ = 0U;
+      emitBleTrace("BOND_CALLBACK_LOADED_CAPACITY_1");
+    }
+    bondStorageLoaded_ = true;
+    return bondRecordValid_;
   }
 
+  if (!migrateLegacyBondStorageToDatabase()) {
+    emitBleTrace("BOND_DB_MIGRATION_FAILED");
+    return false;
+  }
   bondStorageLoaded_ = true;
-  if (loadedFromStore && isBondRecordUsable(loaded)) {
-    memcpy(&bondRecord_, &loaded, sizeof(bondRecord_));
+  for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+    BleBondDbPayload payload{};
+    if (!readActiveBleBondDbPayload(bondId, &payload)) {
+      continue;
+    }
+    bondRuntimeLastUsed_[bondId] = payload.peerState.lastUsedGeneration;
+    if (bleBondDbGenerationNewer(bondRuntimeLastUsed_[bondId],
+                                 bondRuntimeUseCounter_)) {
+      bondRuntimeUseCounter_ = bondRuntimeLastUsed_[bondId];
+    }
+  }
+  const uint8_t newest = mostRecentBleBondDbId();
+  if (newest != kBleInvalidBondId &&
+      loadBondProjection(newest, BleConnectionRole::kNone, &bondRecord_,
+                         &activeBondGeneration_)) {
+    activeBondId_ = newest;
     bondRecordValid_ = true;
-    emitBleTrace("BOND_LOADED");
-  } else {
-    memset(&bondRecord_, 0, sizeof(bondRecord_));
-    bondRecordValid_ = false;
+    emitBleTrace("BOND_DB_LOADED");
+  }
+  return bondRecordValid_;
+}
+
+bool BleRadio::loadBondProjection(uint8_t bondId, BleConnectionRole role,
+                                  BleBondRecord* outRecord,
+                                  uint32_t* outGeneration) const {
+  BleBondDbPayload payload{};
+  uint32_t generation = 0U;
+  if (bondId >= kBleMaxBonds ||
+      !readActiveBleBondDbPayload(bondId, &payload, &generation) ||
+      !bleBondDbCoreToRecord(payload.core, role, outRecord)) {
+    return false;
+  }
+  if (outGeneration != nullptr) {
+    *outGeneration = generation;
+  }
+  return true;
+}
+
+bool BleRadio::persistActiveBondDatabaseRecord(bool includeCccdState) {
+  if (activeBondId_ >= kBleMaxBonds || !bondRecordValid_ ||
+      !isBondRecordUsable(bondRecord_) || bleRunningInIsr()) {
+    return false;
+  }
+  BleBondDbPayload payload{};
+  BleBondDbPayload existing{};
+  const bool hasExisting =
+      readActiveBleBondDbPayload(activeBondId_, &existing);
+  const bool samePeer =
+      hasExisting && bleBondDbIdentityMatches(existing.core, bondRecord_);
+  bool sameSecurityMaterial = false;
+  if (samePeer) {
+    BleBondRecord projected{};
+    sameSecurityMaterial =
+        bleBondDbCoreToRecord(existing.core, connectionRole_, &projected) &&
+        memcmp(projected.ltk, bondRecord_.ltk, sizeof(projected.ltk)) == 0 &&
+        memcmp(projected.rand, bondRecord_.rand, sizeof(projected.rand)) == 0 &&
+        projected.ediv == bondRecord_.ediv;
+    if (sameSecurityMaterial) {
+      memcpy(&payload, &existing, sizeof(payload));
+    }
   }
 
-  return bondRecordValid_;
+  bleBondDbUpdateCoreFromRecord(bondRecord_, connectionRole_, &payload.core,
+                                sameSecurityMaterial);
+  const bool runtimeLegacyPairing =
+      smpBondingRequested_ && !smpSecureConnectionsActive_;
+  if (runtimeLegacyPairing && smpLocalLtkValid_) {
+    memcpy(payload.core.localOrSharedKey.ltk, smpLocalLtk_,
+           sizeof(payload.core.localOrSharedKey.ltk));
+    memcpy(payload.core.localOrSharedKey.rand, smpLocalRand_,
+           sizeof(payload.core.localOrSharedKey.rand));
+    payload.core.localOrSharedKey.ediv = smpLocalEdiv_;
+    payload.core.keyValidityFlags |= kBleBondDbKeyLocalOrSharedValid;
+  }
+  if (runtimeLegacyPairing && smpPeerLtkValid_ &&
+      !smpPeerLtkAwaitMasterId_) {
+    memcpy(payload.core.peerLegacyKey.ltk, smpPeerLtk_,
+           sizeof(payload.core.peerLegacyKey.ltk));
+    memcpy(payload.core.peerLegacyKey.rand, smpEncReqRand_,
+           sizeof(payload.core.peerLegacyKey.rand));
+    payload.core.peerLegacyKey.ediv = smpEncReqEdiv_;
+    payload.core.keyValidityFlags |= kBleBondDbKeyPeerLegacyValid;
+  }
+  if (runtimeLegacyPairing) {
+    payload.core.keySize =
+        (smpKeySize_ >= 7U && smpKeySize_ <= 16U) ? smpKeySize_ : 16U;
+    payload.core.keyValidityFlags &=
+        static_cast<uint8_t>(~kBleBondDbKeySharedSecureConnections);
+    if ((payload.core.keyValidityFlags &
+         (kBleBondDbKeyLocalOrSharedValid |
+          kBleBondDbKeyPeerLegacyValid)) ==
+        (kBleBondDbKeyLocalOrSharedValid |
+         kBleBondDbKeyPeerLegacyValid)) {
+      payload.core.keyValidityFlags &= static_cast<uint8_t>(
+          ~kBleBondDbKeyLegacyProjectionUnknown);
+    }
+  }
+  if (!sameSecurityMaterial) {
+    memset(&payload.peerState, 0, sizeof(payload.peerState));
+    payload.peerState.schemaFingerprint = gattSchemaFingerprint_;
+    payload.peerState.serviceChangedGeneration = 1U;
+  }
+  uint32_t lastUsed = bondRuntimeLastUsed_[activeBondId_];
+  if (lastUsed == 0U) {
+    lastUsed = nextBleBondDbGeneration();
+    bondRuntimeLastUsed_[activeBondId_] = lastUsed;
+  }
+  payload.peerState.lastUsedGeneration = lastUsed;
+
+  if (includeCccdState) {
+    payload.peerState.schemaFingerprint = bondedGattSchemaFingerprint_;
+    payload.peerState.serviceChangedGeneration =
+        bondedServiceChangedGeneration_ != 0U
+            ? bondedServiceChangedGeneration_
+            : 1U;
+    payload.peerState.serviceChangedStartHandle =
+        bondedServiceChangedStartHandle_;
+    payload.peerState.serviceChangedEndHandle =
+        bondedServiceChangedEndHandle_;
+    payload.peerState.fixedCccdFlags = 0U;
+    if (connectionServiceChangedIndicationsEnabled_) {
+      payload.peerState.fixedCccdFlags |= kBleCccdFixedServiceChanged;
+    }
+    if (connectionBatteryNotificationsEnabled_) {
+      payload.peerState.fixedCccdFlags |= kBleCccdFixedBattery;
+    }
+    payload.peerState.cccdCount = 0U;
+    memset(payload.peerState.cccdValues, 0,
+           sizeof(payload.peerState.cccdValues));
+    memset(payload.peerState.cccdHandles, 0,
+           sizeof(payload.peerState.cccdHandles));
+    for (uint8_t i = 0U; i < customGattCharacteristicCount_ &&
+                         payload.peerState.cccdCount <
+                             kCustomGattMaxCharacteristics;
+         ++i) {
+      const BleCustomCharacteristicState& ch = customGattCharacteristics_[i];
+      if (ch.cccdHandle == 0U || ch.cccdValue == 0U) {
+        continue;
+      }
+      const uint8_t index = payload.peerState.cccdCount++;
+      payload.peerState.cccdHandles[index] = ch.cccdHandle;
+      bleBondDbSetCccdValue(&payload.peerState, index,
+                            static_cast<uint8_t>(ch.cccdValue));
+    }
+  }
+
+  uint32_t generation = 0U;
+  if (!writeBleBondDbReplica(activeBondId_, kBleBondDbActiveMagic, &payload,
+                             &generation)) {
+    return false;
+  }
+  activeBondGeneration_ = generation;
+  for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+    if (bondId == activeBondId_) {
+      continue;
+    }
+    BleBondDbPayload duplicate{};
+    if (readActiveBleBondDbPayload(bondId, &duplicate) &&
+        bleBondDbIdentityMatches(duplicate.core, bondRecord_)) {
+      (void)eraseBleBondDbRecord(bondId);
+      bondRuntimeLastUsed_[bondId] = 0U;
+      emitBleTrace("BOND_DB_DUPLICATE_TOMBSTONED");
+    }
+  }
+  clearRetainedBondBlob();
+  clearRetainedCccdBondBlob();
+  emitBleTrace("BOND_DB_COMMITTED");
+  return true;
+}
+
+bool BleRadio::updateActiveBondLegacyKeyTuple(
+    bool locallyDistributed, const uint8_t ltk[16], const uint8_t rand[8],
+    uint16_t ediv, uint8_t keySize) {
+  if (activeBondId_ >= kBleMaxBonds || ltk == nullptr || rand == nullptr ||
+      keySize < 7U || keySize > 16U ||
+      bleBondDbBytesAllZero(ltk, 16U)) {
+    return false;
+  }
+  BleBondDbPayload payload{};
+  if (!readActiveBleBondDbPayload(activeBondId_, &payload) ||
+      (payload.core.securityFlags &
+       kBleBondDbSecuritySecureConnections) != 0U) {
+    return false;
+  }
+  BleBondDbLongTermKey& key = locallyDistributed
+                                  ? payload.core.localOrSharedKey
+                                  : payload.core.peerLegacyKey;
+  memcpy(key.ltk, ltk, sizeof(key.ltk));
+  memcpy(key.rand, rand, sizeof(key.rand));
+  key.ediv = ediv;
+  payload.core.keySize = keySize;
+  payload.core.keyValidityFlags |=
+      locallyDistributed ? kBleBondDbKeyLocalOrSharedValid
+                         : kBleBondDbKeyPeerLegacyValid;
+  if ((payload.core.keyValidityFlags &
+       (kBleBondDbKeyLocalOrSharedValid |
+        kBleBondDbKeyPeerLegacyValid)) ==
+      (kBleBondDbKeyLocalOrSharedValid |
+       kBleBondDbKeyPeerLegacyValid)) {
+    payload.core.keyValidityFlags &=
+        static_cast<uint8_t>(~kBleBondDbKeyLegacyProjectionUnknown);
+  }
+  uint32_t generation = 0U;
+  if (!writeBleBondDbReplica(activeBondId_, kBleBondDbActiveMagic, &payload,
+                             &generation)) {
+    return false;
+  }
+  activeBondGeneration_ = generation;
+  return loadBondProjection(activeBondId_, connectionRole_, &bondRecord_,
+                            &activeBondGeneration_);
 }
 
 bool BleRadio::persistBondRecord(const BleBondRecord& record) {
@@ -2965,53 +3653,130 @@ bool BleRadio::persistBondRecord(const BleBondRecord& record) {
     return false;
   }
 
+  const bool sameBond =
+      bondRecordValid_ &&
+      bondRecord_.peerAddressRandom == record.peerAddressRandom &&
+      bondRecord_.peerIdentityAddressRandom ==
+          record.peerIdentityAddressRandom &&
+      memcmp(bondRecord_.peerAddress, record.peerAddress,
+             sizeof(record.peerAddress)) == 0 &&
+      memcmp(bondRecord_.peerIdentityAddress, record.peerIdentityAddress,
+             sizeof(record.peerIdentityAddress)) == 0 &&
+      memcmp(bondRecord_.ltk, record.ltk, sizeof(record.ltk)) == 0 &&
+      memcmp(bondRecord_.rand, record.rand, sizeof(record.rand)) == 0 &&
+      bondRecord_.ediv == record.ediv;
+  if (!sameBond) {
+    resetBondedServiceChangedState(gattSchemaFingerprint_);
+  }
+
   const bool retentionOk = writeRetainedBondRecord(record);
-  bool flashOk = false;
   const bool deferStorage = connected_ || bleRunningInIsr();
+  const bool callbackMode =
+      bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr;
+  bool callbackStored = false;
+  if (callbackMode) {
+    bool stored = retentionOk;
+    if (!deferStorage) {
+      const bool flashOk = writeFlashBondRecord(record);
+      const bool callbackOk =
+          bondSaveCallback_ == nullptr ||
+          bondSaveCallback_(&record, bondCallbackContext_);
+      stored = stored || (flashOk && callbackOk);
+    } else {
+      bondFlashPersistPending_ = true;
+      bondSigningCounterPersistPending_ = bondSaveCallback_ != nullptr;
+    }
+    if (!stored && !deferStorage) {
+      return false;
+    }
+    activeBondId_ = 0U;
+    callbackStored = stored || deferStorage;
+  } else {
+    uint8_t selected = findBleBondDbIdForRecord(record);
+    if (selected == kBleInvalidBondId && activeBondId_ < kBleMaxBonds) {
+      BleBondDbPayload active{};
+      if (!readActiveBleBondDbPayload(activeBondId_, &active) ||
+          bleBondDbIdentityMatches(active.core, record)) {
+        selected = activeBondId_;
+      }
+    }
+    if (selected == kBleInvalidBondId) {
+      for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+        if (!readActiveBleBondDbPayload(bondId, nullptr)) {
+          selected = bondId;
+          break;
+        }
+      }
+    }
+    if (selected == kBleInvalidBondId) {
+      uint32_t oldestUse = 0U;
+      for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+        if (connected_ && bondId == activeBondId_) {
+          continue;
+        }
+        const uint32_t use = bondRuntimeLastUsed_[bondId];
+        if (selected == kBleInvalidBondId || use == 0U ||
+            (oldestUse != 0U && bleBondDbGenerationNewer(oldestUse, use))) {
+          selected = bondId;
+          oldestUse = use;
+        }
+      }
+    }
+    if (selected == kBleInvalidBondId) {
+      return false;
+    }
+    if (selected != activeBondId_) {
+      resetBondedServiceChangedState(gattSchemaFingerprint_);
+    }
+    activeBondId_ = selected;
+    ++bondRuntimeUseCounter_;
+    if (bondRuntimeUseCounter_ == 0U) {
+      bondRuntimeUseCounter_ = 1U;
+    }
+    bondRuntimeLastUsed_[selected] = bondRuntimeUseCounter_;
+  }
+
+  memcpy(&bondRecord_, &record, sizeof(bondRecord_));
+  bondRecordValid_ = true;
+  bondStorageLoaded_ = true;
   if (deferStorage) {
     bondFlashPersistPending_ = true;
     cccdFlashPersistPending_ = true;
-  } else {
-    flashOk = writeFlashBondRecord(record);
-    if (flashOk) {
+    emitBleTrace("BOND_DEFERRED");
+    return retentionOk || bondFlashPersistPending_;
+  }
+  if (callbackMode) {
+    if (callbackStored) {
       bondFlashPersistPending_ = false;
+      emitBleTrace("BOND_CALLBACK_SAVED_CAPACITY_1");
     }
+    return callbackStored;
   }
-  const bool callbackPresent = bondSaveCallback_ != nullptr;
-  bool callbackOk = !callbackPresent;
-  if (callbackPresent && !deferStorage) {
-    callbackOk = bondSaveCallback_(&record, bondCallbackContext_);
-  } else if (callbackPresent) {
-    bondSigningCounterPersistPending_ = true;
-  }
-  const bool stored = retentionOk || flashOk || callbackOk ||
-                      bondSigningCounterPersistPending_;
+  const bool stored = persistActiveBondDatabaseRecord(true);
   if (stored) {
-    memcpy(&bondRecord_, &record, sizeof(bondRecord_));
-    bondRecordValid_ = true;
-    bondStorageLoaded_ = true;
-    if (deferStorage) {
-      emitBleTrace("BOND_DEFERRED");
-    } else {
-      persistBondedCccdState();
-      emitBleTrace("BOND_SAVED");
-    }
+    bondFlashPersistPending_ = false;
+    cccdFlashPersistPending_ = false;
+    emitBleTrace("BOND_SAVED");
   }
-  return stored && (callbackOk || bondSigningCounterPersistPending_);
+  return stored;
 }
 
 bool BleRadio::flushDeferredBondStorage() {
   bool ok = true;
-  if (bondFlashPersistPending_) {
-    if (bondRecordValid_) {
-      const bool flashOk = writeFlashBondRecord(bondRecord_);
-      ok = flashOk && ok;
-      if (flashOk) {
-        emitBleTrace("BOND_FLASH_FLUSHED");
-        bondFlashPersistPending_ = false;
+  if ((bondFlashPersistPending_ || cccdFlashPersistPending_) &&
+      bondRecordValid_) {
+    const bool callbackMode =
+        bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr;
+    const bool flashOk = callbackMode
+                             ? writeFlashBondRecord(bondRecord_)
+                             : persistActiveBondDatabaseRecord(true);
+    ok = flashOk && ok;
+    if (flashOk) {
+      bondFlashPersistPending_ = false;
+      if (!callbackMode) {
+        cccdFlashPersistPending_ = false;
       }
-    } else {
-      ok = false;
+      emitBleTrace("BOND_FLASH_FLUSHED");
     }
   }
   if (bondSigningCounterPersistPending_) {
@@ -3025,7 +3790,7 @@ bool BleRadio::flushDeferredBondStorage() {
       emitBleTrace("BOND_SIGN_COUNTERS_FLUSHED");
     }
   }
-  if (cccdFlashPersistPending_) {
+  if (cccdFlashPersistPending_ && !bondFlashPersistPending_) {
     const bool cccdOk = persistBondedCccdState(true);
     ok = cccdOk && ok;
     if (cccdOk) {
@@ -3045,19 +3810,26 @@ bool BleRadio::clearPersistentBondRecord() {
   bondLocalIdentityMigrationPending_ = false;
   bondLocalIdentityMigrationRetryAtUs_ = 0U;
   bondSigningCounterPersistPending_ = false;
-  const bool cccdOk = clearPersistentCccdRecord();
+  clearRetainedCccdBondBlob();
+  resetBondedServiceChangedState();
+  const bool callbackMode =
+      bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr;
+  const bool databaseOk = callbackMode ? true : clearBleBondDbRecords();
+  const bool cccdOk = clearFlashCccdBondRecord();
   const bool flashOk = clearFlashBondRecord();
   bool callbackOk = true;
   if (bondClearCallback_ != nullptr) {
     callbackOk = bondClearCallback_(bondCallbackContext_);
   }
   emitBleTrace("BOND_CLEARED");
-  return flashOk && cccdOk && callbackOk;
+  return databaseOk && flashOk && cccdOk && callbackOk;
 }
 
 bool BleRadio::primeBondForCurrentPeer() {
   bondKeyPrimedForConnection_ = false;
   bondIdentityMatchedForConnection_ = false;
+  activeBondMeetsSecurityPolicy_ = false;
+  activeBondUseNotedForConnection_ = false;
   smpPeerCsrkValid_ = false;
   smpLocalCsrkValid_ = false;
   smpPeerSignCounterValid_ = false;
@@ -3070,62 +3842,6 @@ bool BleRadio::primeBondForCurrentPeer() {
   if (!bondStorageLoaded_) {
     loadBondRecordFromPersistence();
   }
-  if (!bondRecordValid_) {
-    emitBleTrace("BOND_PRIME_NO_RECORD");
-    return false;
-  }
-
-  // Reuse a key only after the current peer is identified. LE Secure
-  // Connections stores zero EDIV/Rand, so those LL_ENC_REQ fields cannot
-  // distinguish bonds belonging to different phones.
-  const bool bondPeerIsRandom = (bondRecord_.peerAddressRandom & 0x01U) != 0U;
-  bool peerIdentityMatches =
-      (bondPeerIsRandom == connectionPeerAddressRandom_) &&
-      (memcmp(bondRecord_.peerAddress, connectionPeerAddress_,
-              sizeof(connectionPeerAddress_)) == 0);
-
-  if (!peerIdentityMatches && (bondRecord_.peerIrkValid != 0U)) {
-    const bool identityAddressRandom =
-        (bondRecord_.peerIdentityAddressRandom & 0x01U) != 0U;
-    peerIdentityMatches =
-        (identityAddressRandom == connectionPeerAddressRandom_) &&
-        (memcmp(bondRecord_.peerIdentityAddress, connectionPeerAddress_,
-                sizeof(connectionPeerAddress_)) == 0);
-    if (peerIdentityMatches) {
-      emitBleTrace("BOND_IDENTITY_ADDR_MATCH");
-    }
-  }
-
-  if (!peerIdentityMatches && connectionPeerAddressRandom_ &&
-      (bondRecord_.peerIrkValid != 0U) &&
-      bleAddressLooksResolvablePrivate(connectionPeerAddress_)) {
-    ++encDebug_.connAarResolveAttemptCount;
-    bool resolved = false;
-    Aar aar;
-    const bool aarOk =
-        aar.resolveSingle(connectionPeerAddress_, bondRecord_.peerIrk,
-                          &resolved, kBleBondAarSpinLimit);
-    encDebug_.connAarLastErrorStatus = aar.errorStatus();
-    if (aarOk && resolved) {
-      ++encDebug_.connAarResolveSuccessCount;
-      peerIdentityMatches = true;
-      emitBleTrace("BOND_AAR_RESOLVED");
-    } else {
-      ++encDebug_.connAarResolveFailureCount;
-      uint8_t softwareHash[3] = {0};
-      if (computeBleResolvablePrivateAddressHash(
-              bondRecord_.peerIrk, &connectionPeerAddress_[3], softwareHash) &&
-          memcmp(softwareHash, &connectionPeerAddress_[0],
-                 sizeof(softwareHash)) == 0) {
-        peerIdentityMatches = true;
-        emitBleTrace("BOND_AH_RESOLVED");
-      }
-    }
-  }
-  if (!peerIdentityMatches) {
-    emitBleTrace("BOND_PRIME_PEER_UNRESOLVED");
-    return false;
-  }
   uint8_t localIdentityAddress[6] = {0};
   BleAddressType localIdentityType = BleAddressType::kPublic;
   if (!getLocalIdentityAddress(localIdentityAddress, &localIdentityType)) {
@@ -3134,6 +3850,138 @@ bool BleRadio::primeBondForCurrentPeer() {
   }
   const uint8_t localIdentityRandom =
       (localIdentityType == BleAddressType::kRandomStatic) ? 0x01U : 0x00U;
+  uint8_t currentLocalIrk[16] = {0};
+  const bool currentLocalIrkValid = getLocalIdentityIrk(currentLocalIrk);
+  uint8_t legacyLocalRoot[16] = {0};
+  Ficr::identityRoot(legacyLocalRoot);
+  uint8_t selectedBondId = kBleInvalidBondId;
+  uint8_t directMatches = 0U;
+  uint8_t identityMatches = 0U;
+  uint8_t rpaMatches = 0U;
+  const bool callbackMode =
+      bondLoadCallback_ != nullptr || bondSaveCallback_ != nullptr;
+  if (callbackMode && bondRecordValid_) {
+    const bool peerRandom = (bondRecord_.peerAddressRandom & 0x01U) != 0U;
+    const bool identityRandom =
+        (bondRecord_.peerIdentityAddressRandom & 0x01U) != 0U;
+    if (peerRandom == connectionPeerAddressRandom_ &&
+        memcmp(bondRecord_.peerAddress, connectionPeerAddress_, 6U) == 0) {
+      selectedBondId = 0U;
+      directMatches = 1U;
+    } else if (bondRecord_.peerIrkValid != 0U &&
+               identityRandom == connectionPeerAddressRandom_ &&
+               memcmp(bondRecord_.peerIdentityAddress,
+                      connectionPeerAddress_, 6U) == 0) {
+      selectedBondId = 0U;
+      identityMatches = 1U;
+    } else if (connectionPeerAddressRandom_ &&
+               bondRecord_.peerIrkValid != 0U &&
+               bleAddressLooksResolvablePrivate(connectionPeerAddress_)) {
+      uint8_t hash[3] = {0};
+      if (computeBleResolvablePrivateAddressHash(
+              bondRecord_.peerIrk, &connectionPeerAddress_[3], hash) &&
+          memcmp(hash, connectionPeerAddress_, sizeof(hash)) == 0) {
+        selectedBondId = 0U;
+        rpaMatches = 1U;
+      }
+    }
+  } else if (!callbackMode) {
+    // Examine every logical bond. Direct on-air address wins over stable
+    // identity, which wins over resolving the peer's current RPA.
+    for (uint8_t bondId = 0U; bondId < kBleMaxBonds; ++bondId) {
+      BleBondDbPayload payload{};
+      BleBondRecord projected{};
+      if (!readActiveBleBondDbPayload(bondId, &payload) ||
+          !bleBondDbCoreToRecord(payload.core, connectionRole_, &projected)) {
+        continue;
+      }
+      bool candidateLocalIdentityMatches =
+          payload.core.localAddressRandom == localIdentityRandom &&
+          memcmp(payload.core.localAddress, localIdentityAddress, 6U) == 0;
+      if (!candidateLocalIdentityMatches &&
+          payload.core.localAddressRandom != 0U &&
+          bleAddressLooksResolvablePrivate(payload.core.localAddress)) {
+        uint8_t expectedHash[3] = {0};
+        candidateLocalIdentityMatches =
+            (currentLocalIrkValid &&
+             computeBleResolvablePrivateAddressHash(
+                 currentLocalIrk, &payload.core.localAddress[3],
+                 expectedHash) &&
+             memcmp(expectedHash, payload.core.localAddress, 3U) == 0) ||
+            (computeBleResolvablePrivateAddressHash(
+                 legacyLocalRoot, &payload.core.localAddress[3],
+                 expectedHash) &&
+             memcmp(expectedHash, payload.core.localAddress, 3U) == 0);
+      }
+      if (!candidateLocalIdentityMatches) {
+        continue;
+      }
+      if (((payload.core.peerAddressRandom & 0x01U) != 0U) ==
+              connectionPeerAddressRandom_ &&
+          memcmp(payload.core.peerAddress, connectionPeerAddress_, 6U) == 0) {
+        selectedBondId = bondId;
+        ++directMatches;
+        continue;
+      }
+      if (bleBondDbAddressNonZero(payload.core.peerIdentityAddress) &&
+          ((payload.core.peerIdentityAddressRandom & 0x01U) != 0U) ==
+              connectionPeerAddressRandom_ &&
+          memcmp(payload.core.peerIdentityAddress, connectionPeerAddress_,
+                 6U) == 0) {
+        if (directMatches == 0U) {
+          selectedBondId = bondId;
+        }
+        ++identityMatches;
+        continue;
+      }
+      if (connectionPeerAddressRandom_ &&
+          bleAddressLooksResolvablePrivate(connectionPeerAddress_) &&
+          (payload.core.keyValidityFlags &
+           kBleBondDbKeyPeerIrkValid) != 0U) {
+        ++encDebug_.connAarResolveAttemptCount;
+        uint8_t hash[3] = {0};
+        if (computeBleResolvablePrivateAddressHash(
+                payload.core.peerIrk, &connectionPeerAddress_[3], hash) &&
+            memcmp(hash, connectionPeerAddress_, sizeof(hash)) == 0) {
+          if (directMatches == 0U && identityMatches == 0U) {
+            selectedBondId = bondId;
+          }
+          ++rpaMatches;
+        }
+      }
+    }
+    const bool ambiguous = directMatches > 1U ||
+                           (directMatches == 0U && identityMatches > 1U) ||
+                           (directMatches == 0U && identityMatches == 0U &&
+                            rpaMatches > 1U);
+    if (ambiguous) {
+      selectedBondId = kBleInvalidBondId;
+      emitBleTrace("BOND_PRIME_AMBIGUOUS");
+    }
+    if (selectedBondId != kBleInvalidBondId &&
+        !loadBondProjection(selectedBondId, connectionRole_, &bondRecord_,
+                            &activeBondGeneration_)) {
+      selectedBondId = kBleInvalidBondId;
+    }
+  }
+  if (selectedBondId == kBleInvalidBondId) {
+    activeBondId_ = kBleInvalidBondId;
+    activeBondGeneration_ = 0U;
+    bondRecordValid_ = false;
+    emitBleTrace("BOND_PRIME_PEER_UNRESOLVED");
+    return false;
+  }
+  activeBondId_ = selectedBondId;
+  bondRecordValid_ = true;
+  if (directMatches != 0U) {
+    emitBleTrace("BOND_DB_DIRECT_MATCH");
+  } else if (identityMatches != 0U) {
+    emitBleTrace("BOND_IDENTITY_ADDR_MATCH");
+  } else if (rpaMatches != 0U) {
+    ++encDebug_.connAarResolveSuccessCount;
+    emitBleTrace("BOND_DB_RPA_RESOLVED");
+  }
+  emitBleTrace("BOND_DB_SELECTED");
   bool localIdentityMatches =
       ((bondRecord_.localAddressRandom & 0x01U) == localIdentityRandom) &&
       memcmp(bondRecord_.localAddress, localIdentityAddress,
@@ -3166,10 +4014,15 @@ bool BleRadio::primeBondForCurrentPeer() {
     localIdentityMatches = normalizeLegacyLocalRpa;
   }
   if (!localIdentityMatches) {
+    activeBondId_ = kBleInvalidBondId;
+    activeBondGeneration_ = 0U;
+    bondRecordValid_ = false;
     emitBleTrace("BOND_PRIME_LOCAL_ID_MISMATCH");
     return false;
   }
   bondIdentityMatchedForConnection_ = true;
+  activeBondMeetsSecurityPolicy_ =
+      bondMeetsSecurityPolicy(bondRecord_, securityPolicy_);
   memcpy(smpStk_, bondRecord_.ltk, sizeof(smpStk_));
   smpStkValid_ = true;
   memcpy(smpPeerLtk_, bondRecord_.ltk, sizeof(smpPeerLtk_));
@@ -3205,6 +4058,9 @@ bool BleRadio::primeBondForCurrentPeer() {
   bondKeyPrimedForConnection_ = true;
   connectionBondedEncryptionRequested_ = false;
   restoreBondedCccdState();
+  if (gattSchemaFingerprint_ != 0U) {
+    (void)commitGattSchemaFingerprint(gattSchemaFingerprint_);
+  }
   if (normalizeLegacyLocalRpa) {
     memcpy(bondRecord_.localAddress, localIdentityAddress,
            sizeof(bondRecord_.localAddress));
@@ -3601,8 +4457,12 @@ void BleRadio::restoreAdvertisingLinkDefaults() {
   memset(connectionPendingChannelMap_, 0, sizeof(connectionPendingChannelMap_));
   connectionPendingChannelCount_ = 0U;
   connectionServiceChangedIndicationsEnabled_ = false;
+  connectionServiceChangedCccdRestored_ = false;
   connectionServiceChangedIndicationPending_ = false;
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  connectionServiceChangedIndicationStartHandle_ = 0U;
+  connectionServiceChangedIndicationEndHandle_ = 0U;
+  connectionServiceChangedIndicationGeneration_ = 0U;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
   connectionSmpSecurityRequestPending_ = false;

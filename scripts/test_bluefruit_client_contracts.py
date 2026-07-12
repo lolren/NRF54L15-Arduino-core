@@ -46,11 +46,11 @@ def main() -> int:
     )
     assert "kAttOpHandleValueNtf" in client_dispatch
     assert "kAttOpHandleValueInd" in client_dispatch
-    assert "kAttOpHandleValueCfm" in client_dispatch
-    assert "BleConnectionRole::kPeripheral" in client_dispatch
+    assert "kAttOpHandleValueCfm" not in client_dispatch
+    assert "queueAttRequest" not in client_dispatch
     assert "event.packetIsNew" in client_dispatch
     assert client_dispatch.index("event.packetIsNew") < client_dispatch.index(
-        "characteristic->handleNotify(value, valueLength)"
+        "characteristic->handleValueEvent(value, valueLength, attOpcode"
     )
     att_wait = function_body(source, "AttWaitResult waitForAttOpcode(")
     assert "if (!event.packetIsNew)" in att_wait
@@ -156,17 +156,15 @@ def main() -> int:
     assert "uint8_t scratch" not in client_read
     print("PASS Bluefruit client Read Blob continuation and terminal-error contract")
 
-    deferred_enqueue = function_body(
-        source, "bool enqueueDeferredClientNotification("
-    )
+    deferred_enqueue = function_body(source, "bool enqueueDeferredClientValueEvent(")
     deferred_clear = function_body(
-        source, "void clearDeferredClientNotifications("
+        source, "void clearDeferredClientValueEvents("
     )
     deferred_dispatch = function_body(
         source, "void dispatchDeferredUserCallbacks()"
     )
-    notify_handler = function_body(
-        source, "void BLEClientCharacteristic::handleNotify("
+    value_handler = function_body(
+        source, "void BLEClientCharacteristic::handleValueEvent("
     )
     reset_discovery = function_body(
         source, "void BLEClientCharacteristic::resetDiscovery()"
@@ -175,14 +173,17 @@ def main() -> int:
         source, "void resetClientDiscoveryState()"
     )
     connection_edge = function_body(source, "void handleConnectionEdge(bool connected)")
-    assert "kDeferredClientNotificationQueueDepth = 8U" in source
-    assert "deferred_client_notification_count_ >=" in deferred_enqueue
-    assert "++deferred_client_notification_count_;" in deferred_enqueue
-    assert "deferred_client_notification_count_ = retained;" in deferred_clear
-    assert "while (deferred_client_notification_count_ > 0U)" in deferred_dispatch
-    assert "--deferred_client_notification_count_;" in deferred_dispatch
-    assert "enqueueDeferredClientNotification(this, data, copyLen)" in notify_handler
-    assert "clearDeferredClientNotifications(this)" in reset_discovery
+    assert "kDeferredClientValueEventQueueDepth = 8U" in source
+    assert "deferred_client_value_event_count_ >=" in deferred_enqueue
+    assert "++deferred_client_value_event_count_;" in deferred_enqueue
+    assert "deferred_client_value_event_count_ = retained;" in deferred_clear
+    assert "while (deferred_client_value_event_count_ > 0U)" in deferred_dispatch
+    assert "--deferred_client_value_event_count_;" in deferred_dispatch
+    assert "enqueueDeferredClientValueEvent(" in value_handler
+    assert "clearDeferredClientValueEvents(this)" in reset_discovery
+    assert "connection_generation" in deferred_enqueue
+    assert "eventGeneration == connection_generation_" in deferred_dispatch
+    assert "discovery_generation_ == eventGeneration" in deferred_dispatch
     assert "client_characteristics_[i]->resetDiscovery();" in reset_client_state
     assert "client_services_[i]->resetDiscovery();" in reset_client_state
     assert "uart->discovered_ = false;" in reset_client_state

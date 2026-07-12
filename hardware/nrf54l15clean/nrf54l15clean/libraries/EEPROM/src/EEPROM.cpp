@@ -23,6 +23,9 @@
 
 #include <string.h>
 
+extern "C" bool nrf54l15_rram_transaction_try_lock(void);
+extern "C" void nrf54l15_rram_transaction_unlock(void);
+
 namespace {
 
 constexpr uint32_t kEepromMagic = 0x45455052UL;  // "EEPR"
@@ -137,6 +140,9 @@ bool writeBlob(const EepromBlob& blob) {
     if (rramc == nullptr) {
         return false;
     }
+    if (!nrf54l15_rram_transaction_try_lock()) {
+        return false;
+    }
 
     const uint32_t targetAddress =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_eepromFlashBlob));
@@ -177,15 +183,18 @@ bool writeBlob(const EepromBlob& blob) {
     }
 
     if (!ok) {
+        nrf54l15_rram_transaction_unlock();
         return false;
     }
 
     EepromBlob verify{};
     if (!readBlob(&verify)) {
+        nrf54l15_rram_transaction_unlock();
         return false;
     }
-
-    return memcmp(&verify, &blob, sizeof(blob)) == 0;
+    const bool verified = memcmp(&verify, &blob, sizeof(blob)) == 0;
+    nrf54l15_rram_transaction_unlock();
+    return verified;
 }
 
 }  // namespace

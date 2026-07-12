@@ -19,6 +19,9 @@
 
 #include <string.h>
 
+extern "C" bool nrf54l15_rram_transaction_try_lock(void);
+extern "C" void nrf54l15_rram_transaction_unlock(void);
+
 namespace {
 
 constexpr uint32_t kPrefsMagic = 0x50524653UL;  // "PFRS"
@@ -252,6 +255,9 @@ bool writeBlobRaw(const PreferencesBlob& blob) {
     if (rramc == nullptr) {
         return false;
     }
+    if (!nrf54l15_rram_transaction_try_lock()) {
+        return false;
+    }
 
     const uint32_t targetAddress =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_preferencesFlashBlob));
@@ -290,6 +296,7 @@ bool writeBlobRaw(const PreferencesBlob& blob) {
     if (!waitRramcReady(rramc, kPrefsRramcSpinLimit)) {
         ok = false;
     }
+    nrf54l15_rram_transaction_unlock();
     return ok;
 }
 

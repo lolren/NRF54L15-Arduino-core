@@ -11,6 +11,9 @@ struct BleBondRecordV1 {
   uint8_t reserved[3];
 };
 
+extern "C" bool nrf54l15_rram_transaction_try_lock(void);
+extern "C" void nrf54l15_rram_transaction_unlock(void);
+
 struct BleBondRecordV2 {
   uint8_t peerAddress[6];
   uint8_t peerAddressRandom;
@@ -71,13 +74,128 @@ static_assert(sizeof(BleBondSigningState) == 44U,
 static_assert(sizeof(BleBondSigningBlob) == 56U,
               "the signing extension consumes the 56-byte page slack");
 
+constexpr uint32_t kBleBondDbActiveMagic = 0x34444E42UL;     // "BND4"
+constexpr uint32_t kBleBondDbTombstoneMagic = 0x344C4544UL;  // "DEL4"
+constexpr uint32_t kBleBondDbClearAllMagic = 0x34524C43UL;   // "CLR4"
+constexpr uint8_t kBleBondDbReplicaCount = 2U;
+constexpr uint8_t kBleBondDbCccdValueBytes = 6U;
+
+constexpr uint8_t kBleBondDbSecurityAuthenticated = 0x01U;
+constexpr uint8_t kBleBondDbSecuritySecureConnections = 0x02U;
+constexpr uint8_t kBleBondDbKeyPeerIrkValid = 0x01U;
+constexpr uint8_t kBleBondDbKeyLocalOrSharedValid = 0x02U;
+constexpr uint8_t kBleBondDbKeyPeerLegacyValid = 0x04U;
+constexpr uint8_t kBleBondDbKeySharedSecureConnections = 0x08U;
+constexpr uint8_t kBleBondDbKeyLegacyProjectionUnknown = 0x10U;
+constexpr uint8_t kBleBondDbSigningPeerCsrkValid = 0x01U;
+constexpr uint8_t kBleBondDbSigningLocalCsrkValid = 0x02U;
+constexpr uint8_t kBleBondDbSigningPeerCounterValid = 0x04U;
+
+struct BleBondDbLongTermKey {
+  uint8_t ltk[16];
+  uint8_t rand[8];
+  uint16_t ediv;
+};
+
+// Frozen internal representation. The two key tuples allow a later SMP phase
+// to retain locally and peer-distributed legacy keys for GAP role reversal.
+struct BleBondDbCore {
+  uint8_t peerAddress[6];
+  uint8_t peerAddressRandom;
+  uint8_t peerIdentityAddress[6];
+  uint8_t peerIdentityAddressRandom;
+  uint8_t localAddress[6];
+  uint8_t localAddressRandom;
+  uint8_t keySize;
+  uint8_t securityFlags;
+  uint8_t keyValidityFlags;
+  uint8_t peerIrk[16];
+  uint8_t peerCsrk[16];
+  uint8_t localCsrk[16];
+  uint32_t peerSignCounter;
+  uint32_t localSignCounter;
+  BleBondDbLongTermKey localOrSharedKey;
+  BleBondDbLongTermKey peerLegacyKey;
+  uint8_t signingFlags;
+  uint8_t pairedLocalRole;
+  uint8_t reserved[6];
+};
+
+struct BleBondDbPeerState {
+  uint32_t schemaFingerprint;
+  uint32_t serviceChangedGeneration;
+  uint32_t lastUsedGeneration;
+  uint16_t serviceChangedStartHandle;
+  uint16_t serviceChangedEndHandle;
+  uint8_t fixedCccdFlags;
+  uint8_t cccdCount;
+  uint8_t cccdValues[kBleBondDbCccdValueBytes];
+  uint16_t cccdHandles[xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics];
+};
+
+struct BleBondDbPayload {
+  BleBondDbCore core;
+  BleBondDbPeerState peerState;
+  uint32_t clearGeneration;
+  uint8_t reserved[24];
+};
+
+struct BleBondDbHeader {
+  uint32_t magic;
+  uint32_t generation;
+  uint32_t payloadCrc32;
+  uint32_t headerCrc32;
+};
+
+struct BleBondDbReplica {
+  BleBondDbHeader header;
+  BleBondDbPayload payload;
+};
+
+struct BleBondDbPage {
+  BleBondDbReplica replicas[kBleBondDbReplicaCount]
+                           [xiao_nrf54l15::BleRadio::kBleMaxBonds];
+};
+
+static_assert(sizeof(BleBondDbLongTermKey) == 26U,
+              "BLE bond DB LTK tuple layout changed");
+static_assert(sizeof(BleBondDbCore) == 140U,
+              "BLE bond DB normalized core must remain 140 bytes");
+static_assert(sizeof(BleBondDbPeerState) == 72U,
+              "BLE bond DB peer state must remain 72 bytes");
+static_assert(sizeof(BleBondDbPayload) == 240U,
+              "BLE bond DB payload must remain 240 bytes");
+static_assert(sizeof(BleBondDbHeader) == 16U,
+              "BLE bond DB commit header must be one RRAM wordline");
+static_assert(sizeof(BleBondDbReplica) == 256U,
+              "BLE bond DB replica must remain 256 bytes");
+static_assert(sizeof(BleBondDbPage) == 4096U,
+              "eight A/B bond replicas must fill one 4 KB page");
+
 struct BleCccdBondEntry {
   uint16_t handle;
   uint16_t value;
 };
 
-constexpr uint8_t kBleCccdBondEntryCapacity =
+constexpr uint8_t kBleCccdBondEntryCapacityV1 =
     static_cast<uint8_t>(2U + xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics);
+
+struct BleCccdBondRecordV1 {
+  uint8_t peerAddress[6];
+  uint8_t peerAddressRandom;
+  uint8_t peerIdentityAddress[6];
+  uint8_t peerIdentityAddressRandom;
+  uint8_t localAddress[6];
+  uint8_t localAddressRandom;
+  uint8_t entryCount;
+  uint8_t reserved[2];
+  BleCccdBondEntry entries[kBleCccdBondEntryCapacityV1];
+};
+
+constexpr uint8_t kBleCccdFixedServiceChanged = 0x01U;
+constexpr uint8_t kBleCccdFixedBattery = 0x02U;
+constexpr uint8_t kBleCccdFixedMask =
+    kBleCccdFixedServiceChanged | kBleCccdFixedBattery;
 
 struct BleCccdBondRecord {
   uint8_t peerAddress[6];
@@ -87,8 +205,13 @@ struct BleCccdBondRecord {
   uint8_t localAddress[6];
   uint8_t localAddressRandom;
   uint8_t entryCount;
-  uint8_t reserved[2];
-  BleCccdBondEntry entries[kBleCccdBondEntryCapacity];
+  uint8_t fixedCccdFlags;
+  uint8_t reserved;
+  uint32_t schemaFingerprint;
+  uint16_t serviceChangedStartHandle;
+  uint16_t serviceChangedEndHandle;
+  BleCccdBondEntry
+      entries[xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics];
 };
 
 struct BleCccdRetentionBlob {
@@ -99,6 +222,26 @@ struct BleCccdRetentionBlob {
   BleCccdBondRecord record;
 };
 
+struct BleCccdRetentionBlobV1 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t recordLength;
+  uint32_t crc32;
+  BleCccdBondRecordV1 record;
+};
+
+bool appendCccdBondEntry(BleCccdBondRecord* record, uint16_t handle,
+                         uint16_t value);
+
+static_assert(sizeof(BleCccdBondRecordV1) == 128U,
+              "legacy CCCD record layout must remain readable");
+static_assert(sizeof(BleCccdBondRecord) == 128U,
+              "CCCD v2 metadata must fit the stable record slot");
+static_assert(sizeof(BleCccdRetentionBlobV1) == 140U,
+              "legacy CCCD blob must remain 140 bytes");
+static_assert(sizeof(BleCccdRetentionBlob) == 140U,
+              "CCCD v2 blob must remain 140 bytes");
+
 __attribute__((section(".noinit"))) BleBondRetentionBlob g_bleBondRetention;
 __attribute__((section(".noinit"))) BleCccdRetentionBlob g_bleCccdRetention;
 __attribute__((section(".bond_base_storage"), aligned(4)))
@@ -107,6 +250,8 @@ __attribute__((section(".bond_cccd_storage"), aligned(4)))
 volatile BleCccdRetentionBlob g_bleCccdFlashStorage;
 __attribute__((section(".bond_signing_storage"), aligned(4)))
 volatile BleBondSigningBlob g_bleBondSigningFlashStorage;
+__attribute__((section(".bond_db_storage"), aligned(16)))
+volatile BleBondDbPage g_bleBondDbStorage;
 bool g_bleBondStorageWriteInProgress = false;
 
 constexpr uint8_t kAttOpErrorRsp = 0x01U;
@@ -710,13 +855,10 @@ bool writeBondStorageToRram(volatile void* target, const void* src, size_t len) 
   if (bufferedWordCount == 0U || bufferedWordCount > 32U) {
     return false;
   }
-  const uint32_t lockIrqState = bleEnterCritical();
-  if (g_bleBondStorageWriteInProgress) {
-    bleExitCritical(lockIrqState);
+  if (!nrf54l15_rram_transaction_try_lock()) {
     return false;
   }
   g_bleBondStorageWriteInProgress = true;
-  bleExitCritical(lockIrqState);
 
   const uint8_t* const source = reinterpret_cast<const uint8_t*>(src);
   const uint32_t prevConfig = rramc->CONFIG;
@@ -786,7 +928,694 @@ bool writeBondStorageToRram(volatile void* target, const void* src, size_t len) 
   const uint32_t unlockIrqState = bleEnterCritical();
   g_bleBondStorageWriteInProgress = false;
   bleExitCritical(unlockIrqState);
+  nrf54l15_rram_transaction_unlock();
   return writeOk;
+}
+
+bool bleBondDbGenerationNewer(uint32_t lhs, uint32_t rhs) {
+  return lhs != rhs && static_cast<int32_t>(lhs - rhs) > 0;
+}
+
+bool bleBondDbMagicValid(uint32_t magic) {
+  return magic == kBleBondDbActiveMagic ||
+         magic == kBleBondDbTombstoneMagic ||
+         magic == kBleBondDbClearAllMagic;
+}
+
+bool bleBondDbBytesAllZero(const uint8_t* bytes, size_t length) {
+  if (bytes == nullptr) {
+    return false;
+  }
+  uint8_t aggregate = 0U;
+  for (size_t i = 0U; i < length; ++i) {
+    aggregate = static_cast<uint8_t>(aggregate | bytes[i]);
+  }
+  return aggregate == 0U;
+}
+
+uint8_t bleBondDbCccdValue(const BleBondDbPeerState& state, uint8_t index) {
+  if (index >= xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics) {
+    return 0U;
+  }
+  const uint8_t bitOffset = static_cast<uint8_t>(index * 2U);
+  return static_cast<uint8_t>(
+      (state.cccdValues[bitOffset >> 3U] >> (bitOffset & 0x07U)) & 0x03U);
+}
+
+void bleBondDbSetCccdValue(BleBondDbPeerState* state, uint8_t index,
+                           uint8_t value) {
+  if (state == nullptr ||
+      index >= xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics) {
+    return;
+  }
+  const uint8_t bitOffset = static_cast<uint8_t>(index * 2U);
+  const uint8_t byteIndex = static_cast<uint8_t>(bitOffset >> 3U);
+  const uint8_t shift = static_cast<uint8_t>(bitOffset & 0x07U);
+  state->cccdValues[byteIndex] = static_cast<uint8_t>(
+      (state->cccdValues[byteIndex] & ~(0x03U << shift)) |
+      ((value & 0x03U) << shift));
+}
+
+bool bleBondDbKeyLooksSane(const BleBondDbLongTermKey& key) {
+  return !bleBondDbBytesAllZero(key.ltk, sizeof(key.ltk));
+}
+
+bool bleBondDbCoreLooksSane(const BleBondDbCore& core) {
+  const uint8_t allowedSecurity =
+      kBleBondDbSecurityAuthenticated | kBleBondDbSecuritySecureConnections;
+  const uint8_t allowedKeys =
+      kBleBondDbKeyPeerIrkValid | kBleBondDbKeyLocalOrSharedValid |
+      kBleBondDbKeyPeerLegacyValid |
+      kBleBondDbKeySharedSecureConnections |
+      kBleBondDbKeyLegacyProjectionUnknown;
+  const uint8_t allowedSigning =
+      kBleBondDbSigningPeerCsrkValid |
+      kBleBondDbSigningLocalCsrkValid |
+      kBleBondDbSigningPeerCounterValid;
+  if (core.peerAddressRandom > 1U ||
+      core.peerIdentityAddressRandom > 1U ||
+      core.localAddressRandom > 1U || core.keySize < 7U ||
+      core.keySize > 16U || (core.securityFlags & ~allowedSecurity) != 0U ||
+      (core.keyValidityFlags & ~allowedKeys) != 0U ||
+      (core.signingFlags & ~allowedSigning) != 0U ||
+      core.pairedLocalRole >
+          static_cast<uint8_t>(xiao_nrf54l15::BleConnectionRole::kCentral) ||
+      !bleBondDbBytesAllZero(core.reserved, sizeof(core.reserved))) {
+    return false;
+  }
+  if ((core.keyValidityFlags & kBleBondDbKeyLocalOrSharedValid) != 0U &&
+      !bleBondDbKeyLooksSane(core.localOrSharedKey)) {
+    return false;
+  }
+  if ((core.keyValidityFlags & kBleBondDbKeyPeerLegacyValid) != 0U &&
+      !bleBondDbKeyLooksSane(core.peerLegacyKey)) {
+    return false;
+  }
+  if ((core.keyValidityFlags & kBleBondDbKeySharedSecureConnections) != 0U &&
+      ((core.securityFlags & kBleBondDbSecuritySecureConnections) == 0U ||
+       (core.keyValidityFlags & kBleBondDbKeyLocalOrSharedValid) == 0U)) {
+    return false;
+  }
+  if ((core.signingFlags & kBleBondDbSigningPeerCounterValid) != 0U &&
+      (core.signingFlags & kBleBondDbSigningPeerCsrkValid) == 0U) {
+    return false;
+  }
+  return (core.keyValidityFlags & (kBleBondDbKeyLocalOrSharedValid |
+                                   kBleBondDbKeyPeerLegacyValid)) != 0U;
+}
+
+bool bleBondDbPeerStateLooksSane(const BleBondDbPeerState& state) {
+  if ((state.fixedCccdFlags & ~kBleCccdFixedMask) != 0U ||
+      state.cccdCount >
+          xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics) {
+    return false;
+  }
+  const bool hasPending = state.serviceChangedStartHandle != 0U ||
+                          state.serviceChangedEndHandle != 0U;
+  if (hasPending &&
+      (state.serviceChangedStartHandle == 0U ||
+       state.serviceChangedStartHandle > state.serviceChangedEndHandle)) {
+    return false;
+  }
+  for (uint8_t i = 0U;
+       i < xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics; ++i) {
+    const uint16_t handle = state.cccdHandles[i];
+    const uint8_t value = bleBondDbCccdValue(state, i);
+    if (i >= state.cccdCount) {
+      if (handle != 0U || value != 0U) {
+        return false;
+      }
+      continue;
+    }
+    if (handle == 0U || handle == kHandleGattServiceChangedCccd ||
+        handle == kHandleBatteryLevelCccd || value == 0U) {
+      return false;
+    }
+    for (uint8_t previous = 0U; previous < i; ++previous) {
+      if (state.cccdHandles[previous] == handle) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool bleBondDbPayloadLooksSane(const BleBondDbPayload& payload) {
+  return bleBondDbCoreLooksSane(payload.core) &&
+         bleBondDbPeerStateLooksSane(payload.peerState) &&
+         bleBondDbBytesAllZero(payload.reserved, sizeof(payload.reserved));
+}
+
+bool bleBondDbMarkerPayloadLooksSane(const BleBondDbPayload& payload) {
+  BleBondDbPayload normalized = payload;
+  normalized.clearGeneration = 0U;
+  return bleBondDbBytesAllZero(
+      reinterpret_cast<const uint8_t*>(&normalized), sizeof(normalized));
+}
+
+void readBleBondDbReplica(uint8_t replicaIndex, uint8_t bondId,
+                          BleBondDbReplica* outReplica) {
+  if (outReplica == nullptr || replicaIndex >= kBleBondDbReplicaCount ||
+      bondId >= xiao_nrf54l15::BleRadio::kBleMaxBonds) {
+    return;
+  }
+  copyFromVolatileMemory(
+      reinterpret_cast<const volatile uint8_t*>(
+          &g_bleBondDbStorage.replicas[replicaIndex][bondId]),
+      reinterpret_cast<uint8_t*>(outReplica), sizeof(*outReplica));
+}
+
+bool bleBondDbHeaderValid(const BleBondDbHeader& header);
+
+bool bleBondDbReplicaValid(const BleBondDbReplica& replica) {
+  if (!bleBondDbMagicValid(replica.header.magic) ||
+      replica.header.generation == 0U ||
+      replica.header.headerCrc32 !=
+          crc32(reinterpret_cast<const uint8_t*>(&replica.header), 12U)) {
+    return false;
+  }
+  const uint32_t payloadCrc =
+      crc32(reinterpret_cast<const uint8_t*>(&replica.payload),
+            sizeof(replica.payload));
+  if (payloadCrc != replica.header.payloadCrc32) {
+    return false;
+  }
+  const uint32_t clearGeneration = replica.payload.clearGeneration;
+  if (replica.header.magic == kBleBondDbClearAllMagic) {
+    return clearGeneration == replica.header.generation &&
+           bleBondDbMarkerPayloadLooksSane(replica.payload);
+  }
+  if (clearGeneration != 0U &&
+      !bleBondDbGenerationNewer(replica.header.generation,
+                                clearGeneration)) {
+    return false;
+  }
+  if (replica.header.magic == kBleBondDbActiveMagic) {
+    return bleBondDbPayloadLooksSane(replica.payload);
+  }
+  if (!bleBondDbMarkerPayloadLooksSane(replica.payload)) {
+    return false;
+  }
+  return true;
+}
+
+bool bleBondDbHeaderValid(const BleBondDbHeader& header) {
+  return bleBondDbMagicValid(header.magic) && header.generation != 0U &&
+         header.headerCrc32 ==
+             crc32(reinterpret_cast<const uint8_t*>(&header), 12U);
+}
+
+uint32_t bleBondDbLatestClearGeneration() {
+  uint32_t generation = 0U;
+  for (uint8_t replicaIndex = 0U; replicaIndex < kBleBondDbReplicaCount;
+       ++replicaIndex) {
+    for (uint8_t bondId = 0U;
+         bondId < xiao_nrf54l15::BleRadio::kBleMaxBonds; ++bondId) {
+      BleBondDbReplica replica{};
+      readBleBondDbReplica(replicaIndex, bondId, &replica);
+      uint32_t candidate = 0U;
+      if (bleBondDbHeaderValid(replica.header) &&
+          replica.header.magic == kBleBondDbClearAllMagic) {
+        candidate = replica.header.generation;
+      } else if (bleBondDbReplicaValid(replica)) {
+        candidate = replica.payload.clearGeneration;
+      }
+      if (candidate != 0U &&
+          (generation == 0U ||
+           bleBondDbGenerationNewer(candidate, generation))) {
+        generation = candidate;
+      }
+    }
+  }
+  return generation;
+}
+
+bool readNewestBleBondDbReplica(uint8_t bondId, BleBondDbReplica* outReplica,
+                                uint8_t* outReplicaIndex = nullptr) {
+  if (bondId >= xiao_nrf54l15::BleRadio::kBleMaxBonds ||
+      outReplica == nullptr) {
+    return false;
+  }
+  BleBondDbReplica candidates[kBleBondDbReplicaCount]{};
+  bool headerValid[kBleBondDbReplicaCount]{};
+  for (uint8_t i = 0U; i < kBleBondDbReplicaCount; ++i) {
+    readBleBondDbReplica(i, bondId, &candidates[i]);
+    headerValid[i] = bleBondDbHeaderValid(candidates[i].header);
+  }
+  if (!headerValid[0] && !headerValid[1]) {
+    return false;
+  }
+  uint8_t selected = !headerValid[0]
+                         ? 1U
+                         : (!headerValid[1] || !bleBondDbGenerationNewer(
+                                                  candidates[1].header.generation,
+                                                  candidates[0].header.generation)
+                                ? 0U
+                                : 1U);
+  const uint32_t clearGeneration = bleBondDbLatestClearGeneration();
+  if (clearGeneration != 0U &&
+      !bleBondDbGenerationNewer(candidates[selected].header.generation,
+                                clearGeneration)) {
+    return false;
+  }
+  // A newer committed header always supersedes the older replica. If its
+  // payload is corrupt, fail closed instead of resurrecting stale key data.
+  if (!bleBondDbReplicaValid(candidates[selected])) {
+    return false;
+  }
+  memcpy(outReplica, &candidates[selected], sizeof(*outReplica));
+  if (outReplicaIndex != nullptr) {
+    *outReplicaIndex = selected;
+  }
+  return true;
+}
+
+bool readActiveBleBondDbPayload(uint8_t bondId, BleBondDbPayload* outPayload,
+                                uint32_t* outGeneration = nullptr) {
+  BleBondDbReplica replica{};
+  if (!readNewestBleBondDbReplica(bondId, &replica) ||
+      replica.header.magic != kBleBondDbActiveMagic) {
+    return false;
+  }
+  if (outPayload != nullptr) {
+    memcpy(outPayload, &replica.payload, sizeof(*outPayload));
+  }
+  if (outGeneration != nullptr) {
+    *outGeneration = replica.header.generation;
+  }
+  return true;
+}
+
+uint32_t nextBleBondDbGeneration() {
+  uint32_t newest = 0U;
+  for (uint8_t replicaIndex = 0U; replicaIndex < kBleBondDbReplicaCount;
+       ++replicaIndex) {
+    for (uint8_t bondId = 0U;
+         bondId < xiao_nrf54l15::BleRadio::kBleMaxBonds; ++bondId) {
+      BleBondDbReplica replica{};
+      readBleBondDbReplica(replicaIndex, bondId, &replica);
+      if (bleBondDbHeaderValid(replica.header) &&
+          (newest == 0U || bleBondDbGenerationNewer(
+                               replica.header.generation, newest))) {
+        newest = replica.header.generation;
+      }
+    }
+  }
+  ++newest;
+  return newest == 0U ? 1U : newest;
+}
+
+uint8_t selectBleBondDbWriteReplica(uint8_t bondId) {
+  BleBondDbReplica replicas[kBleBondDbReplicaCount]{};
+  bool headerValid[kBleBondDbReplicaCount]{};
+  for (uint8_t i = 0U; i < kBleBondDbReplicaCount; ++i) {
+    readBleBondDbReplica(i, bondId, &replicas[i]);
+    headerValid[i] = bleBondDbHeaderValid(replicas[i].header);
+  }
+  if (!headerValid[0]) {
+    return 0U;
+  }
+  if (!headerValid[1]) {
+    return 1U;
+  }
+  return bleBondDbGenerationNewer(replicas[0].header.generation,
+                                  replicas[1].header.generation)
+             ? 1U
+             : 0U;
+}
+
+bool writeBleBondDbReplica(uint8_t bondId, uint32_t magic,
+                           const BleBondDbPayload* payload,
+                           uint32_t* outGeneration = nullptr) {
+  if (bondId >= xiao_nrf54l15::BleRadio::kBleMaxBonds ||
+      !bleBondDbMagicValid(magic) ||
+      (magic == kBleBondDbActiveMagic &&
+       (payload == nullptr || !bleBondDbPayloadLooksSane(*payload)))) {
+    return false;
+  }
+  const uint8_t targetReplica = selectBleBondDbWriteReplica(bondId);
+  const uint32_t generation = nextBleBondDbGeneration();
+  const uint32_t inheritedClearGeneration =
+      bleBondDbLatestClearGeneration();
+  volatile BleBondDbReplica* const target =
+      &g_bleBondDbStorage.replicas[targetReplica][bondId];
+  const BleBondDbHeader invalidHeader{};
+  if (!writeBondStorageToRram(&target->header, &invalidHeader,
+                              sizeof(invalidHeader))) {
+    return false;
+  }
+  BleBondDbHeader verifyHeader{};
+  copyFromVolatileMemory(
+      reinterpret_cast<const volatile uint8_t*>(&target->header),
+      reinterpret_cast<uint8_t*>(&verifyHeader), sizeof(verifyHeader));
+  if (memcmp(&verifyHeader, &invalidHeader, sizeof(invalidHeader)) != 0) {
+    return false;
+  }
+
+  BleBondDbPayload image{};
+  if (magic == kBleBondDbActiveMagic) {
+    memcpy(&image, payload, sizeof(image));
+  }
+  image.clearGeneration = magic == kBleBondDbClearAllMagic
+                              ? generation
+                              : inheritedClearGeneration;
+  if (!writeBondStorageToRram(&target->payload, &image, sizeof(image))) {
+    return false;
+  }
+  BleBondDbPayload verifyPayload{};
+  copyFromVolatileMemory(
+      reinterpret_cast<const volatile uint8_t*>(&target->payload),
+      reinterpret_cast<uint8_t*>(&verifyPayload), sizeof(verifyPayload));
+  if (memcmp(&verifyPayload, &image, sizeof(image)) != 0) {
+    return false;
+  }
+
+  BleBondDbHeader finalHeader{};
+  finalHeader.magic = magic;
+  finalHeader.generation = generation;
+  finalHeader.payloadCrc32 = crc32(
+      reinterpret_cast<const uint8_t*>(&image), sizeof(image));
+  finalHeader.headerCrc32 =
+      crc32(reinterpret_cast<const uint8_t*>(&finalHeader), 12U);
+  if (!writeBondStorageToRram(&target->header, &finalHeader,
+                              sizeof(finalHeader))) {
+    return false;
+  }
+  BleBondDbReplica verifyReplica{};
+  readBleBondDbReplica(targetReplica, bondId, &verifyReplica);
+  if (!bleBondDbReplicaValid(verifyReplica) ||
+      memcmp(&verifyReplica.header, &finalHeader, sizeof(finalHeader)) != 0) {
+    return false;
+  }
+  if (outGeneration != nullptr) {
+    *outGeneration = finalHeader.generation;
+  }
+  return true;
+}
+
+bool eraseBleBondDbRecord(uint8_t bondId) {
+  return writeBleBondDbReplica(bondId, kBleBondDbTombstoneMagic, nullptr);
+}
+
+bool clearBleBondDbRecords() {
+  return writeBleBondDbReplica(0U, kBleBondDbClearAllMagic, nullptr);
+}
+
+bool bleBondDbAddressNonZero(const uint8_t address[6]) {
+  return address != nullptr && !bleBondDbBytesAllZero(address, 6U);
+}
+
+bool bleBondDbIdentityMatches(const BleBondDbCore& core,
+                              const xiao_nrf54l15::BleBondRecord& record) {
+  if ((core.keyValidityFlags & kBleBondDbKeyPeerIrkValid) != 0U &&
+      record.peerIrkValid != 0U &&
+      memcmp(core.peerIrk, record.peerIrk, sizeof(core.peerIrk)) == 0) {
+    return true;
+  }
+  if (bleBondDbAddressNonZero(core.peerIdentityAddress) &&
+      bleBondDbAddressNonZero(record.peerIdentityAddress) &&
+      core.peerIdentityAddressRandom == record.peerIdentityAddressRandom &&
+      memcmp(core.peerIdentityAddress, record.peerIdentityAddress,
+             sizeof(core.peerIdentityAddress)) == 0) {
+    return true;
+  }
+  return core.peerAddressRandom == record.peerAddressRandom &&
+         memcmp(core.peerAddress, record.peerAddress,
+                sizeof(core.peerAddress)) == 0;
+}
+
+void bleBondDbCopyKeyFromRecord(
+    const xiao_nrf54l15::BleBondRecord& record,
+    BleBondDbLongTermKey* outKey) {
+  if (outKey == nullptr) {
+    return;
+  }
+  memcpy(outKey->ltk, record.ltk, sizeof(outKey->ltk));
+  memcpy(outKey->rand, record.rand, sizeof(outKey->rand));
+  outKey->ediv = record.ediv;
+}
+
+void bleBondDbUpdateCoreFromRecord(
+    const xiao_nrf54l15::BleBondRecord& record,
+    xiao_nrf54l15::BleConnectionRole localRole, BleBondDbCore* core,
+    bool preserveExistingKeys) {
+  if (core == nullptr) {
+    return;
+  }
+  BleBondDbCore updated{};
+  if (preserveExistingKeys) {
+    memcpy(&updated, core, sizeof(updated));
+  }
+  memcpy(updated.peerAddress, record.peerAddress,
+         sizeof(updated.peerAddress));
+  updated.peerAddressRandom = record.peerAddressRandom & 0x01U;
+  memcpy(updated.peerIdentityAddress, record.peerIdentityAddress,
+         sizeof(updated.peerIdentityAddress));
+  updated.peerIdentityAddressRandom =
+      record.peerIdentityAddressRandom & 0x01U;
+  memcpy(updated.localAddress, record.localAddress,
+         sizeof(updated.localAddress));
+  updated.localAddressRandom = record.localAddressRandom & 0x01U;
+  updated.keySize = record.keySize;
+  updated.securityFlags = 0U;
+  if ((record.reserved[0] & kBleBondRecordFlagAuthenticated) != 0U) {
+    updated.securityFlags |= kBleBondDbSecurityAuthenticated;
+  }
+  if ((record.reserved[0] & kBleBondRecordFlagSecureConnections) != 0U) {
+    updated.securityFlags |= kBleBondDbSecuritySecureConnections;
+  }
+  memcpy(updated.peerIrk, record.peerIrk, sizeof(updated.peerIrk));
+  if (record.peerIrkValid != 0U) {
+    updated.keyValidityFlags |= kBleBondDbKeyPeerIrkValid;
+  } else {
+    updated.keyValidityFlags &=
+        static_cast<uint8_t>(~kBleBondDbKeyPeerIrkValid);
+  }
+  memcpy(updated.peerCsrk, record.peerCsrk, sizeof(updated.peerCsrk));
+  memcpy(updated.localCsrk, record.localCsrk, sizeof(updated.localCsrk));
+  updated.peerSignCounter = record.peerSignCounter;
+  updated.localSignCounter = record.localSignCounter;
+  updated.signingFlags = 0U;
+  if (record.peerCsrkValid != 0U) {
+    updated.signingFlags |= kBleBondDbSigningPeerCsrkValid;
+  }
+  if (record.localCsrkValid != 0U) {
+    updated.signingFlags |= kBleBondDbSigningLocalCsrkValid;
+  }
+  if (record.peerSignCounterValid != 0U) {
+    updated.signingFlags |= kBleBondDbSigningPeerCounterValid;
+  }
+
+  const bool secureConnections =
+      (updated.securityFlags & kBleBondDbSecuritySecureConnections) != 0U;
+  if (secureConnections) {
+    bleBondDbCopyKeyFromRecord(record, &updated.localOrSharedKey);
+    memset(&updated.peerLegacyKey, 0, sizeof(updated.peerLegacyKey));
+    updated.keyValidityFlags &= static_cast<uint8_t>(
+        ~(kBleBondDbKeyPeerLegacyValid |
+          kBleBondDbKeyLegacyProjectionUnknown));
+    updated.keyValidityFlags |=
+        kBleBondDbKeyLocalOrSharedValid |
+        kBleBondDbKeySharedSecureConnections;
+  } else if (!preserveExistingKeys ||
+             (updated.keyValidityFlags &
+              (kBleBondDbKeyLocalOrSharedValid |
+               kBleBondDbKeyPeerLegacyValid)) == 0U) {
+    // Until local legacy key distribution is implemented, the old public
+    // record contains one role-projected tuple. Preserve compatibility by
+    // tagging that ambiguity and keeping it in both ownership slots.
+    bleBondDbCopyKeyFromRecord(record, &updated.localOrSharedKey);
+    bleBondDbCopyKeyFromRecord(record, &updated.peerLegacyKey);
+    updated.keyValidityFlags &=
+        static_cast<uint8_t>(~kBleBondDbKeySharedSecureConnections);
+    updated.keyValidityFlags |=
+        kBleBondDbKeyLocalOrSharedValid |
+        kBleBondDbKeyPeerLegacyValid |
+        kBleBondDbKeyLegacyProjectionUnknown;
+  } else if (localRole == xiao_nrf54l15::BleConnectionRole::kCentral) {
+    bleBondDbCopyKeyFromRecord(record, &updated.peerLegacyKey);
+    updated.keyValidityFlags |= kBleBondDbKeyPeerLegacyValid;
+  } else if (localRole == xiao_nrf54l15::BleConnectionRole::kPeripheral) {
+    bleBondDbCopyKeyFromRecord(record, &updated.localOrSharedKey);
+    updated.keyValidityFlags |= kBleBondDbKeyLocalOrSharedValid;
+  }
+  updated.pairedLocalRole = static_cast<uint8_t>(localRole);
+  if (localRole == xiao_nrf54l15::BleConnectionRole::kNone &&
+      preserveExistingKeys) {
+    updated.pairedLocalRole = core->pairedLocalRole;
+  }
+  memset(updated.reserved, 0, sizeof(updated.reserved));
+  memcpy(core, &updated, sizeof(*core));
+}
+
+bool bleBondDbCoreToRecord(const BleBondDbCore& core,
+                           xiao_nrf54l15::BleConnectionRole localRole,
+                           xiao_nrf54l15::BleBondRecord* outRecord) {
+  if (outRecord == nullptr || !bleBondDbCoreLooksSane(core)) {
+    return false;
+  }
+  xiao_nrf54l15::BleConnectionRole projectionRole = localRole;
+  if (projectionRole == xiao_nrf54l15::BleConnectionRole::kNone &&
+      core.pairedLocalRole <=
+          static_cast<uint8_t>(xiao_nrf54l15::BleConnectionRole::kCentral)) {
+    projectionRole =
+        static_cast<xiao_nrf54l15::BleConnectionRole>(core.pairedLocalRole);
+  }
+  const BleBondDbLongTermKey* selectedKey = nullptr;
+  const bool secureConnections =
+      (core.securityFlags & kBleBondDbSecuritySecureConnections) != 0U;
+  if (secureConnections &&
+      (core.keyValidityFlags & kBleBondDbKeyLocalOrSharedValid) != 0U) {
+    selectedKey = &core.localOrSharedKey;
+  } else if (projectionRole ==
+                 xiao_nrf54l15::BleConnectionRole::kCentral &&
+             (core.keyValidityFlags & kBleBondDbKeyPeerLegacyValid) != 0U) {
+    selectedKey = &core.peerLegacyKey;
+  } else if (projectionRole ==
+                 xiao_nrf54l15::BleConnectionRole::kPeripheral &&
+             (core.keyValidityFlags & kBleBondDbKeyLocalOrSharedValid) != 0U) {
+    selectedKey = &core.localOrSharedKey;
+  } else if ((core.keyValidityFlags &
+              kBleBondDbKeyLegacyProjectionUnknown) != 0U) {
+    selectedKey =
+        (core.keyValidityFlags & kBleBondDbKeyLocalOrSharedValid) != 0U
+            ? &core.localOrSharedKey
+            : &core.peerLegacyKey;
+  }
+  if (selectedKey == nullptr) {
+    return false;
+  }
+
+  xiao_nrf54l15::BleBondRecord record{};
+  memcpy(record.peerAddress, core.peerAddress, sizeof(record.peerAddress));
+  record.peerAddressRandom = core.peerAddressRandom;
+  memcpy(record.peerIdentityAddress, core.peerIdentityAddress,
+         sizeof(record.peerIdentityAddress));
+  record.peerIdentityAddressRandom = core.peerIdentityAddressRandom;
+  memcpy(record.localAddress, core.localAddress, sizeof(record.localAddress));
+  record.localAddressRandom = core.localAddressRandom;
+  memcpy(record.ltk, selectedKey->ltk, sizeof(record.ltk));
+  memcpy(record.rand, selectedKey->rand, sizeof(record.rand));
+  record.ediv = selectedKey->ediv;
+  record.keySize = core.keySize;
+  memcpy(record.peerIrk, core.peerIrk, sizeof(record.peerIrk));
+  record.peerIrkValid =
+      (core.keyValidityFlags & kBleBondDbKeyPeerIrkValid) != 0U ? 1U : 0U;
+  if ((core.securityFlags & kBleBondDbSecurityAuthenticated) != 0U) {
+    record.reserved[0] |= kBleBondRecordFlagAuthenticated;
+  }
+  if (secureConnections) {
+    record.reserved[0] |= kBleBondRecordFlagSecureConnections;
+  }
+  memcpy(record.peerCsrk, core.peerCsrk, sizeof(record.peerCsrk));
+  memcpy(record.localCsrk, core.localCsrk, sizeof(record.localCsrk));
+  record.peerSignCounter = core.peerSignCounter;
+  record.localSignCounter = core.localSignCounter;
+  record.peerCsrkValid =
+      (core.signingFlags & kBleBondDbSigningPeerCsrkValid) != 0U ? 1U : 0U;
+  record.localCsrkValid =
+      (core.signingFlags & kBleBondDbSigningLocalCsrkValid) != 0U ? 1U : 0U;
+  record.peerSignCounterValid =
+      (core.signingFlags & kBleBondDbSigningPeerCounterValid) != 0U ? 1U : 0U;
+  memcpy(outRecord, &record, sizeof(*outRecord));
+  return true;
+}
+
+void bleBondDbPeerStateFromCccdRecord(const BleCccdBondRecord& record,
+                                      BleBondDbPeerState* outState) {
+  if (outState == nullptr) {
+    return;
+  }
+  BleBondDbPeerState state{};
+  state.schemaFingerprint = record.schemaFingerprint;
+  state.serviceChangedGeneration = 1U;
+  state.serviceChangedStartHandle = record.serviceChangedStartHandle;
+  state.serviceChangedEndHandle = record.serviceChangedEndHandle;
+  state.fixedCccdFlags = record.fixedCccdFlags;
+  for (uint8_t i = 0U; i < record.entryCount &&
+                       state.cccdCount <
+                           xiao_nrf54l15::BleRadio::kCustomGattMaxCharacteristics;
+       ++i) {
+    const BleCccdBondEntry& entry = record.entries[i];
+    bool duplicate = false;
+    for (uint8_t j = 0U; j < state.cccdCount; ++j) {
+      if (state.cccdHandles[j] == entry.handle) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate || entry.handle == 0U || entry.value == 0U ||
+        (entry.value & ~0x0003U) != 0U) {
+      continue;
+    }
+    const uint8_t index = state.cccdCount++;
+    state.cccdHandles[index] = entry.handle;
+    bleBondDbSetCccdValue(&state, index,
+                          static_cast<uint8_t>(entry.value));
+  }
+  memcpy(outState, &state, sizeof(*outState));
+}
+
+void bleBondDbPeerStateToCccdRecord(
+    const BleBondDbCore& core, const BleBondDbPeerState& state,
+    BleCccdBondRecord* outRecord) {
+  if (outRecord == nullptr) {
+    return;
+  }
+  BleCccdBondRecord record{};
+  memcpy(record.peerAddress, core.peerAddress, sizeof(record.peerAddress));
+  record.peerAddressRandom = core.peerAddressRandom;
+  memcpy(record.peerIdentityAddress, core.peerIdentityAddress,
+         sizeof(record.peerIdentityAddress));
+  record.peerIdentityAddressRandom = core.peerIdentityAddressRandom;
+  memcpy(record.localAddress, core.localAddress, sizeof(record.localAddress));
+  record.localAddressRandom = core.localAddressRandom;
+  record.fixedCccdFlags = state.fixedCccdFlags;
+  record.schemaFingerprint = state.schemaFingerprint;
+  record.serviceChangedStartHandle = state.serviceChangedStartHandle;
+  record.serviceChangedEndHandle = state.serviceChangedEndHandle;
+  for (uint8_t i = 0U; i < state.cccdCount; ++i) {
+    (void)appendCccdBondEntry(&record, state.cccdHandles[i],
+                              bleBondDbCccdValue(state, i));
+  }
+  memcpy(outRecord, &record, sizeof(*outRecord));
+}
+
+void bleBondDbPayloadToInfo(uint8_t bondId, const BleBondDbPayload& payload,
+                            xiao_nrf54l15::BleBondInfo* outInfo) {
+  if (outInfo == nullptr) {
+    return;
+  }
+  xiao_nrf54l15::BleBondInfo info{};
+  info.id = bondId;
+  memcpy(info.peerAddress, payload.core.peerAddress,
+         sizeof(info.peerAddress));
+  info.peerAddressRandom = payload.core.peerAddressRandom;
+  memcpy(info.peerIdentityAddress, payload.core.peerIdentityAddress,
+         sizeof(info.peerIdentityAddress));
+  info.peerIdentityAddressRandom = payload.core.peerIdentityAddressRandom;
+  if ((payload.core.securityFlags & kBleBondDbSecurityAuthenticated) != 0U) {
+    info.flags |= xiao_nrf54l15::kBleBondInfoAuthenticated;
+  }
+  if ((payload.core.securityFlags &
+       kBleBondDbSecuritySecureConnections) != 0U) {
+    info.flags |= xiao_nrf54l15::kBleBondInfoSecureConnections;
+  }
+  if (bleBondDbAddressNonZero(payload.core.peerIdentityAddress)) {
+    info.flags |= xiao_nrf54l15::kBleBondInfoPeerIdentityValid;
+  }
+  if ((payload.core.keyValidityFlags & kBleBondDbKeyPeerIrkValid) != 0U) {
+    info.flags |= xiao_nrf54l15::kBleBondInfoPeerIrkValid;
+  }
+  if (payload.peerState.serviceChangedStartHandle != 0U) {
+    info.flags |= xiao_nrf54l15::kBleBondInfoServiceChangedPending;
+  }
+  info.lastUsedGeneration = payload.peerState.lastUsedGeneration;
+  info.schemaFingerprint = payload.peerState.schemaFingerprint;
+  info.serviceChangedStartHandle =
+      payload.peerState.serviceChangedStartHandle;
+  info.serviceChangedEndHandle = payload.peerState.serviceChangedEndHandle;
+  memcpy(outInfo, &info, sizeof(*outInfo));
 }
 
 void copyBondRecordV2(const xiao_nrf54l15::BleBondRecord& record,
@@ -1080,6 +1909,33 @@ bool cccdBondRecordLooksSane(const BleCccdBondRecord& record) {
   if (record.peerAddressRandom > 1U ||
       record.peerIdentityAddressRandom > 1U ||
       record.localAddressRandom > 1U ||
+      (record.fixedCccdFlags & ~kBleCccdFixedMask) != 0U ||
+      record.reserved != 0U ||
+      record.entryCount > (sizeof(record.entries) / sizeof(record.entries[0]))) {
+    return false;
+  }
+  const bool hasPendingRange = record.serviceChangedStartHandle != 0U ||
+                               record.serviceChangedEndHandle != 0U;
+  if (hasPendingRange &&
+      (record.serviceChangedStartHandle == 0U ||
+       record.serviceChangedStartHandle > record.serviceChangedEndHandle)) {
+    return false;
+  }
+  for (uint8_t i = 0U; i < record.entryCount; ++i) {
+    if (record.entries[i].handle == 0U ||
+        record.entries[i].handle == kHandleGattServiceChangedCccd ||
+        record.entries[i].handle == kHandleBatteryLevelCccd ||
+        (record.entries[i].value & ~0x0003U) != 0U) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool cccdBondRecordV1LooksSane(const BleCccdBondRecordV1& record) {
+  if (record.peerAddressRandom > 1U ||
+      record.peerIdentityAddressRandom > 1U ||
+      record.localAddressRandom > 1U ||
       record.entryCount > (sizeof(record.entries) / sizeof(record.entries[0]))) {
     return false;
   }
@@ -1140,6 +1996,41 @@ bool appendCccdBondEntry(BleCccdBondRecord* record, uint16_t handle,
   return true;
 }
 
+bool migrateCccdBondRecordV1(const BleCccdBondRecordV1& legacy,
+                             BleCccdBondRecord* outRecord) {
+  if (outRecord == nullptr || !cccdBondRecordV1LooksSane(legacy)) {
+    return false;
+  }
+  memset(outRecord, 0, sizeof(*outRecord));
+  memcpy(outRecord->peerAddress, legacy.peerAddress,
+         sizeof(outRecord->peerAddress));
+  outRecord->peerAddressRandom = legacy.peerAddressRandom;
+  memcpy(outRecord->peerIdentityAddress, legacy.peerIdentityAddress,
+         sizeof(outRecord->peerIdentityAddress));
+  outRecord->peerIdentityAddressRandom = legacy.peerIdentityAddressRandom;
+  memcpy(outRecord->localAddress, legacy.localAddress,
+         sizeof(outRecord->localAddress));
+  outRecord->localAddressRandom = legacy.localAddressRandom;
+
+  for (uint8_t i = 0U; i < legacy.entryCount; ++i) {
+    const BleCccdBondEntry& entry = legacy.entries[i];
+    if (entry.handle == kHandleGattServiceChangedCccd &&
+        (entry.value & 0x0002U) != 0U) {
+      outRecord->fixedCccdFlags |= kBleCccdFixedServiceChanged;
+      continue;
+    }
+    if (entry.handle == kHandleBatteryLevelCccd &&
+        (entry.value & 0x0001U) != 0U) {
+      outRecord->fixedCccdFlags |= kBleCccdFixedBattery;
+      continue;
+    }
+    if (!appendCccdBondEntry(outRecord, entry.handle, entry.value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void buildCccdFlashBlob(const BleCccdBondRecord& record,
                         BleCccdRetentionBlob* blob) {
   if (blob == nullptr) {
@@ -1184,24 +2075,46 @@ bool writeFlashCccdBondRecord(const BleCccdBondRecord& record) {
   return writeFlashCccdBondBlob(blob);
 }
 
-bool readFlashCccdBondRecord(BleCccdBondRecord* outRecord) {
-  if (outRecord == nullptr) {
-    return false;
-  }
-  BleCccdRetentionBlob blob{};
-  if (!readFlashCccdBondBlob(&blob) ||
-      blob.magic != kBleCccdRetentionMagic ||
-      blob.version != kBleCccdRetentionVersion ||
+bool decodeCccdBondBlob(const BleCccdRetentionBlob& blob,
+                        BleCccdBondRecord* outRecord, bool* outMigrated) {
+  if (outRecord == nullptr || blob.magic != kBleCccdRetentionMagic ||
       blob.recordLength != sizeof(blob.record)) {
     return false;
   }
+  if (outMigrated != nullptr) {
+    *outMigrated = false;
+  }
   const uint32_t computedCrc =
       crc32(reinterpret_cast<const uint8_t*>(&blob.record), sizeof(blob.record));
-  if (computedCrc != blob.crc32 || !cccdBondRecordLooksSane(blob.record)) {
+  if (computedCrc != blob.crc32) {
     return false;
   }
-  memcpy(outRecord, &blob.record, sizeof(*outRecord));
-  return true;
+  if (blob.version == kBleCccdRetentionVersion) {
+    if (!cccdBondRecordLooksSane(blob.record)) {
+      return false;
+    }
+    memcpy(outRecord, &blob.record, sizeof(*outRecord));
+    return true;
+  }
+  if (blob.version == 1U) {
+    BleCccdBondRecordV1 legacy{};
+    memcpy(&legacy, &blob.record, sizeof(legacy));
+    if (!migrateCccdBondRecordV1(legacy, outRecord)) {
+      return false;
+    }
+    if (outMigrated != nullptr) {
+      *outMigrated = true;
+    }
+    return true;
+  }
+  return false;
+}
+
+bool readFlashCccdBondRecord(BleCccdBondRecord* outRecord,
+                             bool* outMigrated = nullptr) {
+  BleCccdRetentionBlob blob{};
+  return readFlashCccdBondBlob(&blob) &&
+         decodeCccdBondBlob(blob, outRecord, outMigrated);
 }
 
 void clearRetainedCccdBondBlob() {
@@ -1222,28 +2135,124 @@ bool writeRetainedCccdBondRecord(const BleCccdBondRecord& record) {
   return true;
 }
 
-bool readRetainedCccdBondRecord(BleCccdBondRecord* outRecord) {
-  if (outRecord == nullptr ||
-      g_bleCccdRetention.magic != kBleCccdRetentionMagic ||
-      g_bleCccdRetention.version != kBleCccdRetentionVersion ||
-      g_bleCccdRetention.recordLength != sizeof(g_bleCccdRetention.record)) {
-    return false;
-  }
-  const uint32_t computedCrc =
-      crc32(reinterpret_cast<const uint8_t*>(&g_bleCccdRetention.record),
-            sizeof(g_bleCccdRetention.record));
-  if (computedCrc != g_bleCccdRetention.crc32 ||
-      !cccdBondRecordLooksSane(g_bleCccdRetention.record)) {
-    return false;
-  }
-  memcpy(outRecord, &g_bleCccdRetention.record, sizeof(*outRecord));
-  return true;
+bool readRetainedCccdBondRecord(BleCccdBondRecord* outRecord,
+                                bool* outMigrated = nullptr) {
+  return decodeCccdBondBlob(g_bleCccdRetention, outRecord, outMigrated);
 }
 
 bool clearFlashCccdBondRecord() {
   BleCccdRetentionBlob blob{};
   clearCccdBondBlobImage(&blob);
   return writeFlashCccdBondBlob(blob);
+}
+
+bool bleBondDbHasValidHeader() {
+  for (uint8_t replicaIndex = 0U; replicaIndex < kBleBondDbReplicaCount;
+       ++replicaIndex) {
+    for (uint8_t bondId = 0U;
+         bondId < xiao_nrf54l15::BleRadio::kBleMaxBonds; ++bondId) {
+      BleBondDbReplica replica{};
+      readBleBondDbReplica(replicaIndex, bondId, &replica);
+      // A committed new-format header is authoritative even when its payload
+      // is corrupt. Falling back to a stale legacy key would be unsafe.
+      if (bleBondDbHeaderValid(replica.header)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool migrateLegacyBondStorageToDatabase() {
+  if (bleBondDbHasValidHeader()) {
+    return true;
+  }
+
+  xiao_nrf54l15::BleBondRecord legacyBond{};
+  if (!readFlashBondRecord(&legacyBond) ||
+      !bleBondRecordLooksSane(legacyBond)) {
+    return true;
+  }
+
+  BleBondDbPayload payload{};
+  bleBondDbUpdateCoreFromRecord(
+      legacyBond, xiao_nrf54l15::BleConnectionRole::kNone, &payload.core,
+      false);
+  if ((payload.core.securityFlags &
+       kBleBondDbSecuritySecureConnections) == 0U) {
+    payload.core.keyValidityFlags |= kBleBondDbKeyLegacyProjectionUnknown;
+  }
+  payload.core.pairedLocalRole =
+      static_cast<uint8_t>(xiao_nrf54l15::BleConnectionRole::kNone);
+  payload.peerState.lastUsedGeneration = 1U;
+
+  BleCccdBondRecord legacyCccd{};
+  bool cccdMigrated = false;
+  if (readFlashCccdBondRecord(&legacyCccd, &cccdMigrated) &&
+      cccdBondRecordMatchesBond(legacyCccd, legacyBond)) {
+    bleBondDbPeerStateFromCccdRecord(legacyCccd, &payload.peerState);
+    payload.peerState.lastUsedGeneration = 1U;
+  }
+  if (!writeBleBondDbReplica(0U, kBleBondDbActiveMagic, &payload)) {
+    return false;
+  }
+
+  // The new valid header is authoritative before any legacy byte is changed.
+  // Preferences and EEPROM occupy different frozen offsets and are untouched.
+  (void)clearFlashBondRecord();
+  (void)clearFlashCccdBondRecord();
+  clearRetainedBondBlob();
+  clearRetainedCccdBondBlob();
+  return true;
+}
+
+uint8_t activeBleBondDbCount() {
+  uint8_t count = 0U;
+  for (uint8_t bondId = 0U;
+       bondId < xiao_nrf54l15::BleRadio::kBleMaxBonds; ++bondId) {
+    if (readActiveBleBondDbPayload(bondId, nullptr)) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+uint8_t mostRecentBleBondDbId() {
+  uint8_t selected = xiao_nrf54l15::BleRadio::kBleInvalidBondId;
+  uint32_t selectedUse = 0U;
+  uint32_t selectedGeneration = 0U;
+  for (uint8_t bondId = 0U;
+       bondId < xiao_nrf54l15::BleRadio::kBleMaxBonds; ++bondId) {
+    BleBondDbPayload payload{};
+    uint32_t generation = 0U;
+    if (!readActiveBleBondDbPayload(bondId, &payload, &generation)) {
+      continue;
+    }
+    const uint32_t use = payload.peerState.lastUsedGeneration;
+    if (selected == xiao_nrf54l15::BleRadio::kBleInvalidBondId ||
+        (use != 0U &&
+         (selectedUse == 0U || bleBondDbGenerationNewer(use, selectedUse))) ||
+        (use == selectedUse && bleBondDbGenerationNewer(
+                                   generation, selectedGeneration))) {
+      selected = bondId;
+      selectedUse = use;
+      selectedGeneration = generation;
+    }
+  }
+  return selected;
+}
+
+uint8_t findBleBondDbIdForRecord(
+    const xiao_nrf54l15::BleBondRecord& record) {
+  for (uint8_t bondId = 0U;
+       bondId < xiao_nrf54l15::BleRadio::kBleMaxBonds; ++bondId) {
+    BleBondDbPayload payload{};
+    if (readActiveBleBondDbPayload(bondId, &payload) &&
+        bleBondDbIdentityMatches(payload.core, record)) {
+      return bondId;
+    }
+  }
+  return xiao_nrf54l15::BleRadio::kBleInvalidBondId;
 }
 
 }  // namespace
@@ -1253,7 +2262,34 @@ namespace xiao_nrf54l15 {
 bool BleRadio::clearPersistentCccdRecord() {
   clearRetainedCccdBondBlob();
   cccdFlashPersistPending_ = false;
+  resetBondedServiceChangedState();
+  if (activeBondId_ != kBleInvalidBondId && bondRecordValid_ &&
+      bondLoadCallback_ == nullptr && bondSaveCallback_ == nullptr) {
+    for (uint8_t i = 0U; i < customGattCharacteristicCount_; ++i) {
+      customGattCharacteristics_[i].cccdValue = 0U;
+    }
+    connectionServiceChangedIndicationsEnabled_ = false;
+    connectionBatteryNotificationsEnabled_ = false;
+    return persistActiveBondDatabaseRecord(true);
+  }
   return clearFlashCccdBondRecord();
+}
+
+void BleRadio::resetBondedServiceChangedState(uint32_t schemaFingerprint) {
+  bondedGattSchemaFingerprint_ = schemaFingerprint;
+  bondedServiceChangedStartHandle_ = 0U;
+  bondedServiceChangedEndHandle_ = 0U;
+  ++bondedServiceChangedGeneration_;
+  if (bondedServiceChangedGeneration_ == 0U) {
+    bondedServiceChangedGeneration_ = 1U;
+  }
+  bondedGattSchemaStateLoaded_ = schemaFingerprint != 0U;
+  connectionServiceChangedCccdRestored_ = false;
+  connectionServiceChangedIndicationPending_ = false;
+  connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  connectionServiceChangedIndicationStartHandle_ = 0U;
+  connectionServiceChangedIndicationEndHandle_ = 0U;
+  connectionServiceChangedIndicationGeneration_ = 0U;
 }
 
 bool BleRadio::persistBondedCccdState(bool forceFlash) {
@@ -1264,11 +2300,14 @@ bool BleRadio::persistBondedCccdState(bool forceFlash) {
   BleCccdBondRecord record{};
   seedCccdRecordIdentityFromBond(bondRecord_, &record);
   if (connectionServiceChangedIndicationsEnabled_) {
-    appendCccdBondEntry(&record, kHandleGattServiceChangedCccd, 0x0002U);
+    record.fixedCccdFlags |= kBleCccdFixedServiceChanged;
   }
   if (connectionBatteryNotificationsEnabled_) {
-    appendCccdBondEntry(&record, kHandleBatteryLevelCccd, 0x0001U);
+    record.fixedCccdFlags |= kBleCccdFixedBattery;
   }
+  record.schemaFingerprint = bondedGattSchemaFingerprint_;
+  record.serviceChangedStartHandle = bondedServiceChangedStartHandle_;
+  record.serviceChangedEndHandle = bondedServiceChangedEndHandle_;
   for (uint8_t i = 0U; i < customGattCharacteristicCount_; ++i) {
     const BleCustomCharacteristicState& ch = customGattCharacteristics_[i];
     if (ch.cccdHandle != 0U && ch.cccdValue != 0U) {
@@ -1280,6 +2319,12 @@ bool BleRadio::persistBondedCccdState(bool forceFlash) {
   bool flashOk = false;
   if (connected_ && !forceFlash) {
     cccdFlashPersistPending_ = true;
+  } else if (bondLoadCallback_ == nullptr && bondSaveCallback_ == nullptr &&
+             activeBondId_ != kBleInvalidBondId) {
+    flashOk = persistActiveBondDatabaseRecord(true);
+    if (flashOk) {
+      cccdFlashPersistPending_ = false;
+    }
   } else {
     flashOk = writeFlashCccdBondRecord(record);
     if (flashOk) {
@@ -1298,15 +2343,46 @@ bool BleRadio::restoreBondedCccdState() {
   }
 
   BleCccdBondRecord record{};
-  bool loaded = readFlashCccdBondRecord(&record);
-  if (!loaded) {
-    loaded = readRetainedCccdBondRecord(&record);
+  bool migrated = false;
+  bool loaded = false;
+  BleBondDbPayload payload{};
+  if (bondLoadCallback_ == nullptr && bondSaveCallback_ == nullptr &&
+      activeBondId_ != kBleInvalidBondId &&
+      readActiveBleBondDbPayload(activeBondId_, &payload,
+                                 &activeBondGeneration_)) {
+    bleBondDbPeerStateToCccdRecord(payload.core, payload.peerState, &record);
+    loaded = true;
+  } else {
+    loaded = readFlashCccdBondRecord(&record, &migrated);
+    if (!loaded) {
+      loaded = readRetainedCccdBondRecord(&record, &migrated);
+    }
   }
   if (!loaded || !cccdBondRecordMatchesBond(record, bondRecord_)) {
+    resetBondedServiceChangedState();
     return false;
   }
 
+  bondedGattSchemaFingerprint_ = record.schemaFingerprint;
+  bondedServiceChangedStartHandle_ = record.serviceChangedStartHandle;
+  bondedServiceChangedEndHandle_ = record.serviceChangedEndHandle;
+  bondedGattSchemaStateLoaded_ = true;
+  bondedServiceChangedGeneration_ =
+      payload.peerState.serviceChangedGeneration != 0U
+          ? payload.peerState.serviceChangedGeneration
+          : 1U;
+
   bool appliedAny = false;
+  connectionServiceChangedCccdRestored_ = false;
+  if ((record.fixedCccdFlags & kBleCccdFixedServiceChanged) != 0U &&
+      applyCccdState(kHandleGattServiceChangedCccd, 0x0002U)) {
+    connectionServiceChangedCccdRestored_ = true;
+    appliedAny = true;
+  }
+  if ((record.fixedCccdFlags & kBleCccdFixedBattery) != 0U &&
+      applyCccdState(kHandleBatteryLevelCccd, 0x0001U)) {
+    appliedAny = true;
+  }
   for (uint8_t i = 0U; i < record.entryCount; ++i) {
     if (applyCccdState(record.entries[i].handle, record.entries[i].value)) {
       appliedAny = true;
@@ -1315,7 +2391,157 @@ bool BleRadio::restoreBondedCccdState() {
   if (appliedAny) {
     emitBleTrace("CCCD_RESTORED");
   }
-  return appliedAny || record.entryCount == 0U;
+  if (migrated) {
+    (void)persistBondedCccdState();
+  }
+  scheduleBondedServiceChangedIfReady();
+  return true;
+}
+
+void BleRadio::setGattServiceChangedEnabled(bool enabled) {
+  gattServiceChangedEnabled_ = enabled;
+  if (!enabled) {
+    connectionServiceChangedIndicationPending_ = false;
+  } else {
+    scheduleBondedServiceChangedIfReady();
+  }
+}
+
+bool BleRadio::commitGattSchemaFingerprint(uint32_t fingerprint) {
+  if (fingerprint == 0U) {
+    return false;
+  }
+  gattSchemaFingerprint_ = fingerprint;
+  if (!gattServiceChangedEnabled_ || !bondRecordValid_) {
+    return true;
+  }
+
+  if (!bondedGattSchemaStateLoaded_) {
+    BleCccdBondRecord record{};
+    bool migrated = false;
+    bool loaded = false;
+    BleBondDbPayload payload{};
+    if (bondLoadCallback_ == nullptr && bondSaveCallback_ == nullptr &&
+        activeBondId_ != kBleInvalidBondId &&
+        readActiveBleBondDbPayload(activeBondId_, &payload)) {
+      bleBondDbPeerStateToCccdRecord(payload.core, payload.peerState, &record);
+      loaded = true;
+    } else {
+      loaded = readFlashCccdBondRecord(&record, &migrated);
+      if (!loaded) {
+        loaded = readRetainedCccdBondRecord(&record, &migrated);
+      }
+    }
+    if (loaded && cccdBondRecordMatchesBond(record, bondRecord_)) {
+      bondedGattSchemaFingerprint_ = record.schemaFingerprint;
+      bondedServiceChangedStartHandle_ = record.serviceChangedStartHandle;
+      bondedServiceChangedEndHandle_ = record.serviceChangedEndHandle;
+      bondedGattSchemaStateLoaded_ = true;
+    }
+  }
+
+  // Before a peer is identified and its CCCDs are restored, the live CCCD
+  // fields are all zero. Defer mutation so finalizing advertising cannot erase
+  // a bonded peer's subscriptions.
+  if (!connected_ || !bondKeyPrimedForConnection_ ||
+      !bondIdentityMatchedForConnection_) {
+    return true;
+  }
+
+  if (!bondedGattSchemaStateLoaded_) {
+    bondedGattSchemaFingerprint_ = fingerprint;
+    bondedGattSchemaStateLoaded_ = true;
+    return persistBondedCccdState();
+  }
+  if (bondedGattSchemaFingerprint_ == 0U) {
+    // Version-1 records have no fingerprint. Establish a baseline once rather
+    // than forcing rediscovery when the database may be unchanged.
+    bondedGattSchemaFingerprint_ = fingerprint;
+    return persistBondedCccdState();
+  }
+  if (bondedGattSchemaFingerprint_ != fingerprint) {
+    bondedGattSchemaFingerprint_ = fingerprint;
+    return markGattServiceChanged(0x0001U, 0xFFFFU);
+  }
+  scheduleBondedServiceChangedIfReady();
+  return true;
+}
+
+bool BleRadio::markGattServiceChanged(uint16_t startHandle,
+                                      uint16_t endHandle) {
+  if (!gattServiceChangedEnabled_ || !bondRecordValid_ ||
+      !bondedGattSchemaStateLoaded_ || !connected_ ||
+      !bondKeyPrimedForConnection_ || !bondIdentityMatchedForConnection_ ||
+      startHandle == 0U ||
+      startHandle > endHandle) {
+    return false;
+  }
+  if (bondedServiceChangedStartHandle_ == 0U) {
+    bondedServiceChangedEndHandle_ = endHandle;
+    bondedServiceChangedStartHandle_ = startHandle;
+  } else {
+    if (startHandle < bondedServiceChangedStartHandle_) {
+      bondedServiceChangedStartHandle_ = startHandle;
+    }
+    if (endHandle > bondedServiceChangedEndHandle_) {
+      bondedServiceChangedEndHandle_ = endHandle;
+    }
+  }
+  ++bondedServiceChangedGeneration_;
+  if (bondedServiceChangedGeneration_ == 0U) {
+    bondedServiceChangedGeneration_ = 1U;
+  }
+  const bool persisted = persistBondedCccdState();
+  scheduleBondedServiceChangedIfReady();
+  return persisted;
+}
+
+bool BleRadio::getGattServiceChangedPending(uint16_t* outStartHandle,
+                                            uint16_t* outEndHandle) const {
+  if (!bondedGattSchemaStateLoaded_ ||
+      bondedServiceChangedStartHandle_ == 0U) {
+    return false;
+  }
+  if (outStartHandle != nullptr) {
+    *outStartHandle = bondedServiceChangedStartHandle_;
+  }
+  if (outEndHandle != nullptr) {
+    *outEndHandle = bondedServiceChangedEndHandle_;
+  }
+  return true;
+}
+
+uint32_t BleRadio::gattSchemaFingerprint() const {
+  return gattSchemaFingerprint_;
+}
+
+void BleRadio::scheduleBondedServiceChangedIfReady() {
+  if (!gattServiceChangedEnabled_ || !connected_ ||
+      connectionRole_ != BleConnectionRole::kPeripheral ||
+      !bondKeyPrimedForConnection_ || !bondIdentityMatchedForConnection_ ||
+      !connectionServiceChangedCccdRestored_ ||
+      !connectionServiceChangedIndicationsEnabled_ ||
+      bondedServiceChangedStartHandle_ == 0U) {
+    return;
+  }
+  connectionServiceChangedIndicationPending_ = true;
+}
+
+bool BleRadio::confirmBondedServiceChanged(uint32_t confirmedGeneration) {
+  if (confirmedGeneration == 0U ||
+      confirmedGeneration != bondedServiceChangedGeneration_) {
+    scheduleBondedServiceChangedIfReady();
+    return false;
+  }
+  bondedServiceChangedStartHandle_ = 0U;
+  bondedServiceChangedEndHandle_ = 0U;
+  ++bondedServiceChangedGeneration_;
+  if (bondedServiceChangedGeneration_ == 0U) {
+    bondedServiceChangedGeneration_ = 1U;
+  }
+  const bool persisted = persistBondedCccdState();
+  emitBleTrace("GATT_SERVICE_CHANGED_CONFIRMED");
+  return persisted;
 }
 
 }  // namespace xiao_nrf54l15

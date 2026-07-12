@@ -1443,6 +1443,7 @@ bool BleRadio::initiateConnectionOnce(BleAdvertisingChannel channel,
   const uint8_t advPayloadLen = static_cast<uint8_t>(advPayloadLenRaw & 0x3FU);
   const bool advChSel2 = ((advHeader >> 5U) & 0x1U) != 0U;
   const bool advertiserAddressRandom = ((advHeader >> 6U) & 0x1U) != 0U;
+  const bool directedTargetAddressRandom = ((advHeader >> 7U) & 0x1U) != 0U;
   g_ble_central_connect_debug_header = advHeader;
   g_ble_central_connect_debug_length = advPayloadLen;
   if (advertiserAddressRandom) {
@@ -1462,8 +1463,16 @@ bool BleRadio::initiateConnectionOnce(BleAdvertisingChannel channel,
   const bool addressMatch =
       (advertiserAddressRandom == peerAddressRandom) &&
       bleAddressEqual(advPayload, peerAddress);
+  const bool directed =
+      (advPduType == static_cast<uint8_t>(BleAdvPduType::kAdvDirectInd));
+    const bool directedAtLocalAddress =
+        !directed ||
+        (advPayloadLen >= 12U &&
+         directedTargetMatchesLocalAddress(&advPayload[6],
+                                           directedTargetAddressRandom));
   const bool connectable =
-      (advPduType == static_cast<uint8_t>(BleAdvPduType::kAdvInd));
+      (advPduType == static_cast<uint8_t>(BleAdvPduType::kAdvInd)) ||
+      (directed && directedAtLocalAddress);
   if (addressMatch) {
     g_ble_central_connect_debug_flags |= 0x02U;
   }
@@ -1616,6 +1625,7 @@ bool BleRadio::initiateConnectionOnceBudgeted(BleAdvertisingChannel channel,
         static_cast<uint8_t>(advPayloadLenRaw & 0x3FU);
     advChSel2 = ((advHeader >> 5U) & 0x1U) != 0U;
     const bool advertiserAddressRandom = ((advHeader >> 6U) & 0x1U) != 0U;
+    const bool directedTargetAddressRandom = ((advHeader >> 7U) & 0x1U) != 0U;
     g_ble_central_connect_debug_header = advHeader;
     g_ble_central_connect_debug_length = advPayloadLen;
     g_ble_central_connect_debug_flags = 0U;
@@ -1635,8 +1645,16 @@ bool BleRadio::initiateConnectionOnceBudgeted(BleAdvertisingChannel channel,
     const bool addressMatch =
         (advertiserAddressRandom == peerAddressRandom) &&
         bleAddressEqual(advPayload, peerAddress);
+    const bool directed =
+        (advPduType == static_cast<uint8_t>(BleAdvPduType::kAdvDirectInd));
+    const bool directedAtLocalAddress =
+        !directed ||
+        (advPayloadLen >= 12U &&
+         directedTargetMatchesLocalAddress(&advPayload[6],
+                                           directedTargetAddressRandom));
     const bool connectable =
-        (advPduType == static_cast<uint8_t>(BleAdvPduType::kAdvInd));
+        (advPduType == static_cast<uint8_t>(BleAdvPduType::kAdvInd)) ||
+        (directed && directedAtLocalAddress);
     if (addressMatch) {
       g_ble_central_connect_debug_flags |= 0x02U;
     }
@@ -1996,12 +2014,16 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   memset(connectionPendingChannelMap_, 0, sizeof(connectionPendingChannelMap_));
   connectionPendingChannelCount_ = 0U;
   connectionServiceChangedIndicationsEnabled_ = false;
+  connectionServiceChangedCccdRestored_ = false;
   // Do not emit Service Changed on every connection. The current core does not
   // track a database-change epoch, and spurious indications force needless
   // rediscovery right in the window where Android apps are trying to enable
   // NUS notifications.
   connectionServiceChangedIndicationPending_ = false;
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  connectionServiceChangedIndicationStartHandle_ = 0U;
+  connectionServiceChangedIndicationEndHandle_ = 0U;
+  connectionServiceChangedIndicationGeneration_ = 0U;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
   connectionSmpSecurityRequestPending_ = false;
@@ -2155,8 +2177,12 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   memset(connectionPendingChannelMap_, 0, sizeof(connectionPendingChannelMap_));
   connectionPendingChannelCount_ = 0U;
   connectionServiceChangedIndicationsEnabled_ = false;
+  connectionServiceChangedCccdRestored_ = false;
   connectionServiceChangedIndicationPending_ = false;
   connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  connectionServiceChangedIndicationStartHandle_ = 0U;
+  connectionServiceChangedIndicationEndHandle_ = 0U;
+  connectionServiceChangedIndicationGeneration_ = 0U;
   connectionBatteryNotificationsEnabled_ = false;
   connectionBatteryNotificationPending_ = false;
   clearPreparedWriteState();

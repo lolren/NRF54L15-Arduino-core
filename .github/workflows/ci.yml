@@ -37,6 +37,18 @@ jobs:
             options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Services/ancs
             options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Diagnostics/gatt_authorization
+            options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Peripheral/indication_peripheral
+            options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Central/central_indication
+            options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Central/central_gatt_discovery
+            options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Security/pairing_passkey_input
+            options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Advertising/directed_advertising
+            options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingReflector
             options: clean_ble=on,cpu_freq=128m
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator
@@ -219,6 +231,30 @@ jobs:
 
       - name: Bluefruit client, HID, signed-write, and DFU contracts
         run: python3 ./scripts/test_bluefruit_client_contracts.py
+
+      - name: Bluefruit discovery and client lifetime contracts
+        run: python3 ./scripts/test_bluefruit_discovery_lifetime_contracts.py
+
+      - name: BLE directed-advertising contracts
+        run: python3 ./scripts/test_ble_directed_advertising_contracts.py
+
+      - name: BLE dynamic GATT authorization contracts
+        run: python3 ./scripts/test_ble_gatt_authorization_contracts.py
+
+      - name: BLE central indication contracts
+        run: python3 ./scripts/test_ble_client_indication_contracts.py
+
+      - name: BLE Service Changed contracts
+        run: python3 ./scripts/test_service_changed_contracts.py
+
+      - name: BLE security-policy and passkey contracts
+        run: python3 ./scripts/test_ble_security_policy_contracts.py
+
+      - name: BLE multi-bond persistence contracts
+        run: python3 ./scripts/test_ble_multibond_contracts.py
+
+      - name: BLE periodic-advertising truthfulness contracts
+        run: python3 ./scripts/test_ble_periodic_advertising_contracts.py
 
       - name: Upload recovery and platform recipe contracts
         run: python3 ./scripts/test_upload_helper.py

@@ -89,6 +89,14 @@ jobs:
         run: |
           python3 ./scripts/test_core_io_regressions.py
           python3 ./scripts/test_bluefruit_client_contracts.py
+          python3 ./scripts/test_bluefruit_discovery_lifetime_contracts.py
+          python3 ./scripts/test_ble_directed_advertising_contracts.py
+          python3 ./scripts/test_ble_gatt_authorization_contracts.py
+          python3 ./scripts/test_ble_client_indication_contracts.py
+          python3 ./scripts/test_service_changed_contracts.py
+          python3 ./scripts/test_ble_security_policy_contracts.py
+          python3 ./scripts/test_ble_multibond_contracts.py
+          python3 ./scripts/test_ble_periodic_advertising_contracts.py
           python3 ./scripts/test_upload_helper.py
           python3 ./scripts/test_release_versions.py
           python3 ./scripts/test_lm20a_pdm_contract.py

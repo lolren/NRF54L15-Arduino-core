@@ -114,6 +114,7 @@ bool BleRadio::advertiseOncePrepared(BleAdvertisingChannel channel,
   }
   if (pduType_ != BleAdvPduType::kAdvNonConnInd &&
       pduType_ != BleAdvPduType::kAdvInd &&
+      pduType_ != BleAdvPduType::kAdvDirectInd &&
       pduType_ != BleAdvPduType::kAdvScanInd) {
     return false;
   }
@@ -1856,6 +1857,7 @@ bool BleRadio::advertiseInteractOncePrepared(BleAdvertisingChannel channel,
     return false;
   }
   if (pduType_ != BleAdvPduType::kAdvInd &&
+      pduType_ != BleAdvPduType::kAdvDirectInd &&
       pduType_ != BleAdvPduType::kAdvScanInd) {
     return false;
   }
@@ -2001,7 +2003,8 @@ bool BleRadio::advertiseInteractOncePrepared(BleAdvertisingChannel channel,
   bool hasConnectInd = false;
   bool connectAccepted = false;
   bool addressMatch = false;
-  const bool connectable = (pduType_ == BleAdvPduType::kAdvInd);
+  const bool directed = (pduType_ == BleAdvPduType::kAdvDirectInd);
+  const bool connectable = (pduType_ == BleAdvPduType::kAdvInd) || directed;
   if (crcOk && length >= 12U) {
     const uint8_t* scannerOrInitiator = payload;
     const uint8_t* advertiserAddress = &payload[6];
@@ -2019,12 +2022,16 @@ bool BleRadio::advertiseInteractOncePrepared(BleAdvertisingChannel channel,
       addressMatch = true;
     }
 
-    if (addressMatch && pduType == kBlePduScanReq) {
+    const bool directedPeerMatch =
+        !directed ||
+        directedInitiatorMatchesTarget(scannerOrInitiator, txAddrRandom);
+    if (addressMatch && pduType == kBlePduScanReq && !directed) {
       hasScanReq = true;
       if (interaction != nullptr) {
         memcpy(&interaction->peerAddress[0], scannerOrInitiator, 6U);
       }
-    } else if (addressMatch && pduType == kBlePduConnectInd && connectable &&
+    } else if (addressMatch && directedPeerMatch &&
+               pduType == kBlePduConnectInd && connectable &&
                (length >= 34U)) {
       hasConnectInd = true;
       if (interaction != nullptr) {

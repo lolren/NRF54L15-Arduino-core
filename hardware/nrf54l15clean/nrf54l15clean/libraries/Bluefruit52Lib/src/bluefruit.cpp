@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <utility>
 
 #include <nrf54l15_hal.h>
 
@@ -12,7 +13,11 @@ using xiao_nrf54l15::BleAdvertisingChannel;
 using xiao_nrf54l15::BleDisconnectDebug;
 using xiao_nrf54l15::BleDisconnectReason;
 using xiao_nrf54l15::BleGattCharacteristicProperty;
+using xiao_nrf54l15::BleGattAuthorizeReplyResult;
+using xiao_nrf54l15::BleGattAuthorizeRequest;
+using xiao_nrf54l15::BleGattAuthorizeType;
 using xiao_nrf54l15::BleRadio;
+using xiao_nrf54l15::BleSecurityPolicy;
 
 extern "C" uint64_t nrf54l15_core_monotonic_time_us(void);
 extern "C" uint32_t nrf54l15_core_monotonic_time_ms(void);
@@ -63,10 +68,22 @@ constexpr uint8_t kAttOpExecuteWriteReq = 0x18U;
 constexpr uint8_t kAttOpExecuteWriteRsp = 0x19U;
 constexpr uint8_t kAttOpHandleValueNtf = 0x1BU;
 constexpr uint8_t kAttOpHandleValueInd = 0x1DU;
-constexpr uint8_t kAttOpHandleValueCfm = 0x1EU;
 constexpr uint8_t kAttErrInvalidOffset = 0x07U;
 constexpr uint8_t kAttErrAttributeNotFound = 0x0AU;
 constexpr uint8_t kAttErrAttributeNotLong = 0x0BU;
+
+bool isValidSixDigitPasskey(const uint8_t passkey[6]) {
+  if (passkey == nullptr) {
+    return false;
+  }
+  for (uint8_t i = 0U; i < 6U; ++i) {
+    if (passkey[i] < static_cast<uint8_t>('0') ||
+        passkey[i] > static_cast<uint8_t>('9')) {
+      return false;
+    }
+  }
+  return true;
+}
 
 volatile uint32_t g_bluefruitIdleCapAdvZeroDueCount = 0U;
 volatile uint32_t g_bluefruitIdleCapAdvPastDueCount = 0U;
@@ -512,12 +529,12 @@ class ScopedBluefruitUserCallback {
 };
 
 template <typename Callback, typename... Args>
-void invokeBluefruitUserCallback(Callback callback, Args... args) {
+void invokeBluefruitUserCallback(Callback callback, Args&&... args) {
   if (callback == nullptr) {
     return;
   }
   ScopedBluefruitUserCallback scope;
-  callback(args...);
+  callback(std::forward<Args>(args)...);
 }
 
 bool timeReachedUs(uint64_t now, uint64_t target) {
@@ -560,6 +577,27 @@ void copyBondAddressToGapAddress(const uint8_t address[6], bool random,
       random ? gapAddressTypeForRandomAddress(address) : BLE_GAP_ADDR_TYPE_PUBLIC;
 }
 
+void copyHalBondInfoToBluefruit(const xiao_nrf54l15::BleBondInfo& source,
+                                ble_gap_bond_info_t* destination) {
+  if (destination == nullptr) {
+    return;
+  }
+  ble_gap_bond_info_t info{};
+  info.bond_id = source.id;
+  copyBondAddressToGapAddress(source.peerAddress,
+                              source.peerAddressRandom != 0U,
+                              &info.peer_addr);
+  copyBondAddressToGapAddress(source.peerIdentityAddress,
+                              source.peerIdentityAddressRandom != 0U,
+                              &info.peer_identity_addr);
+  info.flags = source.flags;
+  info.last_used_generation = source.lastUsedGeneration;
+  info.schema_fingerprint = source.schemaFingerprint;
+  info.service_changed_start_handle = source.serviceChangedStartHandle;
+  info.service_changed_end_handle = source.serviceChangedEndHandle;
+  memcpy(destination, &info, sizeof(*destination));
+}
+
 uint8_t bluefruitAddressTypeFromHal(xiao_nrf54l15::BleAddressType type,
                                     const uint8_t address[6]) {
   (void)address;
@@ -587,6 +625,57 @@ xiao_nrf54l15::BleAddressType halAddressTypeFromBluefruit(uint8_t type) {
     case BLE_GAP_ADDR_TYPE_PUBLIC:
     default:
       return xiao_nrf54l15::BleAddressType::kPublic;
+  }
+}
+
+bool bluefruitGapAddressValid(const ble_gap_addr_t& address) {
+  const uint8_t randomTypeBits = static_cast<uint8_t>(address.addr[5] & 0xC0U);
+  switch (address.addr_type) {
+    case BLE_GAP_ADDR_TYPE_PUBLIC:
+      return true;
+    case BLE_GAP_ADDR_TYPE_RANDOM_STATIC:
+      return randomTypeBits == 0xC0U;
+    case BLE_GAP_ADDR_TYPE_RANDOM_PRIVATE_RESOLVABLE:
+      return randomTypeBits == 0x40U;
+    case BLE_GAP_ADDR_TYPE_RANDOM_PRIVATE_NON_RESOLVABLE:
+      return randomTypeBits == 0x00U;
+    default:
+      return false;
+  }
+}
+
+bool bluefruitAdvertisingTypeIsDirected(uint8_t type) {
+  return type ==
+             BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED_HIGH_DUTY_CYCLE ||
+         type == BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED;
+}
+
+bool bluefruitAdvertisingTypeIsHighDutyDirected(uint8_t type) {
+  return type ==
+         BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED_HIGH_DUTY_CYCLE;
+}
+
+bool bluefruitAdvertisingTypeToHal(uint8_t type,
+                                   xiao_nrf54l15::BleAdvPduType* outType) {
+  if (outType == nullptr) {
+    return false;
+  }
+  switch (type) {
+    case BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED:
+      *outType = xiao_nrf54l15::BleAdvPduType::kAdvInd;
+      return true;
+    case BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED_HIGH_DUTY_CYCLE:
+    case BLE_GAP_ADV_TYPE_CONNECTABLE_NONSCANNABLE_DIRECTED:
+      *outType = xiao_nrf54l15::BleAdvPduType::kAdvDirectInd;
+      return true;
+    case BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED:
+      *outType = xiao_nrf54l15::BleAdvPduType::kAdvScanInd;
+      return true;
+    case BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED:
+      *outType = xiao_nrf54l15::BleAdvPduType::kAdvNonConnInd;
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -853,6 +942,9 @@ const char* disconnectReasonNameFromHci(uint8_t reason) {
   }
 }
 
+class BluefruitCompatManager;
+static BluefruitCompatManager* g_bluefruitCompatManager = nullptr;
+
 class BluefruitCompatManager {
  public:
   static constexpr uint32_t kBleActiveIdleSleepCapUs = 1000UL;
@@ -860,11 +952,14 @@ class BluefruitCompatManager {
   static constexpr uint32_t kBleIdleConnectionPollBudgetUs = 0UL;
   static constexpr uint32_t kBleScannerPrewarmLeadUs = 650UL;
   static constexpr uint32_t kBleScannerReadyLeadUs = 80UL;
+  static constexpr uint16_t kDirectedHighDutyMaxIntervalUnits = 6U;
+  static constexpr uint64_t kDirectedHighDutyMaxDurationUs = 1280000ULL;
 
   BluefruitCompatManager()
       : started_(false),
         last_connected_(false),
         last_connection_role_(BleConnectionRole::kNone),
+        connection_generation_(0U),
         last_connection_edge_ms_(0UL),
         next_adv_due_us_(0U),
         armed_adv_wake_us_(0U),
@@ -874,7 +969,10 @@ class BluefruitCompatManager {
         scan_prewarm_active_(false),
         adv_random_state_(0U),
         adv_started_ms_(0UL),
+        directed_high_duty_deadline_us_(0U),
         scan_rsp_name_added_(false),
+        gatt_schema_hash_(2166136261UL),
+        gatt_schema_hash_finalized_(false),
         characteristic_count_(0U),
         client_service_count_(0U),
         client_characteristic_count_(0U),
@@ -917,15 +1015,23 @@ class BluefruitCompatManager {
         security_secured_callback_fired_(false),
         security_seen_procedure_active_(false),
         security_last_encrypted_(false),
+        security_passkey_request_callback_id_(0UL),
         security_secured_callback_timeout_ms_(0UL),
-        deferred_client_notification_head_(0U),
-        deferred_client_notification_tail_(0U),
-        deferred_client_notification_count_(0U) {
+        deferred_client_value_event_head_(0U),
+        deferred_client_value_event_tail_(0U),
+        deferred_client_value_event_count_(0U) {
     memset(characteristics_, 0, sizeof(characteristics_));
     memset(client_services_, 0, sizeof(client_services_));
     memset(client_characteristics_, 0, sizeof(client_characteristics_));
     memset(&scan_report_, 0, sizeof(scan_report_));
     memset(pending_connect_address_, 0, sizeof(pending_connect_address_));
+    g_bluefruitCompatManager = this;
+  }
+
+  ~BluefruitCompatManager() {
+    if (g_bluefruitCompatManager == this) {
+      g_bluefruitCompatManager = nullptr;
+    }
   }
 
   bool begin(uint8_t prph_count, uint8_t central_count) {
@@ -964,6 +1070,8 @@ class BluefruitCompatManager {
     radio_.setCentralPreferredDataLength(
         preferredBleDataLengthFromMtu(Bluefruit.central_requested_mtu_));
     radio_.setCustomGattWriteCallback(&BluefruitCompatManager::gattWriteThunk, this);
+    radio_.setGattServiceChangedEnabled(Bluefruit.service_changed_enabled_);
+    resetGattSchemaHash();
     (void)Bluefruit.Security.refreshBondedPeerResolving();
 
     if (Bluefruit.auto_conn_led_) {
@@ -979,6 +1087,7 @@ class BluefruitCompatManager {
 
   BleRadio& radio() { return radio_; }
   const BleRadio& radio() const { return radio_; }
+  uint32_t connectionGeneration() const { return connection_generation_; }
 
   void beginClientSyncProcedure() {
     if (client_sync_procedure_depth_ < 0xFFU) {
@@ -1143,6 +1252,69 @@ class BluefruitCompatManager {
     return true;
   }
 
+  void noteGattService(const BLEService* service) {
+    if (service == nullptr) {
+      return;
+    }
+    gattSchemaHashByte(0x53U);
+    gattSchemaHashU16(service->_handle);
+    gattSchemaHashUuid(service->uuid);
+    gatt_schema_hash_finalized_ = false;
+  }
+
+  void noteGattCharacteristic(
+      const BLECharacteristic* characteristic, SecureMode_t readPermission,
+      SecureMode_t writePermission, SecureMode_t reportReferenceReadPermission,
+      const BleRadio::BleCustomGattDescriptorHandles& descriptorHandles) {
+    if (characteristic == nullptr) {
+      return;
+    }
+    gattSchemaHashByte(0x43U);
+    gattSchemaHashU16(characteristic->_service != nullptr
+                          ? characteristic->_service->_handle
+                          : 0U);
+    gattSchemaHashUuid(characteristic->uuid);
+    gattSchemaHashByte(characteristic->_properties);
+    gattSchemaHashByte(static_cast<uint8_t>(readPermission));
+    gattSchemaHashByte(static_cast<uint8_t>(writePermission));
+    gattSchemaHashByte(static_cast<uint8_t>(reportReferenceReadPermission));
+    gattSchemaHashU16(characteristic->_max_len);
+    gattSchemaHashByte(characteristic->_fixed_len ? 1U : 0U);
+    gattSchemaHashU16(characteristic->_handles.decl_handle);
+    gattSchemaHashU16(characteristic->_handles.value_handle);
+    gattSchemaHashU16(characteristic->_handles.cccd_handle);
+    gattSchemaHashU16(characteristic->_handles.user_desc_handle);
+    gattSchemaHashU16(descriptorHandles.presentationFormatHandle);
+    gattSchemaHashU16(descriptorHandles.reportReferenceHandle);
+    gattSchemaHashByte(characteristic->_usr_descriptor != nullptr &&
+                               characteristic->_usr_descriptor[0] != '\0'
+                           ? 1U
+                           : 0U);
+    gattSchemaHashByte(characteristic->_presentation_format_valid ? 1U : 0U);
+    gattSchemaHashByte(characteristic->_report_ref_valid ? 1U : 0U);
+    gatt_schema_hash_finalized_ = false;
+  }
+
+  bool finalizeGattSchema() {
+    const uint32_t fingerprint =
+        (gatt_schema_hash_ != 0U) ? gatt_schema_hash_ : 1U;
+    radio_.setGattServiceChangedEnabled(Bluefruit.service_changed_enabled_);
+    if (!radio_.commitGattSchemaFingerprint(fingerprint)) {
+      return false;
+    }
+    gatt_schema_hash_finalized_ = true;
+    return true;
+  }
+
+  void configureServiceChanged(bool enabled) {
+    radio_.setGattServiceChangedEnabled(enabled);
+    if (started_ && gatt_schema_hash_finalized_) {
+      const uint32_t fingerprint =
+          (gatt_schema_hash_ != 0U) ? gatt_schema_hash_ : 1U;
+      (void)radio_.commitGattSchemaFingerprint(fingerprint);
+    }
+  }
+
   bool registerClientCharacteristic(BLEClientCharacteristic* characteristic) {
     if (characteristic == nullptr) {
       return false;
@@ -1175,8 +1347,73 @@ class BluefruitCompatManager {
     return true;
   }
 
+  void unregisterClientCharacteristic(
+      BLEClientCharacteristic* characteristic) {
+    if (characteristic == nullptr) {
+      return;
+    }
+    clearDeferredClientValueEvents(characteristic);
+    for (uint8_t i = 0U; i < client_characteristic_count_; ++i) {
+      if (client_characteristics_[i] != characteristic) {
+        continue;
+      }
+      for (uint8_t next = static_cast<uint8_t>(i + 1U);
+           next < client_characteristic_count_; ++next) {
+        client_characteristics_[next - 1U] = client_characteristics_[next];
+      }
+      --client_characteristic_count_;
+      client_characteristics_[client_characteristic_count_] = nullptr;
+      break;
+    }
+    characteristic->resetDiscovery();
+    characteristic->service_ = nullptr;
+    characteristic->begun_ = false;
+  }
+
+  void unregisterClientService(BLEClientService* service) {
+    if (service == nullptr) {
+      return;
+    }
+
+    // Characteristics cannot outlive an implicit or explicit parent service.
+    // Detach them from both callback dispatch and future discovery so begin()
+    // can bind them to a live service again.
+    uint8_t characteristicIndex = 0U;
+    while (characteristicIndex < client_characteristic_count_) {
+      BLEClientCharacteristic* characteristic =
+          client_characteristics_[characteristicIndex];
+      if (characteristic != nullptr && characteristic->service_ == service) {
+        unregisterClientCharacteristic(characteristic);
+      } else {
+        ++characteristicIndex;
+      }
+    }
+
+    for (uint8_t i = 0U; i < client_service_count_; ++i) {
+      if (client_services_[i] != service) {
+        continue;
+      }
+      for (uint8_t next = static_cast<uint8_t>(i + 1U);
+           next < client_service_count_; ++next) {
+        client_services_[next - 1U] = client_services_[next];
+      }
+      --client_service_count_;
+      client_services_[client_service_count_] = nullptr;
+      break;
+    }
+
+    service->resetDiscovery();
+    service->begun_ = false;
+    if (BLEClientService::lastService == service) {
+      BLEClientService::lastService =
+          (client_service_count_ > 0U)
+              ? client_services_[client_service_count_ - 1U]
+              : nullptr;
+    }
+  }
+
   void resetClientDiscoveryState() {
-    clearDeferredClientNotifications();
+    clearDeferredClientValueEvents();
     for (uint8_t i = 0U; i < client_characteristic_count_; ++i) {
       if (client_characteristics_[i] != nullptr) {
         client_characteristics_[i]->resetDiscovery();
@@ -1198,53 +1435,60 @@ class BluefruitCompatManager {
     }
   }
 
-  bool enqueueDeferredClientNotification(BLEClientCharacteristic* characteristic,
-                                         const uint8_t* data, uint16_t len) {
+  bool enqueueDeferredClientValueEvent(
+      BLEClientCharacteristic* characteristic, const uint8_t* data,
+      uint16_t len, uint8_t attOpcode, uint32_t connectionGeneration) {
     if (characteristic == nullptr || (data == nullptr && len != 0U) ||
-        deferred_client_notification_count_ >=
-            kDeferredClientNotificationQueueDepth) {
+        (attOpcode != kAttOpHandleValueNtf &&
+         attOpcode != kAttOpHandleValueInd) ||
+        connectionGeneration == 0U ||
+        connectionGeneration != connection_generation_ ||
+        deferred_client_value_event_count_ >=
+            kDeferredClientValueEventQueueDepth) {
       return false;
     }
 
-    DeferredClientNotification& notification =
-        deferred_client_notifications_[deferred_client_notification_head_];
-    notification.characteristic = characteristic;
-    notification.len = min<uint16_t>(len, sizeof(notification.data));
-    if (notification.len > 0U) {
-      memcpy(notification.data, data, notification.len);
+    DeferredClientValueEvent& event =
+        deferred_client_value_events_[deferred_client_value_event_head_];
+    event.characteristic = characteristic;
+    event.att_opcode = attOpcode;
+    event.connection_generation = connectionGeneration;
+    event.len = min<uint16_t>(len, sizeof(event.data));
+    if (event.len > 0U) {
+      memcpy(event.data, data, event.len);
     }
-    deferred_client_notification_head_ = static_cast<uint8_t>(
-        (deferred_client_notification_head_ + 1U) %
-        kDeferredClientNotificationQueueDepth);
-    ++deferred_client_notification_count_;
+    deferred_client_value_event_head_ = static_cast<uint8_t>(
+        (deferred_client_value_event_head_ + 1U) %
+        kDeferredClientValueEventQueueDepth);
+    ++deferred_client_value_event_count_;
     return true;
   }
 
-  void clearDeferredClientNotifications(
+  void clearDeferredClientValueEvents(
       BLEClientCharacteristic* characteristic = nullptr) {
     uint8_t retained = 0U;
-    for (uint8_t i = 0U; i < deferred_client_notification_count_; ++i) {
+    for (uint8_t i = 0U; i < deferred_client_value_event_count_; ++i) {
       const uint8_t sourceIndex = static_cast<uint8_t>(
-          (deferred_client_notification_tail_ + i) %
-          kDeferredClientNotificationQueueDepth);
+          (deferred_client_value_event_tail_ + i) %
+          kDeferredClientValueEventQueueDepth);
       if (characteristic == nullptr ||
-          deferred_client_notifications_[sourceIndex].characteristic ==
+          deferred_client_value_events_[sourceIndex].characteristic ==
               characteristic) {
         continue;
       }
       const uint8_t destinationIndex = static_cast<uint8_t>(
-          (deferred_client_notification_tail_ + retained) %
-          kDeferredClientNotificationQueueDepth);
+          (deferred_client_value_event_tail_ + retained) %
+          kDeferredClientValueEventQueueDepth);
       if (destinationIndex != sourceIndex) {
-        deferred_client_notifications_[destinationIndex] =
-            deferred_client_notifications_[sourceIndex];
+        deferred_client_value_events_[destinationIndex] =
+            deferred_client_value_events_[sourceIndex];
       }
       ++retained;
     }
-    deferred_client_notification_count_ = retained;
-    deferred_client_notification_head_ = static_cast<uint8_t>(
-        (deferred_client_notification_tail_ + retained) %
-        kDeferredClientNotificationQueueDepth);
+    deferred_client_value_event_count_ = retained;
+    deferred_client_value_event_head_ = static_cast<uint8_t>(
+        (deferred_client_value_event_tail_ + retained) %
+        kDeferredClientValueEventQueueDepth);
   }
 
   void markAdvertisingDirty() {
@@ -1254,6 +1498,11 @@ class BluefruitCompatManager {
 
   void advertisingStarted() {
     adv_started_ms_ = schedulerTimeMs();
+    directed_high_duty_deadline_us_ =
+        bluefruitAdvertisingTypeIsHighDutyDirected(
+            Bluefruit.Advertising.adv_type_)
+            ? schedulerTimeUs() + kDirectedHighDutyMaxDurationUs
+            : 0ULL;
     next_adv_due_us_ = 0U;
     nrf54l15_ble_idle_wake_cancel();
     armed_adv_wake_us_ = 0U;
@@ -1310,11 +1559,8 @@ class BluefruitCompatManager {
         attOpcode != kAttOpHandleValueInd) {
       return;
     }
-    if (attOpcode == kAttOpHandleValueInd &&
-        radio_.connectionRole() == BleConnectionRole::kPeripheral) {
-      const uint8_t confirmation = kAttOpHandleValueCfm;
-      (void)radio_.queueAttRequest(&confirmation, sizeof(confirmation));
-    }
+    // The HAL central event path confirms indications before publishing this
+    // event. Do not queue a second Handle Value Confirmation here.
 
     const uint16_t valueHandle = readLe16(&event.payload[5]);
     const uint16_t valueLength =
@@ -1322,11 +1568,14 @@ class BluefruitCompatManager {
     const uint8_t* value = &event.payload[7];
     for (uint8_t i = 0U; i < client_characteristic_count_; ++i) {
       BLEClientCharacteristic* characteristic = client_characteristics_[i];
-      if (characteristic == nullptr || !characteristic->discovered_) {
+      if (characteristic == nullptr || !characteristic->discovered_ ||
+          characteristic->conn_handle_ != 0U ||
+          characteristic->discovery_generation_ != connection_generation_) {
         continue;
       }
       if (characteristic->value_handle_ == valueHandle) {
-        characteristic->handleNotify(value, valueLength);
+        characteristic->handleValueEvent(value, valueLength, attOpcode,
+                                         connection_generation_);
         return;
       }
     }
@@ -1411,6 +1660,7 @@ class BluefruitCompatManager {
             handleClientConnectionEvent(event);
           }
         }
+        dispatchGattAuthorizationRequest();
         maybeDispatchSecurityCallbacks();
         for (uint8_t i = 0U; i < characteristic_count_; ++i) {
           if (characteristics_[i] != nullptr) {
@@ -1499,6 +1749,16 @@ class BluefruitCompatManager {
       uint32_t remainingUs = (remainingUs64 > 0xFFFFFFFFULL)
                                  ? 0xFFFFFFFFUL
                                  : static_cast<uint32_t>(remainingUs64);
+      if (directed_high_duty_deadline_us_ != 0ULL) {
+        if (timeReachedUs(nowUs, directed_high_duty_deadline_us_)) {
+          return 1U;
+        }
+        const uint64_t highDutyRemainingUs =
+            directed_high_duty_deadline_us_ - nowUs;
+        if (highDutyRemainingUs < remainingUs) {
+          remainingUs = static_cast<uint32_t>(highDutyRemainingUs);
+        }
+      }
 
       // Wake slightly ahead of the deadline so the pump-driven advertising
       // state machine can stage the next event without falling late.
@@ -1691,28 +1951,115 @@ class BluefruitCompatManager {
     if (ScopedBluefruitUserCallback::active()) {
       return;
     }
-    while (deferred_client_notification_count_ > 0U) {
-      DeferredClientNotification& notification =
-          deferred_client_notifications_[deferred_client_notification_tail_];
-      BLEClientCharacteristic* characteristic = notification.characteristic;
-      const uint16_t len = notification.len;
-      if (characteristic != nullptr && len > 0U) {
-        memcpy(characteristic->last_value_, notification.data, len);
+    dispatchGattAuthorizationRequest();
+    while (deferred_client_value_event_count_ > 0U) {
+      DeferredClientValueEvent& event =
+          deferred_client_value_events_[deferred_client_value_event_tail_];
+      BLEClientCharacteristic* characteristic = event.characteristic;
+      const uint16_t len = event.len;
+      const uint8_t attOpcode = event.att_opcode;
+      const uint32_t eventGeneration = event.connection_generation;
+      const bool current =
+          eventGeneration != 0U && eventGeneration == connection_generation_ &&
+          radio_.isConnected() &&
+          radio_.connectionRole() == BleConnectionRole::kCentral &&
+          characteristic != nullptr && characteristic->discovered_ &&
+          characteristic->conn_handle_ == 0U &&
+          characteristic->discovery_generation_ == eventGeneration;
+      if (current && len > 0U) {
+        memcpy(characteristic->last_value_, event.data, len);
       }
-      deferred_client_notification_tail_ = static_cast<uint8_t>(
-          (deferred_client_notification_tail_ + 1U) %
-          kDeferredClientNotificationQueueDepth);
-      --deferred_client_notification_count_;
+      deferred_client_value_event_tail_ = static_cast<uint8_t>(
+          (deferred_client_value_event_tail_ + 1U) %
+          kDeferredClientValueEventQueueDepth);
+      --deferred_client_value_event_count_;
 
-      if (characteristic == nullptr || !characteristic->discovered_ ||
-          characteristic->notify_callback_ == nullptr) {
+      if (!current) {
         continue;
       }
       characteristic->last_value_len_ = len;
-      invokeBluefruitUserCallback(characteristic->notify_callback_,
-                                  characteristic, characteristic->last_value_,
-                                  characteristic->last_value_len_);
+      characteristic->dispatchValueEventCallback(attOpcode);
     }
+  }
+
+  void dispatchGattAuthorizationRequest() {
+    if (ScopedBluefruitUserCallback::active()) {
+      return;
+    }
+
+    BleGattAuthorizeRequest request{};
+    if (!radio_.consumeCustomGattAuthorizeRequest(&request)) {
+      return;
+    }
+
+    BLECharacteristic* characteristic = nullptr;
+    for (uint8_t i = 0U; i < characteristic_count_; ++i) {
+      BLECharacteristic* candidate = characteristics_[i];
+      if (candidate != nullptr &&
+          candidate->_handles.value_handle == request.handle) {
+        characteristic = candidate;
+        break;
+      }
+    }
+
+    const auto rejectMissingCallback = [&]() {
+      (void)radio_.replyCustomGattAuthorization(
+          request.type, BLE_GATT_STATUS_ATTERR_INSUF_AUTHORIZATION, false,
+          0U, nullptr, 0U);
+    };
+    if (characteristic == nullptr) {
+      rejectMissingCallback();
+      return;
+    }
+
+    ble_uuid_t eventUuid{};
+    if (request.uuidSize == 2U) {
+      eventUuid.uuid = readLe16(request.uuid);
+      eventUuid.type = BLE_UUID_TYPE_BLE;
+    } else if (request.uuidSize == 16U) {
+      eventUuid.uuid = readLe16(&request.uuid[12]);
+      eventUuid.type = BLE_UUID_TYPE_VENDOR_BEGIN;
+    }
+
+    if (request.type == BleGattAuthorizeType::kRead) {
+      if (characteristic->_rd_authorize_cb == nullptr) {
+        rejectMissingCallback();
+        return;
+      }
+      ble_gatts_evt_read_t event{};
+      event.handle = request.handle;
+      event.uuid = eventUuid;
+      event.offset = request.offset;
+      invokeBluefruitUserCallback(characteristic->_rd_authorize_cb, 0U,
+                                  characteristic, &event);
+      return;
+    }
+
+    if (request.type == BleGattAuthorizeType::kWrite) {
+      if (characteristic->_wr_authorize_cb == nullptr) {
+        rejectMissingCallback();
+        return;
+      }
+      alignas(ble_gatts_evt_write_t) uint8_t eventStorage[
+          sizeof(ble_gatts_evt_write_t) +
+          BleRadio::kCustomGattMaxValueLength - 1U] = {0};
+      auto* event =
+          reinterpret_cast<ble_gatts_evt_write_t*>(eventStorage);
+      event->handle = request.handle;
+      event->uuid = eventUuid;
+      event->op = request.operation;
+      event->auth_required = 1U;
+      event->offset = request.offset;
+      event->len = request.valueLength;
+      if (event->len > 0U) {
+        memcpy(event->data, request.value, event->len);
+      }
+      invokeBluefruitUserCallback(characteristic->_wr_authorize_cb, 0U,
+                                  characteristic, event);
+      return;
+    }
+
+    rejectMissingCallback();
   }
 
   void maybeDispatchCentralConnectCallback() {
@@ -1757,14 +2104,59 @@ class BluefruitCompatManager {
 
  private:
   static constexpr uint8_t kMaxCharacteristics = 24U;
-  static constexpr uint8_t kMaxClientServices = 16U;
-  static constexpr uint8_t kMaxClientCharacteristics = 16U;
-  static constexpr uint8_t kDeferredClientNotificationQueueDepth = 8U;
-  struct DeferredClientNotification {
+  static constexpr uint8_t kMaxClientServices = 20U;
+  static constexpr uint8_t kMaxClientCharacteristics = 40U;
+  static constexpr uint8_t kDeferredClientValueEventQueueDepth = 8U;
+  struct DeferredClientValueEvent {
     BLEClientCharacteristic* characteristic;
+    uint8_t att_opcode;
+    uint32_t connection_generation;
     uint16_t len;
     uint8_t data[BLUEFRUIT_GATT_VALUE_MAX_LEN];
   };
+
+  void advanceConnectionGeneration() {
+    ++connection_generation_;
+    if (connection_generation_ == 0U) {
+      ++connection_generation_;
+    }
+  }
+
+  void gattSchemaHashByte(uint8_t value) {
+    gatt_schema_hash_ ^= value;
+    gatt_schema_hash_ *= 16777619UL;
+  }
+
+  void gattSchemaHashU16(uint16_t value) {
+    gattSchemaHashByte(static_cast<uint8_t>(value & 0xFFU));
+    gattSchemaHashByte(static_cast<uint8_t>((value >> 8U) & 0xFFU));
+  }
+
+  void gattSchemaHashUuid(const BLEUuid& uuid) {
+    const size_t uuidSize = uuid.size();
+    gattSchemaHashByte(static_cast<uint8_t>(uuidSize));
+    if (uuidSize == 2U) {
+      gattSchemaHashU16(uuid.uuid16());
+    } else if (uuidSize == 16U) {
+      const uint8_t* bytes = uuid.uuid128();
+      if (bytes != nullptr) {
+        for (uint8_t i = 0U; i < 16U; ++i) {
+          gattSchemaHashByte(bytes[i]);
+        }
+      }
+    }
+  }
+
+  void resetGattSchemaHash() {
+    static constexpr uint8_t kBuiltInGattSchemaVersion[] = {
+        'G', 'A', 'T', 'T', '-', 'S', 'C', '-', '1'};
+    gatt_schema_hash_ = 2166136261UL;
+    for (uint8_t value : kBuiltInGattSchemaVersion) {
+      gattSchemaHashByte(value);
+    }
+    gatt_schema_hash_finalized_ = false;
+  }
+
   static constexpr uint16_t kDefaultDataLength = 27U;
   static constexpr uint16_t kDefaultAttMtu = 23U;
   static constexpr uint32_t kScannerMinIntervalUs = 2500UL;
@@ -1855,6 +2247,7 @@ class BluefruitCompatManager {
   bool started_;
   bool last_connected_;
   BleConnectionRole last_connection_role_;
+  uint32_t connection_generation_;
   unsigned long last_connection_edge_ms_;
   uint64_t next_adv_due_us_;
   uint64_t armed_adv_wake_us_;
@@ -1864,7 +2257,10 @@ class BluefruitCompatManager {
   bool scan_prewarm_active_;
   uint32_t adv_random_state_;
   unsigned long adv_started_ms_;
+  uint64_t directed_high_duty_deadline_us_;
   bool scan_rsp_name_added_;
+  uint32_t gatt_schema_hash_;
+  bool gatt_schema_hash_finalized_;
   BLECharacteristic* characteristics_[kMaxCharacteristics];
   uint8_t characteristic_count_;
   BLEClientService* client_services_[kMaxClientServices];
@@ -1913,12 +2309,13 @@ class BluefruitCompatManager {
   bool security_secured_callback_fired_;
   bool security_seen_procedure_active_;
   bool security_last_encrypted_;
+  uint32_t security_passkey_request_callback_id_;
   unsigned long security_secured_callback_timeout_ms_;
-  DeferredClientNotification deferred_client_notifications_[
-      kDeferredClientNotificationQueueDepth];
-  uint8_t deferred_client_notification_head_;
-  uint8_t deferred_client_notification_tail_;
-  uint8_t deferred_client_notification_count_;
+  DeferredClientValueEvent deferred_client_value_events_[
+      kDeferredClientValueEventQueueDepth];
+  uint8_t deferred_client_value_event_head_;
+  uint8_t deferred_client_value_event_tail_;
+  uint8_t deferred_client_value_event_count_;
 
   static void gattWriteThunk(uint16_t valueHandle, const uint8_t* value,
                              uint16_t valueLength, bool withResponse, void* context) {
@@ -1986,8 +2383,17 @@ class BluefruitCompatManager {
             : BLE_GAP_ADDR_TYPE_PUBLIC;
     scan_report_.rssi = packet.rssiDbm;
     fillReportType(packet.pduHeader, &scan_report_.type);
+    const bool directed = scan_report_.type.directed != 0U;
+    if (directed && packet.length >= 12U) {
+      memcpy(scan_report_.direct_addr.addr, &packet.payload[6], 6U);
+      scan_report_.direct_addr.addr_type =
+          ((packet.pduHeader >> 7U) & 0x1U)
+              ? gapAddressTypeForRandomAddress(&packet.payload[6])
+              : BLE_GAP_ADDR_TYPE_PUBLIC;
+    }
 
-    scan_report_len_ = static_cast<uint8_t>(packet.length - 6U);
+    scan_report_len_ =
+        directed ? 0U : static_cast<uint8_t>(packet.length - 6U);
     if (scan_report_len_ > sizeof(scan_report_data_)) {
       scan_report_len_ = sizeof(scan_report_data_);
     }
@@ -2047,8 +2453,17 @@ class BluefruitCompatManager {
             : BLE_GAP_ADDR_TYPE_PUBLIC;
     scan_report_.rssi = rssiDbm;
     fillReportType(pduHeader, &scan_report_.type);
+    const bool directed = scan_report_.type.directed != 0U;
+    if (directed && payloadLength >= 12U) {
+      memcpy(scan_report_.direct_addr.addr, &payload[6], 6U);
+      scan_report_.direct_addr.addr_type =
+          ((pduHeader >> 7U) & 0x1U)
+              ? gapAddressTypeForRandomAddress(&payload[6])
+              : BLE_GAP_ADDR_TYPE_PUBLIC;
+    }
 
-    scan_report_len_ = static_cast<uint8_t>(payloadLength - 6U);
+    scan_report_len_ =
+        directed ? 0U : static_cast<uint8_t>(payloadLength - 6U);
     if (scan_report_len_ > sizeof(scan_report_data_)) {
       scan_report_len_ = sizeof(scan_report_data_);
     }
@@ -2495,8 +2910,24 @@ class BluefruitCompatManager {
   }
 
   bool applyAdvertisingPayloads() {
-    if (!radio_.setAdvertisingPduType(
-            static_cast<xiao_nrf54l15::BleAdvPduType>(Bluefruit.Advertising.adv_type_))) {
+    xiao_nrf54l15::BleAdvPduType halType{};
+    if (!bluefruitAdvertisingTypeToHal(Bluefruit.Advertising.adv_type_,
+                                       &halType)) {
+      return false;
+    }
+    if (bluefruitAdvertisingTypeIsDirected(Bluefruit.Advertising.adv_type_)) {
+      if (Bluefruit.Advertising.len_ != 0U ||
+          Bluefruit.ScanResponse.len_ != 0U ||
+          !Bluefruit.Advertising.peer_addr_set_ ||
+          !bluefruitGapAddressValid(Bluefruit.Advertising.peer_addr_) ||
+          !radio_.setDirectedAdvertisingTarget(
+              Bluefruit.Advertising.peer_addr_.addr,
+              halAddressTypeFromBluefruit(
+                  Bluefruit.Advertising.peer_addr_.addr_type))) {
+        return false;
+      }
+    }
+    if (!radio_.setAdvertisingPduType(halType)) {
       return false;
     }
     if (!radio_.setAdvertisingData(Bluefruit.Advertising.data_, Bluefruit.Advertising.len_)) {
@@ -2519,11 +2950,26 @@ class BluefruitCompatManager {
       return;
     }
 
+    const uint64_t timeoutNowUs = schedulerTimeUs();
+    if (directed_high_duty_deadline_us_ != 0ULL &&
+        timeReachedUs(timeoutNowUs, directed_high_duty_deadline_us_)) {
+      Bluefruit.Advertising.running_ = false;
+      directed_high_duty_deadline_us_ = 0ULL;
+      if (radio_.isBackgroundAdvertisingEnabled()) {
+        radio_.stopBackgroundAdvertising();
+      }
+      if (Bluefruit.Advertising.stop_callback_ != nullptr) {
+        invokeBluefruitUserCallback(Bluefruit.Advertising.stop_callback_);
+      }
+      return;
+    }
+
     if (Bluefruit.Advertising.stop_timeout_s_ != 0U) {
       const unsigned long elapsedMs = schedulerTimeMs() - adv_started_ms_;
       if (elapsedMs >= (static_cast<unsigned long>(Bluefruit.Advertising.stop_timeout_s_) *
                         1000UL)) {
         Bluefruit.Advertising.running_ = false;
+        directed_high_duty_deadline_us_ = 0ULL;
         if (radio_.isBackgroundAdvertisingEnabled()) {
           radio_.stopBackgroundAdvertising();
         }
@@ -2535,11 +2981,13 @@ class BluefruitCompatManager {
     }
 
     if (Bluefruit.Advertising.dirty_ || Bluefruit.ScanResponse.dirty_) {
-      if (!applyAdvertisingPayloads()) {
-        return;
-      }
       if (radio_.isBackgroundAdvertisingEnabled()) {
         radio_.stopBackgroundAdvertising();
+      }
+      if (!applyAdvertisingPayloads()) {
+        Bluefruit.Advertising.running_ = false;
+        directed_high_duty_deadline_us_ = 0ULL;
+        return;
       }
     }
 
@@ -2547,6 +2995,7 @@ class BluefruitCompatManager {
       return;
     }
 
+    const uint8_t advType = Bluefruit.Advertising.adv_type_;
     uint16_t intervalUnits = Bluefruit.Advertising.interval_fast_;
     if (Bluefruit.Advertising.fast_timeout_s_ != 0U) {
       const unsigned long elapsedMs = schedulerTimeMs() - adv_started_ms_;
@@ -2560,8 +3009,10 @@ class BluefruitCompatManager {
     if (intervalUnits == 0U) {
       intervalUnits = 32U;
     }
+    if (bluefruitAdvertisingTypeIsHighDutyDirected(advType)) {
+      intervalUnits = kDirectedHighDutyMaxIntervalUnits;
+    }
 
-    const uint8_t advType = Bluefruit.Advertising.adv_type_;
     if (advType == BLE_GAP_ADV_TYPE_NONCONNECTABLE_NONSCANNABLE_UNDIRECTED) {
       if (radio_.isBackgroundAdvertisingEnabled()) {
         return;
@@ -2603,7 +3054,10 @@ class BluefruitCompatManager {
     }
 
     const uint32_t intervalUs = static_cast<uint32_t>(intervalUnits) * 625UL;
-    const uint32_t advDelayUs = foregroundAdvertisingRandomDelayUs();
+    const uint32_t advDelayUs =
+        bluefruitAdvertisingTypeIsHighDutyDirected(advType)
+            ? 0U
+            : foregroundAdvertisingRandomDelayUs();
     const uint64_t scheduledNextDueUs =
         nowUs + static_cast<uint64_t>(intervalUs) + advDelayUs;
     // Foreground advertising is pump-driven by the Arduino scheduler. Schedule
@@ -2613,7 +3067,8 @@ class BluefruitCompatManager {
     next_adv_due_us_ = scheduledNextDueUs;
 
     if (advType == BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED ||
-        advType == BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED) {
+        advType == BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED ||
+        bluefruitAdvertisingTypeIsDirected(advType)) {
       (void)radio_.advertiseInteractEvent(
           nullptr, kForegroundConnectableAdvInterChannelDelayUs, 250000UL,
           700000UL, false);
@@ -2690,6 +3145,26 @@ class BluefruitCompatManager {
       security_secured_callback_pending_ = true;
     }
 
+    uint32_t passkeyRequestId = 0UL;
+    if (radio_.getPendingPairingPasskeyRequest(&passkeyRequestId)) {
+      if (Bluefruit.Security.pair_passkey_request_callback_ != nullptr &&
+          passkeyRequestId != security_passkey_request_callback_id_) {
+        security_passkey_request_callback_id_ = passkeyRequestId;
+        uint8_t requestedPasskey[6];
+        memset(requestedPasskey, 0xFF, sizeof(requestedPasskey));
+        {
+          ScopedBluefruitUserCallback scope;
+          Bluefruit.Security.pair_passkey_request_callback_(
+              0U, requestedPasskey);
+        }
+        if (isValidSixDigitPasskey(requestedPasskey)) {
+          (void)radio_.replyPendingPairingPasskey(passkeyRequestId,
+                                                  requestedPasskey);
+        }
+      }
+      return;
+    }
+
     uint8_t passkey[6] = {0};
     bool matchRequest = false;
     if (radio_.getPendingPairingPasskey(passkey, &matchRequest)) {
@@ -2727,7 +3202,7 @@ class BluefruitCompatManager {
 
     if (security_secured_callback_pending_ &&
         !security_secured_callback_fired_ &&
-        encrypted && !security_last_encrypted_ &&
+        encrypted && !security_last_encrypted_ && !pairingActive &&
         Bluefruit.Security.secured_callback_ != nullptr) {
       invokeBluefruitUserCallback(Bluefruit.Security.secured_callback_, 0U);
       security_secured_callback_fired_ = true;
@@ -2781,6 +3256,7 @@ class BluefruitCompatManager {
   }
 
   void handleConnectionEdge(bool connected) {
+    advanceConnectionGeneration();
     if (connected) {
       ++g_bluefruitBleIdleDiagConnectionEdgeCount;
       last_connection_edge_ms_ = millis();
@@ -2803,6 +3279,7 @@ class BluefruitCompatManager {
       security_secured_callback_fired_ = false;
       security_seen_procedure_active_ = false;
       security_last_encrypted_ = radio_.isConnectionEncrypted();
+      security_passkey_request_callback_id_ = 0UL;
       security_secured_callback_timeout_ms_ = 0UL;
       if (Bluefruit.auto_conn_led_) {
         digitalWrite(LED_BUILTIN, kLedOnState);
@@ -2812,6 +3289,7 @@ class BluefruitCompatManager {
         // restartOnDisconnect is a future policy; advertising is not active
         // while a peripheral connection is established.
         Bluefruit.Advertising.running_ = false;
+        directed_high_duty_deadline_us_ = 0ULL;
         next_adv_due_us_ = 0U;
         nrf54l15_ble_idle_wake_cancel();
         armed_adv_wake_us_ = 0U;
@@ -2845,9 +3323,13 @@ class BluefruitCompatManager {
           central_connect_callback_pending_ = true;
           central_connect_callback_not_before_ms_ = millis() + 2000UL;
         }
-        if (radio_.hasBondRecord()) {
-          security_secured_callback_pending_ = true;
-          security_secured_callback_timeout_ms_ = millis() + 2500UL;
+      }
+      if (radio_.hasBondRecord()) {
+        security_secured_callback_pending_ = true;
+        security_secured_callback_timeout_ms_ = millis() + 2500UL;
+        if (last_connection_role_ == BleConnectionRole::kCentral &&
+            radio_.requestPairing()) {
+          security_seen_procedure_active_ = true;
         }
       }
       return;
@@ -2885,6 +3367,7 @@ class BluefruitCompatManager {
     security_secured_callback_fired_ = false;
     security_seen_procedure_active_ = false;
     security_last_encrypted_ = false;
+    security_passkey_request_callback_id_ = 0UL;
     security_secured_callback_timeout_ms_ = 0UL;
     deferred_connection_phy_request_pending_ = false;
     deferred_connection_data_length_request_pending_ = false;
@@ -2924,11 +3407,7 @@ class BluefruitCompatManager {
       }
       if (Bluefruit.Advertising.restart_on_disconnect_) {
         Bluefruit.Advertising.running_ = true;
-        adv_started_ms_ = schedulerTimeMs();
-        next_adv_due_us_ = 0U;
-        nrf54l15_ble_idle_wake_cancel();
-        armed_adv_wake_us_ = 0U;
-        adv_random_state_ = 0U;
+        advertisingStarted();
       }
     } else if (last_connection_role_ == BleConnectionRole::kCentral) {
       clearCentralScannerTransientState();
@@ -2963,6 +3442,10 @@ BluefruitCompatManager& manager() {
   return instance;
 }
 
+static BluefruitCompatManager* managerIfAlive() {
+  return g_bluefruitCompatManager;
+}
+
 extern "C" uint8_t nrf54l15_clean_ble_idle_yield_wfi_allowed(void) {
   return manager().idleYieldWfiAllowed() ? 1U : 0U;
 }
@@ -2970,6 +3453,7 @@ extern "C" uint8_t nrf54l15_clean_ble_idle_yield_wfi_allowed(void) {
 BLESecurity::BLESecurity()
     : secured_callback_(nullptr),
       pair_passkey_callback_(nullptr),
+      pair_passkey_request_callback_(nullptr),
       pair_complete_callback_(nullptr),
       io_caps_(0x03U),
       fixed_pin_valid_(false),
@@ -2986,14 +3470,22 @@ BLESecurity::BLESecurity()
       auto_bonded_peer_irk_owned_(false),
       auto_bonded_peer_irk_{0},
       resolving_list_count_(0),
-      resolving_list_irks_{{0}} {}
+      resolving_list_irks_{{0}},
+      resolving_list_sources_{0} {}
 
 void BLESecurity::setSecuredCallback(secured_callback_t fp) {
   secured_callback_ = fp;
 }
 
-void BLESecurity::setPairPasskeyCallback(pair_passkey_callback_t fp) {
+bool BLESecurity::setPairPasskeyCallback(pair_passkey_callback_t fp) {
   pair_passkey_callback_ = fp;
+  setMITM(true);
+  return true;
+}
+
+void BLESecurity::setPairPasskeyRequestCallback(pair_passkey_req_cb_t fp) {
+  pair_passkey_request_callback_ = fp;
+  setMITM(true);
 }
 
 void BLESecurity::setPairCompleteCallback(pair_complete_callback_t fp) {
@@ -3022,25 +3514,65 @@ void BLESecurity::setIOCaps(bool display, bool yesNo, bool keyboard) {
   setIOCaps(ioCaps);
 }
 
-void BLESecurity::setPIN(const char* pin) {
-  fixed_pin_valid_ = false;
-  memset(fixed_pin_, 0, sizeof(fixed_pin_));
-  manager().radio().setSecurityFixedPasskey(nullptr);
+void BLESecurity::setMITM(bool enabled) {
+  BleSecurityPolicy policy = manager().radio().getSecurityPolicy();
+  policy.mitmRequired = enabled;
+  (void)manager().radio().setSecurityPolicy(policy);
+}
+
+bool BLESecurity::setBondingEnabled(bool enabled) {
+  BleSecurityPolicy policy = manager().radio().getSecurityPolicy();
+  policy.bondingEnabled = enabled;
+  return manager().radio().setSecurityPolicy(policy);
+}
+
+bool BLESecurity::setSecureConnectionsEnabled(bool enabled) {
+  BleSecurityPolicy policy = manager().radio().getSecurityPolicy();
+  if (!enabled && policy.secureConnectionsRequired) {
+    return false;
+  }
+  policy.secureConnectionsEnabled = enabled;
+  return manager().radio().setSecurityPolicy(policy);
+}
+
+bool BLESecurity::setSecureConnectionsRequired(bool required) {
+  BleSecurityPolicy policy = manager().radio().getSecurityPolicy();
+  policy.secureConnectionsRequired = required;
+  if (required) {
+    policy.secureConnectionsEnabled = true;
+  }
+  return manager().radio().setSecurityPolicy(policy);
+}
+
+bool BLESecurity::setEncryptionKeySize(uint8_t min_size, uint8_t max_size) {
+  if (min_size < 7U || max_size > 16U || min_size > max_size) {
+    return false;
+  }
+  BleSecurityPolicy policy = manager().radio().getSecurityPolicy();
+  policy.minEncryptionKeySize = min_size;
+  policy.maxEncryptionKeySize = max_size;
+  return manager().radio().setSecurityPolicy(policy);
+}
+
+bool BLESecurity::setPIN(const char* pin) {
   if (pin == nullptr || strlen(pin) != 6U) {
-    return;
+    return false;
   }
   for (size_t i = 0; i < 6U; ++i) {
     if (pin[i] < '0' || pin[i] > '9') {
-      return;
+      return false;
     }
-    fixed_pin_[i] = pin[i];
   }
+
+  memcpy(fixed_pin_, pin, 6U);
   fixed_pin_[6] = '\0';
   fixed_pin_valid_ = true;
   manager().radio().setSecurityFixedPasskey(fixed_pin_);
+  setMITM(true);
   if (io_caps_ == 0x03U) {
     setIOCaps(0x00U);
   }
+  return true;
 }
 
 bool BLESecurity::getPendingPairingPasskey(uint8_t passkey[6],
@@ -3050,6 +3582,19 @@ bool BLESecurity::getPendingPairingPasskey(uint8_t passkey[6],
 
 bool BLESecurity::replyPendingPairingPasskey(bool accept) const {
   return manager().radio().replyPendingPairingPasskey(accept);
+}
+
+bool BLESecurity::getPendingPairingPasskeyRequest(
+    uint32_t* request_id) const {
+  return manager().radio().getPendingPairingPasskeyRequest(request_id);
+}
+
+bool BLESecurity::replyPendingPairingPasskey(
+    uint32_t request_id, const uint8_t passkey[6]) const {
+  if (!isValidSixDigitPasskey(passkey)) {
+    return false;
+  }
+  return manager().radio().replyPendingPairingPasskey(request_id, passkey);
 }
 
 bool BLESecurity::generateOobData(uint8_t oob_r[16], uint8_t oob_c[16]) {
@@ -3174,6 +3719,57 @@ bool BLESecurity::hasBond() const {
   return manager().radio().hasBondRecord();
 }
 
+uint8_t BLESecurity::bondCount() const {
+  return manager().radio().bondCount();
+}
+
+uint8_t BLESecurity::enumerateBonds(ble_gap_bond_info_t* out_bonds,
+                                    uint8_t capacity) const {
+  const uint8_t count = manager().radio().bondCount();
+  if (out_bonds == nullptr || capacity == 0U) {
+    return count;
+  }
+  xiao_nrf54l15::BleBondInfo bonds[xiao_nrf54l15::BleRadio::kBleMaxBonds]{};
+  const uint8_t copied = manager().radio().enumerateBonds(bonds, capacity);
+  for (uint8_t i = 0U; i < copied; ++i) {
+    copyHalBondInfoToBluefruit(bonds[i], &out_bonds[i]);
+  }
+  return copied;
+}
+
+bool BLESecurity::getBondInfo(uint8_t bond_id,
+                              ble_gap_bond_info_t* out_info) const {
+  if (out_info == nullptr) {
+    return false;
+  }
+  xiao_nrf54l15::BleBondInfo info{};
+  if (!manager().radio().getBondInfo(bond_id, &info)) {
+    return false;
+  }
+  copyHalBondInfoToBluefruit(info, out_info);
+  return true;
+}
+
+bool BLESecurity::deleteBond(uint8_t bond_id) {
+  if (!manager().radio().deleteBond(bond_id)) {
+    return false;
+  }
+  (void)refreshBondedPeerResolving();
+  return true;
+}
+
+bool BLESecurity::clearBonds() {
+  if (!manager().radio().clearBondRecord(true)) {
+    return false;
+  }
+  (void)refreshBondedPeerResolving();
+  return true;
+}
+
+uint8_t BLESecurity::activeBondId() const {
+  return manager().radio().activeBondId();
+}
+
 bool BLESecurity::bondAuthenticated() const {
   xiao_nrf54l15::BleBondRecord record{};
   if (!manager().radio().getBondRecord(&record)) {
@@ -3217,6 +3813,20 @@ bool BLESecurity::getBondPeerIrk(uint8_t outIrk[16]) const {
   }
   xiao_nrf54l15::BleBondRecord record{};
   if (!manager().radio().getBondRecord(&record) || record.peerIrkValid == 0U) {
+    return false;
+  }
+  memcpy(outIrk, record.peerIrk, sizeof(record.peerIrk));
+  return true;
+}
+
+bool BLESecurity::getBondPeerIrk(uint8_t bond_id,
+                                 uint8_t outIrk[16]) const {
+  if (outIrk == nullptr) {
+    return false;
+  }
+  xiao_nrf54l15::BleBondRecord record{};
+  if (!manager().radio().getBondRecord(bond_id, &record) ||
+      record.peerIrkValid == 0U) {
     return false;
   }
   memcpy(outIrk, record.peerIrk, sizeof(record.peerIrk));
@@ -3330,6 +3940,7 @@ bool BLESecurity::resolveResolvablePrivateAddress(const uint8_t address[6],
 void BLESecurity::clearResolvingList() {
   resolving_list_count_ = 0U;
   memset(resolving_list_irks_, 0, sizeof(resolving_list_irks_));
+  memset(resolving_list_sources_, 0, sizeof(resolving_list_sources_));
   auto_bonded_peer_irk_owned_ = false;
   memset(auto_bonded_peer_irk_, 0, sizeof(auto_bonded_peer_irk_));
 }
@@ -3349,6 +3960,7 @@ bool BLESecurity::addResolvingIrk(const uint8_t irk[16]) {
 
   for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
     if (memcmp(resolving_list_irks_[i], irk, 16U) == 0) {
+      resolving_list_sources_[i] |= kResolvingSourceManual;
       return true;
     }
   }
@@ -3358,6 +3970,7 @@ bool BLESecurity::addResolvingIrk(const uint8_t irk[16]) {
   }
 
   memcpy(resolving_list_irks_[resolving_list_count_], irk, 16U);
+  resolving_list_sources_[resolving_list_count_] = kResolvingSourceManual;
   ++resolving_list_count_;
   return true;
 }
@@ -3367,7 +3980,19 @@ bool BLESecurity::addBondedPeerIrkToResolvingList() {
   if (!getBondPeerIrk(irk)) {
     return false;
   }
-  return addResolvingIrk(irk);
+  for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
+    if (memcmp(resolving_list_irks_[i], irk, sizeof(irk)) == 0) {
+      resolving_list_sources_[i] |= kResolvingSourceBond;
+      return true;
+    }
+  }
+  if (resolving_list_count_ >= kResolvingListMaxEntries) {
+    return false;
+  }
+  memcpy(resolving_list_irks_[resolving_list_count_], irk, sizeof(irk));
+  resolving_list_sources_[resolving_list_count_] = kResolvingSourceBond;
+  ++resolving_list_count_;
+  return true;
 }
 
 bool BLESecurity::setBondedPeerResolvingEnabled(bool enabled) {
@@ -3389,35 +4014,48 @@ bool BLESecurity::bondedPeerResolvingEnabled() const {
 bool BLESecurity::refreshBondedPeerResolving() {
   removeAutoBondedPeerResolvingIrk();
   if (!auto_bonded_peer_resolving_) {
-    return false;
+    return true;
   }
 
-  uint8_t irk[16] = {0};
-  if (!getBondPeerIrk(irk)) {
-    return false;
-  }
-  for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
-    if (memcmp(resolving_list_irks_[i], irk, sizeof(irk)) == 0) {
-      return true;
+  xiao_nrf54l15::BleBondInfo bonds[xiao_nrf54l15::BleRadio::kBleMaxBonds]{};
+  const uint8_t count = manager().radio().enumerateBonds(
+      bonds, xiao_nrf54l15::BleRadio::kBleMaxBonds);
+  bool addedAny = false;
+  for (uint8_t bond = 0U; bond < count; ++bond) {
+    uint8_t irk[16] = {0};
+    if (!getBondPeerIrk(bonds[bond].id, irk)) {
+      continue;
     }
+    bool present = false;
+    for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
+      if (memcmp(resolving_list_irks_[i], irk, sizeof(irk)) == 0) {
+        resolving_list_sources_[i] |= kResolvingSourceBond;
+        present = true;
+        addedAny = true;
+        break;
+      }
+    }
+    if (present || resolving_list_count_ >= kResolvingListMaxEntries) {
+      continue;
+    }
+    memcpy(resolving_list_irks_[resolving_list_count_], irk, sizeof(irk));
+    resolving_list_sources_[resolving_list_count_] = kResolvingSourceBond;
+    ++resolving_list_count_;
+    addedAny = true;
   }
-  if (!addResolvingIrk(irk)) {
-    return false;
-  }
-  memcpy(auto_bonded_peer_irk_, irk, sizeof(auto_bonded_peer_irk_));
-  auto_bonded_peer_irk_owned_ = true;
-  return true;
+  auto_bonded_peer_irk_owned_ = addedAny;
+  return addedAny || count == 0U;
 }
 
 void BLESecurity::removeAutoBondedPeerResolvingIrk() {
-  if (!auto_bonded_peer_irk_owned_) {
-    return;
-  }
-  for (uint8_t i = 0U; i < resolving_list_count_; ++i) {
-    if (memcmp(resolving_list_irks_[i], auto_bonded_peer_irk_,
-               sizeof(auto_bonded_peer_irk_)) == 0) {
+  uint8_t i = 0U;
+  while (i < resolving_list_count_) {
+    resolving_list_sources_[i] &=
+        static_cast<uint8_t>(~kResolvingSourceBond);
+    if (resolving_list_sources_[i] == 0U) {
       (void)removeResolvingIrk(i);
-      break;
+    } else {
+      ++i;
     }
   }
   auto_bonded_peer_irk_owned_ = false;
@@ -3431,9 +4069,11 @@ bool BLESecurity::removeResolvingIrk(uint8_t index) {
 
   for (uint8_t i = index; (i + 1U) < resolving_list_count_; ++i) {
     memcpy(resolving_list_irks_[i], resolving_list_irks_[i + 1U], 16U);
+    resolving_list_sources_[i] = resolving_list_sources_[i + 1U];
   }
   --resolving_list_count_;
   memset(resolving_list_irks_[resolving_list_count_], 0, 16U);
+  resolving_list_sources_[resolving_list_count_] = 0U;
   return true;
 }
 
@@ -4260,6 +4900,50 @@ bool writeLongHandleSync(uint16_t handle, const uint8_t* data, uint16_t dataLen)
   return executed;
 }
 
+extern "C" uint32_t sd_ble_gatts_rw_authorize_reply(
+    uint16_t conn_handle,
+    const ble_gatts_rw_authorize_reply_params_t* reply_params) {
+  if (reply_params == nullptr) {
+    return NRF_ERROR_INVALID_ADDR;
+  }
+  if (conn_handle != 0U || !manager().radio().isConnected() ||
+      manager().radio().connectionRole() != BleConnectionRole::kPeripheral) {
+    return BLE_ERROR_INVALID_CONN_HANDLE;
+  }
+
+  BleGattAuthorizeType type = BleGattAuthorizeType::kInvalid;
+  const ble_gatts_authorize_params_t* params = nullptr;
+  if (reply_params->type == BLE_GATTS_AUTHORIZE_TYPE_READ) {
+    type = BleGattAuthorizeType::kRead;
+    params = &reply_params->params.read;
+  } else if (reply_params->type == BLE_GATTS_AUTHORIZE_TYPE_WRITE) {
+    type = BleGattAuthorizeType::kWrite;
+    params = &reply_params->params.write;
+  } else {
+    return NRF_ERROR_INVALID_PARAM;
+  }
+
+  const BleGattAuthorizeReplyResult result =
+      manager().radio().replyCustomGattAuthorization(
+          type, params->gatt_status, params->update != 0U, params->offset,
+          params->p_data, params->len);
+  switch (result) {
+    case BleGattAuthorizeReplyResult::kSuccess:
+      return NRF_SUCCESS;
+    case BleGattAuthorizeReplyResult::kInvalidConnection:
+      return BLE_ERROR_INVALID_CONN_HANDLE;
+    case BleGattAuthorizeReplyResult::kInvalidParameter:
+      return NRF_ERROR_INVALID_PARAM;
+    case BleGattAuthorizeReplyResult::kTimeout:
+      return NRF_ERROR_TIMEOUT;
+    case BleGattAuthorizeReplyResult::kBusy:
+      return NRF_ERROR_BUSY;
+    case BleGattAuthorizeReplyResult::kInvalidState:
+    default:
+      return NRF_ERROR_INVALID_STATE;
+  }
+}
+
 extern "C" void nrf54l15_bluefruit_compat_idle_service(void) {
   if (ScopedBluefruitUserCallback::active()) {
     return;
@@ -4430,6 +5114,7 @@ err_t BLEService::begin() {
 
   _begun = true;
   lastService = this;
+  manager().noteGattService(this);
   return ERROR_NONE;
 }
 
@@ -4572,9 +5257,6 @@ err_t BLECharacteristic::begin() {
   if (_service == nullptr || !_service->_begun) {
     return ERROR_INVALID_STATE;
   }
-  if (_rd_authorize_cb != nullptr || _wr_authorize_cb != nullptr) {
-    return ERROR_NOT_SUPPORTED;
-  }
   if (!securityModesCanInherit(_read_perm, _service->_read_perm) ||
       !securityModesCanInherit(_write_perm, _service->_write_perm) ||
       (_report_ref_valid && _report_ref_read_perm_valid &&
@@ -4632,9 +5314,22 @@ err_t BLECharacteristic::begin() {
   _handles.decl_handle = (valueHandle > 0U) ? static_cast<uint16_t>(valueHandle - 1U) : 0U;
   _handles.cccd_handle = cccdHandle;
   _handles.user_desc_handle = descriptorHandles.userDescriptionHandle;
+  if (!manager().radio().setCustomGattAuthorization(
+          valueHandle, _rd_authorize_cb != nullptr,
+          _wr_authorize_cb != nullptr)) {
+    return ERROR_INVALID_STATE;
+  }
   if (!manager().registerCharacteristic(this)) {
     return ERROR_NO_MEM;
   }
+  const SecureMode_t effectiveReportReferenceReadPermission =
+      static_cast<SecureMode_t>(
+          descriptors.reportReferenceReadPermission != 0U
+              ? descriptors.reportReferenceReadPermission
+              : descriptors.readPermission);
+  manager().noteGattCharacteristic(
+      this, effectiveReadPermission, effectiveWritePermission,
+      effectiveReportReferenceReadPermission, descriptorHandles);
   return ERROR_NONE;
 }
 
@@ -5079,7 +5774,9 @@ BLEAdvertising::BLEAdvertising()
       interval_slow_(244U),
       fast_timeout_s_(30U),
       stop_timeout_s_(0U),
-      adv_type_(static_cast<uint8_t>(xiao_nrf54l15::BleAdvPduType::kAdvInd)),
+      adv_type_(BLE_GAP_ADV_TYPE_CONNECTABLE_SCANNABLE_UNDIRECTED),
+      peer_addr_{},
+      peer_addr_set_(false),
       running_(false),
       slow_callback_(nullptr),
       stop_callback_(nullptr) {}
@@ -5097,7 +5794,16 @@ void BLEAdvertising::setIntervalMS(uint16_t fast_ms, uint16_t slow_ms) {
 
 void BLEAdvertising::setFastTimeout(uint16_t seconds) { fast_timeout_s_ = seconds; }
 
-void BLEAdvertising::setType(uint8_t type) { adv_type_ = type; }
+void BLEAdvertising::setType(uint8_t type) {
+  adv_type_ = type;
+  manager().markAdvertisingDirty();
+}
+
+void BLEAdvertising::setPeerAddress(const ble_gap_addr_t& peer_addr) {
+  peer_addr_ = peer_addr;
+  peer_addr_set_ = bluefruitGapAddressValid(peer_addr);
+  manager().markAdvertisingDirty();
+}
 
 void BLEAdvertising::setSlowCallback(slow_callback_t cb) { slow_callback_ = cb; }
 
@@ -5110,7 +5816,22 @@ bool BLEAdvertising::setBeacon(BLEBeacon& beacon) { return beacon.start(*this); 
 bool BLEAdvertising::setBeacon(EddyStoneUrl& beacon) { return beacon.start(*this); }
 
 bool BLEAdvertising::start(uint16_t timeout) {
+  xiao_nrf54l15::BleAdvPduType halType{};
+  const bool directed = bluefruitAdvertisingTypeIsDirected(adv_type_);
+  if (!bluefruitAdvertisingTypeToHal(adv_type_, &halType) ||
+      (directed &&
+       (!peer_addr_set_ ||
+        !bluefruitGapAddressValid(peer_addr_) ||
+        len_ != 0U || Bluefruit.ScanResponse.count() != 0U))) {
+    if (running_) {
+      (void)stop();
+    }
+    return false;
+  }
   if (!manager().begin(1U, 0U)) {
+    return false;
+  }
+  if (!manager().finalizeGattSchema()) {
     return false;
   }
   stop_timeout_s_ = timeout;
@@ -5641,11 +6362,155 @@ int BLEScanner::parseReportByType(const ble_gap_evt_adv_report_t* report, uint8_
   return copyAdFieldByType(report->data.p_data, report->data.len, type, buffer, buffer_len);
 }
 
+BLEDiscovery::BLEDiscovery()
+    : handle_range_{0x0001U, 0xFFFFU}, begun_(false) {}
+
+void BLEDiscovery::begin() { begun_ = manager().begin(0U, 1U); }
+
+void BLEDiscovery::setHandleRange(ble_gattc_handle_range_t handle_range) {
+  handle_range_ = handle_range;
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(
+    uint16_t conn_handle, BLEClientCharacteristic* characteristics[],
+    uint8_t count) {
+  if (!begun_) {
+    begin();
+  }
+  if (!begun_ || !clientReady(conn_handle) || characteristics == nullptr ||
+      count == 0U || handle_range_.start_handle == 0U ||
+      handle_range_.start_handle > handle_range_.end_handle) {
+    return 0U;
+  }
+
+  uint8_t found = 0U;
+  for (uint8_t i = 0U; i < count; ++i) {
+    BLEClientCharacteristic* characteristic = characteristics[i];
+    bool duplicateObject = false;
+    for (uint8_t priorIndex = 0U; priorIndex < i; ++priorIndex) {
+      if (characteristics[priorIndex] == characteristic) {
+        duplicateObject = true;
+        break;
+      }
+    }
+    if (characteristic == nullptr || duplicateObject ||
+        !characteristic->begin()) {
+      continue;
+    }
+    characteristic->resetDiscovery();
+
+    uint16_t searchStart = handle_range_.start_handle;
+    bool rangeExhausted = false;
+    for (uint8_t priorIndex = 0U; priorIndex < i; ++priorIndex) {
+      BLEClientCharacteristic* prior = characteristics[priorIndex];
+      if (prior == nullptr || !prior->discovered_ ||
+          prior->uuid != characteristic->uuid ||
+          prior->end_handle_ < searchStart) {
+        continue;
+      }
+      if (prior->end_handle_ == 0xFFFFU) {
+        rangeExhausted = true;
+        break;
+      }
+      searchStart = static_cast<uint16_t>(prior->end_handle_ + 1U);
+    }
+    if (rangeExhausted || searchStart > handle_range_.end_handle) {
+      continue;
+    }
+
+    if (!discoverCharacteristicSync(
+            searchStart, handle_range_.end_handle, characteristic->uuid,
+            &characteristic->decl_handle_, &characteristic->value_handle_,
+            &characteristic->end_handle_, &characteristic->properties_)) {
+      continue;
+    }
+    characteristic->conn_handle_ = conn_handle;
+    characteristic->discovery_generation_ = manager().connectionGeneration();
+    if (characteristic->discovery_generation_ == 0U) {
+      characteristic->resetDiscovery();
+      continue;
+    }
+    characteristic->discovered_ = true;
+    ++found;
+  }
+  return found;
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(uint16_t conn_handle,
+                                             BLEClientCharacteristic& chr1) {
+  BLEClientCharacteristic* characteristics[] = {&chr1};
+  return discoverCharacteristic(conn_handle, characteristics, 1U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(uint16_t conn_handle,
+                                             BLEClientCharacteristic& chr1,
+                                             BLEClientCharacteristic& chr2) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2};
+  return discoverCharacteristic(conn_handle, characteristics, 2U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(uint16_t conn_handle,
+                                             BLEClientCharacteristic& chr1,
+                                             BLEClientCharacteristic& chr2,
+                                             BLEClientCharacteristic& chr3) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2, &chr3};
+  return discoverCharacteristic(conn_handle, characteristics, 3U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(
+    uint16_t conn_handle, BLEClientCharacteristic& chr1,
+    BLEClientCharacteristic& chr2, BLEClientCharacteristic& chr3,
+    BLEClientCharacteristic& chr4) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2, &chr3, &chr4};
+  return discoverCharacteristic(conn_handle, characteristics, 4U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(
+    uint16_t conn_handle, BLEClientCharacteristic& chr1,
+    BLEClientCharacteristic& chr2, BLEClientCharacteristic& chr3,
+    BLEClientCharacteristic& chr4, BLEClientCharacteristic& chr5) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2, &chr3, &chr4,
+                                                 &chr5};
+  return discoverCharacteristic(conn_handle, characteristics, 5U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(
+    uint16_t conn_handle, BLEClientCharacteristic& chr1,
+    BLEClientCharacteristic& chr2, BLEClientCharacteristic& chr3,
+    BLEClientCharacteristic& chr4, BLEClientCharacteristic& chr5,
+    BLEClientCharacteristic& chr6) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2, &chr3,
+                                                 &chr4, &chr5, &chr6};
+  return discoverCharacteristic(conn_handle, characteristics, 6U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(
+    uint16_t conn_handle, BLEClientCharacteristic& chr1,
+    BLEClientCharacteristic& chr2, BLEClientCharacteristic& chr3,
+    BLEClientCharacteristic& chr4, BLEClientCharacteristic& chr5,
+    BLEClientCharacteristic& chr6, BLEClientCharacteristic& chr7) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2, &chr3, &chr4,
+                                                 &chr5, &chr6, &chr7};
+  return discoverCharacteristic(conn_handle, characteristics, 7U);
+}
+
+uint8_t BLEDiscovery::discoverCharacteristic(
+    uint16_t conn_handle, BLEClientCharacteristic& chr1,
+    BLEClientCharacteristic& chr2, BLEClientCharacteristic& chr3,
+    BLEClientCharacteristic& chr4, BLEClientCharacteristic& chr5,
+    BLEClientCharacteristic& chr6, BLEClientCharacteristic& chr7,
+    BLEClientCharacteristic& chr8) {
+  BLEClientCharacteristic* characteristics[] = {&chr1, &chr2, &chr3, &chr4,
+                                                 &chr5, &chr6, &chr7, &chr8};
+  return discoverCharacteristic(conn_handle, characteristics, 8U);
+}
+
 BLEClientCharacteristic::BLEClientCharacteristic()
     : uuid(),
       begun_(false),
       discovered_(false),
       notify_callback_(nullptr),
+      indicate_callback_(nullptr),
       service_(nullptr),
       conn_handle_(INVALID_CONNECTION_HANDLE),
       decl_handle_(0U),
@@ -5655,11 +6520,23 @@ BLEClientCharacteristic::BLEClientCharacteristic()
       properties_(0U),
       last_value_{0},
       last_value_len_(0U),
-      notify_deferred_(true) {}
+      notify_deferred_(true),
+      indicate_deferred_(true),
+      cccd_value_(0U),
+      discovery_generation_(0U) {}
 
 BLEClientCharacteristic::BLEClientCharacteristic(BLEUuid bleuuid)
     : BLEClientCharacteristic() {
   uuid = bleuuid;
+}
+
+BLEClientCharacteristic::~BLEClientCharacteristic() {
+  if (begun_) {
+    BluefruitCompatManager* activeManager = managerIfAlive();
+    if (activeManager != nullptr) {
+      activeManager->unregisterClientCharacteristic(this);
+    }
+  }
 }
 
 bool BLEClientCharacteristic::begin() {
@@ -5686,7 +6563,7 @@ BLEClientService& BLEClientCharacteristic::parentService() { return *service_; }
 const BLEClientService& BLEClientCharacteristic::parentService() const { return *service_; }
 
 void BLEClientCharacteristic::resetDiscovery() {
-  manager().clearDeferredClientNotifications(this);
+  manager().clearDeferredClientValueEvents(this);
   discovered_ = false;
   conn_handle_ = INVALID_CONNECTION_HANDLE;
   decl_handle_ = 0U;
@@ -5695,6 +6572,8 @@ void BLEClientCharacteristic::resetDiscovery() {
   cccd_handle_ = 0U;
   properties_ = 0U;
   last_value_len_ = 0U;
+  cccd_value_ = 0U;
+  discovery_generation_ = 0U;
   memset(last_value_, 0, sizeof(last_value_));
 }
 
@@ -5721,6 +6600,11 @@ bool BLEClientCharacteristic::discover() {
     return false;
   }
   conn_handle_ = service_->conn_handle_;
+  discovery_generation_ = manager().connectionGeneration();
+  if (discovery_generation_ == 0U) {
+    resetDiscovery();
+    return false;
+  }
   discovered_ = true;
   return true;
 }
@@ -5741,8 +6625,17 @@ uint16_t BLEClientCharacteristic::read(void* buffer, uint16_t len) {
 
 uint8_t BLEClientCharacteristic::read8() {
   uint8_t value = 0U;
-  (void)read(&value, sizeof(value));
-  return value;
+  return (read(&value, sizeof(value)) == sizeof(value)) ? value : 0U;
+}
+
+uint16_t BLEClientCharacteristic::read16() {
+  uint16_t value = 0U;
+  return (read(&value, sizeof(value)) == sizeof(value)) ? value : 0U;
+}
+
+uint32_t BLEClientCharacteristic::read32() {
+  uint32_t value = 0UL;
+  return (read(&value, sizeof(value)) == sizeof(value)) ? value : 0UL;
 }
 
 uint16_t BLEClientCharacteristic::write(const void* buffer, uint16_t len) {
@@ -5800,6 +6693,19 @@ uint16_t BLEClientCharacteristic::write8(uint8_t value) {
   return write(&value, sizeof(value));
 }
 
+uint16_t BLEClientCharacteristic::write16(uint16_t value) {
+  return write(&value, sizeof(value));
+}
+
+uint16_t BLEClientCharacteristic::write32(uint32_t value) {
+  return write(&value, sizeof(value));
+}
+
+uint16_t BLEClientCharacteristic::write32(int value) {
+  const int32_t value32 = static_cast<int32_t>(value);
+  return write(&value32, sizeof(value32));
+}
+
 uint16_t BLEClientCharacteristic::write8(uint8_t value, bool withResponse) {
   return write(&value, sizeof(value), withResponse);
 }
@@ -5808,8 +6714,33 @@ uint16_t BLEClientCharacteristic::write8WithoutResponse(uint8_t value) {
   return writeWithoutResponse(&value, sizeof(value));
 }
 
-bool BLEClientCharacteristic::enableNotify() {
-  if (!discovered_) {
+uint16_t BLEClientCharacteristic::write_resp(const void* buffer, uint16_t len) {
+  return write(buffer, len, true);
+}
+
+uint16_t BLEClientCharacteristic::write8_resp(uint8_t value) {
+  return write_resp(&value, sizeof(value));
+}
+
+uint16_t BLEClientCharacteristic::write16_resp(uint16_t value) {
+  return write_resp(&value, sizeof(value));
+}
+
+uint16_t BLEClientCharacteristic::write32_resp(uint32_t value) {
+  return write_resp(&value, sizeof(value));
+}
+
+uint16_t BLEClientCharacteristic::write32_resp(int value) {
+  const int32_t value32 = static_cast<int32_t>(value);
+  return write_resp(&value32, sizeof(value32));
+}
+
+bool BLEClientCharacteristic::writeCCCD(uint16_t value) {
+  if (!discovered_ || (value & ~0x0003U) != 0U ||
+      ((value & 0x0001U) != 0U &&
+       (properties_ & xiao_nrf54l15::kBleGattPropNotify) == 0U) ||
+      ((value & 0x0002U) != 0U &&
+       (properties_ & xiao_nrf54l15::kBleGattPropIndicate) == 0U)) {
     return false;
   }
   if (cccd_handle_ == 0U &&
@@ -5818,42 +6749,85 @@ bool BLEClientCharacteristic::enableNotify() {
       })) {
     return false;
   }
-  const uint8_t cccdValue[2] = {0x01U, 0x00U};
-  return retryClientProcedure([&]() {
+  const uint8_t cccdValue[2] = {
+      static_cast<uint8_t>(value & 0xFFU),
+      static_cast<uint8_t>((value >> 8U) & 0xFFU)};
+  const bool written = retryClientProcedure([&]() {
     return writeHandleSync(cccd_handle_, cccdValue, sizeof(cccdValue), true);
   });
+  if (written) {
+    cccd_value_ = value;
+  }
+  return written;
+}
+
+bool BLEClientCharacteristic::enableNotify() {
+  return writeCCCD(static_cast<uint16_t>(cccd_value_ | 0x0001U));
 }
 
 bool BLEClientCharacteristic::disableNotify() {
-  if (!discovered_) {
-    return false;
-  }
-  if (cccd_handle_ == 0U &&
-      !retryClientProcedure([&]() {
-        return discoverCccdHandleSync(value_handle_, end_handle_, &cccd_handle_);
-      })) {
-    return false;
-  }
-  const uint8_t cccdValue[2] = {0x00U, 0x00U};
-  return retryClientProcedure([&]() {
-    return writeHandleSync(cccd_handle_, cccdValue, sizeof(cccdValue), true);
-  });
+  return writeCCCD(static_cast<uint16_t>(cccd_value_ & ~0x0001U));
 }
 
-void BLEClientCharacteristic::handleNotify(const uint8_t* data, uint16_t len) {
+bool BLEClientCharacteristic::enableIndicate() {
+  return writeCCCD(static_cast<uint16_t>(cccd_value_ | 0x0002U));
+}
+
+bool BLEClientCharacteristic::disableIndicate() {
+  return writeCCCD(static_cast<uint16_t>(cccd_value_ & ~0x0002U));
+}
+
+BLEClientCharacteristic::notify_cb_t
+BLEClientCharacteristic::callbackForValueEvent(uint8_t att_opcode) const {
+  if (att_opcode == kAttOpHandleValueInd && indicate_callback_ != nullptr) {
+    return indicate_callback_;
+  }
+  if (att_opcode == kAttOpHandleValueNtf ||
+      att_opcode == kAttOpHandleValueInd) {
+    // Existing sketches historically received indications through the notify
+    // callback. Preserve that fallback when no distinct indication callback is
+    // installed.
+    return notify_callback_;
+  }
+  return nullptr;
+}
+
+bool BLEClientCharacteristic::callbackForValueEventIsDeferred(
+    uint8_t att_opcode) const {
+  if (att_opcode == kAttOpHandleValueInd && indicate_callback_ != nullptr) {
+    return indicate_deferred_;
+  }
+  return notify_deferred_;
+}
+
+void BLEClientCharacteristic::dispatchValueEventCallback(uint8_t att_opcode) {
+  notify_cb_t callback = callbackForValueEvent(att_opcode);
+  if (callback != nullptr) {
+    invokeBluefruitUserCallback(callback, this, last_value_, last_value_len_);
+  }
+}
+
+void BLEClientCharacteristic::handleValueEvent(
+    const uint8_t* data, uint16_t len, uint8_t att_opcode,
+    uint32_t connection_generation) {
+  if (!discovered_ || discovery_generation_ == 0U ||
+      discovery_generation_ != connection_generation) {
+    return;
+  }
   const uint16_t copyLen = min<uint16_t>(len, sizeof(last_value_));
   if (copyLen > 0U && data != nullptr) {
     memcpy(last_value_, data, copyLen);
   }
   last_value_len_ = copyLen;
-  if (notify_callback_ != nullptr) {
-    if (notify_deferred_) {
-      (void)manager().enqueueDeferredClientNotification(this, data, copyLen);
-    } else {
-      manager().clearDeferredClientNotifications(this);
-      invokeBluefruitUserCallback(notify_callback_, this, last_value_,
-                                  last_value_len_);
-    }
+  if (callbackForValueEvent(att_opcode) == nullptr) {
+    return;
+  }
+  if (callbackForValueEventIsDeferred(att_opcode)) {
+    (void)manager().enqueueDeferredClientValueEvent(
+        this, data, copyLen, att_opcode, connection_generation);
+  } else {
+    manager().clearDeferredClientValueEvents(this);
+    dispatchValueEventCallback(att_opcode);
   }
 }
 
@@ -5868,6 +6842,15 @@ BLEClientService::BLEClientService()
 BLEClientService::BLEClientService(BLEUuid bleuuid)
     : BLEClientService() {
   uuid = bleuuid;
+}
+
+BLEClientService::~BLEClientService() {
+  if (begun_) {
+    BluefruitCompatManager* activeManager = managerIfAlive();
+    if (activeManager != nullptr) {
+      activeManager->unregisterClientService(this);
+    }
+  }
 }
 
 bool BLEClientService::begin() {
@@ -5902,6 +6885,16 @@ bool BLEClientService::discover(uint16_t conn_hdl) {
   return true;
 }
 
+void BLEClientService::setHandleRange(
+    ble_gattc_handle_range_t handle_range) {
+  start_handle_ = handle_range.start_handle;
+  end_handle_ = handle_range.end_handle;
+}
+
+ble_gattc_handle_range_t BLEClientService::getHandleRange() const {
+  return ble_gattc_handle_range_t{start_handle_, end_handle_};
+}
+
 BLEClientUart* BLEClientUart::instances_[BLEClientUart::kMaxInstances] = {};
 uint8_t BLEClientUart::instance_count_ = 0U;
 
@@ -5909,6 +6902,7 @@ BLEClientUart::BLEClientUart()
     : service_(BLEUART_UUID_SERVICE),
       txd_(BLEUART_UUID_CHR_TXD),
       rxd_(BLEUART_UUID_CHR_RXD),
+      instance_registered_(false),
       discovered_(false),
       rx_callback_(nullptr),
       rx_fifo_{0},
@@ -5917,10 +6911,37 @@ BLEClientUart::BLEClientUart()
       rx_count_(0U) {
   if (instance_count_ < kMaxInstances) {
     instances_[instance_count_++] = this;
+    instance_registered_ = true;
+  }
+}
+
+BLEClientUart::~BLEClientUart() {
+  if (!instance_registered_) {
+    return;
+  }
+  for (uint8_t i = 0U; i < instance_count_; ++i) {
+    if (instances_[i] != this) {
+      continue;
+    }
+    for (uint8_t next = static_cast<uint8_t>(i + 1U);
+         next < instance_count_; ++next) {
+      instances_[next - 1U] = instances_[next];
+    }
+    --instance_count_;
+    instances_[instance_count_] = nullptr;
+    instance_registered_ = false;
+    break;
   }
 }
 
 bool BLEClientUart::begin() {
+  if (!instance_registered_) {
+    if (instance_count_ >= kMaxInstances) {
+      return false;
+    }
+    instances_[instance_count_++] = this;
+    instance_registered_ = true;
+  }
   txd_.setNotifyCallback(txdNotifyThunk);
   return service_.begin() && txd_.begin(&service_) && rxd_.begin(&service_);
 }
@@ -7680,6 +8701,46 @@ void BLEUart::bleuart_txd_cccd_cb(uint16_t conn_hdl, BLECharacteristic* chr, uin
   }
 }
 
+uint16_t BLEGatt::readCharByUuid(uint16_t conn_hdl, BLEUuid bleuuid,
+                                 void* buffer, uint16_t bufsize,
+                                 uint16_t start_hdl, uint16_t end_hdl) {
+  if (!clientReady(conn_hdl) || !bleuuid.begin() || buffer == nullptr ||
+      bufsize == 0U || start_hdl == 0U || start_hdl > end_hdl) {
+    return 0U;
+  }
+
+  uint16_t declarationHandle = 0U;
+  uint16_t valueHandle = 0U;
+  uint16_t characteristicEndHandle = 0U;
+  uint8_t properties = 0U;
+  if (!retryClientProcedure(
+          [&]() {
+            return discoverCharacteristicSync(
+                start_hdl, end_hdl, bleuuid, &declarationHandle, &valueHandle,
+                &characteristicEndHandle, &properties);
+          },
+          2U, 50UL)) {
+    return 0U;
+  }
+  (void)declarationHandle;
+  (void)characteristicEndHandle;
+  (void)properties;
+  return readHandleSync(valueHandle, static_cast<uint8_t*>(buffer), bufsize);
+}
+
+bool BLEGatt::serviceChanged(uint16_t start_handle, uint16_t end_handle) {
+  return manager().radio().markGattServiceChanged(start_handle, end_handle);
+}
+
+bool BLEGatt::serviceChangedPending(uint16_t* start_handle,
+                                    uint16_t* end_handle) const {
+  return manager().radio().getGattServiceChangedPending(start_handle, end_handle);
+}
+
+uint32_t BLEGatt::serviceChangedFingerprint() const {
+  return manager().radio().gattSchemaFingerprint();
+}
+
 AdafruitBluefruit::AdafruitBluefruit()
     : Periph(),
       Central(),
@@ -7700,6 +8761,7 @@ AdafruitBluefruit::AdafruitBluefruit()
       central_requested_mtu_(23U),
       central_request_data_length_(false),
       central_request_mtu_(false),
+      service_changed_enabled_(false),
       last_disconnect_reason_(BLE_HCI_STATUS_CODE_SUCCESS),
       last_disconnect_reason_valid_(false),
       last_disconnect_reason_remote_(false),
@@ -7707,7 +8769,10 @@ AdafruitBluefruit::AdafruitBluefruit()
   strncpy(device_name_, "XIAO nRF54L15", sizeof(device_name_) - 1U);
 }
 
-void AdafruitBluefruit::configServiceChanged(bool changed) { (void)changed; }
+void AdafruitBluefruit::configServiceChanged(bool changed) {
+  service_changed_enabled_ = changed;
+  manager().configureServiceChanged(changed);
+}
 
 void AdafruitBluefruit::configUuid128Count(uint8_t uuid128_max) { (void)uuid128_max; }
 

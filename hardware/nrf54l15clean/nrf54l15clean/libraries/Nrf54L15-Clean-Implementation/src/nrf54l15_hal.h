@@ -2026,13 +2026,19 @@ struct BleActiveScanResult {
   uint8_t scanRspPayload[kBleLegacyRawPayloadMaxLength];
 
   const uint8_t* advData() const {
-    return (advPayloadLength > kBleLegacyAddressLength)
+    const bool directed =
+        (advHeader & 0x0FU) ==
+        static_cast<uint8_t>(BleAdvPduType::kAdvDirectInd);
+    return (!directed && advPayloadLength > kBleLegacyAddressLength)
                ? &advPayload[kBleLegacyAddressLength]
                : nullptr;
   }
 
   uint8_t advDataLength() const {
-    return (advPayloadLength > kBleLegacyAddressLength)
+    const bool directed =
+        (advHeader & 0x0FU) ==
+        static_cast<uint8_t>(BleAdvPduType::kAdvDirectInd);
+    return (!directed && advPayloadLength > kBleLegacyAddressLength)
                ? static_cast<uint8_t>(advPayloadLength - kBleLegacyAddressLength)
                : 0U;
   }
@@ -2520,6 +2526,50 @@ struct BleBondRecord {
   uint8_t signingReserved;
 };
 
+enum BleBondInfoFlag : uint8_t {
+  kBleBondInfoAuthenticated = 0x01U,
+  kBleBondInfoSecureConnections = 0x02U,
+  kBleBondInfoPeerIdentityValid = 0x04U,
+  kBleBondInfoPeerIrkValid = 0x08U,
+  kBleBondInfoServiceChangedPending = 0x10U,
+};
+
+struct BleBondInfo {
+  uint8_t id;
+  uint8_t peerAddress[6];
+  uint8_t peerAddressRandom;
+  uint8_t peerIdentityAddress[6];
+  uint8_t peerIdentityAddressRandom;
+  uint8_t flags;
+  uint8_t reserved;
+  uint32_t lastUsedGeneration;
+  uint32_t schemaFingerprint;
+  uint16_t serviceChangedStartHandle;
+  uint16_t serviceChangedEndHandle;
+};
+
+struct BleSecurityPolicy {
+  bool bondingEnabled = true;
+  bool mitmRequired = false;
+  bool secureConnectionsEnabled = true;
+  bool secureConnectionsRequired = false;
+  uint8_t minEncryptionKeySize = 7U;
+  uint8_t maxEncryptionKeySize = 16U;
+};
+
+enum class BleSmpUserAction : uint8_t {
+  None = 0U,
+  Display,
+  NumericComparison,
+  PasskeyInput,
+};
+
+enum class BleSmpPasskeyPreparationResult : uint8_t {
+  Ready = 0U,
+  Pending,
+  Fatal,
+};
+
 // OOB (Out-of-Band) pairing data for LE Secure Connections
 // Per Bluetooth Core Spec Vol 3 Part H §2.3.5.6.6:
 //   r = 16-byte random number generated from CRACEN RNG
@@ -2537,10 +2587,40 @@ using BleGattWriteCallback = void (*)(uint16_t valueHandle, const uint8_t* value
                                       uint16_t valueLength, bool withResponse,
                                       void* context);
 
+enum class BleGattAuthorizeType : uint8_t {
+  kInvalid = 0U,
+  kRead = 1U,
+  kWrite = 2U,
+};
+
+enum class BleGattAuthorizeReplyResult : uint8_t {
+  kSuccess = 0U,
+  kInvalidConnection = 1U,
+  kInvalidState = 2U,
+  kInvalidParameter = 3U,
+  kTimeout = 4U,
+  kBusy = 5U,
+};
+
+struct BleGattAuthorizeRequest {
+  BleGattAuthorizeType type;
+  uint8_t operation;
+  uint8_t requestOpcode;
+  uint8_t uuidSize;
+  uint16_t handle;
+  uint16_t offset;
+  uint16_t valueLength;
+  uint32_t generation;
+  uint8_t uuid[16];
+  uint8_t value[512];
+};
+
 // Minimal BLE LL radio block (legacy ADV + passive scan) implemented on RADIO.
 // This class intentionally avoids a full host/controller stack.
 class BleRadio {
  public:
+  static constexpr uint8_t kBleMaxBonds = 8U;
+  static constexpr uint8_t kBleInvalidBondId = 0xFFU;
   static constexpr uint8_t kCustomGattMaxServices = 8U;
   static constexpr uint8_t kCustomGattMaxCharacteristics = 24U;
   static constexpr uint16_t kCustomGattMaxValueLength = 512U;
@@ -2615,6 +2695,10 @@ class BleRadio {
   static bool isResolvablePrivateAddress(const uint8_t address[6]);
 
   bool setAdvertisingPduType(BleAdvPduType type);
+  bool setDirectedAdvertisingTarget(
+      const uint8_t address[6],
+      BleAddressType type = BleAddressType::kPublic);
+  void clearDirectedAdvertisingTarget();
   bool setAdvertisingChannelSelectionAlgorithm2(bool enabled);
   bool setAdvertisingData(const uint8_t* data, size_t len);
   bool setAdvertisingName(const char* name, bool includeFlags = true);
@@ -2690,6 +2774,20 @@ class BleRadio {
                                bool indication = false) const;
   bool isCustomGattNotificationQueued(uint16_t valueHandle,
                                       bool indicate = false) const;
+  bool setCustomGattAuthorization(uint16_t valueHandle, bool readAuthorize,
+                                  bool writeAuthorize);
+  bool consumeCustomGattAuthorizeRequest(BleGattAuthorizeRequest* outRequest);
+  BleGattAuthorizeReplyResult replyCustomGattAuthorization(
+      BleGattAuthorizeType type, uint16_t gattStatus, bool update,
+      uint16_t offset, const uint8_t* value, uint16_t valueLength);
+  bool customGattAuthorizationPending() const;
+  void setGattServiceChangedEnabled(bool enabled);
+  bool commitGattSchemaFingerprint(uint32_t fingerprint);
+  bool markGattServiceChanged(uint16_t startHandle = 0x0001U,
+                              uint16_t endHandle = 0xFFFFU);
+  bool getGattServiceChangedPending(uint16_t* outStartHandle = nullptr,
+                                    uint16_t* outEndHandle = nullptr) const;
+  uint32_t gattSchemaFingerprint() const;
   uint16_t currentDataLength() const;
   uint16_t currentAttMtu() const;
   bool dataLengthUpdateComplete() const;
@@ -2750,8 +2848,8 @@ class BleRadio {
                                        uint32_t spinLimit = 600000UL);
 
   // Advertise and listen for SCAN_REQ / CONNECT_IND on a single channel.
-  // Use kAdvInd or kAdvScanInd. Directed legacy advertising is not supported
-  // by this helper.
+  // Use kAdvInd, kAdvDirectInd, or kAdvScanInd. ADV_DIRECT_IND accepts only
+  // CONNECT_IND from its configured target and never answers SCAN_REQ.
   bool advertiseInteractOnce(BleAdvertisingChannel channel,
                              BleAdvInteraction* interaction,
                              uint32_t requestListenSpinLimit = 250000UL,
@@ -2819,6 +2917,9 @@ class BleRadio {
   bool isConnectionAuthenticated() const;
   void setSecurityIoCapabilities(uint8_t ioCaps);
   void setSecurityFixedPasskey(const char* pin);
+  bool setSecurityPolicy(const BleSecurityPolicy& policy);
+  BleSecurityPolicy getSecurityPolicy() const;
+  void getSecurityPolicy(BleSecurityPolicy* outPolicy) const;
   // OOB (Out-of-Band) pairing for LE Secure Connections
   // Enable/disable OOB pairing. Must be called before requestPairing().
   void setSecurityOobEnabled(bool enable);
@@ -2846,6 +2947,9 @@ class BleRadio {
   bool getPendingPairingPasskey(uint8_t outPasskey[6],
                                 bool* outMatchRequest) const;
   bool replyPendingPairingPasskey(bool accept);
+  bool getPendingPairingPasskeyRequest(uint32_t* outRequestId) const;
+  bool replyPendingPairingPasskey(uint32_t requestId,
+                                  const uint8_t passkey[6]);
   bool consumePairingFailureReason(uint8_t* outReason);
   bool getConnectionInfo(BleConnectionInfo* info) const;
   bool getConnectionTimingSnapshot(BleConnectionTimingSnapshot* snapshot) const;
@@ -2857,6 +2961,13 @@ class BleRadio {
   void clearDisconnectDebug();
   bool hasBondRecord() const;
   bool getBondRecord(BleBondRecord* outRecord) const;
+  bool getBondRecord(uint8_t bondId, BleBondRecord* outRecord,
+                     BleConnectionRole role = BleConnectionRole::kNone) const;
+  uint8_t bondCount() const;
+  uint8_t enumerateBonds(BleBondInfo* outBonds, uint8_t capacity) const;
+  bool getBondInfo(uint8_t bondId, BleBondInfo* outInfo) const;
+  bool deleteBond(uint8_t bondId);
+  uint8_t activeBondId() const;
   bool clearBondRecord(bool clearPersistentStorage = true);
   void setBondPersistenceCallbacks(BleBondLoadCallback loadCallback,
                                    BleBondSaveCallback saveCallback,
@@ -2968,8 +3079,29 @@ class BleRadio {
     uint8_t reportReference[kCustomGattReportReferenceLength];
     uint16_t maxValueLength;
     bool fixedValueLength;
+    bool readAuthorize;
+    bool writeAuthorize;
     uint16_t valueLength;
     uint8_t value[kCustomGattMaxValueLength];
+  };
+
+  struct BleGattAuthorizationState {
+    bool pending;
+    bool callbackPending;
+    bool responseReady;
+    BleGattAuthorizeType type;
+    uint8_t operation;
+    uint8_t requestOpcode;
+    uint8_t uuidSize;
+    uint16_t handle;
+    uint16_t offset;
+    uint16_t valueLength;
+    uint16_t responseLength;
+    uint32_t generation;
+    uint32_t deadlineMs;
+    uint8_t uuid[16];
+    uint8_t value[kCustomGattMaxValueLength];
+    uint8_t response[255];
   };
 
   struct BleCustomWriteHandlerState {
@@ -2993,8 +3125,15 @@ class BleRadio {
     BleAddressType addressType;
     BleAdvPduType pduType;
     bool useChSel2;
+    bool directedTargetValid;
+    BleAddressType directedTargetAddressType;
+    uint8_t directedTargetBondId;
+    uint32_t directedTargetBondGeneration;
+    bool directedTargetPeerIrkValid;
     bool scanRspDataAutoDefault;
     uint8_t address[6];
+    uint8_t directedTargetAddress[6];
+    uint8_t directedTargetPeerIrk[16];
     uint8_t advData[kBleLegacyAdDataMaxLength];
     size_t advDataLen;
     uint8_t scanRspData[kBleLegacyAdDataMaxLength];
@@ -3092,6 +3231,10 @@ class BleRadio {
                                     BleAdvInteraction* interaction,
                                     uint32_t requestListenSpinLimit,
                                     uint32_t spinLimit);
+  bool directedTargetMatchesLocalAddress(const uint8_t targetAddress[6],
+                                         bool targetAddressRandom) const;
+  bool directedInitiatorMatchesTarget(const uint8_t initiatorAddress[6],
+                                      bool initiatorAddressRandom) const;
   bool startCentralConnection(const uint8_t peerAddress[6],
                               bool peerAddressRandom,
                               uint32_t accessAddress, uint32_t crcInit,
@@ -3178,6 +3321,14 @@ class BleRadio {
                                     const uint8_t** outPayload,
                                     uint8_t* outPayloadLength);
   bool applyCccdState(uint16_t handle, uint16_t cccd);
+  bool beginCustomGattAuthorization(
+      BleGattAuthorizeType type, uint8_t requestOpcode, uint8_t operation,
+      const BleCustomCharacteristicState* characteristic, uint16_t offset,
+      const uint8_t* value, uint16_t valueLength);
+  void clearCustomGattAuthorizationState();
+  bool takeCustomGattAuthorizationResponse(uint8_t* outL2capPayload,
+                                           uint8_t* outPayloadLength);
+  void serviceCustomGattAuthorizationTimeout();
   bool buildAttErrorResponse(uint8_t requestOpcode, uint16_t handle,
                              uint8_t errorCode, uint8_t* outAttResponse,
                              uint16_t* outAttResponseLength) const;
@@ -3192,6 +3343,11 @@ class BleRadio {
   bool ensureSecureConnectionsLocalKeypair();
   bool prepareLocalPairingRandom();
   void buildLegacyTemporaryKey(uint8_t outTk[16]) const;
+  uint8_t resolveLegacyPairingIoAction() const;
+  BleSmpPasskeyPreparationResult preparePairingPasskeyForAction(
+      uint8_t ioAction);
+  bool serviceDeferredPairingConfirm();
+  bool prepareLocalLegacyEncryptionKey();
   bool computeSecureConnectionsDhKey();
   bool computeSecureConnectionsLocalConfirm();
   bool computeSecureConnectionsCheckValues();
@@ -3205,11 +3361,16 @@ class BleRadio {
   bool smpBackoffActiveForCurrentPeer();
   void noteSmpPairingFailure(uint8_t reason);
   void clearSmpBackoffForCurrentPeer();
+  void latchSecurityPolicyForPairing();
+  uint8_t buildLocalPairingAuthReq(bool bondingAllowed = true) const;
+  bool bondMeetsSecurityPolicy(const BleBondRecord& record,
+                               const BleSecurityPolicy& policy) const;
+  bool requestPairingPasskeyInput();
   uint8_t resolveCurrentSecureConnectionsIoAction() const;
   uint8_t resolveCurrentSecureConnectionsPairAlgorithm() const;
   bool currentPairingIsAuthenticated() const;
   bool secureConnectionsPairAlgorithmSupported(uint8_t pairAlg) const;
-  bool prepareSecureConnectionsPasskey();
+  BleSmpPasskeyPreparationResult prepareSecureConnectionsPasskey();
   uint8_t secureConnectionsPasskeyRoundZ() const;
   bool advanceSecureConnectionsPasskeyRound();
   bool secureConnectionsInitiatorTransmitsConfirm() const;
@@ -3253,6 +3414,7 @@ class BleRadio {
   bool isBondRecordUsable(const BleBondRecord& record) const;
   bool loadBondRecordFromPersistence();
   bool persistBondRecord(const BleBondRecord& record);
+  bool persistActiveBondDatabaseRecord(bool includeCccdState);
   bool flushDeferredBondStorage();
   // Prepare the encrypted LL_START_ENC_RSP while normal connection work has
   // budget, rather than trying to run CCM in the T_IFS response window.
@@ -3260,9 +3422,19 @@ class BleRadio {
   bool clearPersistentBondRecord();
   bool buildCurrentBondRecord(BleBondRecord* outRecord) const;
   bool primeBondForCurrentPeer();
+  bool loadBondProjection(uint8_t bondId, BleConnectionRole role,
+                          BleBondRecord* outRecord,
+                          uint32_t* outGeneration = nullptr) const;
+  bool updateActiveBondLegacyKeyTuple(bool locallyDistributed,
+                                      const uint8_t ltk[16],
+                                      const uint8_t rand[8], uint16_t ediv,
+                                      uint8_t keySize);
   bool persistBondedCccdState(bool forceFlash = false);
   bool restoreBondedCccdState();
   bool clearPersistentCccdRecord();
+  void resetBondedServiceChangedState(uint32_t schemaFingerprint = 0U);
+  void scheduleBondedServiceChangedIfReady();
+  bool confirmBondedServiceChanged(uint32_t confirmedGeneration);
   void clearCustomGattConnectionState();
   bool addCustomGattServiceUuid(const uint8_t* uuidBytes, uint8_t uuidLength,
                                 uint16_t* outServiceHandle);
@@ -3432,6 +3604,13 @@ class BleRadio {
   uint8_t localIdentityAddress_[6];
   BleAdvPduType pduType_;
   bool useChSel2_;
+  bool directedTargetValid_;
+  BleAddressType directedTargetAddressType_;
+  uint8_t directedTargetAddress_[6];
+  uint8_t directedTargetBondId_;
+  uint32_t directedTargetBondGeneration_;
+  bool directedTargetPeerIrkValid_;
+  uint8_t directedTargetPeerIrk_[16];
   bool rpaRotationEnabled_;
   bool rpaRotationAddressValid_;
   uint32_t rpaRotationIntervalMs_;
@@ -3562,11 +3741,24 @@ class BleRadio {
   uint16_t connectionChannelMapInstant_;
   uint8_t connectionPendingChannelMap_[5];
   uint8_t connectionPendingChannelCount_;
+  bool gattServiceChangedEnabled_;
+  uint32_t gattSchemaFingerprint_;
+  uint32_t bondedGattSchemaFingerprint_;
+  uint16_t bondedServiceChangedStartHandle_;
+  uint16_t bondedServiceChangedEndHandle_;
+  uint32_t bondedServiceChangedGeneration_;
+  bool bondedGattSchemaStateLoaded_;
   bool connectionServiceChangedIndicationsEnabled_;
+  bool connectionServiceChangedCccdRestored_;
   bool connectionServiceChangedIndicationPending_;
   bool connectionServiceChangedIndicationAwaitingConfirm_;
+  uint16_t connectionServiceChangedIndicationStartHandle_;
+  uint16_t connectionServiceChangedIndicationEndHandle_;
+  uint32_t connectionServiceChangedIndicationGeneration_;
   bool connectionBatteryNotificationsEnabled_;
   bool connectionBatteryNotificationPending_;
+  BleGattAuthorizationState connectionGattAuthorization_;
+  uint32_t connectionGattAuthorizationGeneration_;
   bool connectionPreparedWriteActive_;
   uint16_t connectionPreparedWriteHandle_;
   uint8_t connectionPreparedWriteValue_[kCustomGattMaxValueLength];
@@ -3640,6 +3832,8 @@ class BleRadio {
   uint8_t smpLocalRandom_[16];
   bool smpPrefetchedLocalRandomValid_;
   uint8_t smpPrefetchedLocalRandom_[16];
+  bool smpPrefetchedLegacyKeyValid_;
+  uint8_t smpPrefetchedLegacyKeyMaterial_[26];
   uint8_t smpLocalConfirm_[16];
   uint8_t smpStk_[16];
   bool smpStkValid_;
@@ -3680,8 +3874,14 @@ class BleRadio {
   BleBondRecord bondRecord_;
   bool bondRecordValid_;
   bool bondStorageLoaded_;
+  uint8_t activeBondId_;
+  uint32_t activeBondGeneration_;
+  uint32_t bondRuntimeUseCounter_;
+  uint32_t bondRuntimeLastUsed_[kBleMaxBonds];
+  mutable bool activeBondUseNotedForConnection_;
   bool bondKeyPrimedForConnection_;
   bool bondIdentityMatchedForConnection_;
+  bool activeBondMeetsSecurityPolicy_;
   bool bondFlashPersistPending_;
   bool cccdFlashPersistPending_;
   bool bondLocalIdentityMigrationPending_;
@@ -3690,21 +3890,36 @@ class BleRadio {
   bool connectionBondedEncryptionRequested_;
   BleTraceCallback traceCallback_;
   void* traceCallbackContext_;
+  BleSecurityPolicy securityPolicy_;
+  BleSecurityPolicy smpSecurityPolicy_;
+  bool smpSecurityPolicyLatched_;
   bool smpBondingRequested_;
   bool smpLocalInitiator_;
   bool smpExpectPeerEncKey_;
   bool smpExpectPeerIdKey_;
   bool smpExpectPeerSignKey_;
+  bool smpDistributeLocalEncKey_;
   bool smpDistributeLocalIdKey_;
   bool smpDistributeLocalSignKey_;
+  bool smpLocalLtkValid_;
+  bool smpLocalEncInfoSent_;
+  bool smpLocalEncInfoAcked_;
+  bool smpLocalMasterIdSent_;
+  bool smpLocalMasterIdAcked_;
   bool smpLocalIdInfoSent_;
+  bool smpLocalIdInfoAcked_;
   bool smpLocalIdAddressSent_;
   bool smpLocalIdAddressAcked_;
   bool smpLocalSignInfoSent_;
   bool smpLocalSignInfoAcked_;
   uint8_t smpLocalIoCapabilities_;
+  uint8_t smpPairingLocalIoCapabilities_;
   bool smpPendingUserPasskey_;
   bool smpPendingUserPasskeyMatchRequest_;
+  BleSmpUserAction smpPendingUserAction_;
+  bool smpPendingUserPasskeyCallbackDispatched_;
+  bool smpPeerConfirmReceived_;
+  bool smpLegacyConfirmDeferred_;
   bool smpDeferredPairingFailed_;
   bool smpPairingFailureReasonPending_;
   bool smpPeerLtkValid_;
@@ -3715,6 +3930,9 @@ class BleRadio {
   bool smpPeerCsrkValid_;
   bool smpLocalCsrkValid_;
   bool smpPeerSignCounterValid_;
+  uint8_t smpLocalLtk_[16];
+  uint8_t smpLocalRand_[8];
+  uint16_t smpLocalEdiv_;
   uint8_t smpPeerLtk_[16];
   uint8_t smpPeerIrk_[16];
   uint8_t smpPeerIdentityAddress_[6];
@@ -3743,6 +3961,10 @@ class BleRadio {
   bool smpFixedPasskeyValid_;
   uint32_t smpFixedPasskeyValue_;
   uint32_t smpPendingUserPasskeyValue_;
+  uint32_t smpPendingUserPasskeyRequestId_;
+  uint32_t smpNextUserPasskeyRequestId_;
+  bool smpPairingPasskeyValid_;
+  uint32_t smpPairingPasskeyValue_;
   bool smpSecureConnectionsActive_;
   bool smpSecureConnectionsLocalKeyReady_;
   bool smpSecureConnectionsLocalKeyInProgress_;

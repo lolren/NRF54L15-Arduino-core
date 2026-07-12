@@ -3,8 +3,8 @@
  *
  * Memory Layout (no FLPR co-processor, all RAM for CPUAPP):
  * - RRAM:  2036 KB total (0x00000000 - 0x001FD000)
- *   - 4 KB reserved at the top for bond/preferences/EEPROM persistence
- *   - 2032 KB usable for code/rodata/data loads
+ *   - 8 KB reserved at the top for multibond and legacy persistence
+ *   - 2028 KB usable for code/rodata/data loads
  * - RAM: application range 0x20000000 - 0x2007FD40 (523584 bytes)
  *   - 0x2007FD40 and above is reserved for VPR saved context and ProtectedRAM
  *   - The top 4 KB of application RAM is reserved for the CPUAPP stack
@@ -18,7 +18,8 @@ ENTRY(Reset_Handler)
 
 MEMORY
 {
-    FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x1FC000
+    FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x1FB000
+    FLASH_BOND_DB (r) : ORIGIN = 0x001FB000, LENGTH = 0x1000
     FLASH_BOND (r)  : ORIGIN = 0x001FC000, LENGTH = 0x1000
     RAM (rwx)       : ORIGIN = 0x20000000, LENGTH = 0x7FD40
 }
@@ -85,6 +86,17 @@ SECTIONS
         *(.rodata*)
         . = ALIGN(4);
     } >FLASH
+
+    .bond_db_storage ORIGIN(FLASH_BOND_DB) (NOLOAD) :
+    {
+        . = ALIGN(16);
+        _sbond_db_storage = .;
+        KEEP(*(.bond_db_storage))
+        . = ALIGN(16);
+        _ebond_db_storage = .;
+    } >FLASH_BOND_DB
+    ASSERT(SIZEOF(.bond_db_storage) <= 0x1000,
+           "BLE multibond database exceeds its dedicated 4 KB page")
 
     .bond_storage ORIGIN(FLASH_BOND) (NOLOAD) :
     {

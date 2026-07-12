@@ -975,7 +975,11 @@ bool BleRadio::sendSmpSecurityRequest() {
     bleExitCritical(irqState);
     return false;
   }
-  if (bondKeyPrimedForConnection_) {
+  latchSecurityPolicyForPairing();
+  activeBondMeetsSecurityPolicy_ =
+      bondKeyPrimedForConnection_ &&
+      bondMeetsSecurityPolicy(bondRecord_, securityPolicy_);
+  if (activeBondMeetsSecurityPolicy_) {
     // On bonded HID reconnects Android may treat a Security Request as "pair
     // again", then remove the bond after service setup. Let the central prove
     // the existing bond with LL_ENC_REQ when it accesses encrypted attributes.
@@ -985,6 +989,9 @@ bool BleRadio::sendSmpSecurityRequest() {
     return true;
   }
   connectionSmpSecurityRequestPending_ = true;
+  if (bondKeyPrimedForConnection_) {
+    emitBleTrace("SMP_SEC_REQ_BOND_UPGRADE");
+  }
   bleExitCritical(irqState);
   return true;
 }
@@ -1511,8 +1518,14 @@ void BleRadio::maybeQueueCentralLinkSetupRequest() {
         smpSecureConnectionsDhKeyCheckSent_ &&
         !smpSecureConnectionsDeferredDhKeyCheck_ &&
         !smpSecureConnectionsReceivedDhKeyCheckValid_;
+    if (bondKeyPrimedForConnection_) {
+      activeBondMeetsSecurityPolicy_ =
+          bondMeetsSecurityPolicy(bondRecord_, securityPolicy_);
+    }
     const bool bondedReconnectMayEncrypt =
-        !bondKeyPrimedForConnection_ || connectionBondedEncryptionRequested_;
+        !bondKeyPrimedForConnection_ ||
+        (connectionBondedEncryptionRequested_ &&
+         activeBondMeetsSecurityPolicy_);
     const bool centralEncryptionReady =
         smpStkValid_ &&
         bondedReconnectMayEncrypt &&
@@ -1819,6 +1832,65 @@ void BleRadio::setCustomGattWriteCallback(BleGattWriteCallback callback, void* c
   bleExitCritical(irqState);
 }
 
+bool BleRadio::setCustomGattAuthorization(uint16_t valueHandle,
+                                          bool readAuthorize,
+                                          bool writeAuthorize) {
+  const uint32_t irqState = bleEnterCritical();
+  BleCustomCharacteristicState* characteristic =
+      findCustomCharacteristicByValueHandle(valueHandle);
+  if (characteristic == nullptr) {
+    bleExitCritical(irqState);
+    return false;
+  }
+  characteristic->readAuthorize = readAuthorize;
+  characteristic->writeAuthorize = writeAuthorize;
+  bleExitCritical(irqState);
+  return true;
+}
+
+bool BleRadio::consumeCustomGattAuthorizeRequest(
+    BleGattAuthorizeRequest* outRequest) {
+  if (outRequest == nullptr) {
+    return false;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  if (!connectionGattAuthorization_.pending ||
+      !connectionGattAuthorization_.callbackPending) {
+    bleExitCritical(irqState);
+    return false;
+  }
+
+  memset(outRequest, 0, sizeof(*outRequest));
+  outRequest->type = connectionGattAuthorization_.type;
+  outRequest->operation = connectionGattAuthorization_.operation;
+  outRequest->requestOpcode = connectionGattAuthorization_.requestOpcode;
+  outRequest->uuidSize = connectionGattAuthorization_.uuidSize;
+  outRequest->handle = connectionGattAuthorization_.handle;
+  outRequest->offset = connectionGattAuthorization_.offset;
+  outRequest->valueLength = connectionGattAuthorization_.valueLength;
+  outRequest->generation = connectionGattAuthorization_.generation;
+  memcpy(outRequest->uuid, connectionGattAuthorization_.uuid,
+         sizeof(outRequest->uuid));
+  if (outRequest->valueLength > 0U) {
+    memcpy(outRequest->value, connectionGattAuthorization_.value,
+           outRequest->valueLength);
+  }
+  connectionGattAuthorization_.callbackPending = false;
+  bleExitCritical(irqState);
+  return true;
+}
+
+bool BleRadio::customGattAuthorizationPending() const {
+  return connectionGattAuthorization_.pending ||
+         connectionGattAuthorization_.responseReady;
+}
+
+void BleRadio::clearCustomGattAuthorizationState() {
+  memset(&connectionGattAuthorization_, 0,
+         sizeof(connectionGattAuthorization_));
+  connectionGattAuthorization_.type = BleGattAuthorizeType::kInvalid;
+}
+
 bool BleRadio::applyCustomGattCharacteristicValueWrite(uint16_t handle,
                                                        const uint8_t* value,
                                                        uint16_t valueLength,
@@ -2009,6 +2081,7 @@ void BleRadio::deferredCustomGattPeerWriteCallback(uint16_t valueHandle,
 }
 
 void BleRadio::clearCustomGattConnectionState() {
+  clearCustomGattAuthorizationState();
   memset(connectionCustomNotificationQueue_, 0,
          sizeof(connectionCustomNotificationQueue_));
   connectionCustomNotificationQueueHead_ = 0U;
@@ -2021,7 +2094,13 @@ void BleRadio::clearCustomGattConnectionState() {
 }
 
 bool BleRadio::buildAdvertisingPacket() {
-  const size_t payloadLen = sizeof(address_) + advDataLen_;
+  const bool directed = (pduType_ == BleAdvPduType::kAdvDirectInd);
+  if (directed && !directedTargetValid_) {
+    return false;
+  }
+  const size_t payloadLen =
+      directed ? (sizeof(address_) + sizeof(directedTargetAddress_))
+               : (sizeof(address_) + advDataLen_);
   if (payloadLen > kBleLegacyRawPayloadMaxLength) {
     return false;
   }
@@ -2037,12 +2116,18 @@ bool BleRadio::buildAdvertisingPacket() {
   if (bleAddressTypeIsRandom(addressType_)) {
     header |= (1U << 6U);
   }
+  if (directed && bleAddressTypeIsRandom(directedTargetAddressType_)) {
+    header |= (1U << 7U);
+  }
 
   txPacket_[0] = header;
   txPacket_[1] = static_cast<uint8_t>(payloadLen & 0x3FU);
 
   memcpy(&txPacket_[2], address_, sizeof(address_));
-  if (advDataLen_ > 0U) {
+  if (directed) {
+    memcpy(&txPacket_[2 + sizeof(address_)], directedTargetAddress_,
+           sizeof(directedTargetAddress_));
+  } else if (advDataLen_ > 0U) {
     memcpy(&txPacket_[2 + sizeof(address_)], advData_, advDataLen_);
   }
 
