@@ -49,6 +49,23 @@ def make_platform_entry(version: str) -> dict:
 
 
 class ReleaseVersionTests(unittest.TestCase):
+    def test_release_staging_excludes_ignored_workspace_files(self) -> None:
+        ignored = PLATFORM / "build" / "release-ignore-probe.bin"
+        ignored.parent.mkdir(parents=True, exist_ok=True)
+        ignored.write_bytes(b"must not ship")
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                stage = Path(directory) / PLATFORM.name
+                build_release.stage_git_release_tree(ROOT, PLATFORM, stage)
+                self.assertTrue((stage / "platform.txt").is_file())
+                self.assertFalse((stage / "build" / ignored.name).exists())
+        finally:
+            ignored.unlink(missing_ok=True)
+            try:
+                ignored.parent.rmdir()
+            except OSError:
+                pass
+
     def test_numeric_and_prerelease_versions(self) -> None:
         self.assertEqual(build_release.parse_version("1.0.1"), (1, 0, 1))
         self.assertEqual(build_release.parse_version("1.0.1-rc1"), (1, 0, 1))

@@ -14,10 +14,10 @@
           "architecture": "nrf54l15clean",
           "version": "1.0.0",
           "category": "Arduino",
-          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v1.0.0/nrf54l15clean-1.0.0-a7331190ed45.tar.bz2",
-          "archiveFileName": "nrf54l15clean-1.0.0-a7331190ed45.tar.bz2",
-          "checksum": "SHA-256:a7331190ed45f218e35839c96a27786f997f1f130bc42a1f6d7451411fe4afb2",
-          "size": "6280539",
+          "url": "https://github.com/lolren/nrf54-arduino-core/releases/download/v1.0.0/nrf54l15clean-1.0.0-723febbcd736.tar.bz2",
+          "archiveFileName": "nrf54l15clean-1.0.0-723febbcd736.tar.bz2",
+          "checksum": "SHA-256:723febbcd736caf37e008985c89bb3eb3297ea21125614e3d62ca2a54a15ddeb",
+          "size": "6275058",
           "boards": [
             {
               "name": "XIAO nRF54L15 / Sense"

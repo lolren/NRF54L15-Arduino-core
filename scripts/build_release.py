@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import zipfile
@@ -99,6 +100,33 @@ def iter_archive_entries(source_dir: Path, excludes: tuple[str, ...]) -> list[Pa
         for child in [source_dir, *sorted(source_dir.rglob("*"))]
         if not path_is_excluded(child, source_dir, excludes)
     ]
+
+
+def stage_git_release_tree(root: Path, source_dir: Path, stage_dir: Path) -> None:
+    """Stage tracked and non-ignored untracked files for reproducible archives."""
+    source_rel = source_dir.relative_to(root).as_posix()
+    result = subprocess.run(
+        [
+            "git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+            "--exclude-standard", "--", source_rel,
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    paths = [item for item in result.stdout.split(b"\0") if item]
+    if not paths:
+        raise SystemExit(f"No Git release files found under {source_rel}")
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    for raw_path in paths:
+        repo_rel = os.fsdecode(raw_path)
+        source = root / repo_rel
+        relative = source.relative_to(source_dir)
+        destination = stage_dir / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink():
+            destination.symlink_to(os.readlink(source))
+        else:
+            shutil.copy2(source, destination)
 
 
 def build_archive(
@@ -685,12 +713,15 @@ def main() -> int:
 
     platform_ext = ".tar.bz2"
     temp_archive_path = dist_dir / f".{args.packager}-{version}{platform_ext}"
-    build_archive(
-        platform_dir,
-        temp_archive_path,
-        f"{args.packager}-{version}",
-        excludes=platform_excludes,
-    )
+    with tempfile.TemporaryDirectory(prefix="nrf54-platform-stage-") as td:
+        staged_platform = Path(td) / platform_dir.name
+        stage_git_release_tree(root, platform_dir, staged_platform)
+        build_archive(
+            staged_platform,
+            temp_archive_path,
+            f"{args.packager}-{version}",
+            excludes=platform_excludes,
+        )
     archive_path, archive_name, archive_sha256, archive_size = finalize_content_addressed_archive(
         temp_archive_path,
         f"{args.packager}-{version}",
