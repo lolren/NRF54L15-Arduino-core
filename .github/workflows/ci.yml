@@ -368,7 +368,32 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install arduino:mbed_nano
 
+      - name: Select package verification mode
+        id: package-mode
+        shell: bash
+        run: |
+          SOURCE_VERSION="nrf54l15clean"
+          VERSION="$(sed -n 's/^version=//p' "hardware/nrf54l15clean/${SOURCE_VERSION}/platform.txt" | head -n1)"
+          test -n "${VERSION}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "released=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "released=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Verify immutable published package
+        if: steps.package-mode.outputs.released == 'true'
+        run: |
+          python3 ./scripts/verify_public_release.py \
+            --index package_nrf54l15clean_index.json \
+            --version "${{ steps.package-mode.outputs.version }}" \
+            --include-tools \
+            --retries 3 \
+            --retry-delay 2
+
       - name: Build release artifacts
+        if: steps.package-mode.outputs.released != 'true'
         run: |
           if [ -d "hardware/nrf54l15clean/nrf54l15clean" ]; then
             SOURCE_VERSION="nrf54l15clean"
@@ -385,12 +410,14 @@ jobs:
             --reuse-existing-hosttools
 
       - name: Ensure checked-in index matches generated index
+        if: steps.package-mode.outputs.released != 'true'
         run: |
           diff -u dist/package_nrf54l15clean_index.json package_nrf54l15clean_index.json
           diff -u dist/package_nrf54l15clean_stable_index.json package_nrf54l15clean_stable_index.json
           diff -u dist/package_nrf54l15clean_archive_index.json package_nrf54l15clean_archive_index.json
 
       - name: Verify checksum and size
+        if: steps.package-mode.outputs.released != 'true'
         run: |
           PLATFORM_ARCHIVE="$(python3 - <<'PY'
           import json
@@ -423,6 +450,7 @@ jobs:
           done
 
       - name: Compile advertised features from exact archive
+        if: steps.package-mode.outputs.released != 'true'
         run: |
           PLATFORM_ARCHIVE="$(python3 - <<'PY'
           import json
