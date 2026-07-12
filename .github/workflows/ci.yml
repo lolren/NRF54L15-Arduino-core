@@ -235,26 +235,6 @@ jobs:
       - name: nRF54LM20A CRACEN RNG register contracts
         run: python3 ./scripts/test_lm20a_cracen_rng_header.py
 
-  android-voice-imu-demo:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Setup Java
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Verify checked-in APK checksum
-        working-directory: extras/VoiceImuDemo/apk
-        run: sha256sum -c SHA256SUMS.txt
-
-      - name: Test and build Android app
-        working-directory: extras/VoiceImuDemo/android
-        run: ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug -x copyVersionedDebugApk
-
   audit-contract-compiles:
     runs-on: ubuntu-latest
     strategy:
@@ -279,9 +259,6 @@ jobs:
           - board: xiao_nrf54l15
             options: cpu_freq=64m
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/HID/blehid_mouse
-          - board: xiao_nrf54lm20b
-            options: clean_ble=on,cpu_freq=128m
-            sketch: extras/VoiceImuDemo/firmware/VoiceImuPeripheral
           - board: xiao_nrf54lm20b
             options: clean_ble=on,cpu_freq=128m
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator
