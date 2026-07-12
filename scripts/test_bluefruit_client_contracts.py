@@ -96,6 +96,16 @@ def main() -> int:
     assert "BLE_GAP_AD_TYPE_SOLICITED_SERVICE_UUIDS_128BIT 0x15U" in common
     print("PASS client-service 16/128-bit Service Solicitation AD encoding")
 
+    uuid_canonical = function_body(source, "void bleUuid128ToCanonical(")
+    service_begin = function_body(source, "err_t BLEService::begin()")
+    characteristic_begin = function_body(source, "err_t BLECharacteristic::begin()")
+    assert "canonical[i] = littleEndian[15U - i]" in uuid_canonical
+    assert "bleUuid128ToCanonical(uuid.uuid128(), canonicalUuid)" in service_begin
+    assert "addCustomGattService128(canonicalUuid" in service_begin
+    assert "bleUuid128ToCanonical(uuid.uuid128(), canonicalUuid)" in characteristic_begin
+    assert "addCustomGattCharacteristic128WithDescriptors(\n        _service->_handle, canonicalUuid" in characteristic_begin
+    print("PASS Bluefruit 128-bit server UUID canonical/wire byte order")
+
     ancs_get = function_body(
         source,
         "uint16_t BLEAncs::getAttribute(uint32_t uid, uint8_t attr, void* buffer, uint16_t bufsize)",

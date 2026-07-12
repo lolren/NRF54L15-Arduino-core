@@ -454,6 +454,9 @@ test procedure.
 - Use the lower-level examples under `Nrf54L15-Clean-Implementation` for radio,
   privacy, crypto, and hardware diagnostics where compatibility wrappers would
   hide the behavior being tested.
+- The repository's [XIAO Sense Voice + IMU Android demo](extras/VoiceImuDemo/README.md)
+  includes a low-power wake/listen firmware sketch, complete Android source,
+  live audio playback and IMU plotting, and an installable debug APK.
 
 A normal peripheral sketch follows this order:
 

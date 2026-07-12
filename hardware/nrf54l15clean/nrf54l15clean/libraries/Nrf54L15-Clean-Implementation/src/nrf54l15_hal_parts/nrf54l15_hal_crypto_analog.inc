@@ -1994,7 +1994,12 @@ Pdm::Pdm(uint32_t base)
       modeConfig_(0U),
       ratioConfig_(PDM_RATIO_RATIO_Ratio80),
       prescalerConfig_(25U),
-      sampleRateHz_(16000UL) {}
+      sampleRateHz_(16000UL),
+      streaming_(false),
+      streamStarting_(false),
+      streamActiveBuffer_(0U),
+      streamSampleCount_(0U),
+      streamBuffers_{nullptr, nullptr} {}
 
 void Pdm::applyConfiguration() {
   pdm_->PSEL.CLK = make_psel(clkPin_.port, clkPin_.pin);
@@ -2078,6 +2083,11 @@ void Pdm::end() {
   }
 
   (void)stopAndReleaseDma(100000UL);
+  streaming_ = false;
+  streamStarting_ = false;
+  streamSampleCount_ = 0U;
+  streamBuffers_[0] = nullptr;
+  streamBuffers_[1] = nullptr;
   pdm_->ENABLE = PDM_ENABLE_ENABLE_Disabled;
   __DSB();
   (void)pdm_->ENABLE;
@@ -2122,7 +2132,8 @@ bool Pdm::stopAndReleaseDma(uint32_t timeoutUs) {
 }
 
 bool Pdm::capture(int16_t* samples, size_t sampleCount, uint32_t timeoutUs) {
-  if (!configured_ || samples == nullptr || sampleCount < kDrainSampleCount) {
+  if (!configured_ || streaming_ || samples == nullptr ||
+      sampleCount < kDrainSampleCount) {
     return false;
   }
 
@@ -2188,3 +2199,128 @@ bool Pdm::capture(int16_t* samples, size_t sampleCount, uint32_t timeoutUs) {
 
   return endSeen && stoppedBeforeDeadline && !busError;
 }
+
+bool Pdm::startStream(int16_t* firstBuffer, size_t sampleCount) {
+  if (!configured_ || streaming_ || firstBuffer == nullptr ||
+      sampleCount < kDrainSampleCount ||
+      sampleCount > (PDM_SAMPLE_MAXCNT_BUFFSIZE_Max / sizeof(int16_t))) {
+    return false;
+  }
+  const uintptr_t ptr = reinterpret_cast<uintptr_t>(firstBuffer);
+  if ((ptr & 0x3U) != 0U) {
+    return false;
+  }
+
+  clearPdmEvent(&pdm_->EVENTS_STARTED);
+  clearPdmEvent(&pdm_->EVENTS_END);
+  clearPdmEvent(&pdm_->EVENTS_STOPPED);
+  clearPdmEvent(&pdm_->EVENTS_DMA.BUSERROR);
+  streamBuffers_[0] = firstBuffer;
+  streamBuffers_[1] = nullptr;
+  streamActiveBuffer_ = 0U;
+  streamSampleCount_ = sampleCount;
+  streamStarting_ = true;
+  streaming_ = true;
+
+  pdm_->SAMPLE.PTR = static_cast<uint32_t>(ptr);
+  pdm_->SAMPLE.MAXCNT =
+      static_cast<uint32_t>(sampleCount * sizeof(int16_t));
+  applyConfiguration();
+  pdm_->ENABLE = PDM_ENABLE_ENABLE_Enabled;
+  __DSB();
+  (void)pdm_->ENABLE;
+  pdm_->TASKS_START = PDM_TASKS_START_TASKS_START_Trigger;
+  return true;
+}
+
+bool Pdm::queueStreamBuffer(int16_t* buffer) {
+  if (!streaming_ || streamStarting_ || buffer == nullptr) {
+    return false;
+  }
+  const uintptr_t ptr = reinterpret_cast<uintptr_t>(buffer);
+  if ((ptr & 0x3U) != 0U) {
+    return false;
+  }
+  if (buffer == streamBuffers_[streamActiveBuffer_]) {
+    return false;
+  }
+  const uint8_t nextBuffer = static_cast<uint8_t>(streamActiveBuffer_ ^ 1U);
+  if (streamBuffers_[nextBuffer] != nullptr) {
+    return false;
+  }
+
+  streamBuffers_[nextBuffer] = buffer;
+  pdm_->SAMPLE.PTR = static_cast<uint32_t>(ptr);
+  pdm_->SAMPLE.MAXCNT =
+      static_cast<uint32_t>(streamSampleCount_ * sizeof(int16_t));
+  __DSB();
+  return true;
+}
+
+bool Pdm::pollStream(StreamEvent* event) {
+  if (event == nullptr) {
+    return false;
+  }
+  event->releasedBuffer = nullptr;
+  event->bufferRequested = false;
+  event->overflow = false;
+  event->busError = false;
+  if (!streaming_) {
+    return false;
+  }
+
+  if (pdm_->EVENTS_DMA.BUSERROR != 0U) {
+    event->busError = true;
+    (void)stopStream();
+    return true;
+  }
+  if (pdm_->EVENTS_STARTED == 0U) {
+    return false;
+  }
+
+  clearPdmEvent(&pdm_->EVENTS_STARTED);
+  clearPdmEvent(&pdm_->EVENTS_END);
+  if (streamStarting_) {
+    streamStarting_ = false;
+    event->bufferRequested = true;
+    return true;
+  }
+
+  const uint8_t nextBuffer = static_cast<uint8_t>(streamActiveBuffer_ ^ 1U);
+  if (streamBuffers_[nextBuffer] == nullptr) {
+    event->overflow = true;
+    (void)stopStream();
+    return true;
+  }
+
+  event->releasedBuffer = streamBuffers_[streamActiveBuffer_];
+  streamBuffers_[streamActiveBuffer_] = nullptr;
+  streamActiveBuffer_ = nextBuffer;
+  event->bufferRequested = true;
+  Cache::invalidateForDma(
+      event->releasedBuffer,
+      static_cast<uint32_t>(streamSampleCount_ * sizeof(int16_t)));
+  return true;
+}
+
+bool Pdm::stopStream(uint32_t timeoutUs) {
+  if (!streaming_) {
+    return true;
+  }
+  const bool stopped = stopAndReleaseDma(timeoutUs);
+  const uint32_t byteCount =
+      static_cast<uint32_t>(streamSampleCount_ * sizeof(int16_t));
+  for (uint8_t i = 0U; i < 2U; ++i) {
+    if (streamBuffers_[i] != nullptr) {
+      Cache::invalidateForDma(streamBuffers_[i], byteCount);
+    }
+    streamBuffers_[i] = nullptr;
+  }
+  streaming_ = false;
+  streamStarting_ = false;
+  streamActiveBuffer_ = 0U;
+  streamSampleCount_ = 0U;
+  return stopped;
+}
+
+bool Pdm::isStreaming() const { return streaming_; }

@@ -1954,7 +1954,12 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionAttMtuExchangePending_ = false;
   connectionAttMtuExchangeInFlight_ = false;
   connectionAttMtuExchangeComplete_ = false;
-  connectionConnParamUpdatePending_ = false;
+  const uint16_t preferredIntervalMax =
+      (gapPpcpIntervalMax_ != 0U) ? gapPpcpIntervalMax_ : gapPpcpIntervalMin_;
+  connectionConnParamUpdatePending_ =
+      intervalUnits < gapPpcpIntervalMin_ ||
+      intervalUnits > preferredIntervalMax || latency != gapPpcpLatency_ ||
+      timeoutUnits != gapPpcpTimeout_;
   connectionConnParamUpdateInFlight_ = false;
   connectionConnParamUpdateIdentifier_ = 1U;
   connectionRole_ = BleConnectionRole::kPeripheral;

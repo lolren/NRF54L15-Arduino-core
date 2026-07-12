@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Sense Voice + IMU</string>
+    <string name="connect">Connect</string>
+    <string name="stop">Stop</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="listen">Listen</string>
+    <string name="mute">Mute</string>
+    <string name="status_idle">Not connected</string>
+    <string name="audio_waiting">Audio idle</string>
+    <string name="imu_waiting">Waiting for IMU data</string>
+    <string name="live_microphone">Live microphone</string>
+    <string name="motion">Motion</string>
+    <string name="board_drops">Board drops: audio %1$d, IMU %2$d</string>
+</resources>

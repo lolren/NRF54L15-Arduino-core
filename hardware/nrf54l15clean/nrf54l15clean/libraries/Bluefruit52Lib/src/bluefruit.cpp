@@ -770,6 +770,16 @@ bool parseUuidString(const char* str, uint8_t outUuid[16], uint8_t* outSize,
   return true;
 }
 
+void bleUuid128ToCanonical(const uint8_t littleEndian[16],
+                           uint8_t canonical[16]) {
+  if (littleEndian == nullptr || canonical == nullptr) {
+    return;
+  }
+  for (size_t i = 0U; i < 16U; ++i) {
+    canonical[i] = littleEndian[15U - i];
+  }
+}
+
 uint8_t mapProperties(uint8_t properties) {
   uint8_t mapped = 0U;
   if ((properties & CHR_PROPS_READ) != 0U) {
@@ -4410,7 +4420,9 @@ err_t BLEService::begin() {
   if (uuid.size() == 2U) {
     ok = manager().radio().addCustomGattService(uuid.uuid16(), &_handle);
   } else if (uuid.size() == 16U) {
-    ok = manager().radio().addCustomGattService128(uuid.uuid128(), &_handle);
+    uint8_t canonicalUuid[16] = {0};
+    bleUuid128ToCanonical(uuid.uuid128(), canonicalUuid);
+    ok = manager().radio().addCustomGattService128(canonicalUuid, &_handle);
   }
   if (!ok) {
     return ERROR_INVALID_STATE;
@@ -4606,8 +4618,10 @@ err_t BLECharacteristic::begin() {
         _service->_handle, uuid.uuid16(), properties, _value, initialLen, &valueHandle,
         &cccdHandle, &descriptors, &descriptorHandles);
   } else if (uuid.size() == 16U) {
+    uint8_t canonicalUuid[16] = {0};
+    bleUuid128ToCanonical(uuid.uuid128(), canonicalUuid);
     ok = manager().radio().addCustomGattCharacteristic128WithDescriptors(
-        _service->_handle, uuid.uuid128(), properties, _value, initialLen, &valueHandle,
+        _service->_handle, canonicalUuid, properties, _value, initialLen, &valueHandle,
         &cccdHandle, &descriptors, &descriptorHandles);
   }
   if (!ok) {

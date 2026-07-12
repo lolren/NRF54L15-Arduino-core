@@ -1378,6 +1378,13 @@ enum class PdmEdge : uint8_t {
 
 class Pdm {
  public:
+  struct StreamEvent {
+    int16_t* releasedBuffer;
+    bool bufferRequested;
+    bool overflow;
+    bool busError;
+  };
+
   explicit Pdm(uint32_t base = nrf54l15::PDM20_BASE);
 
   bool begin(const Pin& clk, const Pin& din, bool mono = true,
@@ -1394,6 +1401,16 @@ class Pdm {
   bool capture(int16_t* samples, size_t sampleCount,
                uint32_t timeoutUs = 0UL);
 
+  // Continuous capture keeps PDM running while caller-owned buffers alternate.
+  // Poll until bufferRequested is reported, then queue the next buffer before
+  // the active buffer duration elapses. A released buffer is no longer owned
+  // by EasyDMA and is cache-coherent when returned.
+  bool startStream(int16_t* firstBuffer, size_t sampleCount);
+  bool queueStreamBuffer(int16_t* buffer);
+  bool pollStream(StreamEvent* event);
+  bool stopStream(uint32_t timeoutUs = 100000UL);
+  bool isStreaming() const;
+
  private:
   static constexpr size_t kDrainSampleCount = 64U;
   void applyConfiguration();
@@ -1407,6 +1424,11 @@ class Pdm {
   uint32_t ratioConfig_;
   uint32_t prescalerConfig_;
   uint32_t sampleRateHz_;
+  bool streaming_;
+  bool streamStarting_;
+  uint8_t streamActiveBuffer_;
+  size_t streamSampleCount_;
+  int16_t* streamBuffers_[2];
   alignas(4) int16_t drainSamples_[kDrainSampleCount];
 };
 

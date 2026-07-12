@@ -195,6 +195,23 @@ class Lm20aPdmContractTests(unittest.TestCase):
         self.assertIn("true, 25, PDM_RATIO_RATIO_Ratio80", example)
         self.assertIn("PdmEdge::kLeftFalling", example)
 
+    def test_continuous_stream_uses_ping_pong_dma_and_releases_cache(self) -> None:
+        header = HAL_HEADER.read_text(encoding="utf-8")
+        source = HAL_ANALOG.read_text(encoding="utf-8")
+        self.assertIn("struct StreamEvent", header)
+        self.assertIn("bool startStream(int16_t* firstBuffer", header)
+        self.assertIn("bool queueStreamBuffer(int16_t* buffer)", header)
+        self.assertIn("bool pollStream(StreamEvent* event)", header)
+        self.assertIn("bool stopStream(uint32_t timeoutUs = 100000UL)", header)
+        self.assertIn("streamActiveBuffer_ ^ 1U", source)
+        self.assertIn(
+            "buffer == streamBuffers_[streamActiveBuffer_]", source
+        )
+        self.assertIn("event->overflow = true", source)
+        self.assertIn("event->bufferRequested = true", source)
+        self.assertIn("Cache::invalidateForDma(\n      event->releasedBuffer", source)
+        self.assertIn("if (!configured_ || streaming_ || samples == nullptr", source)
+
     def test_example_selects_exact_16_khz_left_channel(self) -> None:
         source = MIC_EXAMPLE.read_text(encoding="utf-8")
         self.assertIn("kPdmPrescaler = 25U", source)

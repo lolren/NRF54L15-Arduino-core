@@ -1652,6 +1652,17 @@ def validate_ble_security_hardening_contracts() -> None:
     assert "connectionCentralConnParamIndPending_ = true" in conn_param_req
     assert "rejectProcedureCollision()" in conn_param_req
 
+    connections = (
+        parts / "nrf54l15_hal_ble_scanning_connections.inc"
+    ).read_text(encoding="utf-8")
+    peripheral_connect = function_body(
+        connections, "bool BleRadio::startConnectionFromConnectInd("
+    )
+    assert "preferredIntervalMax" in peripheral_connect
+    assert "intervalUnits < gapPpcpIntervalMin_" in peripheral_connect
+    assert "intervalUnits > preferredIntervalMax" in peripheral_connect
+    assert "connectionConnParamUpdatePending_ =" in peripheral_connect
+
     smp = (parts / "nrf54l15_hal_ble_att_l2cap.inc").read_text(encoding="utf-8")
     assert "SMP_SECURITY_REQUEST_BOND_UPGRADE" in smp
     assert "clearSmpPairingState();" in smp
