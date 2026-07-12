@@ -62,7 +62,6 @@ static bool g_wasConnected = false;
 static bool g_phyRequestIssued = false;
 static bool g_dataLengthRequestIssued = false;
 static bool g_mtuRequestIssued = false;
-static bool g_flexiblePreferenceSet = false;
 static bool g_returnBaselineSet = false;
 static uint16_t g_serviceStartHandle = 0U;
 static uint16_t g_serviceEndHandle = 0U;
@@ -191,7 +190,6 @@ static void resetDiscovery() {
   g_phyRequestIssued = false;
   g_dataLengthRequestIssued = false;
   g_mtuRequestIssued = false;
-  g_flexiblePreferenceSet = false;
   g_returnBaselineSet = false;
   g_serviceStartHandle = 0U;
   g_serviceEndHandle = 0U;
@@ -205,12 +203,6 @@ static void resetDiscovery() {
   g_fallbackBaselineNotifyCount = 0U;
   g_returnBaselineNotifyCount = 0U;
   g_lastNotifySequence = 0U;
-}
-
-static bool initial2MPhyRequestReady() {
-  return (g_phase == DiscoveryPhase::kReady) &&
-         (g_ble.currentAttMtu() >= kRequestedMtu) &&
-         (g_ble.currentDataLength() >= 251U);
 }
 
 static bool queueServiceDiscovery() {
@@ -390,6 +382,12 @@ static void handleWriteResponse() {
   g_requestInFlight = false;
   g_phase = DiscoveryPhase::kReady;
   Serial.print("notifications enabled\r\n");
+  if (!g_phyRequestIssued) {
+    g_phyRequestIssued = g_ble.requestPHY(kBlePhy2M);
+    if (g_phyRequestIssued) {
+      Serial.print("request 2M phy: queued\r\n");
+    }
+  }
 }
 
 static void handleNotification(const BleConnectionEvent& evt) {
@@ -443,13 +441,10 @@ static void maybeDrivePhyCycle(const BleConnectionInfo& info, uint32_t nowMs) {
       if ((info.txPhy == kBlePhy1M) &&
           (info.rxPhy == kBlePhy1M) &&
           (g_longNotifyReceiveCount > g_fallbackBaselineNotifyCount)) {
-        if (!g_flexiblePreferenceSet &&
-            g_ble.setPreferredPhyOptions(
-                static_cast<uint8_t>(kBlePhy1M | kBlePhy2M),
-                static_cast<uint8_t>(kBlePhy1M | kBlePhy2M))) {
-          g_flexiblePreferenceSet = true;
-          Serial.print("phy preference: flexible\r\n");
+        if (!g_ble.requestPHY(kBlePhy2M)) {
+          return;
         }
+        Serial.print("request phy 2M return: queued\r\n");
         g_cyclePhase = PhyCyclePhase::kWaitForReturn2MTraffic;
         g_returnBaselineSet = false;
         Serial.print("cycle phase: 1M long notify confirmed\r\n");
@@ -579,12 +574,6 @@ void loop() {
   const uint32_t nowMs = millis();
   (void)g_ble.getConnectionInfo(&info);
   queueDiscoveryStep();
-  if (!g_phyRequestIssued && initial2MPhyRequestReady()) {
-    g_phyRequestIssued = g_ble.requestPHY(kBlePhy2M);
-    if (g_phyRequestIssued) {
-      Serial.print("request 2M phy: queued\r\n");
-    }
-  }
   maybeDrivePhyCycle(info, nowMs);
   if ((nowMs - g_lastReportMs) >= kStatusIntervalMs) {
     g_lastReportMs = nowMs;

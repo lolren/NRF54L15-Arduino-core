@@ -23,5 +23,6 @@ rm -rf "$DEST_BASE/openthread"
 cp -R "$TMP_DIR/openthread/include/openthread" "$DEST_BASE/"
 cp "$TMP_DIR/openthread/examples/platforms/openthread-system.h" "$DEST_BASE/openthread-system.h"
 cp "$TMP_DIR/openthread/LICENSE" "$DEST_BASE/openthread-LICENSE.txt"
+cp "$TMP_DIR/openthread/NOTICE" "$DEST_BASE/openthread-NOTICE.txt"
 
 echo "Imported OpenThread public headers from ref: $OT_REF"

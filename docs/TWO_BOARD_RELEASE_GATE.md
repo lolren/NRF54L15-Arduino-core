@@ -1,10 +1,11 @@
 # Two-Board Release Gate
 
 `scripts/run_two_board_release_gate.py` is the repeatable hardware evidence
-gate for release candidates. It uses one attached nRF54L15 board and one
-nRF54LM20 board, identifies them by CMSIS-DAP UID, resolves their stable CDC
-ports through `/dev/serial/by-id`, and writes every compiler, programmer, and
-serial artifact to a timestamped directory under `measurements/`.
+gate for stable releases and release candidates. It uses one attached nRF54L15
+board and one nRF54LM20A board (abbreviated `LM20` in runner artifacts),
+identifies them by CMSIS-DAP UID, resolves their stable CDC ports through
+`/dev/serial/by-id`, and writes every compiler, programmer, and serial artifact
+to a timestamped directory under `measurements/`.
 
 The runner creates an isolated Arduino CLI user/download tree inside its
 artifact directory, registers only this checkout as the `localnrf54` hardware
@@ -17,7 +18,7 @@ command is retained with its output.
 
 ## Profiles
 
-Run the short release-candidate smoke gate:
+Run the short hardware smoke gate:
 
 ```bash
 python3 scripts/run_two_board_release_gate.py --profile smoke
@@ -79,9 +80,13 @@ Both profiles perform the following checks.
 
 The `full` profile additionally verifies:
 
+Together with the four common phases above, these eleven phases make the full
+release gate a 15-phase run.
+
 | Phase | Evidence required |
 | --- | --- |
 | `ble_pair_bond` | Two-board Just Works pairing saves a bond on each board, encrypts, subscribes, writes GATT data, reloads bonds after reset, and encrypts the reconnect. |
+| `ble_signed_write` | Fresh encrypted pairing distributes SignKey material and saves a signing-ready bond on both boards. After an unencrypted reconnect, the central sends a production signed write, the peripheral applies it exactly once, and an injected replay is rejected. The runner then clears both `.noinit` bond/CCCD caches through pyOCD; a second reconnect must reload the bond, CSRKs, and counters from built-in RRAM before another signed write succeeds. |
 | `ble_numeric_comparison` | Both boards display the same six-digit value, accept it, exchange encrypted GATT traffic, save authenticated bonds, and reconnect without prompting or saving another bond. |
 | `ble_numeric_comparison_reject` | The initiator accepts while the responder rejects the same Numeric Comparison request; the gate requires pairing failure, no link encryption, and no bond save. |
 | `ble_oob_pairing` | The runner captures both fresh LE SC `r/c` records, exchanges the exact `peer` records over Serial, and requires authenticated mutual-OOB pairing plus bidirectional encrypted UART. |
@@ -107,11 +112,12 @@ generic `Wire1` pin, because that route is board-specific (on LM20 it is
 
 ## Release Use
 
-`1.0.0-rc1` should require a clean `--profile full` result from the candidate
-source checkout/core version, separate verification and compilation from the
-exact release archive, a fresh package-install compilation pass, the existing
-compile CI, and recorded long-soak evidence. A release should retain the
-hardware artifact directory or archive it with the release-validation record.
+The stable `1.0.0` release requires a clean `--profile full` result from the
+release source checkout/core version, separate verification and compilation
+from the exact release archive, a fresh package-install compilation pass, the
+existing compile CI, and the retained hardware artifact directory. Longer soak
+runs should be retained with the release-validation record whenever they inform
+the release decision.
 
 This gate is intentionally not presented as proof of full Bluetooth
 qualification. It does not replace phone/desktop interoperability testing,
@@ -119,8 +125,11 @@ power/current profiling, an RF attenuation test setup, multi-link stress, or
 Bluetooth PTS/BQB qualification. Its CS phase covers the released standalone
 LE CS Test pair, not a connected-ACL Channel Sounding application workflow.
 The security/privacy phases cover the core's single retained bond and
-application-managed resolving list; they do not test CSRK signing,
-controller-enforced multi-peer privacy policy, or a complete negative SMP
-matrix. It also does not inject entropy failure, negotiate reduced SMP key
-sizes, wait out the 30-second SMP timer, validate repeated-attempt timing, or
-exercise an in-place stored-bond security upgrade.
+application-managed resolving list. The signed-write phase covers SignKey
+distribution, the production send/receive paths, replay rejection, and durable
+counters between the two bundled peers; it does not establish phone/desktop
+signed-write interoperability or a multi-peer signing policy. The gate also
+does not test controller-enforced multi-peer privacy policy or a complete
+negative SMP matrix. It does not inject entropy failure, negotiate reduced SMP
+key sizes, wait out the 30-second SMP timer, validate repeated-attempt timing,
+or exercise an in-place stored-bond security upgrade.

@@ -23,6 +23,7 @@ git clone --no-checkout --filter=blob:none --sparse \
     /src/include \
     /third_party/mbedtls \
     /LICENSE \
+    /NOTICE \
     /README.md
 )
 
@@ -35,6 +36,7 @@ cp -R "$TMP_DIR/openthread/src/include" "$DEST_BASE/src/"
 cp -R "$TMP_DIR/openthread/third_party/mbedtls" "$DEST_BASE/third_party/"
 find "$DEST_BASE" -type f \( -name "BUILD.gn" -o -name "CMakeLists.txt" -o -name "*.cmake" \) -delete
 cp "$TMP_DIR/openthread/LICENSE" "$DEST_BASE/openthread-LICENSE.txt"
+cp "$TMP_DIR/openthread/NOTICE" "$DEST_BASE/openthread-NOTICE.txt"
 cp "$TMP_DIR/openthread/README.md" "$DEST_BASE/openthread-README-upstream.md"
 
 (

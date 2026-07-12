@@ -187,6 +187,7 @@ void loop()
 
   // No notifications, do nothing
   if ( notifCount == 0 ) return;
+  if ( activeIndex < 0 || activeIndex >= notifCount ) activeIndex = 0;
 
   // Check buttons
   uint32_t presedButtons = readPressedButtons();
@@ -275,7 +276,8 @@ void displayNotification(int index)
   {
     // Text size = 1, max char is 21. Text size = 2, max char is 10
     char tempbuf[30];
-    sprintf(tempbuf, "%-15s %02d/%02d", myNtf->app_name, index+1, notifCount);
+    snprintf(tempbuf, sizeof(tempbuf), "%.15s %02d/%02d",
+             myNtf->app_name, index+1, notifCount);
 
     oled.println(tempbuf);
     oled.println(myNtf->title);
@@ -352,8 +354,13 @@ void connection_secured_callback(uint16_t conn_handle)
  */
 void ancs_notification_callback(AncsNotification_t* notif)
 {
+  if ( notif == nullptr ) return;
+
   if (notif->eventID == ANCS_EVT_NOTIFICATION_ADDED )
   {
+    // The list is deliberately fixed-size so notifications cannot exhaust RAM.
+    if ( notifCount >= MAX_COUNT ) return;
+
     myNotifs[ notifCount ].ntf = *notif;
 
     /*------------- Retrieve Title, Message, App Name -------------*/
@@ -367,15 +374,15 @@ void ancs_notification_callback(AncsNotification_t* notif)
       char u202D[3] = { 0xE2, 0x80, 0xAD }; // U+202D in UTF-8
       char u202C[3] = { 0xE2, 0x80, 0xAC }; // U+202C in UTF-8
 
-      int len = strlen(myNtf->title);
+      size_t len = strlen(myNtf->title);
 
-      if ( 0 == memcmp(&myNtf->title[len-3], u202C, 3) )
+      if ( len >= 3 && 0 == memcmp(&myNtf->title[len-3], u202C, 3) )
       {
         len -= 3;
         myNtf->title[len] = 0; // chop ending U+202C
       }
 
-      if ( 0 == memcmp(myNtf->title, u202D, 3) )
+      if ( len >= 3 && 0 == memcmp(myNtf->title, u202D, 3) )
       {
         memmove(myNtf->title, myNtf->title+3, len-2); // move null-terminator as well
       }
@@ -392,19 +399,27 @@ void ancs_notification_callback(AncsNotification_t* notif)
       if ( notif->uid == myNotifs[i].ntf.uid )
       {
         // remove by swapping with the last one
+        int previousActive = activeIndex;
         notifCount--;
         myNotifs[i] = myNotifs[notifCount];
 
         // Invalid removed data
         memset(&myNotifs[notifCount], 0, sizeof(MyNotif_t));
 
-        if (activeIndex == notifCount)
+        if (notifCount == 0)
         {
-          // If remove the last notification, adjust display index
-          displayIndex = notifCount-1;
-        }else if (activeIndex == i)
+          activeIndex = 0;
+          displayIndex = -1;
+        }else
         {
-          // Re-draw if remove currently active one
+          if (previousActive == notifCount)
+          {
+            // The old last entry was moved into the removed slot.
+            activeIndex = i;
+          }else if (previousActive == i)
+          {
+            activeIndex = (i < notifCount) ? i : (notifCount-1);
+          }
           displayIndex = activeIndex;
         }
 
@@ -483,7 +498,9 @@ uint32_t readPressedButtons(void)
 
   // Take current read and masked with BUTTONs
   // Note: Bitwise inverted since buttons are active (pressed) LOW
-  uint32_t debounced = ~( (digitalRead(BUTTON_A) << BUTTON_A) | (digitalRead(BUTTON_C) << BUTTON_C) );
+  uint32_t debounced =
+      ~((static_cast<uint32_t>(digitalRead(BUTTON_A)) << BUTTON_A) |
+        (static_cast<uint32_t>(digitalRead(BUTTON_C)) << BUTTON_C));
 
   // Copy current state into array
   states[ (index & (MAX_CHECKS-1)) ] = debounced;

@@ -1,7 +1,13 @@
 /*
- * Arduino Print implementation
+ * Print.cpp - base class providing Arduino print() and println().
+ * Copyright (c) 2008 David A. Mellis. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Licensed under the Apache License 2.0
+ * Modified 23 November 2006 by David A. Mellis.
+ * Modified 03 August 2015 by Chuck Todd.
+ * Modified for the nRF54 Arduino Core in 2026: reformatted and adapted number,
+ * buffer, and formatting paths to the local C++ implementation. See
+ * ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #include "Print.h"

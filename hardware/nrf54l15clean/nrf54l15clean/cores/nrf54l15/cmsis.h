@@ -1,10 +1,13 @@
 /*
- * CMSIS-Core Compatibility Header for nRF54L15
+ * Copyright (c) 2009-2020 Arm Limited. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Minimal CMSIS-Core definitions for ARM Cortex-M33.
- * Based on ARM CMSIS-CORE specification.
+ * Modified for the nRF54 Arduino Core in 2026: reduced CMSIS-Core 5.7 Cortex-M33
+ * register and GCC intrinsic definitions to the surface used by this bare-metal
+ * core, with nRF54 interrupt sizing and helpers. See
+ * ../../LICENSES/Apache-2.0.txt.
  *
- * Licensed under the Apache License 2.0
+ * CMSIS-Core Compatibility Header for nRF54L15.
  */
 
 #ifndef CMSIS_H

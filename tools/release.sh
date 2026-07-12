@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLATFORM="$ROOT/hardware/nrf54l15clean/nrf54l15clean/platform.txt"
+DIST="$ROOT/dist"
 
 if [[ ${1:-} == --* ]]; then
     VERSION="$(sed -n 's/^version=//p' "$PLATFORM" | head -n 1)"
@@ -26,11 +27,22 @@ ARGS=(
     --source-version nrf54l15clean
     --repo-url https://github.com/lolren/nrf54-arduino-core
     --release-base-url 'https://github.com/lolren/nrf54-arduino-core/releases/download/v{version}'
+    --host-tools-release-base-url 'https://github.com/lolren/nrf54-arduino-core/releases/download/host-tools-v{host_tool_version}'
 )
 if [[ ${NRF54_REBUILD_HOSTTOOLS:-0} != 1 ]]; then
     ARGS+=(--reuse-existing-hosttools)
 fi
 
+rm -rf "$DIST"
+mkdir -p "$DIST"
+
+python3 "$ROOT/scripts/test_core_io_regressions.py"
+python3 "$ROOT/scripts/test_bluefruit_client_contracts.py"
+python3 "$ROOT/scripts/test_upload_helper.py"
+python3 "$ROOT/scripts/test_release_versions.py"
+python3 "$ROOT/scripts/test_lm20a_pdm_contract.py"
+python3 "$ROOT/scripts/test_cracen_ikg_contract.py"
+python3 "$ROOT/scripts/test_lm20a_cracen_rng_header.py"
 python3 "$ROOT/scripts/build_release.py" "${ARGS[@]}" "$@"
 
 MANIFEST="$ROOT/dist/release-manifest.json"

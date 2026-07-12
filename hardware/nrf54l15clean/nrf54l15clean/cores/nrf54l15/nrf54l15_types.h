@@ -48736,4 +48736,3 @@ typedef struct {
 }
 #endif
 #endif /* NRF54L15_TYPES_H */
-

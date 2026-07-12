@@ -1404,7 +1404,22 @@ bool BleRadio::initiateConnectionOnce(BleAdvertisingChannel channel,
   g_ble_central_connect_debug_flags = 0U;
   memset(const_cast<uint8_t*>(g_ble_central_connect_debug_address), 0,
          sizeof(g_ble_central_connect_debug_address));
-  if (!initialized_ || radio_ == nullptr || connected_ || peerAddress == nullptr) {
+  if (!initialized_ || radio_ == nullptr || connected_ || peerAddress == nullptr ||
+      !connParamsAreValid(intervalUnits, intervalUnits, 0U,
+                          supervisionTimeoutUnits) ||
+      hopIncrement < 5U || hopIncrement > 16U) {
+    return false;
+  }
+
+  uint8_t connectionEntropy[7] = {0};
+  const uint32_t entropySeed =
+      bleTimingUs() ^ (static_cast<uint32_t>(address_[0]) << 24U) ^
+      (static_cast<uint32_t>(peerAddress[0]) << 16U) ^
+      (static_cast<uint32_t>(peerAddress[5]) << 8U) ^
+      static_cast<uint32_t>(intervalUnits);
+  if (!fillBleSecurityRandomBytes(connectionEntropy, sizeof(connectionEntropy),
+                                  entropySeed, kBleSecurityRandomSpinLimit)) {
+    emitBleTrace("CENTRAL_CONNECT_ENTROPY_UNAVAILABLE");
     return false;
   }
   if (!setAdvertisingChannel(channel)) {
@@ -1467,26 +1482,18 @@ bool BleRadio::initiateConnectionOnce(BleAdvertisingChannel channel,
 
   const bool initiatorAddressRandom = bleAddressTypeIsRandom(addressType_);
   const bool useChSel2 = useChSel2_ && advChSel2;
-  uint8_t entropy[7] = {0};
-  const uint32_t seed =
-      bleTimingUs() ^ (static_cast<uint32_t>(address_[0]) << 24U) ^
-      (static_cast<uint32_t>(peerAddress[0]) << 16U) ^
-      (static_cast<uint32_t>(peerAddress[5]) << 8U) ^
-      static_cast<uint32_t>(intervalUnits);
-  fillPseudoRandomBytes(entropy, sizeof(entropy), seed);
-
   const uint32_t accessAddressSeed =
-      readLe32(&entropy[0]) ^
+      readLe32(&connectionEntropy[0]) ^
       (static_cast<uint32_t>(peerAddress[1]) << 24U) ^
       (static_cast<uint32_t>(peerAddress[4]) << 16U) ^
       (static_cast<uint32_t>(intervalUnits) << 4U);
   const uint32_t accessAddress =
       generateBleConnectionAccessAddress(accessAddressSeed);
-  uint32_t crcInit = readLe24(&entropy[4]);
-  if (crcInit == 0U || crcInit == 0x00FFFFFFUL) {
-    crcInit ^= 0x005A96A5UL;
+  if (accessAddress == 0U) {
+    emitBleTrace("CENTRAL_CONNECT_AA_GENERATION_FAILED");
+    return false;
   }
-  crcInit &= 0x00FFFFFFUL;
+  const uint32_t crcInit = readLe24(&connectionEntropy[4]);
 
   txPacket_[0] = static_cast<uint8_t>(
       kBlePduConnectInd |
@@ -1558,7 +1565,22 @@ bool BleRadio::initiateConnectionOnceBudgeted(BleAdvertisingChannel channel,
   g_ble_central_connect_debug_flags = 0U;
   memset(const_cast<uint8_t*>(g_ble_central_connect_debug_address), 0,
          sizeof(g_ble_central_connect_debug_address));
-  if (!initialized_ || radio_ == nullptr || connected_ || peerAddress == nullptr) {
+  if (!initialized_ || radio_ == nullptr || connected_ || peerAddress == nullptr ||
+      !connParamsAreValid(intervalUnits, intervalUnits, 0U,
+                          supervisionTimeoutUnits) ||
+      hopIncrement < 5U || hopIncrement > 16U) {
+    return false;
+  }
+
+  uint8_t connectionEntropy[7] = {0};
+  const uint32_t entropySeed =
+      bleTimingUs() ^ (static_cast<uint32_t>(address_[0]) << 24U) ^
+      (static_cast<uint32_t>(peerAddress[0]) << 16U) ^
+      (static_cast<uint32_t>(peerAddress[5]) << 8U) ^
+      static_cast<uint32_t>(intervalUnits);
+  if (!fillBleSecurityRandomBytes(connectionEntropy, sizeof(connectionEntropy),
+                                  entropySeed, kBleSecurityRandomSpinLimit)) {
+    emitBleTrace("CENTRAL_CONNECT_ENTROPY_UNAVAILABLE");
     return false;
   }
   if (!setAdvertisingChannel(channel)) {
@@ -1629,26 +1651,18 @@ bool BleRadio::initiateConnectionOnceBudgeted(BleAdvertisingChannel channel,
 
   const bool initiatorAddressRandom = bleAddressTypeIsRandom(addressType_);
   const bool useChSel2 = useChSel2_ && advChSel2;
-  uint8_t entropy[7] = {0};
-  const uint32_t seed =
-      bleTimingUs() ^ (static_cast<uint32_t>(address_[0]) << 24U) ^
-      (static_cast<uint32_t>(peerAddress[0]) << 16U) ^
-      (static_cast<uint32_t>(peerAddress[5]) << 8U) ^
-      static_cast<uint32_t>(intervalUnits);
-  fillPseudoRandomBytes(entropy, sizeof(entropy), seed);
-
   const uint32_t accessAddressSeed =
-      readLe32(&entropy[0]) ^
+      readLe32(&connectionEntropy[0]) ^
       (static_cast<uint32_t>(peerAddress[1]) << 24U) ^
       (static_cast<uint32_t>(peerAddress[4]) << 16U) ^
       (static_cast<uint32_t>(intervalUnits) << 4U);
   const uint32_t accessAddress =
       generateBleConnectionAccessAddress(accessAddressSeed);
-  uint32_t crcInit = readLe24(&entropy[4]);
-  if (crcInit == 0U || crcInit == 0x00FFFFFFUL) {
-    crcInit ^= 0x005A96A5UL;
+  if (accessAddress == 0U) {
+    emitBleTrace("CENTRAL_CONNECT_AA_GENERATION_FAILED");
+    return false;
   }
-  crcInit &= 0x00FFFFFFUL;
+  const uint32_t crcInit = readLe24(&connectionEntropy[4]);
 
   txPacket_[0] = static_cast<uint8_t>(
       kBlePduConnectInd |
@@ -1849,53 +1863,56 @@ bool BleRadio::handleRequestAndMaybeRespond(BleAdvertisingChannel channel,
 bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t length,
                                              bool peerAddressRandom, bool useChSel2,
                                              uint32_t connectIndEndUs) {
-  if (!initialized_ || radio_ == nullptr || payload == nullptr || length < 34U) {
+  if (!initialized_ || radio_ == nullptr || payload == nullptr || length != 34U) {
+    return false;
+  }
+
+  const uint8_t* llData = &payload[12];
+  const uint32_t accessAddress = readLe32(&llData[0]);
+  const uint8_t winSize = llData[7];
+  const uint16_t winOffset = readLe16(&llData[8]);
+  const uint16_t intervalUnits = readLe16(&llData[10]);
+  const uint16_t latency = readLe16(&llData[12]);
+  const uint16_t timeoutUnits = readLe16(&llData[14]);
+  const uint8_t hopIncrement = llData[21] & 0x1FU;
+  uint8_t channelMap[5] = {0};
+  memcpy(channelMap, &llData[16], sizeof(channelMap));
+
+  const uint8_t maxWinSize = static_cast<uint8_t>(
+      minU16(8U, static_cast<uint16_t>(intervalUnits > 0U
+                                          ? intervalUnits - 1U
+                                          : 0U)));
+  if (!connParamsAreValid(intervalUnits, intervalUnits, latency,
+                          timeoutUnits) ||
+      winSize < 1U || winSize > maxWinSize || winOffset > intervalUnits ||
+      (channelMap[4] & 0xE0U) != 0U || bitCount37(channelMap) < 2U ||
+      hopIncrement < 5U || hopIncrement > 16U ||
+      !isValidBleConnectionAccessAddress(accessAddress)) {
     return false;
   }
 
   memcpy(connectionPeerAddress_, payload, sizeof(connectionPeerAddress_));
   connectionPeerAddressRandom_ = peerAddressRandom;
-
-  const uint8_t* llData = &payload[12];
-  connectionAccessAddress_ = readLe32(&llData[0]);
+  connectionAccessAddress_ = accessAddress;
   connectionCrcInit_ = readLe24(&llData[4]);
-
-  const uint8_t winSize = llData[7];
-  const uint16_t winOffset = readLe16(&llData[8]);
   g_ble_periph_connect_win_size = winSize;
   g_ble_periph_connect_win_offset = winOffset;
   blePeriphConnTraceReset();
   blePeriphRxTraceReset();
   blePeriphTxTraceReset();
   blePeriphConnTracePush(0U, 0U, 1U, static_cast<uint8_t>(llData[21] & 0x1FU));
-  connectionIntervalUnits_ = readLe16(&llData[10]);
-  connectionLatency_ = readLe16(&llData[12]);
-  connectionTimeoutUnits_ = readLe16(&llData[14]);
-  memcpy(connectionChannelMap_, &llData[16], sizeof(connectionChannelMap_));
-  connectionChannelMap_[4] &= 0x1FU;
+  connectionIntervalUnits_ = intervalUnits;
+  connectionLatency_ = latency;
+  connectionTimeoutUnits_ = timeoutUnits;
+  memcpy(connectionChannelMap_, channelMap, sizeof(connectionChannelMap_));
   connectionSca_ = (llData[21] >> 5U) & 0x07U;
-  connectionHop_ = llData[21] & 0x1FU;
+  connectionHop_ = hopIncrement;
   // CSA#2 is used only when both sides indicate support via ChSel bit.
   connectionUseChSel2_ = useChSel2_ && useChSel2;
   connectionChannelId_ = static_cast<uint16_t>(
       (connectionAccessAddress_ & 0xFFFFU) ^ ((connectionAccessAddress_ >> 16U) & 0xFFFFU));
 
   connectionChannelCount_ = bitCount37(connectionChannelMap_);
-  if (connectionIntervalUnits_ < 6U || connectionIntervalUnits_ > 3200U) {
-    return false;
-  }
-  if (connectionTimeoutUnits_ < 10U) {
-    return false;
-  }
-  if (connectionChannelCount_ < 2U) {
-    return false;
-  }
-  if (connectionHop_ < 5U || connectionHop_ > 16U) {
-    return false;
-  }
-  if (connectionAccessAddress_ == kBleAccessAddress) {
-    return false;
-  }
 
   connectionChanUse_ = 0U;
   connectionExpectedRxSn_ = 0U;
@@ -1909,8 +1926,7 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   {
     const uint32_t intervalUs =
         static_cast<uint32_t>(connectionIntervalUnits_) * 1250UL;
-    const uint32_t winSizeUs =
-        static_cast<uint32_t>((winSize > 0U) ? winSize : 1U) * 1250UL;
+    const uint32_t winSizeUs = static_cast<uint32_t>(winSize) * 1250UL;
     if (intervalUs > (kBleConnRxStartLeadUs + 2000UL)) {
       const uint32_t maxSyncListenUs = intervalUs - kBleConnRxStartLeadUs - 2000UL;
       connectionFirstEventListenUs_ =
@@ -2044,10 +2060,10 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   if (!initialized_ || radio_ == nullptr || peerAddress == nullptr) {
     return false;
   }
-  if (intervalUnits < 6U || intervalUnits > 3200U ||
-      supervisionTimeoutUnits < 10U ||
+  if (!connParamsAreValid(intervalUnits, intervalUnits, 0U,
+                          supervisionTimeoutUnits) ||
       hopIncrement < 5U || hopIncrement > 16U ||
-      accessAddress == kBleAccessAddress) {
+      !isValidBleConnectionAccessAddress(accessAddress)) {
     return false;
   }
 

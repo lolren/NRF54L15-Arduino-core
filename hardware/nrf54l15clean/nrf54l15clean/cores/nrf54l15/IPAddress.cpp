@@ -1,5 +1,11 @@
 /*
- * Arduino IPAddress (IPv4) compatibility class.
+ * IPAddress.cpp - Arduino IPv4 address compatibility class.
+ * Copyright (c) 2011 Adrian McEwen. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * Modified for the nRF54 Arduino Core in 2026: reformatted, made null-safe,
+ * and adapted to the local String/Print API. See
+ * ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #include "Arduino.h"

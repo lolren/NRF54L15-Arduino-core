@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "bluefruit_common.h"
+#include "utility/ancs_response_parser.h"
 
 class BluefruitCompatManager;
 class BLEClientService;
@@ -30,6 +31,7 @@ enum CharsProperties {
   CHR_PROPS_WRITE = bit(3),
   CHR_PROPS_NOTIFY = bit(4),
   CHR_PROPS_INDICATE = bit(5),
+  CHR_PROPS_AUTH_SIGNED_WRITES = bit(6),
 };
 
 enum BLECharsProperties {
@@ -703,7 +705,14 @@ class BLEClientCharacteristic {
   bool discover(uint16_t conn_hdl);
   bool discover();
   bool discovered() const { return discovered_; }
-  void setNotifyCallback(notify_cb_t fp) { notify_callback_ = fp; }
+  // Deferred callbacks run from the normal Bluefruit user-callback pump.
+  // Immediate callbacks are intended for protocol response streams that a
+  // synchronous client API is actively waiting for (for example ANCS Data
+  // Source fragments).
+  void setNotifyCallback(notify_cb_t fp, bool deferred = true) {
+    notify_callback_ = fp;
+    notify_deferred_ = deferred;
+  }
   BLEClientService& parentService();
   const BLEClientService& parentService() const;
   uint16_t read(void* buffer, uint16_t len);
@@ -711,6 +720,7 @@ class BLEClientCharacteristic {
   uint16_t write(const void* buffer, uint16_t len);
   uint16_t write(const void* buffer, uint16_t len, bool withResponse);
   uint16_t writeWithoutResponse(const void* buffer, uint16_t len);
+  uint16_t writeSigned(const void* buffer, uint16_t len);
   uint16_t write8(uint8_t value);
   uint16_t write8(uint8_t value, bool withResponse);
   uint16_t write8WithoutResponse(uint8_t value);
@@ -730,16 +740,16 @@ class BLEClientCharacteristic {
   uint8_t properties_;
   uint8_t last_value_[BLUEFRUIT_GATT_VALUE_MAX_LEN];
   uint16_t last_value_len_;
-  bool pending_notify_callback_;
+  bool notify_deferred_;
 
   void handleNotify(const uint8_t* data, uint16_t len);
-  void dispatchPendingNotify();
   void resetDiscovery();
 
   friend class BluefruitCompatManager;
   friend class BLEClientUart;
   friend class BLEClientDis;
   friend class BLEClientBas;
+  friend class BLEClientHidAdafruit;
 };
 
 class BLEClientService {
@@ -766,6 +776,7 @@ class BLEClientService {
   void resetDiscovery();
 
   friend class BLEClientCharacteristic;
+  friend class BluefruitCompatManager;
   friend class BLEClientUart;
   friend class BLEClientDis;
   friend class BLEClientBas;
@@ -778,7 +789,10 @@ class BLEClientUart : public Stream {
 
   bool begin();
   bool discover(uint16_t conn_hdl);
-  bool discovered() const { return discovered_; }
+  bool discovered() const {
+    return discovered_ && service_.discovered() && txd_.discovered() &&
+           rxd_.discovered();
+  }
   void setRxCallback(rx_callback_t fp) { rx_callback_ = fp; }
   bool enableTXD();
   uint16_t connHandle() const { return service_.conn_handle_; }
@@ -814,6 +828,8 @@ class BLEClientUart : public Stream {
 
   void handleTxdNotify(BLEClientCharacteristic* chr, uint8_t* data, uint16_t len);
   static void txdNotifyThunk(BLEClientCharacteristic* chr, uint8_t* data, uint16_t len);
+
+  friend class BluefruitCompatManager;
 };
 class BLEClientDis : public BLEClientService {
  public:
@@ -910,7 +926,17 @@ class BLEAncs : public BLEClientService {
   BLEClientCharacteristic data_;
   notification_callback_t notification_callback_;
 
+  static constexpr uint32_t kResponseTimeoutMs = 5000UL;
+  bluefruit_compat::AncsResponseParser response_;
+
   void handleNotification(uint8_t* data, uint16_t len);
+  void beginAttributeResponse(const uint8_t* expectedPrefix,
+                              uint16_t expectedPrefixLen,
+                              uint8_t requestedAttribute, void* buffer,
+                              uint16_t bufferSize);
+  void cancelAttributeResponse();
+  bool waitForAttributeResponse(uint32_t timeoutMs = kResponseTimeoutMs);
+  void handleData(uint8_t* data, uint16_t len);
   static void notificationThunk(BLEClientCharacteristic* chr, uint8_t* data, uint16_t len);
   static void dataThunk(BLEClientCharacteristic* chr, uint8_t* data, uint16_t len);
 };
@@ -961,7 +987,10 @@ class BLEClientHidAdafruit : public BLEClientService {
   BLEClientCharacteristic keyboard_boot_output_;
   BLEClientCharacteristic mouse_boot_input_;
   BLEClientCharacteristic gamepad_report_;
+  bool generic_report_present_;
+  bool gamepad_report_pending_;
 
+  bool discoverGamepadReport();
   void handleKeyboardInput(uint8_t* data, uint16_t len);
   void handleMouseInput(uint8_t* data, uint16_t len);
   void handleGamepadInput(uint8_t* data, uint16_t len);
@@ -1117,6 +1146,9 @@ class BLEUart : public BLEService, public Stream {
   typedef void (*rx_overflow_callback_t)(uint16_t conn_hdl, uint16_t leftover);
 
   explicit BLEUart(uint16_t fifo_depth = 256);
+  ~BLEUart() override;
+  BLEUart(const BLEUart&) = delete;
+  BLEUart& operator=(const BLEUart&) = delete;
 
   err_t begin() override;
 
@@ -1158,6 +1190,8 @@ class BLEUart : public BLEService, public Stream {
   uint16_t _rx_head;
   uint16_t _rx_tail;
   uint16_t _rx_count;
+  uint8_t* _tx_fifo;
+  uint16_t _tx_fifo_count;
   bool _tx_buffered;
   rx_callback_t _rx_cb;
   notify_callback_t _notify_cb;

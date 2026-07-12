@@ -1,5 +1,16 @@
 /*
- * EEPROM - flash-backed EEPROM emulation for nrf54l15clean.
+ * EEPROM.cpp - Arduino EEPROM compatibility library.
+ * Original copyright (c) 2006 David A. Mellis. All rights reserved.
+ * New version by Christopher Andrews, 2015.
+ * Copyright (c) 2014 Ivan Grokhotkov. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * ESP flash emulation was ported by Paolo Becchi, modified by Elochukwu
+ * Ifediora, and converted to NVS by lbernstone@gmail.com.
+ *
+ * Modified for the nRF54 Arduino Core in 2026: replaced AVR/ESP storage with a
+ * fixed-layout, CRC-protected nRF54 RRAM backend. See
+ * ../../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #include "EEPROM.h"

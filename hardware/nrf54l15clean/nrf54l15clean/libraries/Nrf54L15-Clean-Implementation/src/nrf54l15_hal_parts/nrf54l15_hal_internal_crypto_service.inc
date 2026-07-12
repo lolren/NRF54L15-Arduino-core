@@ -19,6 +19,12 @@ Ccm& bleHardwareCcm() {
   return ccm;
 }
 
+static bool bleComputeDataSignature(const uint8_t csrkLe[16],
+                                    const uint8_t* message,
+                                    size_t messageLen,
+                                    uint32_t signCounter,
+                                    uint8_t outMac[8]);
+
 static CcmBleDataRate bleHardwareCryptoDataRateForConnection(bool txDirection) {
   if (g_activeBleRadio == nullptr) {
     return CcmBleDataRate::k1Mbit;
@@ -111,6 +117,22 @@ bool bleHardwareCryptoSelfTest() {
       (swPlainLen != sizeof(payload)) || (hwPlainLen != sizeof(payload)) ||
       (memcmp(swPlain, payload, sizeof(payload)) != 0) ||
       (memcmp(hwPlain, payload, sizeof(payload)) != 0)) {
+    return false;
+  }
+
+  // Bluetooth Core, Vol 3, Part F, ATT_SIGNED_WRITE_CMD example vector.
+  const uint8_t csrkLe[16] = {
+      0x50U, 0x5EU, 0x42U, 0xDFU, 0x96U, 0x91U, 0xECU, 0x72U,
+      0xD3U, 0x1FU, 0xCDU, 0xFBU, 0xEBU, 0x64U, 0x1BU, 0x61U,
+  };
+  const uint8_t signedWrite[] = {0xD2U, 0x12U, 0x00U, 0x13U, 0x37U};
+  const uint8_t expectedMac[8] = {
+      0xF1U, 0x87U, 0x1EU, 0x93U, 0x3CU, 0x90U, 0x0FU, 0xF2U,
+  };
+  uint8_t actualMac[8] = {0};
+  if (!bleComputeDataSignature(csrkLe, signedWrite, sizeof(signedWrite), 1U,
+                               actualMac) ||
+      memcmp(actualMac, expectedMac, sizeof(actualMac)) != 0) {
     return false;
   }
 
@@ -315,6 +337,40 @@ static bool aesCmacBe(const uint8_t keyBe[16], const uint8_t* message,
 
   xorBlock16(x, mLast, y);
   aesEncryptBlockBe(keyBe, y, out);
+  return true;
+}
+
+static bool bleComputeDataSignature(const uint8_t csrkLe[16],
+                                    const uint8_t* message,
+                                    size_t messageLen,
+                                    uint32_t signCounter,
+                                    uint8_t outMac[8]) {
+  if (csrkLe == nullptr || outMac == nullptr ||
+      (messageLen > 0U && message == nullptr) || messageLen > 251U) {
+    return false;
+  }
+
+  uint8_t keyBe[16] = {0};
+  uint8_t cmacMessage[255] = {0};
+  uint8_t cmac[16] = {0};
+  reverseCopy(csrkLe, sizeof(keyBe), keyBe);
+  if (messageLen > 0U) {
+    memcpy(cmacMessage, message, messageLen);
+  }
+  writeLe32(&cmacMessage[messageLen], signCounter);
+  const size_t cmacMessageLen = messageLen + sizeof(signCounter);
+
+  // Bluetooth numbers the transmitted octet sequence least-significant first
+  // for the CMAC bit string. Reverse M = m || SignCounter before the ordinary
+  // big-endian AES-CMAC primitive. The 64-bit result is serialized the same
+  // way into the ATT authentication signature.
+  reverseInPlace(cmacMessage, cmacMessageLen);
+  if (!aesCmacBe(keyBe, cmacMessage, cmacMessageLen, cmac)) {
+    return false;
+  }
+  for (uint8_t i = 0U; i < 8U; ++i) {
+    outMac[i] = cmac[7U - i];
+  }
   return true;
 }
 
@@ -846,6 +902,12 @@ bool isValidBleConnectionAccessAddress(uint32_t accessAddress) {
       accessAddress == 0xFFFFFFFFUL) {
     return false;
   }
+  const uint8_t octet0 = static_cast<uint8_t>(accessAddress);
+  if (static_cast<uint8_t>(accessAddress >> 8U) == octet0 &&
+      static_cast<uint8_t>(accessAddress >> 16U) == octet0 &&
+      static_cast<uint8_t>(accessAddress >> 24U) == octet0) {
+    return false;
+  }
 
   const uint32_t diffBits =
       static_cast<uint32_t>(__builtin_popcount(accessAddress ^ kBleAccessAddress));
@@ -875,6 +937,24 @@ bool isValidBleConnectionAccessAddress(uint32_t accessAddress) {
     return false;
   }
 
+  // Keep every connection Access Address valid if the link later switches to
+  // LE Coded PHY. Vol 6, Part B adds both constraints below for coded packets.
+  if (__builtin_popcount(accessAddress & 0xFFU) < 3) {
+    return false;
+  }
+  uint8_t low16Transitions = 0U;
+  bool lastLowBit = (accessAddress & 0x1U) != 0U;
+  for (uint8_t bit = 1U; bit < 16U; ++bit) {
+    const bool currentBit = ((accessAddress >> bit) & 0x1U) != 0U;
+    if (currentBit != lastLowBit) {
+      ++low16Transitions;
+    }
+    lastLowBit = currentBit;
+  }
+  if (low16Transitions > 11U) {
+    return false;
+  }
+
   uint8_t topTransitions = 0U;
   bool lastTopBit = ((accessAddress >> 31U) & 0x1U) != 0U;
   for (int8_t bit = 30; bit >= 26; --bit) {
@@ -889,9 +969,6 @@ bool isValidBleConnectionAccessAddress(uint32_t accessAddress) {
 
 uint32_t nextPseudoRandomWord(uint32_t state) {
   uint32_t x = state;
-  if (x == 0U) {
-    x = 0xA5A55A5AUL;
-  }
   x ^= (x << 13U);
   x ^= (x >> 17U);
   x ^= (x << 5U);
@@ -906,19 +983,7 @@ uint32_t generateBleConnectionAccessAddress(uint32_t seed) {
       return state;
     }
   }
-
-  static constexpr uint32_t kFallbackCandidates[] = {
-      0xAF9A8C69UL,
-      0xD7A46C5BUL,
-      0xC59A3B6DUL,
-  };
-  for (uint32_t candidate : kFallbackCandidates) {
-    if (isValidBleConnectionAccessAddress(candidate)) {
-      return candidate;
-    }
-  }
-
-  return 0xAF9A8C69UL;
+  return 0U;
 }
 
 uint32_t bleMasterScaPpmUpperBound(uint8_t scaCode) {

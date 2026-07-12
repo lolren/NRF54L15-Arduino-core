@@ -14,9 +14,6 @@
 
 #include <bluefruit.h>
 
-// OTA DFU service
-BLEDfu bledfu;
-
 // Uart over BLE service
 BLEUart bleuart;
 
@@ -39,9 +36,6 @@ void setup(void)
   Bluefruit.begin();
   Bluefruit.setTxPower(4);    // Check bluefruit.h for supported values
   Bluefruit.setName("X54-CTRL");
-
-  // To be consistent OTA DFU should be added first if it exists
-  bledfu.begin();
 
   // Configure and start the BLE Uart service
   bleuart.begin();

@@ -1,3 +1,9 @@
+/*
+ * Compatibility definitions derived from the TinyUSB HID header.
+ * SPDX-FileCopyrightText: Copyright (c) 2019 Ha Thach (tinyusb.org)
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef NRF54L15_TINYUSB_HID_H_
 #define NRF54L15_TINYUSB_HID_H_
 

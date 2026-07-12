@@ -9,8 +9,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
-import sys
 import tarfile
 import tempfile
 import zipfile
@@ -18,7 +16,7 @@ from pathlib import Path
 
 
 HOST_TOOL_NAME = "nrf54l15hosttools"
-HOST_TOOL_VERSION = "1.1.4"
+HOST_TOOL_VERSION = "1.1.5"
 HOST_TOOL_HOSTS = (
     ("x86_64-pc-linux-gnu", ".tar.bz2"),
     ("aarch64-linux-gnu", ".tar.bz2"),
@@ -26,18 +24,15 @@ HOST_TOOL_HOSTS = (
     ("x86_64-apple-darwin", ".tar.bz2"),
     ("arm64-apple-darwin", ".tar.bz2"),
 )
-HOST_TOOL_WHEELHOUSE_PYTHON_VERSIONS = ("310", "311", "312")
-HOST_TOOL_WHEELHOUSE_PLATFORMS = {
-    "x86_64-pc-linux-gnu": "manylinux2014_x86_64",
-    "aarch64-linux-gnu": "manylinux2014_aarch64",
-    "i686-mingw32": "win_amd64",
-    "x86_64-apple-darwin": "macosx_10_12_x86_64",
-    "arm64-apple-darwin": "macosx_11_0_arm64",
-}
 REQUIRED_PLATFORM_TOOL_DEPENDENCIES = (
     {"packager": "arduino", "name": "arm-none-eabi-gcc", "version": "7-2017q4"},
 )
 HOST_TOOL_REQUIREMENTS_FILE = "requirements-pyocd.txt"
+REQUIRED_HOST_TOOL_REQUIREMENTS = (
+    "pyocd==0.44.1",
+    "libusb-package==1.0.30.0",
+)
+REQUIRED_HOST_TOOL_NOTICE_FILES = ("LICENSE", "THIRD_PARTY_NOTICES.md")
 ARCHIVE_HASH_LEN = 12
 OPENTHREAD_PLATFORM_PACKAGE_EXCLUDES = (
     "libraries/Nrf54L15-Clean-Implementation/third_party/openthread-core",
@@ -500,6 +495,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--packager", default="nrf54l15clean")
     parser.add_argument("--platform-name", default="nRF54L15 Boards")
     parser.add_argument("--release-base-url", default="https://github.com/REPLACE_ME/REPLACE_ME/releases/download/v{version}")
+    parser.add_argument(
+        "--host-tools-release-base-url",
+        default="",
+        help=(
+            "Release URL for newly built host tools. Supports the "
+            "{host_tool_version} placeholder; defaults to --release-base-url."
+        ),
+    )
     parser.add_argument("--repo-url", default="https://github.com/REPLACE_ME/REPLACE_ME")
     parser.add_argument("--dist-dir", default=None, type=Path)
     parser.add_argument("--existing-index", default=None, type=Path)
@@ -514,16 +517,6 @@ def parse_args() -> argparse.Namespace:
         "--host-tool-hosts",
         default="",
         help="Comma-separated subset of host tool targets to build (default: all)",
-    )
-    parser.add_argument(
-        "--host-tool-python-versions",
-        default=",".join(HOST_TOOL_WHEELHOUSE_PYTHON_VERSIONS),
-        help="Comma-separated CPython minor versions to bundle, for example 310,311,312",
-    )
-    parser.add_argument(
-        "--skip-host-wheelhouse",
-        action="store_true",
-        help="Skip downloading offline pyOCD wheelhouses into host-tools archives",
     )
     parser.add_argument(
         "--reuse-existing-hosttools",
@@ -581,86 +574,15 @@ def parse_csv_list(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def stage_host_tool_wheelhouse(
-    stage_dir: Path,
-    host: str,
-    python_versions: list[str],
-) -> dict:
-    requirements = stage_dir / HOST_TOOL_REQUIREMENTS_FILE
-    if not requirements.is_file():
-        raise SystemExit(f"Host-tools requirements not found: {requirements}")
-
-    platform_tag = HOST_TOOL_WHEELHOUSE_PLATFORMS.get(host)
-    if not platform_tag:
-        raise SystemExit(f"Unsupported host tool target: {host}")
-
-    wheelhouse_root = stage_dir / "wheelhouse"
-    wheelhouse_root.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "host": host,
-        "platform": platform_tag,
-        "requirements": HOST_TOOL_REQUIREMENTS_FILE,
-        "python_versions": [],
-        "skipped_python_versions": [],
-    }
-
-    for python_version in python_versions:
-        wheel_dir = wheelhouse_root / f"cp{python_version}"
-        wheel_dir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            sys.executable,
-            "-m",
-            "pip",
-            "download",
-            "--dest",
-            str(wheel_dir),
-            "--only-binary=:all:",
-            "--platform",
-            platform_tag,
-            "--implementation",
-            "cp",
-            "--python-version",
-            python_version,
-            "-r",
-            str(requirements),
-        ]
-        result = subprocess.run(cmd, check=False, text=True, capture_output=True)
-        if result.returncode == 0:
-            manifest["python_versions"].append(f"cp{python_version}")
-            continue
-        shutil.rmtree(wheel_dir, ignore_errors=True)
-        manifest["skipped_python_versions"].append(
-            {
-                "python": f"cp{python_version}",
-                "reason": "pip download failed",
-                "stderr_tail": (result.stdout + "\n" + result.stderr).splitlines()[-20:],
-            }
-        )
-
-    (wheelhouse_root / "manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return manifest
-
-
 def build_host_tool_archive(
     source_dir: Path,
     archive_path: Path,
     archive_root: str,
-    host: str,
-    python_versions: list[str],
-    *,
-    skip_wheelhouse: bool,
-) -> dict:
+) -> None:
     with tempfile.TemporaryDirectory() as td:
         stage_dir = Path(td) / archive_root
         shutil.copytree(source_dir, stage_dir)
-        manifest = {"host": host, "python_versions": [], "skipped_python_versions": []}
-        if not skip_wheelhouse:
-            manifest = stage_host_tool_wheelhouse(stage_dir, host=host, python_versions=python_versions)
         build_archive(stage_dir, archive_path, archive_root)
-        return manifest
 
 
 def write_release_manifest(
@@ -696,6 +618,34 @@ def should_rebuild_host_tools(args, existing_index):
         return True
     return find_tool_entry(existing_index, HOST_TOOL_NAME, HOST_TOOL_VERSION) is None
 
+
+def validate_host_tool_source(source_dir: Path) -> None:
+    missing = [
+        name for name in REQUIRED_HOST_TOOL_NOTICE_FILES
+        if not (source_dir / name).is_file()
+    ]
+    if missing:
+        raise SystemExit(f"Host-tools source omits required notices: {missing}")
+
+    requirements = (source_dir / HOST_TOOL_REQUIREMENTS_FILE).read_text(
+        encoding="utf-8"
+    ).splitlines()
+    pins = {line.strip() for line in requirements}
+    missing_requirements = sorted(set(REQUIRED_HOST_TOOL_REQUIREMENTS) - pins)
+    if missing_requirements:
+        raise SystemExit(
+            f"Host-tools requirements omit required pins: {missing_requirements}"
+        )
+
+    redistributed_wheels = sorted(source_dir.rglob("*.whl"))
+    if redistributed_wheels:
+        raise SystemExit(
+            "Host-tools source must not redistribute Python wheels without a "
+            "complete native-dependency notice bundle: "
+            f"{[path.relative_to(source_dir).as_posix() for path in redistributed_wheels]}"
+        )
+
+
 def main() -> int:
     args = parse_args()
     if args.include_openthread_core and args.exclude_openthread_core:
@@ -720,6 +670,9 @@ def main() -> int:
     update_platform_txt_version(platform_dir, version)
 
     release_base_url = args.release_base_url.format(version=version)
+    host_tools_release_base_url = (
+        args.host_tools_release_base_url or release_base_url
+    ).format(version=version, host_tool_version=HOST_TOOL_VERSION)
     platform_excludes = (
         OPENTHREAD_PLATFORM_PACKAGE_EXCLUDES
         if args.exclude_openthread_core
@@ -765,31 +718,24 @@ def main() -> int:
         existing_tool_entry = find_tool_entry(existing_full, HOST_TOOL_NAME, HOST_TOOL_VERSION)
 
     tool_systems = list(existing_tool_entry.get("systems", [])) if existing_tool_entry else []
-    host_manifests = {}
     tool_release_entries = []
     if existing_tool_entry is None:
         host_tools_src = root / "tools" / "board_manager" / HOST_TOOL_NAME
         if not host_tools_src.is_dir():
             raise SystemExit(f"Host-tools source directory not found: {host_tools_src}")
+        validate_host_tool_source(host_tools_src)
 
         selected_hosts = parse_csv_list(args.host_tool_hosts)
         host_targets = [entry for entry in HOST_TOOL_HOSTS if not selected_hosts or entry[0] in selected_hosts]
         if not host_targets:
             raise SystemExit("No host tool targets selected")
 
-        host_tool_python_versions = parse_csv_list(args.host_tool_python_versions)
-        if not host_tool_python_versions:
-            raise SystemExit("At least one host-tool Python version is required")
-
         for host, ext in host_targets:
             temp_tool_archive_path = dist_dir / f".{HOST_TOOL_NAME}-{HOST_TOOL_VERSION}-{host}{ext}"
-            host_manifests[host] = build_host_tool_archive(
+            build_host_tool_archive(
                 host_tools_src,
                 temp_tool_archive_path,
                 f"{HOST_TOOL_NAME}-{HOST_TOOL_VERSION}",
-                host=host,
-                python_versions=host_tool_python_versions,
-                skip_wheelhouse=args.skip_host_wheelhouse,
             )
             tool_archive_path, tool_archive_name, tool_archive_sha256, tool_archive_size = finalize_content_addressed_archive(
                 temp_tool_archive_path,
@@ -800,7 +746,7 @@ def main() -> int:
                 make_tool_system_entry(
                     host=host,
                     archive_name=tool_archive_name,
-                    archive_url=f"{release_base_url}/{tool_archive_name}",
+                    archive_url=f"{host_tools_release_base_url}/{tool_archive_name}",
                     archive_sha256=tool_archive_sha256,
                     archive_size=tool_archive_size,
                 )
@@ -812,7 +758,7 @@ def main() -> int:
                     "host": host,
                     "archiveFileName": tool_archive_name,
                     "archivePath": str(tool_archive_path),
-                    "url": f"{release_base_url}/{tool_archive_name}",
+                    "url": f"{host_tools_release_base_url}/{tool_archive_name}",
                     "checksum": f"SHA-256:{tool_archive_sha256}",
                     "size": tool_archive_size,
                 }
@@ -891,12 +837,6 @@ def main() -> int:
             print(f"tool reused:      {system['host']} -> {system['archiveFileName']}")
             continue
         print(f"tool archive:     {dist_dir / system['archiveFileName']}")
-        manifest = host_manifests.get(system["host"], {})
-        if manifest.get("python_versions"):
-            print(f"tool wheelhouse:  {system['host']} -> {', '.join(manifest['python_versions'])}")
-        if manifest.get("skipped_python_versions"):
-            skipped = ", ".join(item["python"] for item in manifest["skipped_python_versions"])
-            print(f"tool skipped:     {system['host']} -> {skipped}")
     print(f"release channel:  {'prerelease' if is_prerelease_version(version) else 'stable'}")
     print(f"stable index:     {dist_dir / f'package_{args.packager}_index.json'}")
     print(f"archive index:    {dist_dir / f'package_{args.packager}_archive_index.json'}")

@@ -8,8 +8,8 @@ bool BleRadio::initiateConnection(const uint8_t peerAddress[6],
   if (!initialized_ || radio_ == nullptr || connected_ || peerAddress == nullptr) {
     return false;
   }
-  if (intervalUnits < 6U || intervalUnits > 3200U ||
-      supervisionTimeoutUnits < 10U ||
+  if (!connParamsAreValid(intervalUnits, intervalUnits, 0U,
+                          supervisionTimeoutUnits) ||
       hopIncrement < 5U || hopIncrement > 16U) {
     return false;
   }
@@ -90,8 +90,8 @@ bool BleRadio::initiateConnectionBudgeted(
   if (!initialized_ || radio_ == nullptr || connected_ || peerAddress == nullptr) {
     return false;
   }
-  if (intervalUnits < 6U || intervalUnits > 3200U ||
-      supervisionTimeoutUnits < 10U ||
+  if (!connParamsAreValid(intervalUnits, intervalUnits, 0U,
+                          supervisionTimeoutUnits) ||
       hopIncrement < 5U || hopIncrement > 16U) {
     return false;
   }
@@ -332,6 +332,75 @@ bool BleRadio::queueAttWriteRequest(uint16_t handle, const uint8_t* value,
     memcpy(&request[3], value, valueLength);
   }
   return queueAttRequest(request, static_cast<uint8_t>(3U + valueLength));
+}
+
+bool BleRadio::queueAttSignedWriteCommand(uint16_t handle,
+                                          const uint8_t* value,
+                                          uint8_t valueLength) {
+  static constexpr uint32_t kLocalCounterReservation = 16U;
+  const uint16_t attLength = static_cast<uint16_t>(
+      3U + static_cast<uint16_t>(valueLength) + 12U);
+  if (!connected_ || connectionPendingTxValid_ || handle == 0U ||
+      (valueLength > 0U && value == nullptr) ||
+      connectionEncSessionValid_ || connectionEncRxEnabled_ ||
+      connectionEncTxEnabled_ || !bondRecordValid_ ||
+      !smpLocalCsrkValid_ || attLength > currentAttMtu() ||
+      attLength > 255U || smpLocalSignCounter_ == 0xFFFFFFFFUL ||
+      bleRunningInIsr()) {
+    return false;
+  }
+
+  if (smpLocalSignCounter_ >= smpLocalSignCounterReservedUntil_) {
+    const uint32_t remaining = 0xFFFFFFFFUL - smpLocalSignCounter_;
+    const uint32_t reserveDelta =
+        (remaining >= kLocalCounterReservation)
+            ? kLocalCounterReservation
+            : remaining;
+    if (reserveDelta == 0U) {
+      return false;
+    }
+    const uint32_t reservedUntil = smpLocalSignCounter_ + reserveDelta;
+    bondRecord_.localSignCounter = reservedUntil;
+    if (!persistActiveSigningCounters(true)) {
+      emitBleTrace("ATT_SIGNED_WRITE_COUNTER_PERSIST_FAILED");
+      return false;
+    }
+    smpLocalSignCounterReservedUntil_ = reservedUntil;
+    emitBleTrace("ATT_SIGNED_WRITE_COUNTER_RESERVED");
+  }
+
+  uint8_t request[255] = {0};
+  request[0] = kAttOpSignedWriteCmd;
+  writeLe16(&request[1], handle);
+  if (valueLength > 0U) {
+    memcpy(&request[3], value, valueLength);
+  }
+
+  const uint16_t messageLength = static_cast<uint16_t>(3U + valueLength);
+  const uint32_t signCounter = smpLocalSignCounter_;
+  writeLe32(&request[messageLength], signCounter);
+  if (!bleComputeDataSignature(smpLocalCsrk_, request, messageLength,
+                               signCounter, &request[messageLength + 4U])) {
+    return false;
+  }
+
+  // The containing reservation was made durable before this PDU became
+  // eligible for transmission. A failed queue leaves only a harmless gap.
+  smpLocalSignCounter_ = signCounter + 1U;
+  return queueAttRequest(request, static_cast<uint8_t>(attLength));
+}
+
+uint32_t BleRadio::signedWriteReplayRejectCount() const {
+  return signedWriteReplayRejectCount_;
+}
+
+bool BleRadio::computeAttDataSignature(const uint8_t csrk[16],
+                                       const uint8_t* attMessage,
+                                       uint8_t attMessageLength,
+                                       uint32_t signCounter,
+                                       uint8_t outMac[8]) {
+  return bleComputeDataSignature(csrk, attMessage, attMessageLength,
+                                 signCounter, outMac);
 }
 
 bool BleRadio::queueAttPrepareWriteRequest(uint16_t handle, uint16_t offset,
@@ -769,6 +838,7 @@ bool BleRadio::clearBondRecord(bool clearPersistentStorage) {
   bondStorageLoaded_ = true;
   bondKeyPrimedForConnection_ = false;
   bondIdentityMatchedForConnection_ = false;
+  bondSigningCounterPersistPending_ = false;
   if (clearPersistentStorage) {
     return clearPersistentBondRecord();
   }
@@ -1515,6 +1585,8 @@ bool BleRadio::enqueueDeferredGattWrite(BleGattWriteCallback callback, void* con
   slot.valueHandle = valueHandle;
   slot.valueLength = valueLength;
   slot.withResponse = withResponse ? 1U : 0U;
+  slot.signedWrite = 0U;
+  slot.signCounter = 0U;
   if (valueLength > 0U) {
     memcpy(slot.value, value, valueLength);
   }
@@ -1531,6 +1603,42 @@ bool BleRadio::enqueueDeferredGattWrite(BleGattWriteCallback callback, void* con
   // pointed at background advertising/connection cleanup even after the link
   // has already dropped, which can starve the foreground code that should
   // consume the queued connection event carrying the disconnect/ATT cleanup.
+  if (g_activeBleRadio != this || backgroundServicesActive()) {
+    g_bleBackgroundRadio = this;
+  }
+  bleExitCritical(irqState);
+  return true;
+}
+
+bool BleRadio::enqueueDeferredSignedGattWrite(uint16_t valueHandle,
+                                              const uint8_t* value,
+                                              uint16_t valueLength,
+                                              uint32_t signCounter) {
+  if (valueLength > kCustomGattMaxValueLength ||
+      (valueLength > 0U && value == nullptr)) {
+    return false;
+  }
+  const uint8_t depth = static_cast<uint8_t>(
+      sizeof(deferredGattWrites_) / sizeof(deferredGattWrites_[0]));
+  const uint32_t irqState = bleEnterCritical();
+  if (deferredGattWriteCount_ >= depth) {
+    bleExitCritical(irqState);
+    ++encDebug_.connDeferredCallbackDropCount;
+    return false;
+  }
+  BleDeferredGattWriteState& slot = deferredGattWrites_[deferredGattWriteTail_];
+  memset(&slot, 0, sizeof(slot));
+  slot.context = this;
+  slot.valueHandle = valueHandle;
+  slot.valueLength = valueLength;
+  slot.signedWrite = 1U;
+  slot.signCounter = signCounter;
+  if (valueLength > 0U) {
+    memcpy(slot.value, value, valueLength);
+  }
+  deferredGattWriteTail_ =
+      static_cast<uint8_t>((deferredGattWriteTail_ + 1U) % depth);
+  ++deferredGattWriteCount_;
   if (g_activeBleRadio != this || backgroundServicesActive()) {
     g_bleBackgroundRadio = this;
   }
@@ -1557,7 +1665,10 @@ void BleRadio::dispatchDeferredGattWrites() {
     --deferredGattWriteCount_;
     bleExitCritical(irqState);
 
-    if (slot.callback != nullptr) {
+    if (slot.signedWrite != 0U && slot.context == this) {
+      applyDeferredSignedGattWrite(slot.valueHandle, slot.value,
+                                   slot.valueLength, slot.signCounter);
+    } else if (slot.callback != nullptr) {
       slot.callback(slot.valueHandle, slot.value, slot.valueLength,
                     slot.withResponse != 0U, slot.context);
     }
@@ -1648,6 +1759,10 @@ void BleRadio::serviceDeferredApplicationWork() {
   }
 
   if (!postponeNonCriticalWork) {
+    if (bondFlashPersistPending_ || bondSigningCounterPersistPending_ ||
+        cccdFlashPersistPending_) {
+      (void)flushDeferredBondStorage();
+    }
     if (connected_ &&
         (!smpPrefetchedLocalRandomValid_ ||
          !connectionPrefetchedEncMaterialValid_)) {

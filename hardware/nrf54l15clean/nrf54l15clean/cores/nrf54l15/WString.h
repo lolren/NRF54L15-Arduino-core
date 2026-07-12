@@ -1,7 +1,12 @@
 /*
- * Arduino WString - String class for Arduino
+ * WString.h - String library for Wiring and Arduino.
+ * Copyright (c) 2009-2010 Hernando Barragan. All rights reserved.
+ * Copyright 2011 Paul Stoffregen, paul@pjrc.com
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Licensed under the Apache License 2.0
+ * Modified for the nRF54 Arduino Core in 2026: consolidated the implementation
+ * into this header and adapted allocation, formatting, aliasing, and C++ API
+ * behavior. See ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #ifndef WString_h

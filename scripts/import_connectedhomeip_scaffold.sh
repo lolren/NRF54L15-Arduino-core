@@ -26,6 +26,7 @@ git clone --no-checkout --filter=blob:none --sparse \
   git checkout --detach FETCH_HEAD
   git sparse-checkout set --no-cone \
     /LICENSE \
+    /NOTICE \
     /README.md \
     /src/lib/core/DataModelTypes.h \
     /src/lib/core/CHIPError.cpp \
@@ -60,6 +61,7 @@ rm -rf "$DEST_BASE"
 mkdir -p "$DEST_BASE"
 
 cp "$TMP_DIR/connectedhomeip/LICENSE" "$DEST_BASE/connectedhomeip-LICENSE.txt"
+cp "$TMP_DIR/connectedhomeip/NOTICE" "$DEST_BASE/connectedhomeip-NOTICE.txt"
 cp "$TMP_DIR/connectedhomeip/README.md" "$DEST_BASE/connectedhomeip-README-upstream.md"
 
 copy_file() {

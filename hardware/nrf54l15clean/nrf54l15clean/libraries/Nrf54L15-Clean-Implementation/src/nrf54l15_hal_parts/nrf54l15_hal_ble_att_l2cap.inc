@@ -1595,7 +1595,7 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       const uint16_t valueLen = static_cast<uint16_t>(requestLength - 5U);
       const uint16_t maxQueuedValueLen =
           isCustomValueHandle
-              ? kCustomGattMaxValueLength
+              ? customValueTarget->maxValueLength
               : (isCustomUserDescriptionHandle ? kCustomGattMaxUserDescriptionLength
                                                : 2U);
       if (offset > maxQueuedValueLen) {
@@ -1801,6 +1801,30 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
       return false;
     }
 
+    case kAttOpSignedWriteCmd: {
+      emitBleTrace("ATT_RX_SIGNED_WRITE_CMD");
+      *outAttResponseLength = 0U;
+      if (requestLength < 15U) {
+        return false;
+      }
+      const uint16_t handle = readLe16(&attRequest[1]);
+      emitAttHandleTrace(handle);
+      uint32_t signCounter = 0U;
+      if (!verifyAttSignedWrite(attRequest, requestLength, &signCounter)) {
+        return false;
+      }
+
+      const uint16_t valueLength =
+          static_cast<uint16_t>(requestLength - 15U);
+      const uint8_t* value =
+          (valueLength > 0U) ? &attRequest[3] : nullptr;
+      if (!enqueueDeferredSignedGattWrite(handle, value, valueLength,
+                                          signCounter)) {
+        emitBleTrace("ATT_SIGNED_WRITE_DEFER_DROP");
+      }
+      return false;
+    }
+
     case kAttOpErrorRsp:
     case kAttOpExchangeMtuRsp:
     case kAttOpFindInfoRsp:
@@ -1814,7 +1838,6 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
     case kAttOpWriteRsp:
     case kAttOpPrepareWriteRsp:
     case kAttOpExecuteWriteRsp:
-    case kAttOpSignedWriteCmd:
     case kAttOpHandleValueNtf:
     case kAttOpHandleValueInd:
       *outAttResponseLength = 0U;
@@ -2100,6 +2123,13 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpLength != kSmpPairingRequestLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
+      if (smp[1] > kSmpIoCapKeyboardDisplay ||
+          (smp[3] & kSmpAuthReqBondingMask) > 0x01U ||
+          (smp[3] & 0xC0U) != 0U ||
+          (smp[5] & static_cast<uint8_t>(~kSmpKeyDistDefinedMask)) != 0U ||
+          (smp[6] & static_cast<uint8_t>(~kSmpKeyDistDefinedMask)) != 0U) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
       if (!smpLocalInitiator_ && smpPairingState_ != kSmpPairingStateIdle) {
         if (memcmp(smpPairingReq_, smp, kSmpPairingRequestLen) == 0 &&
             smpPairingState_ >= kSmpPairingStateRspSent) {
@@ -2196,14 +2226,17 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (smpBondingRequested_) {
         initiatorKeyDist = static_cast<uint8_t>(
             smp[5] & static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
-                                          kSmpKeyDistIdKeyMask));
+                                          kSmpKeyDistIdKeyMask |
+                                          kSmpKeyDistSignKeyMask));
         responderKeyDist = static_cast<uint8_t>(
             smp[6] & static_cast<uint8_t>(kSmpKeyDistEncKeyMask |
-                                          kSmpKeyDistIdKeyMask));
+                                          kSmpKeyDistIdKeyMask |
+                                          kSmpKeyDistSignKeyMask));
         // This host has no independent legacy responder LTK state. Do not
         // advertise EncKey and then omit its two required PDUs.
         responderKeyDist = static_cast<uint8_t>(
-            responderKeyDist & kSmpKeyDistIdKeyMask);
+            responderKeyDist & static_cast<uint8_t>(
+                kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask));
       }
       if (peerRequestedSecureConnections) {
         smpSecureConnectionsActive_ = true;
@@ -2211,9 +2244,11 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         // LE Secure Connections derives the link key from DHKey. Identity
         // keys remain bidirectional so either role can resolve a bonded RPA.
         initiatorKeyDist = static_cast<uint8_t>(
-            smp[5] & kSmpKeyDistIdKeyMask);
+            smp[5] & static_cast<uint8_t>(
+                kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask));
         responderKeyDist = static_cast<uint8_t>(
-            smp[6] & kSmpKeyDistIdKeyMask);
+            smp[6] & static_cast<uint8_t>(
+                kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask));
       }
       if (!localIdentityDistributionAvailable()) {
         responderKeyDist = static_cast<uint8_t>(
@@ -2226,11 +2261,17 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
                                       : ((smpPairingRsp_[5] &
                                           kSmpKeyDistEncKeyMask) != 0U);
       smpExpectPeerIdKey_ = ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
+      smpExpectPeerSignKey_ =
+          ((smpPairingRsp_[5] & kSmpKeyDistSignKeyMask) != 0U);
       smpDistributeLocalIdKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
+      smpDistributeLocalSignKey_ =
+          ((smpPairingRsp_[6] & kSmpKeyDistSignKeyMask) != 0U);
       smpLocalIdInfoSent_ = false;
       smpLocalIdAddressSent_ = false;
       smpLocalIdAddressAcked_ = false;
+      smpLocalSignInfoSent_ = false;
+      smpLocalSignInfoAcked_ = false;
       smpKeySize_ = maxKeySize;
       if (peerRequestedSecureConnections) {
         const uint8_t pairAlg = resolveCurrentSecureConnectionsPairAlgorithm();
@@ -2632,6 +2673,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         reduceSmpEncryptionKey(smpStk_);
         smpStkValid_ = true;
         connectionEncAuthenticated_ = currentPairingIsAuthenticated();
+        connectionEncSecureConnections_ = false;
         memcpy(encDebug_.encLastStk, smpStk_, sizeof(encDebug_.encLastStk));
         emitBleTrace("SMP_RANDOM_RX");
         return false;
@@ -2645,6 +2687,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       reduceSmpEncryptionKey(smpStk_);
       smpStkValid_ = true;
       connectionEncAuthenticated_ = currentPairingIsAuthenticated();
+      connectionEncSecureConnections_ = false;
       memcpy(encDebug_.encLastStk, smpStk_, sizeof(encDebug_.encLastStk));
 
       uint8_t localRandom[17] = {0};
@@ -2782,11 +2825,30 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       (void)completeSmpKeyDistributionIfDone();
       return false;
 
+    case kSmpCodeSigningInformation:
+      if (smpLength != kSmpSigningInformationLen) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
+      if (!smpBondingRequested_ || !smpExpectPeerSignKey_ ||
+          !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
+          !connectionEncTxEnabled_) {
+        return false;
+      }
+      memcpy(smpPeerCsrk_, &smp[1], sizeof(smpPeerCsrk_));
+      smpPeerCsrkValid_ = true;
+      smpPeerSignCounter_ = 0U;
+      smpPeerSignCounterValid_ = false;
+      emitBleTrace("SMP_SIGN_INFO_RX");
+      (void)completeSmpKeyDistributionIfDone();
+      return false;
+
     case kSmpCodePairingResponse:
       if (smpLength != kSmpPairingResponseLen) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
-      if (smp[2] > 0x01U) {
+      if (smp[1] > kSmpIoCapKeyboardDisplay || smp[2] > 0x01U ||
+          (smp[3] & kSmpAuthReqBondingMask) > 0x01U ||
+          (smp[3] & 0xC0U) != 0U) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (smp[4] < 7U || smp[4] > 16U) {
@@ -2795,14 +2857,12 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
       if (!smpLocalInitiator_) {
         return buildSmpPairingFailed(kSmpReasonCommandNotSupported);
       }
-      if ((smp[5] & static_cast<uint8_t>(
-                         ~(kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask))) !=
-              0U ||
-          (smp[6] & static_cast<uint8_t>(
-                         ~(kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask))) !=
-              0U ||
-          (smp[5] & static_cast<uint8_t>(~smpPairingReq_[5])) != 0U ||
-          (smp[6] & static_cast<uint8_t>(~smpPairingReq_[6])) != 0U) {
+      if ((smp[5] & static_cast<uint8_t>(~kSmpKeyDistDefinedMask)) != 0U ||
+          (smp[6] & static_cast<uint8_t>(~kSmpKeyDistDefinedMask)) != 0U ||
+          (smp[5] & kSmpKeyDistSupportedMask &
+           static_cast<uint8_t>(~smpPairingReq_[5])) != 0U ||
+          (smp[6] & kSmpKeyDistSupportedMask &
+           static_cast<uint8_t>(~smpPairingReq_[6])) != 0U) {
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       if (smpPairingState_ != kSmpPairingStateReqSent) {
@@ -2833,6 +2893,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpResponse(localConfirm, sizeof(localConfirm));
       }
       memcpy(smpPairingRsp_, smp, kSmpPairingResponseLen);
+      // LinkKey is a defined CTKD request bit, but this LE-only host does not
+      // implement CTKD. Preserve the response verbatim for c1 and duplicate
+      // PDU checks; the negotiated state below selects only supported bits.
       smpPairingFailureReasonPending_ = false;
       smpLastPairingFailureReason_ = 0U;
       smpBondingRequested_ =
@@ -2854,11 +2917,17 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
                                           kSmpKeyDistEncKeyMask) != 0U);
       smpExpectPeerIdKey_ =
           ((smpPairingRsp_[6] & kSmpKeyDistIdKeyMask) != 0U);
+      smpExpectPeerSignKey_ =
+          ((smpPairingRsp_[6] & kSmpKeyDistSignKeyMask) != 0U);
       smpDistributeLocalIdKey_ =
           ((smpPairingRsp_[5] & kSmpKeyDistIdKeyMask) != 0U);
+      smpDistributeLocalSignKey_ =
+          ((smpPairingRsp_[5] & kSmpKeyDistSignKeyMask) != 0U);
       smpLocalIdInfoSent_ = false;
       smpLocalIdAddressSent_ = false;
       smpLocalIdAddressAcked_ = false;
+      smpLocalSignInfoSent_ = false;
+      smpLocalSignInfoAcked_ = false;
       if (!prepareLocalPairingRandom()) {
         return buildSmpPairingFailed(kSmpReasonUnspecified);
       }
@@ -2910,6 +2979,10 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
         return buildSmpPairingFailed(kSmpReasonInvalidParameters);
       }
       const uint8_t peerAuthReq = smp[1];
+      if ((peerAuthReq & kSmpAuthReqBondingMask) > 0x01U ||
+          (peerAuthReq & 0xC0U) != 0U) {
+        return buildSmpPairingFailed(kSmpReasonInvalidParameters);
+      }
       const bool storedBondMeetsMitm =
           (peerAuthReq & kSmpAuthReqMitmMask) == 0U ||
           connectionEncAuthenticated_;
@@ -2976,14 +3049,19 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           pairingReq[3] |= kSmpAuthReqSecureConnectionsMask;
           // SC does not distribute EncKey. Exchange both identity keys so
           // either role can resolve a bonded peer after its RPA rotates.
-          const uint8_t peerIdKey =
+          const uint8_t peerKeys =
               ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U)
-                  ? kSmpKeyDistIdKeyMask
+                  ? static_cast<uint8_t>(kSmpKeyDistIdKeyMask |
+                                         kSmpKeyDistSignKeyMask)
                   : 0U;
-          pairingReq[5] = localIdentityDistributionAvailable()
-                              ? peerIdKey
-                              : 0U;
-          pairingReq[6] = peerIdKey;
+          pairingReq[5] =
+              ((pairingReq[3] & kSmpAuthReqBondingMask) != 0U)
+                  ? kSmpKeyDistSignKeyMask
+                  : 0U;
+          if (localIdentityDistributionAvailable()) {
+            pairingReq[5] |= kSmpKeyDistIdKeyMask;
+          }
+          pairingReq[6] = peerKeys;
         } else {
           // The local legacy LTK distribution path is not implemented; offer
           // only local identity and accept the responder's EncKey/IdKey.
@@ -2991,7 +3069,10 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
             pairingReq[5] = localIdentityDistributionAvailable()
                                 ? kSmpKeyDistIdKeyMask
                                 : 0U;
-            pairingReq[6] = kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask;
+            pairingReq[5] |= kSmpKeyDistSignKeyMask;
+            pairingReq[6] = static_cast<uint8_t>(
+                kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask |
+                kSmpKeyDistSignKeyMask);
           } else {
             pairingReq[5] = 0U;
             pairingReq[6] = 0U;
@@ -3013,8 +3094,7 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
     }
 
     default:
-      if (smpCode == kSmpCodeSigningInformation ||
-          smpCode == kSmpCodeKeypressNotification) {
+      if (smpCode == kSmpCodeKeypressNotification) {
         return buildSmpPairingFailed(kSmpReasonCommandNotSupported);
       }
       emitBleTrace("SMP_RESERVED_CODE_IGNORED");

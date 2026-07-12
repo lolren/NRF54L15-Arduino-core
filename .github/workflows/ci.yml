@@ -35,6 +35,8 @@ jobs:
             options: clean_ble=on,clean_ble_trace=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/Security/BleBondPersistenceProbe
             options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Services/ancs
+            options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingReflector
             options: clean_ble=on,cpu_freq=128m
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/BLE/ChannelSounding/BleChannelSoundingInitiator
@@ -55,7 +57,7 @@ jobs:
             options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Basics/CoreVersionProbe
             options: clean_ble=off
-          - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Peripherals/RuntimePeripheralPinRemap
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Runtime/RuntimePeripheralPinRemap
             options: clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeePingInitiator
             options: clean_ble=off
@@ -173,15 +175,15 @@ jobs:
             options: clean_thread=stage,clean_matter=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Peripherals/SaadcDifferentialProbe
             options: clean_ble=off
-          - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Peripherals/VbatReadViaAnalogRead
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/VBAT/VbatReadViaAnalogRead
             options: clean_ble=off
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
 
       - name: Install toolchain dependency
         run: |
@@ -207,19 +209,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
 
       - name: Core I/O sanitizer and vector contracts
         run: python3 ./scripts/test_core_io_regressions.py
+
+      - name: Bluefruit client, HID, signed-write, and DFU contracts
+        run: python3 ./scripts/test_bluefruit_client_contracts.py
 
       - name: Upload recovery and platform recipe contracts
         run: python3 ./scripts/test_upload_helper.py
 
       - name: Release version and prerelease contracts
         run: python3 ./scripts/test_release_versions.py
+
+      - name: XIAO nRF54LM20A Sense PDM contracts
+        run: python3 ./scripts/test_lm20a_pdm_contract.py
+
+      - name: CRACEN IKG fail-closed contracts
+        run: python3 ./scripts/test_cracen_ikg_contract.py
+
+      - name: nRF54LM20A CRACEN RNG register contracts
+        run: python3 ./scripts/test_lm20a_cracen_rng_header.py
 
   audit-contract-compiles:
     runs-on: ubuntu-latest
@@ -268,10 +282,10 @@ jobs:
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeCoordinator
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
 
       - name: Install compiler dependency
         run: |
@@ -302,10 +316,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
 
       - name: Install compiler dependency
         shell: powershell
@@ -327,7 +341,7 @@ jobs:
           arduino-cli compile `
             --fqbn "localnrf54:nrf54l15clean:xiao_nrf54l15" `
             --build-path "$env:RUNNER_TEMP/nrf54-windows-build" `
-            "hardware/nrf54l15clean/nrf54l15clean/examples/CoreVersionProbe"
+            "hardware/nrf54l15clean/nrf54l15clean/examples/Basics/CoreVersionProbe"
           $uf2 = Get-Item "$env:RUNNER_TEMP/nrf54-windows-build/*.uf2"
           if ($uf2.Length -le 0) { throw "Windows compile did not emit UF2" }
 
@@ -339,15 +353,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.10"
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
 
       - name: Install compiler dependency
         run: |

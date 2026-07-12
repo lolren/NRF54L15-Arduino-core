@@ -1478,6 +1478,7 @@ constexpr uint8_t kSmpEncryptionInformationLen = 17U;
 constexpr uint8_t kSmpMasterIdentificationLen = 11U;
 constexpr uint8_t kSmpIdentityInformationLen = 17U;
 constexpr uint8_t kSmpIdentityAddressInformationLen = 8U;
+constexpr uint8_t kSmpSigningInformationLen = 17U;
 constexpr uint8_t kSmpIoCapDisplayOnly = 0x00U;
 constexpr uint8_t kSmpIoCapDisplayYesNo = 0x01U;
 constexpr uint8_t kSmpIoCapKeyboardOnly = 0x02U;
@@ -1489,6 +1490,11 @@ constexpr uint8_t kSmpAuthReqSecureConnectionsMask = 0x08U;
 constexpr uint8_t kSmpKeyDistEncKeyMask = 0x01U;
 constexpr uint8_t kSmpKeyDistIdKeyMask = 0x02U;
 constexpr uint8_t kSmpKeyDistSignKeyMask = 0x04U;
+constexpr uint8_t kSmpKeyDistLinkKeyMask = 0x08U;
+constexpr uint8_t kSmpKeyDistSupportedMask =
+    kSmpKeyDistEncKeyMask | kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask;
+constexpr uint8_t kSmpKeyDistDefinedMask =
+    kSmpKeyDistSupportedMask | kSmpKeyDistLinkKeyMask;
 constexpr uint8_t kSmpReasonPasskeyEntryFailed = 0x01U;
 constexpr uint8_t kSmpReasonAuthRequirements = 0x03U;
 constexpr uint8_t kSmpReasonConfirmValueFailed = 0x04U;
@@ -1524,7 +1530,7 @@ constexpr uint8_t kSmpPairingStateConfirmSent = 2U;
 constexpr uint8_t kSmpPairingStateRandomSent = 3U;
 
 constexpr uint32_t kBleBondRetentionMagic = 0x444E4F42U;  // "BOND"
-constexpr uint16_t kBleBondRetentionVersion = 2U;
+constexpr uint16_t kBleBondRetentionVersion = 3U;
 constexpr uint32_t kBleCccdRetentionMagic = 0x44434343U;  // "CCCD"
 constexpr uint16_t kBleCccdRetentionVersion = 1U;
 constexpr uint32_t kBleBondRramcSpinLimit = 600000UL;

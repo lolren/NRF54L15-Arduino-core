@@ -6,9 +6,8 @@ What it provides:
 - pinned pyOCD bootstrap requirements for the advanced recovery uploader
 - a tool-local pyOCD runtime install path that does not touch the system Python
   environment
-- bundled offline wheelhouses when available for the packaged host target
 - Linux and Windows helper scripts for the host-side setup path
-- the CMSIS-DAP udev rule for XIAO nRF54L15 on Linux
+- CMSIS-DAP udev rules for XIAO nRF54L15 and XIAO nRF54LM20A on Linux
 
 Linux helper usage:
 - `setup/install_linux_host_deps.sh --udev` installs only `/dev/hidraw*` and `/dev/ttyACM*` access rules
@@ -19,7 +18,14 @@ Normal compile and default upload should work without this package being used
 directly. It exists so recovery and protected-target workflows do not depend on
 manually locating setup files in the repository.
 
-Current offline wheelhouse coverage:
-- CPython `3.10`, `3.11`, and `3.12` on the packaged host targets
-- if the local Python version is outside that set, the helper falls back to the
-  normal online `pip` install path inside the same tool-local runtime
+Recovery dependency installation:
+- the first pyOCD recovery setup requires access to the configured Python
+  package index
+- dependencies are installed into the tool-local runtime and do not modify the
+  system Python environment
+- binary dependency wheels are intentionally not redistributed in this archive;
+  this keeps their native third-party license delivery with the package index
+
+Licenses:
+- `LICENSE` covers the project-owned bootstrap and setup files
+- `THIRD_PARTY_NOTICES.md` documents the dependency-installation boundary

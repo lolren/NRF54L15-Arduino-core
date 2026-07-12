@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
         help="Also verify host-tool assets referenced by the index",
     )
     parser.add_argument(
+        "--tools-only",
+        action="store_true",
+        help="Verify host tools without downloading the platform asset",
+    )
+    parser.add_argument(
         "--tool-name",
         default="nrf54l15hosttools",
         help="Tool name to verify when --include-tools is set",
@@ -149,14 +154,17 @@ def verify_entry(label: str, entry: dict, retries: int, retry_delay: float) -> N
 
 def main() -> int:
     args = parse_args()
+    if args.tools_only and not args.include_tools:
+        raise SystemExit("--tools-only requires --include-tools")
     package = load_index(args.index.resolve())
     platform = find_platform(package, args.version)
-    verify_entry(
-        f"platform {args.version}",
-        platform,
-        retries=args.retries,
-        retry_delay=args.retry_delay,
-    )
+    if not args.tools_only:
+        verify_entry(
+            f"platform {args.version}",
+            platform,
+            retries=args.retries,
+            retry_delay=args.retry_delay,
+        )
 
     if args.include_tools:
         hosts = {item.strip() for item in args.tool_hosts.split(",") if item.strip()}

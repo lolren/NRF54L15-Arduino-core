@@ -1,11 +1,12 @@
 ## Bluefruit52Lib Compatibility Layer
 
 `Bluefruit52Lib` is the bundled nRF52/nRF52840 compatibility library for the
-XIAO nRF54L15 clean core.
+supported nRF54L clean-core boards.
 
 It keeps the familiar Bluefruit-style API available on top of the clean nRF54
 HAL, including `Bluefruit`, `BLEUart`, `BLEClientUart`, scanner/client
-helpers, Device Information, Battery Service, and common advertising helpers.
+helpers, Device Information, Battery Service, HID, ANCS, security/privacy, and
+common advertising helpers.
 
 Examples in Arduino IDE:
 
@@ -116,6 +117,33 @@ sizes, applies the 30-second transaction timeout and a bounded single-peer
 repeated-attempt delay, and uses CRACEN entropy without a deterministic
 security fallback. Entropy failure aborts the security step.
 
+### Authenticated Signed Writes
+
+Bonded peers can exchange CSRKs during SMP and use an ATT Signed Write Command
+while the reconnect is not encrypted. On the server, expose the standard
+authenticated-signed-write property and select a signed permission:
+
+```cpp
+BLECharacteristic signedValue(
+    0xFFF1, CHR_PROPS_READ | CHR_PROPS_AUTH_SIGNED_WRITES);
+signedValue.setPermission(SECMODE_OPEN, SECMODE_SIGNED_NO_MITM);
+```
+
+After the client discovers that characteristic, queue a signed command with:
+
+```cpp
+const uint8_t value[] = {0x01, 0x02, 0x03};
+uint16_t written = peerCharacteristic.writeSigned(value, sizeof(value));
+```
+
+The clean HAL uses AES-CMAC with the retained local CSRK, persists the next
+sender counter before making the command eligible for transmission, verifies
+the peer signature in constant time, and rejects stale or replayed counters
+before changing the GATT value. The current policy is deliberately bounded to
+the single retained bond. `writeSigned()` returns zero when the characteristic
+does not advertise the property, no signing bond exists, the link is encrypted,
+or the value does not fit the negotiated ATT MTU.
+
 For bonded peers, CCCD subscriptions are restored automatically when the saved
 bond identity matches the reconnecting peer. This lets notify/indicate
 characteristics keep the same Bluefruit callback behavior after a bonded
@@ -168,6 +196,43 @@ helpers. It exposes readable `0x2901`, `0x2904`, and `0x2908` descriptors plus a
 writable `0x2901` User Description descriptor that can be written and read back
 from a BLE scanner.
 
+Custom characteristic storage follows the configured length contract.
+`setMaxLen()` bounds variable values, `setFixedLen()` requires that exact value
+length, `setFixedLen(0)` returns to variable-length behavior, and `setBuffer()`
+uses the supplied buffer size as the maximum. The HAL applies the same bounds to
+local updates, normal peer writes, and prepare/execute writes. A service-level
+`setPermission()` is inherited as the minimum security for its characteristics
+and descriptors.
+
+Client characteristic `read()` follows a full value through ATT Read and Read
+Blob responses until the caller's buffer is full or the value ends. Paged
+characteristic discovery also determines each characteristic's complete handle
+range before searching for descriptors; this prevents a descriptor from being
+assigned to the neighboring characteristic.
+
+`BLEBas::write(level)` updates the readable Battery Level without implicitly
+notifying. `BLEBas::notify(level)` is the explicit notification path, can resend
+the same value, and returns false when there is no connected subscriber with the
+Battery Level CCCD enabled.
+
+Enable BLE UART TX coalescing with `bleuart.bufferTXD(true)`. Small `write()`
+calls accumulate up to the current `ATT_MTU - 3` notification payload; a full
+packet sends automatically, while `flushTXD()` sends a partial packet on demand.
+If notification backpressure makes a flush fail, the unsent bytes remain
+buffered for a later retry. Disabling buffered mode clears a pending partial
+packet.
+
+### Apple Notification Center Service
+
+`BLEAncs` subscribes to both Notification Source and Data Source. Attribute
+getters send the complete Control Point request, reassemble a Data Source
+response that spans multiple notifications, validate its command/UID/attribute
+prefix, and return the requested bytes. The implemented helpers cover app ID and
+display name, title, subtitle, message, decimal message size, date, positive and
+negative action labels, and the two notification actions. Start with
+`Services > ancs`; ANCS still depends on iOS authorization, pairing, and the
+phone exposing the service after connection.
+
 HID Protocol Mode changes are visible to sketches. `BLEHidAdafruit` switches
 keyboard/mouse notifications between Report and Boot characteristics when a host
 writes Protocol Mode:
@@ -204,6 +269,11 @@ if (hid.keyboardPresent()) {
 }
 ```
 
+For generic `0x2A4D` HID reports, central discovery reads the `0x2908` Report
+Reference descriptor instead of assuming the first matching UUID is a gamepad.
+Keyboard, consumer-control, mouse, and gamepad notification subscription paths
+all require an encrypted link.
+
 Disconnect callbacks receive common HCI-style reason codes. The most recent
 drop can also be inspected later:
 
@@ -233,3 +303,27 @@ discovery, LE Secure Connections, and privacy flows are validated by the nRF54
 two-board gate and are the recommended starting point for nRF52 sketch ports.
 This compatibility statement is not Bluetooth SIG qualification or a claim of
 complete nRF52 Bluefruit behavioral parity.
+
+### Known compatibility limits
+
+Dynamic GATT read/write authorization callbacks are not implemented. The clean
+HAL does not yet expose the request/reply transaction needed to let a callback
+approve or reject an ATT operation before the value changes. If
+`setReadAuthorizeCallback()` or `setWriteAuthorizeCallback()` is configured,
+`BLECharacteristic::begin()` returns `ERROR_NOT_SUPPORTED` instead of silently
+creating an unprotected characteristic. Use `setPermission()` for static GATT
+access control.
+
+Nordic secure DFU is not implemented by this core. `BLEDfu::begin()` returns
+`ERROR_NOT_SUPPORTED`, and the bundled examples do not advertise a non-working
+DFU service.
+
+Directed advertising is not implemented. Service Changed is present as a GATT
+characteristic and its bonded CCCD can be retained, but
+`configServiceChanged()` does not track a database-change epoch or schedule
+schema-range indications.
+
+The compatibility layer keeps one retained bond. Automatic multi-bond policy,
+controller-enforced allow-list behavior, locally generated full legacy
+LTK/EDIV/Rand distribution, complete nRF52 API parity, and Bluetooth PTS/BQB
+qualification are outside the documented `1.0.0` scope.

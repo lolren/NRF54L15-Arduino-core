@@ -7,7 +7,7 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
 
 ## Current Implemented Scope
 
-- [x] Legacy advertising: connectable, scannable, non-connectable, directed
+- [x] Legacy advertising: connectable, scannable, and non-connectable
 - [x] Active/passive scanning and filtered scan callbacks
 - [x] Peripheral and central connections on the clean BLE path
 - [x] ATT/GATT server and client through the Bluefruit-compatible API
@@ -71,10 +71,34 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
       entropy only. Failure zeroizes the requested material and aborts the
       security step; foreground prefetch keeps normal RNG acquisition away
       from radio response deadlines
+- [x] SMP phase-3 signing-key distribution in role-correct order: each bonded
+      role generates a CRACEN-backed CSRK, exchanges Signing Information, and
+      retains local/peer CSRKs plus signing counters in the single bond record.
+      ATT Signed Write Commands use AES-CMAC, reject stale/replayed counters,
+      and persist the next counter before a local command is transmitted or a
+      verified peer command changes the GATT value.
+- [x] Bluefruit authenticated signed-write support: the
+      `CHR_PROPS_AUTH_SIGNED_WRITES` property maps to the clean HAL and
+      `BLEClientCharacteristic::writeSigned()` queues the ATT command when the
+      peer characteristic advertises that property and a signing bond exists.
+- [x] SMP request validation rejects reserved IO capabilities, AuthReq/bonding
+      encodings, and key-distribution bits instead of accepting malformed
+      pairing/security requests.
+- [x] Incoming `CONNECT_IND` and local connection initiation validate access
+      addresses, timing/latency/supervision relationships, window fields,
+      channel maps, and hop values before connection state is mutated.
+- [x] A central that accepts a valid LL or L2CAP connection-parameter request
+      stages the corresponding `LL_CONNECTION_UPDATE_IND` after its response;
+      invalid parameter sets and colliding update procedures are rejected.
 - [x] Custom ATT/GATT long-read path: custom characteristic values are read
       directly from bounded storage instead of the fixed 31-byte scratch buffer,
       and writable custom values support contiguous queued ATT Prepare Write /
       Execute Write up to `BleRadio::kCustomGattMaxValueLength`.
+- [x] Custom characteristic fixed/maximum length semantics are enforced for
+      initial values, local updates, peer writes, and prepare/execute writes.
+      Fixed-length values are zero-filled when registered without an initial
+      value; `setBuffer()` establishes the maximum length and `setFixedLen(0)`
+      restores variable-length behavior.
 - [x] ATT Read Multiple Variable (`0x20/0x21`): the server returns
       little-endian Value Length plus Attribute Value tuples for variable or
       unknown-length multi-handle reads, preserves request handle order, reports
@@ -83,6 +107,19 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
       is propagated to the HAL for custom GATT value reads/writes, including
       encrypted-link and authenticated/MITM access checks for secured
       characteristics. Authenticated bond metadata is retained for reconnects.
+- [x] `BLEService::setPermission()` supplies the minimum inherited security for
+      characteristics and their descriptors. Dynamic authorize callbacks are
+      not silently ignored: a characteristic configured with one fails
+      `begin()` with `ERROR_NOT_SUPPORTED` until a request/reply transaction is
+      implemented.
+- [x] Bluefruit Battery Service semantics separate database updates from
+      notifications: `BLEBas::write()` changes the readable level without
+      notifying, while `BLEBas::notify()` requires an active subscriber and can
+      explicitly resend an unchanged level.
+- [x] Bluefruit UART buffered TX semantics: `bufferTXD(true)` coalesces writes
+      up to the current `ATT_MTU - 3` notification payload, a full packet flushes
+      automatically, `flushTXD()` sends a partial packet explicitly, and a
+      failed notify leaves unsent bytes buffered for retry.
 - [x] Custom GATT standard descriptors: Bluefruit
       `BLECharacteristic::setUserDescriptor()`,
       `setPresentationFormatDescriptor()`, and `setReportRefDescriptor()` now
@@ -92,9 +129,19 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
       parent characteristic write permission allows it; Presentation Format
       (`0x2904`) and Report Reference (`0x2908`) remain read-only.
 - [x] `Bluefruit52Lib > Diagnostics > gatt_edge_cases` exposes one manual
-      regression sketch for 244-byte long reads, queued prepare/execute writes,
-      MTU-sensitive reads, writable User Description descriptors, and readable
-      Presentation Format / Report Reference descriptors.
+      regression sketch for 244/245-byte length boundaries, fixed-length
+      behavior, queued prepare/execute writes, MTU-sensitive reads, writable
+      User Description descriptors, and readable Presentation Format / Report
+      Reference descriptors.
+- [x] Bluefruit central characteristic reads continue with ATT Read Blob until
+      the complete value or caller buffer boundary. Characteristic discovery
+      follows paged Read By Type responses and assigns each characteristic its
+      true end handle before descriptor discovery.
+- [x] Bluefruit ANCS control/data handling sends complete notification and app
+      attribute commands, reassembles fragmented Data Source notifications,
+      validates response prefixes and attribute IDs, and implements app-name,
+      title, subtitle, message, decimal message-size, date, action-label, and
+      positive/negative action helpers.
 - [x] Bonded CCCD persistence: CCCD writes are saved in the BLE bond storage
       page, restored only for the matching bonded peer/local identity, and
       cleared with the bond record. This covers Service Changed, Battery
@@ -109,7 +156,10 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
       `setProtocolModeCallback()`. Host keyboard LED output reports now update
       `keyboardLedState()` before the optional `setKeyboardLedCallback()`
       callback fires, and central HID sketches can write Boot Keyboard Output
-      LEDs through `BLEClientHidAdafruit::setKeyboardLedState()`.
+      LEDs through `BLEClientHidAdafruit::setKeyboardLedState()`. Central HID
+      discovery identifies generic input reports from their `0x2908` Report
+      Reference descriptors, and keyboard, consumer, mouse, and gamepad notify
+      paths apply the same encrypted-link requirement.
 - [x] Bluefruit disconnect reason helpers: central/peripheral disconnect
       callbacks now receive common HCI-style reason codes, and sketches can
       inspect the last disconnect with `Bluefruit.getLastDisconnectReason()`
@@ -140,12 +190,15 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
 
 ## Remaining BLE Compliance Work
 
+- [ ] Directed advertising
+- [ ] Service Changed database-epoch management; the characteristic and bonded
+      CCCD path exist, but `configServiceChanged()` does not yet track database
+      revisions or schedule change-range indications after a schema update
 - [ ] Broader authenticated-pairing interoperability: passkey, Numeric
       Comparison, and NFC/QR OOB workflows against phone/desktop peers, plus a
       larger malformed/timeout/retry matrix
-- [ ] Signing/CSRK distribution and signed writes, locally generated legacy
-      LTK/EDIV/Rand distribution, a multi-peer repeated-attempt policy, and a
-      multi-peer bond database
+- [ ] Locally generated legacy LTK/EDIV/Rand distribution, a multi-peer
+      repeated-attempt policy, and a multi-peer bond database
 - [ ] Automatic controller-enforced resolving-list/allow-list policy and
       privacy/bond-database behavior against a broad phone/desktop matrix
 - [ ] Formal ATT/GATT edge cases: host-app interop for long read/write and
@@ -167,7 +220,7 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
 
 ## Automated Two-Board Gate
 
-Run the complete release-candidate gate described in
+Run the complete stable-release gate described in
 [`TWO_BOARD_RELEASE_GATE.md`](TWO_BOARD_RELEASE_GATE.md):
 
 ```bash
@@ -177,10 +230,13 @@ python3 scripts/run_two_board_release_gate.py --profile full
 The security/privacy portion requires positive Numeric Comparison, responder
 rejection without encryption or bond save, mutual OOB, both one-way OOB
 directions, valid timed RPA rotation, identity-key distribution, and an
-identity-resolved encrypted reconnect without re-pairing. Retain the generated
-`measurements/two_board_release_gate_<timestamp>/` directory with the release
-evidence. A passing gate is hardware regression evidence for these two board
-families, not Bluetooth PTS/BQB qualification or broad host interoperability.
+identity-resolved encrypted reconnect without re-pairing. Its signed-write
+phase creates a fresh signing bond, reconnects without link encryption, and
+requires an accepted signed value with durable monotonic counters. Retain the
+generated `measurements/two_board_release_gate_<timestamp>/` directory with the
+release evidence. A passing gate is hardware regression evidence for these two
+board families, not Bluetooth PTS/BQB qualification or broad host
+interoperability.
 
 ## Resume Test Matrix
 
@@ -212,6 +268,11 @@ Run these before changing BLE again:
       `-DBLE_PAIR_USE_PRIVACY=1`; verify both identity PDUs, retained identity
       and IRK, changed RPAs after reset, successful AAR resolution, and an
       encrypted reconnect with no new prompt or bond save
+- [ ] Compile and run `BlePairPeripheral` + `BlePairCentral` with
+      `-DBLE_PAIR_USE_SIGNED_WRITE=1`; verify CSRK exchange, retained local and
+      peer signing keys, an unencrypted bonded reconnect, an accepted signed
+      write, replay rejection, and monotonically persisted sender/receiver
+      counters across another reset
 - [ ] Compile and run `Bluefruit52Lib > Diagnostics > bond_identity_probe`;
       pair with a phone/desktop host, confirm authenticated fixed-PIN pairing,
       peer bond address logging, and `bonded_peer_resolver_refreshed=yes` when

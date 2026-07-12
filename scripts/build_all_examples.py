@@ -107,9 +107,29 @@ def applicable_boards(relative: str, all_profiles: bool) -> tuple[str, ...]:
         return ("nrf54l15dk_pca10156",)
     if "rawi2s" in lowered:
         return ("xiao_nrf54l15",)
-    if any(token in lowered for token in ("/xiaolm20a/", "lm20a", "lm20b", "npm1300", "qspiflash", "libraries/adafruit_spiflash/")):
+    if any(
+        token in lowered
+        for token in (
+            "/xiaolm20a/",
+            "/xiao-nrf54lm20a/",
+            "lm20a",
+            "lm20b",
+            "npm1300",
+            "qspiflash",
+            "libraries/adafruit_spiflash/",
+        )
+    ):
         return ("xiao_nrf54lm20b",)
-    if any(token in lowered for token in ("/xiaol15/", "xiaosense", "/i2s/")):
+    if any(
+        token in lowered
+        for token in (
+            "/xiaol15/",
+            "/xiao-nrf54l15/",
+            "/xiao-nrf54l15-sense/",
+            "xiaosense",
+            "/i2s/",
+        )
+    ):
         return ("xiao_nrf54l15",)
     if name.startswith("chipphase"):
         return PRIMARY_BOARDS
@@ -140,7 +160,7 @@ def discover_jobs(args: argparse.Namespace) -> list[Job]:
 
     # Every advertised profile gets at least one build even when most examples
     # are intentionally constrained to representative XIAO boards.
-    probe = "examples/CoreVersionProbe/CoreVersionProbe.ino"
+    probe = "examples/Basics/CoreVersionProbe/CoreVersionProbe.ino"
     if not args.filter or args.filter.lower() in probe.lower():
         for board in advertised_boards():
             if not selected_boards or board in selected_boards:
@@ -187,7 +207,14 @@ def make_local_cli_config(temp_root: Path) -> Path:
     return config
 
 
-def run_job(job: Job, config: Path, build_root: Path, compiler: Path | None, timeout: int) -> Result:
+def run_job(
+    job: Job,
+    config: Path,
+    build_root: Path,
+    compiler: Path | None,
+    timeout: int,
+    keep_build: bool,
+) -> Result:
     import time
 
     digest = hashlib.sha256(f"{job.sketch}\0{job.fqbn}".encode()).hexdigest()[:16]
@@ -220,6 +247,9 @@ def run_job(job: Job, config: Path, build_root: Path, compiler: Path | None, tim
             stderr = stderr.decode(errors="replace")
         output = stdout + stderr
         return Result(job.sketch, job.fqbn, "timeout", 124, time.monotonic() - started, output[-12000:])
+    finally:
+        if not keep_build:
+            shutil.rmtree(build_path, ignore_errors=True)
 
 
 def main() -> int:
@@ -248,7 +278,15 @@ def main() -> int:
     results: list[Result] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
         future_map = {
-            executor.submit(run_job, job, config, build_root, compiler, args.timeout): job
+            executor.submit(
+                run_job,
+                job,
+                config,
+                build_root,
+                compiler,
+                args.timeout,
+                args.keep_builds,
+            ): job
             for job in jobs
         }
         for future in concurrent.futures.as_completed(future_map):

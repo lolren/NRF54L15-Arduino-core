@@ -320,29 +320,54 @@ static bool testWatchdog() {
 }
 
 static bool testPdm() {
-  alignas(4) static int16_t pcm[64] = {};
+  struct alignas(4) CaptureBuffer {
+    uint32_t before;
+    int16_t pcm[256];
+    uint32_t after;
+  };
+  static CaptureBuffer buffer;
+  buffer.before = 0xA55AA55AUL;
+  buffer.after = 0x5AA55AA5UL;
+  for (int16_t& sample : buffer.pcm) {
+    sample = static_cast<int16_t>(0x5A5A);
+  }
 
-  bool ok = g_pdm.begin(kPinMicClk, kPinMicData, true, 40U,
-                        PDM_RATIO_RATIO_Ratio64, PdmEdge::kLeftRising);
+  const bool railOk = BoardControl::setImuMicEnabled(true);
+  delay(10);
+  bool ok = railOk && g_pdm.begin(kPinMicClk, kPinMicData, true, 25U,
+                                  PDM_RATIO_RATIO_Ratio80,
+                                  PdmEdge::kLeftFalling);
   if (ok) {
-    g_pdmCaptureOk = g_pdm.capture(pcm, 64U, 8000000UL);
+    g_pdmCaptureOk = g_pdm.capture(buffer.pcm, 256U);
   } else {
     g_pdmCaptureOk = false;
   }
   g_pdm.end();
+  (void)BoardControl::setImuMicEnabled(false);
 
   long checksum = 0;
-  for (size_t i = 0; i < 64U; ++i) {
-    checksum += pcm[i];
+  int16_t minimum = INT16_MAX;
+  int16_t maximum = INT16_MIN;
+  for (size_t i = 64U; i < 256U; ++i) {
+    const int16_t sample = buffer.pcm[i];
+    checksum += sample;
+    minimum = (sample < minimum) ? sample : minimum;
+    maximum = (sample > maximum) ? sample : maximum;
   }
+  const bool guardsOk = buffer.before == 0xA55AA55AUL &&
+                        buffer.after == 0x5AA55AA5UL;
+  const long peakToPeak = static_cast<long>(maximum) - minimum;
+  const bool signalOk = peakToPeak >= 4L;
 
   char detail[96];
-  snprintf(detail, sizeof(detail), "capture=%s sum=%ld first=%d",
+  snprintf(detail, sizeof(detail), "capture=%s guard=%s p2p=%ld sum=%ld",
            g_pdmCaptureOk ? "ok" : "fail",
-           checksum,
-           static_cast<int>(pcm[0]));
-  reportResult("PDM", ok && g_pdmCaptureOk, detail);
-  return ok && g_pdmCaptureOk;
+           guardsOk ? "ok" : "fail",
+           peakToPeak,
+           checksum);
+  const bool pass = ok && g_pdmCaptureOk && guardsOk && signalOk;
+  reportResult("PDM", pass, detail);
+  return pass;
 }
 
 static bool testBle() {

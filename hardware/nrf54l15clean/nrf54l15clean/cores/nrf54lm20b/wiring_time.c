@@ -32,6 +32,27 @@ extern bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit)
     __attribute__((weak));
 
 static volatile uint32_t g_millis_ticks = 0;
+static volatile uint32_t g_system_off_abort_magic
+    __attribute__((section(".noinit")));
+static volatile uint32_t g_system_off_abort_magic_inverse
+    __attribute__((section(".noinit")));
+static volatile uint32_t g_system_off_abort_stage
+    __attribute__((section(".noinit")));
+static volatile uint32_t g_system_off_abort_stage_inverse
+    __attribute__((section(".noinit")));
+static const uint32_t kSystemOffAbortMagic = 0x534F4646UL; /* "SOFF" */
+
+enum {
+    kSystemOffAbortPrepare = 1U,
+    kSystemOffAbortDmaQuiesce = 2U,
+    kSystemOffAbortWakeLfxo = 3U,
+    kSystemOffAbortWakeSync = 4U,
+    kSystemOffAbortWakeCompare = 5U,
+    kSystemOffAbortHfxoStop = 6U,
+    kSystemOffAbortPreEntryCompare = 7U,
+    kSystemOffAbortResetReasonClear = 8U,
+    kSystemOffAbortWakeUnknown = 9U
+};
 static volatile uint32_t* const kScbScr = (volatile uint32_t*)0xE000ED10UL;
 static const uint32_t kScbScrSleepDeep_Msk = (1UL << 2);
 static const uint32_t kScbScrSleepOnExit_Msk = (1UL << 1);
@@ -49,6 +70,8 @@ static const uint32_t kGrtcStartSettleUs = 93UL;
 static const uint32_t kSystemOffPeripheralSpinLimit = 2000000UL;
 static const uint32_t kSystemOffSyncSpinLimit = 4000000UL;
 static const uint32_t kSystemOffHfxoStopSpinLimit = 2000000UL;
+static const uint32_t kSystemOffResetReasonClearSpinLimit = 200000UL;
+static const uint32_t kSystemOffResetReasonStableReads = 64UL;
 uint64_t nrf54lm20b_core_monotonic_time_us(void);
 uint32_t nrf54lm20b_core_monotonic_time_ms(void);
 #if defined(NRF54L15_CLEAN_POWER_LOW)
@@ -836,9 +859,33 @@ static system_off_wake_program_status_t programSystemOffWakeUs(uint32_t delayUs)
     return kSystemOffWakeCompareFired;
 }
 
-static void abortSystemOffWithReset(void) __attribute__((noreturn));
+static void clearSystemOffAbortDiagnostic(void)
+{
+    g_system_off_abort_magic = 0U;
+    g_system_off_abort_magic_inverse = 0U;
+    g_system_off_abort_stage = 0U;
+    g_system_off_abort_stage_inverse = 0U;
+    __asm volatile("dsb 0xF" ::: "memory");
+}
 
-static void abortSystemOffWithReset(void)
+static uint32_t systemOffAbortStageForWakeStatus(
+    system_off_wake_program_status_t status)
+{
+    switch (status) {
+        case kSystemOffWakeLfxoFailed:
+            return kSystemOffAbortWakeLfxo;
+        case kSystemOffWakeSyncTimedOut:
+            return kSystemOffAbortWakeSync;
+        case kSystemOffWakeCompareFired:
+            return kSystemOffAbortWakeCompare;
+        default:
+            return kSystemOffAbortWakeUnknown;
+    }
+}
+
+static void resetAfterSystemOffEvent(void) __attribute__((noreturn));
+
+static void resetAfterSystemOffEvent(void)
 {
     *(volatile uint32_t*)0xE000ED0CUL = 0x05FA0004UL;
     __asm volatile("dsb 0xF" ::: "memory");
@@ -846,6 +893,19 @@ static void abortSystemOffWithReset(void)
     while (1) {
         __asm volatile("wfe");
     }
+}
+
+static void abortSystemOffWithReset(uint32_t stage)
+    __attribute__((noreturn));
+
+static void abortSystemOffWithReset(uint32_t stage)
+{
+    g_system_off_abort_stage = stage;
+    g_system_off_abort_stage_inverse = ~stage;
+    g_system_off_abort_magic_inverse = ~kSystemOffAbortMagic;
+    g_system_off_abort_magic = kSystemOffAbortMagic;
+    __asm volatile("dsb 0xF" ::: "memory");
+    resetAfterSystemOffEvent();
 }
 
 static bool runSystemOffQuiesceHook(bool (*hook)(uint32_t))
@@ -884,6 +944,36 @@ static bool stopHfxoForSystemOff(void)
     return false;
 }
 
+static bool clearResetReasonsForSystemOff(void)
+{
+    nrf54_core_clear_reset_reason(0xFFFFFFFFUL);
+    __asm volatile("dsb 0xF" ::: "memory");
+    __asm volatile("isb 0xF" ::: "memory");
+
+    uint32_t spinLimit = kSystemOffResetReasonClearSpinLimit;
+    uint32_t consecutiveZeroReads = 0U;
+    while (spinLimit-- > 0U) {
+        const uint32_t remaining = NRF_RESET->RESETREAS;
+        if (remaining == 0U) {
+            ++consecutiveZeroReads;
+            if (consecutiveZeroReads >= kSystemOffResetReasonStableReads) {
+                __asm volatile("dsb 0xF" ::: "memory");
+                __asm volatile("isb 0xF" ::: "memory");
+                return NRF_RESET->RESETREAS == 0U;
+            }
+            __NOP();
+            continue;
+        }
+        consecutiveZeroReads = 0U;
+        /* RESETREAS is W1C and may take several peripheral clock cycles to
+         * settle. Re-acknowledge only the causes that remain asserted. */
+        NRF_RESET->RESETREAS = remaining;
+        __asm volatile("dsb 0xF" ::: "memory");
+    }
+    __asm volatile("isb 0xF" ::: "memory");
+    return false;
+}
+
 static void enterSystemOffInternal(bool disableRamRetention,
                                    bool timedWake,
                                    uint32_t delayUs) __attribute__((noreturn));
@@ -892,21 +982,23 @@ static void enterSystemOffInternal(bool disableRamRetention,
                                    bool timedWake,
                                    uint32_t delayUs)
 {
+    clearSystemOffAbortDiagnostic();
     NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
     __asm volatile("cpsid i" ::: "memory");
 
     if (!nrf54lm20b_core_prepare_system_off()) {
-        abortSystemOffWithReset();
+        abortSystemOffWithReset(kSystemOffAbortPrepare);
     }
     if (!quiesceSystemOffDmaOwners()) {
-        abortSystemOffWithReset();
+        abortSystemOffWithReset(kSystemOffAbortDmaQuiesce);
     }
 
     if (timedWake) {
         const system_off_wake_program_status_t wakeStatus =
             programSystemOffWakeUs(delayUs);
         if (wakeStatus != kSystemOffWakeProgrammed) {
-            abortSystemOffWithReset();
+            abortSystemOffWithReset(
+                systemOffAbortStageForWakeStatus(wakeStatus));
         }
     } else {
         nrf54lm20b_core_prepare_system_off_wake_timebase();
@@ -916,17 +1008,20 @@ static void enterSystemOffInternal(bool disableRamRetention,
         nrf54lm20b_core_disable_system_off_retention();
     }
     if (!stopHfxoForSystemOff()) {
-        abortSystemOffWithReset();
+        abortSystemOffWithReset(kSystemOffAbortHfxoStop);
     }
     if (timedWake && anyGrtcCompareEvent(NRF_GRTC)) {
-        abortSystemOffWithReset();
+        abortSystemOffWithReset(kSystemOffAbortPreEntryCompare);
     }
 
     *kScbScr = (*kScbScr | kScbScrSleepDeep_Msk) & ~kScbScrSleepOnExit_Msk;
     __asm volatile("dsb 0xF" ::: "memory");
     __asm volatile("isb 0xF" ::: "memory");
-    nrf54_core_clear_reset_reason(0xFFFFFFFFUL);
+    if (!clearResetReasonsForSystemOff()) {
+        abortSystemOffWithReset(kSystemOffAbortResetReasonClear);
+    }
     __asm volatile("dsb 0xF" ::: "memory");
+    __asm volatile("isb 0xF" ::: "memory");
     NRF_REGULATORS->SYSTEMOFF = REGULATORS_SYSTEMOFF_SYSTEMOFF_Enter;
     __asm volatile("dsb 0xF" ::: "memory");
     __asm volatile("isb 0xF" ::: "memory");
@@ -934,7 +1029,10 @@ static void enterSystemOffInternal(bool disableRamRetention,
     while (1) {
         __asm volatile("wfi");
         if (timedWake && anyGrtcCompareEvent(NRF_GRTC)) {
-            abortSystemOffWithReset();
+            // A connected debugger can keep the CPU in emulated System OFF.
+            // The armed GRTC compare then wakes this fallback path; reset
+            // without marking it as a pre-entry abort.
+            resetAfterSystemOffEvent();
         }
     }
 }
@@ -1173,6 +1271,22 @@ void clearSystemOffWakeResetReason(void)
 {
     nrf54_core_clear_reset_reason(RESET_RESETREAS_OFF_Msk |
                                   RESET_RESETREAS_GRTC_Msk);
+}
+
+uint32_t nrf54SystemOffAbortStage(void)
+{
+    const uint32_t stage = g_system_off_abort_stage;
+    if (g_system_off_abort_magic != kSystemOffAbortMagic ||
+        g_system_off_abort_magic_inverse != ~kSystemOffAbortMagic ||
+        stage == 0U || g_system_off_abort_stage_inverse != ~stage) {
+        return 0U;
+    }
+    return stage;
+}
+
+void nrf54ClearSystemOffAbortStage(void)
+{
+    clearSystemOffAbortDiagnostic();
 }
 
 uint32_t nrf54ResetReason(void)

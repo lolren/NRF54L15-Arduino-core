@@ -67,6 +67,9 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       if (length != 12U) {
         return rejectMalformedRequest();
       }
+      if (connectionRole_ != BleConnectionRole::kPeripheral) {
+        return rejectCommandDisallowed();
+      }
       {
         const uint8_t winSize = payload[1];
         const uint16_t winOffset = readLe16(&payload[2]);
@@ -75,7 +78,12 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         const uint16_t timeout = readLe16(&payload[8]);
         const uint16_t instant = readLe16(&payload[10]);
         bool valid = true;
-        if (winSize > 8U) {
+        const uint8_t maxWinSize = static_cast<uint8_t>(
+            minU16(8U, static_cast<uint16_t>(interval > 0U
+                                                ? interval - 1U
+                                                : 0U)));
+        if (winSize < 1U || winSize > maxWinSize ||
+            winOffset > interval) {
           valid = false;
         }
         if (interval < 6U || interval > 3200U) {
@@ -119,10 +127,13 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       if (length != 8U) {
         return rejectMalformedRequest();
       }
+      if (connectionRole_ != BleConnectionRole::kPeripheral) {
+        return rejectCommandDisallowed();
+      }
       {
         uint8_t map[5] = {payload[1], payload[2], payload[3], payload[4], payload[5]};
         const uint16_t instant = readLe16(&payload[6]);
-        map[4] &= 0x1FU;
+        const bool reservedBitsClear = (map[4] & 0xE0U) == 0U;
         const uint8_t count = bitCount37(map);
         const uint16_t instantDelta =
             static_cast<uint16_t>(instant - currentEventCounter);
@@ -138,7 +149,7 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
              instant) &&
             (memcmp(connectionChannelMap_, map,
                     sizeof(connectionChannelMap_)) == 0);
-        if (count >= 2U && instantInFuture) {
+        if (reservedBitsClear && count >= 2U && instantInFuture) {
           memcpy(connectionPendingChannelMap_, map, sizeof(connectionPendingChannelMap_));
           connectionPendingChannelCount_ = count;
           connectionChannelMapInstant_ = instant;
@@ -152,12 +163,12 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
           encDebug_.connLastChannelMapRxEventCounter = currentEventCounter;
           encDebug_.connLastChannelMapInstant = instant;
           emitBleTrace("LL_CHANNEL_MAP_PENDING");
-        } else if (count >= 2U && duplicatePendingMap) {
+        } else if (reservedBitsClear && count >= 2U && duplicatePendingMap) {
           ++encDebug_.connChannelMapDuplicateCount;
           armConnectionResyncWindow(kBleConnResyncExtraListenUs,
                                     kBleConnChannelMapPendingResyncEventsMax);
           emitBleTrace("LL_CHANNEL_MAP_DUP_PENDING");
-        } else if (count >= 2U && duplicateAppliedMap) {
+        } else if (reservedBitsClear && count >= 2U && duplicateAppliedMap) {
           ++encDebug_.connChannelMapDuplicateCount;
           armConnectionResyncWindow(kBleConnResyncExtraListenUs,
                                     kBleConnChannelMapApplyResyncEvents);
@@ -360,33 +371,28 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         const uint16_t intervalMax = readLe16(&payload[3]);
         const uint16_t latency = readLe16(&payload[5]);
         const uint16_t timeout = readLe16(&payload[7]);
-        bool valid = true;
-        if (intervalMin < 6U || intervalMin > 3200U ||
-            intervalMax < 6U || intervalMax > 3200U ||
-            intervalMin > intervalMax) {
-          valid = false;
-        }
-        if (latency > 499U) {
-          valid = false;
-        }
-        if (timeout < 10U || timeout > 3200U) {
-          valid = false;
-        }
-        const uint32_t timeoutMs = static_cast<uint32_t>(timeout) * 10UL;
-        const uint32_t requiredMs =
-            ((1UL + static_cast<uint32_t>(latency)) *
-             static_cast<uint32_t>(intervalMax) * 5UL) /
-            2UL;
-        if (timeoutMs <= requiredMs) {
-          valid = false;
-        }
-        if (!valid) {
+        if (!connParamsAreValid(intervalMin, intervalMax, latency, timeout)) {
           return rejectMalformedRequest();
+        }
+        if (connectionRole_ == BleConnectionRole::kCentral) {
+          if (connectionCentralConnParamIndPending_ ||
+              connectionUpdatePending_) {
+            return rejectProcedureCollision();
+          }
+          connectionCentralConnParamIntervalUnits_ =
+              chooseAcceptedConnIntervalUnits(intervalMin, intervalMax);
+          connectionCentralConnParamLatency_ = latency;
+          connectionCentralConnParamTimeoutUnits_ = timeout;
+          connectionCentralConnParamIndPending_ = true;
+          emitBleTrace("LL_CONN_PARAM_UPDATE_PENDING");
+        } else if (connectionRole_ != BleConnectionRole::kPeripheral) {
+          return rejectCommandDisallowed();
         }
 
         outPayload[0] = kBleLlCtrlConnectionParamRsp;
         memcpy(&outPayload[1], &payload[1], 23U);
         *outLength = 24U;
+        emitBleTrace("LL_CONN_PARAM_RSP_TX");
       }
       return true;
 
@@ -475,6 +481,10 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       if (length != 24U) {
         return false;
       }
+      // This controller currently initiates parameter changes with L2CAP or
+      // LL_CONNECTION_UPDATE_IND, never LL_CONNECTION_PARAM_REQ. A response
+      // therefore has no local procedure state to advance.
+      emitBleTrace("LL_CONN_PARAM_RSP_UNEXPECTED");
       return false;
 
     case kBleLlCtrlEncRsp:
@@ -616,6 +626,9 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       if (length != 5U) {
         emitBleTrace("LL_PHY_UPDATE_BADLEN");
         return false;
+      }
+      if (connectionRole_ != BleConnectionRole::kPeripheral) {
+        return rejectCommandDisallowed();
       }
       {
         // LL_PHY_UPDATE_IND carries the selected PHY for each direction, not
@@ -1388,17 +1401,23 @@ void BleRadio::clearSmpBackoffForCurrentPeer() {
 }
 
 void BleRadio::noteLastSmpTxAcknowledged() {
-  if (!smpDistributeLocalIdKey_ || !smpLocalIdAddressSent_ ||
-      smpLocalIdAddressAcked_ ||
-      connectionLastTxPlainLlid_ != kBlePduDataStartOrComplete ||
+  if (connectionLastTxPlainLlid_ != kBlePduDataStartOrComplete ||
       connectionLastTxPlainLength_ < (kBleL2capHeaderLen + 1U) ||
-      readLe16(&connectionLastTxPlainPayload_[2]) != kBleL2capCidSmp ||
-      connectionLastTxPlainPayload_[kBleL2capHeaderLen] !=
-          kSmpCodeIdentityAddressInformation) {
+      readLe16(&connectionLastTxPlainPayload_[2]) != kBleL2capCidSmp) {
     return;
   }
-  smpLocalIdAddressAcked_ = true;
-  emitBleTrace("SMP_LOCAL_ID_ADDR_ACK");
+  const uint8_t code = connectionLastTxPlainPayload_[kBleL2capHeaderLen];
+  if (smpDistributeLocalIdKey_ && smpLocalIdAddressSent_ &&
+      !smpLocalIdAddressAcked_ &&
+      code == kSmpCodeIdentityAddressInformation) {
+    smpLocalIdAddressAcked_ = true;
+    emitBleTrace("SMP_LOCAL_ID_ADDR_ACK");
+  }
+  if (smpDistributeLocalSignKey_ && smpLocalSignInfoSent_ &&
+      !smpLocalSignInfoAcked_ && code == kSmpCodeSigningInformation) {
+    smpLocalSignInfoAcked_ = true;
+    emitBleTrace("SMP_LOCAL_SIGN_INFO_ACK");
+  }
 }
 
 void BleRadio::serviceSmpTimer() {
@@ -1538,10 +1557,12 @@ bool BleRadio::requestPairing() {
     pairingReq[3] |= kSmpAuthReqMitmMask;
   }
   pairingReq[4] = 16U;
-  pairingReq[5] = localIdentityDistributionAvailable()
-                      ? kSmpKeyDistIdKeyMask
-                      : 0U;
-  pairingReq[6] = kSmpKeyDistIdKeyMask;
+  pairingReq[5] = kSmpKeyDistSignKeyMask;
+  if (localIdentityDistributionAvailable()) {
+    pairingReq[5] |= kSmpKeyDistIdKeyMask;
+  }
+  pairingReq[6] =
+      static_cast<uint8_t>(kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask);
 
   if (!queuePendingSmpL2capResponse(pairingReq, kSmpPairingRequestLen)) {
     bleExitCritical(irqState);
@@ -1887,6 +1908,7 @@ bool BleRadio::computeSecureConnectionsCheckValues() {
   reduceSmpEncryptionKey(smpStk_);
   smpStkValid_ = true;
   connectionEncAuthenticated_ = currentPairingIsAuthenticated();
+  connectionEncSecureConnections_ = true;
   memcpy(encDebug_.encLastStk, smpStk_, sizeof(encDebug_.encLastStk));
   if (smpBondingRequested_) {
     memcpy(smpPeerLtk_, smpStk_, sizeof(smpPeerLtk_));
@@ -2293,14 +2315,184 @@ void BleRadio::serviceSecureConnectionsWork() {
   (void)completeSmpKeyDistributionIfDone();
 }
 
+bool BleRadio::prepareLocalSigningKey() {
+  if (smpLocalCsrkValid_) {
+    return true;
+  }
+  if (!connected_ || !smpBondingRequested_ ||
+      !smpDistributeLocalSignKey_ || bleRunningInIsr()) {
+    return false;
+  }
+
+  uint8_t csrk[16] = {0};
+  const uint32_t seed =
+      micros() ^ connectionAccessAddress_ ^
+      static_cast<uint32_t>(connectionEventCounter_ << 16U) ^ 0x4353524BUL;
+  if (!fillBleSecurityRandomBytes(csrk, sizeof(csrk), seed,
+                                  kBleSecurityRandomSpinLimit)) {
+    return false;
+  }
+  uint8_t combined = 0U;
+  for (uint8_t i = 0U; i < sizeof(csrk); ++i) {
+    combined = static_cast<uint8_t>(combined | csrk[i]);
+  }
+  if (combined == 0U) {
+    return false;
+  }
+
+  memcpy(smpLocalCsrk_, csrk, sizeof(smpLocalCsrk_));
+  smpLocalCsrkValid_ = true;
+  smpLocalSignCounter_ = 0U;
+  smpLocalSignCounterReservedUntil_ = 0U;
+  emitBleTrace("SMP_LOCAL_CSRK_READY");
+  return true;
+}
+
+bool BleRadio::persistActiveSigningCounters(bool requireDurable) {
+  if (!bondRecordValid_ ||
+      (!smpPeerCsrkValid_ && !smpLocalCsrkValid_)) {
+    return false;
+  }
+
+  if (smpPeerCsrkValid_) {
+    memcpy(bondRecord_.peerCsrk, smpPeerCsrk_,
+           sizeof(bondRecord_.peerCsrk));
+    bondRecord_.peerCsrkValid = 1U;
+  }
+  if (smpLocalCsrkValid_) {
+    memcpy(bondRecord_.localCsrk, smpLocalCsrk_,
+           sizeof(bondRecord_.localCsrk));
+    bondRecord_.localCsrkValid = 1U;
+  }
+  if (!isBondRecordUsable(bondRecord_) ||
+      !writeRetainedBondRecord(bondRecord_)) {
+    return false;
+  }
+
+  if (requireDurable) {
+    const bool flashOk = bondFlashPersistPending_
+                             ? writeFlashBondRecord(bondRecord_)
+                             : writeFlashBondSigningState(bondRecord_);
+    if (!flashOk) {
+      bondFlashPersistPending_ = true;
+      return false;
+    }
+    bondFlashPersistPending_ = false;
+  } else {
+    bondFlashPersistPending_ = true;
+  }
+  // Generic persistence callbacks may use low-endurance storage and have no
+  // counter-reservation contract. The built-in signing slot is authoritative;
+  // callback records are merged with its higher counters when loaded.
+  return true;
+}
+
+bool BleRadio::verifyAttSignedWrite(const uint8_t* attRequest,
+                                    uint16_t requestLength,
+                                    uint32_t* outSignCounter) {
+  if (attRequest == nullptr || requestLength < 15U ||
+      attRequest[0] != kAttOpSignedWriteCmd || !bondRecordValid_ ||
+      !smpPeerCsrkValid_ || connectionEncSessionValid_ ||
+      connectionEncRxEnabled_ || connectionEncTxEnabled_) {
+    return false;
+  }
+
+  const uint16_t messageLength = static_cast<uint16_t>(requestLength - 12U);
+  const uint32_t receivedCounter = readLe32(&attRequest[messageLength]);
+  if (smpPeerSignCounterValid_ &&
+      receivedCounter <= smpPeerSignCounter_) {
+    ++signedWriteReplayRejectCount_;
+    emitBleTrace("ATT_SIGNED_WRITE_REPLAY");
+    return false;
+  }
+
+  uint8_t expectedMac[8] = {0};
+  if (!bleComputeDataSignature(smpPeerCsrk_, attRequest, messageLength,
+                               receivedCounter, expectedMac)) {
+    return false;
+  }
+  uint8_t difference = 0U;
+  for (uint8_t i = 0U; i < sizeof(expectedMac); ++i) {
+    difference = static_cast<uint8_t>(
+        difference | (expectedMac[i] ^ attRequest[messageLength + 4U + i]));
+  }
+  if (difference != 0U) {
+    emitBleTrace("ATT_SIGNED_WRITE_BAD_MAC");
+    return false;
+  }
+
+  smpPeerSignCounter_ = receivedCounter;
+  smpPeerSignCounterValid_ = true;
+  if (outSignCounter != nullptr) {
+    *outSignCounter = receivedCounter;
+  }
+  emitBleTrace("ATT_SIGNED_WRITE_VERIFIED");
+  return true;
+}
+
+bool BleRadio::persistDeferredSignedWriteCounter(uint32_t signCounter) {
+  if (!bondRecordValid_ || !smpPeerCsrkValid_ ||
+      !smpPeerSignCounterValid_ || signCounter > smpPeerSignCounter_) {
+    return false;
+  }
+  if (bondRecord_.peerSignCounterValid != 0U &&
+      signCounter == smpPeerSignCounterReservedUntil_) {
+    return true;
+  }
+
+  // A receiver cannot reserve counters on behalf of its peer: after this
+  // device reboots, the peer may legitimately send signCounter + 1. Persist
+  // the exact accepted counter before making the command visible to GATT.
+  bondRecord_.peerSignCounter = signCounter;
+  bondRecord_.peerSignCounterValid = 1U;
+  if (!persistActiveSigningCounters(true)) {
+    emitBleTrace("ATT_SIGNED_WRITE_COUNTER_PERSIST_FAILED");
+    return false;
+  }
+  smpPeerSignCounterReservedUntil_ = signCounter;
+  emitBleTrace("ATT_SIGNED_WRITE_COUNTER_PERSISTED");
+  return true;
+}
+
+void BleRadio::applyDeferredSignedGattWrite(uint16_t valueHandle,
+                                            const uint8_t* value,
+                                            uint16_t valueLength,
+                                            uint32_t signCounter) {
+  if (!persistDeferredSignedWriteCounter(signCounter)) {
+    return;
+  }
+  if (!connected_ ||
+      findCustomCharacteristicByValueHandle(valueHandle) == nullptr) {
+    emitBleTrace("ATT_SIGNED_WRITE_IGNORED");
+    return;
+  }
+  if (connectionPreparedWriteActive_ &&
+      connectionPreparedWriteHandle_ == valueHandle) {
+    clearPreparedWriteState();
+  }
+  uint8_t ignoredError = kAttErrWriteNotPermitted;
+  if (writeCustomGattCharacteristic(valueHandle, value, valueLength, false,
+                                    &ignoredError, true)) {
+    emitBleTrace("ATT_SIGNED_WRITE_APPLIED");
+  } else {
+    emitBleTrace("ATT_SIGNED_WRITE_IGNORED");
+  }
+}
+
 void BleRadio::serviceSmpKeyDistribution() {
   if (!connected_ || smpPairingState_ == kSmpPairingStateIdle ||
-      !smpBondingRequested_ || !smpDistributeLocalIdKey_ ||
+      !smpBondingRequested_ ||
+      (!smpDistributeLocalIdKey_ && !smpDistributeLocalSignKey_) ||
       !connectionEncSessionValid_ || !connectionEncRxEnabled_ ||
       !connectionEncTxEnabled_) {
     return;
   }
   if (smpSecureConnectionsActive_ && !smpSecureConnectionsDhKeyCheckSent_) {
+    return;
+  }
+  if (smpDistributeLocalSignKey_ && !smpLocalCsrkValid_ &&
+      !prepareLocalSigningKey()) {
+    emitBleTrace("SMP_LOCAL_CSRK_UNAVAILABLE");
     return;
   }
 
@@ -2310,13 +2502,15 @@ void BleRadio::serviceSmpKeyDistribution() {
   const bool peerIdDone =
       !smpExpectPeerIdKey_ ||
       (smpPeerIrkValid_ && smpPeerIdentityAddressValid_);
+  const bool peerSignDone = !smpExpectPeerSignKey_ || smpPeerCsrkValid_;
   // Phase 3 is ordered by role: the Peripheral distributes first. The Central
   // must not send its keys until all negotiated Peripheral keys have arrived.
-  if (smpLocalInitiator_ && (!peerEncDone || !peerIdDone)) {
+  if (smpLocalInitiator_ &&
+      (!peerEncDone || !peerIdDone || !peerSignDone)) {
     return;
   }
 
-  if (!smpLocalIdInfoSent_) {
+  if (smpDistributeLocalIdKey_ && !smpLocalIdInfoSent_) {
     uint8_t identityInfo[kSmpIdentityInformationLen] = {0};
     identityInfo[0] = kSmpCodeIdentityInformation;
     if (!getLocalIdentityIrk(&identityInfo[1])) {
@@ -2331,7 +2525,7 @@ void BleRadio::serviceSmpKeyDistribution() {
     return;
   }
 
-  if (!smpLocalIdAddressSent_) {
+  if (smpDistributeLocalIdKey_ && !smpLocalIdAddressSent_) {
     uint8_t localIdentityAddress[6] = {0};
     BleAddressType localIdentityType = BleAddressType::kPublic;
     if (!getLocalIdentityAddress(localIdentityAddress, &localIdentityType)) {
@@ -2352,6 +2546,23 @@ void BleRadio::serviceSmpKeyDistribution() {
       emitBleTrace("SMP_LOCAL_ID_ADDR_TX");
       serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
     }
+    return;
+  }
+
+  if (smpDistributeLocalIdKey_ && !smpLocalIdAddressAcked_) {
+    return;
+  }
+
+  if (smpDistributeLocalSignKey_ && !smpLocalSignInfoSent_) {
+    uint8_t signingInfo[kSmpSigningInformationLen] = {0};
+    signingInfo[0] = kSmpCodeSigningInformation;
+    memcpy(&signingInfo[1], smpLocalCsrk_, sizeof(smpLocalCsrk_));
+    if (queuePendingSmpL2capResponse(signingInfo, sizeof(signingInfo))) {
+      smpLocalSignInfoSent_ = true;
+      smpLocalSignInfoAcked_ = false;
+      emitBleTrace("SMP_LOCAL_SIGN_INFO_TX");
+      serviceBackgroundConnection(kBleDeferredSmpResponseSpinLimit);
+    }
   }
 }
 
@@ -2368,11 +2579,16 @@ bool BleRadio::completeSmpKeyDistributionIfDone() {
   const bool peerIdDone =
       !smpExpectPeerIdKey_ ||
       (smpPeerIrkValid_ && smpPeerIdentityAddressValid_);
+  const bool peerSignDone = !smpExpectPeerSignKey_ || smpPeerCsrkValid_;
   const bool localIdDone =
       !smpDistributeLocalIdKey_ ||
       (smpLocalIdInfoSent_ && smpLocalIdAddressSent_ &&
        smpLocalIdAddressAcked_);
-  if (!peerEncDone || !peerIdDone || !localIdDone) {
+  const bool localSignDone =
+      !smpDistributeLocalSignKey_ ||
+      (smpLocalSignInfoSent_ && smpLocalSignInfoAcked_);
+  if (!peerEncDone || !peerIdDone || !peerSignDone || !localIdDone ||
+      !localSignDone) {
     return false;
   }
 
@@ -2385,10 +2601,14 @@ bool BleRadio::completeSmpKeyDistributionIfDone() {
 
   smpExpectPeerEncKey_ = false;
   smpExpectPeerIdKey_ = false;
+  smpExpectPeerSignKey_ = false;
   smpDistributeLocalIdKey_ = false;
+  smpDistributeLocalSignKey_ = false;
   smpLocalIdInfoSent_ = false;
   smpLocalIdAddressSent_ = false;
   smpLocalIdAddressAcked_ = false;
+  smpLocalSignInfoSent_ = false;
+  smpLocalSignInfoAcked_ = false;
   smpPairingState_ = kSmpPairingStateIdle;
   stopSmpTimer();
   clearSmpBackoffForCurrentPeer();
@@ -2411,10 +2631,14 @@ void BleRadio::clearSmpPairingState() {
   smpLocalInitiator_ = false;
   smpExpectPeerEncKey_ = false;
   smpExpectPeerIdKey_ = false;
+  smpExpectPeerSignKey_ = false;
   smpDistributeLocalIdKey_ = false;
+  smpDistributeLocalSignKey_ = false;
   smpLocalIdInfoSent_ = false;
   smpLocalIdAddressSent_ = false;
   smpLocalIdAddressAcked_ = false;
+  smpLocalSignInfoSent_ = false;
+  smpLocalSignInfoAcked_ = false;
   smpPendingUserPasskey_ = false;
   smpPendingUserPasskeyMatchRequest_ = false;
   smpDeferredPairingFailed_ = false;
@@ -2425,9 +2649,18 @@ void BleRadio::clearSmpPairingState() {
   smpPeerIrkValid_ = false;
   smpPeerIdentityAddressValid_ = false;
   smpPeerIdentityAddressRandom_ = false;
+  smpPeerCsrkValid_ = false;
+  smpLocalCsrkValid_ = false;
+  smpPeerSignCounterValid_ = false;
   memset(smpPeerLtk_, 0, sizeof(smpPeerLtk_));
   memset(smpPeerIrk_, 0, sizeof(smpPeerIrk_));
   memset(smpPeerIdentityAddress_, 0, sizeof(smpPeerIdentityAddress_));
+  memset(smpPeerCsrk_, 0, sizeof(smpPeerCsrk_));
+  memset(smpLocalCsrk_, 0, sizeof(smpLocalCsrk_));
+  smpPeerSignCounter_ = 0U;
+  smpLocalSignCounter_ = 0U;
+  smpPeerSignCounterReservedUntil_ = 0U;
+  smpLocalSignCounterReservedUntil_ = 0U;
   memset(smpEncReqRand_, 0, sizeof(smpEncReqRand_));
   smpEncReqEdiv_ = 0U;
   smpKeySize_ = 16U;
@@ -2484,6 +2717,7 @@ void BleRadio::clearEncryptionState() {
   connectionEncRxEnabled_ = false;
   connectionEncTxEnabled_ = false;
   connectionEncAuthenticated_ = false;
+  connectionEncSecureConnections_ = false;
   connectionEncStartReqPending_ = false;
   connectionEncStartReqTxPending_ = false;
   connectionEncAwaitingStartRsp_ = false;
@@ -2577,9 +2811,21 @@ bool BleRadio::buildCurrentBondRecord(BleBondRecord* outRecord) const {
     memcpy(record.peerIrk, smpPeerIrk_, sizeof(record.peerIrk));
     record.peerIrkValid = 1U;
   }
+  if (smpPeerCsrkValid_) {
+    memcpy(record.peerCsrk, smpPeerCsrk_, sizeof(record.peerCsrk));
+    record.peerCsrkValid = 1U;
+    record.peerSignCounter = smpPeerSignCounterReservedUntil_;
+    record.peerSignCounterValid = smpPeerSignCounterValid_ ? 1U : 0U;
+  }
+  if (smpLocalCsrkValid_) {
+    memcpy(record.localCsrk, smpLocalCsrk_, sizeof(record.localCsrk));
+    record.localCsrkValid = 1U;
+    record.localSignCounter = smpLocalSignCounterReservedUntil_;
+  }
   record.ediv = smpEncReqEdiv_;
   record.keySize = (smpKeySize_ >= 7U && smpKeySize_ <= 16U) ? smpKeySize_ : 16U;
   memset(record.reserved, 0, sizeof(record.reserved));
+  record.signingReserved = 0U;
   if (currentPairingIsAuthenticated()) {
     record.reserved[0] = kBleBondRecordFlagAuthenticated;
   }
@@ -2641,15 +2887,61 @@ bool BleRadio::loadBondRecordFromPersistence() {
 
   bondLocalIdentityMigrationPending_ = false;
   BleBondRecord loaded{};
-  bool loadedFromStore = false;
+  BleBondRecord callbackRecord{};
+  BleBondRecord flashRecord{};
+  bool callbackLoaded = false;
   if (bondLoadCallback_ != nullptr) {
-    loadedFromStore = bondLoadCallback_(&loaded, bondCallbackContext_);
-    if (loadedFromStore && !isBondRecordUsable(loaded)) {
-      loadedFromStore = false;
+    callbackLoaded =
+        bondLoadCallback_(&callbackRecord, bondCallbackContext_);
+    if (callbackLoaded && !isBondRecordUsable(callbackRecord)) {
+      callbackLoaded = false;
     }
   }
-  if (!loadedFromStore) {
-    loadedFromStore = readFlashBondRecord(&loaded);
+  const bool flashLoaded =
+      readFlashBondRecord(&flashRecord) && isBondRecordUsable(flashRecord);
+  bool loadedFromStore = callbackLoaded || flashLoaded;
+  if (callbackLoaded) {
+    loaded = callbackRecord;
+    const bool sameFlashBond =
+        flashLoaded &&
+        memcmp(loaded.peerAddress, flashRecord.peerAddress,
+               sizeof(loaded.peerAddress)) == 0 &&
+        loaded.peerAddressRandom == flashRecord.peerAddressRandom &&
+        memcmp(loaded.localAddress, flashRecord.localAddress,
+               sizeof(loaded.localAddress)) == 0 &&
+        loaded.localAddressRandom == flashRecord.localAddressRandom &&
+        memcmp(loaded.ltk, flashRecord.ltk, sizeof(loaded.ltk)) == 0;
+
+    // Per-command signing counters are intentionally not written through
+    // generic callbacks. Never trust their possibly stale signing tail after
+    // reboot; only the matching, CRC-checked built-in extension is
+    // authoritative. A missing extension therefore disables signing instead
+    // of rolling an anti-replay counter backward.
+    memset(loaded.peerCsrk, 0, sizeof(loaded.peerCsrk));
+    memset(loaded.localCsrk, 0, sizeof(loaded.localCsrk));
+    loaded.peerSignCounter = 0U;
+    loaded.localSignCounter = 0U;
+    loaded.peerCsrkValid = 0U;
+    loaded.localCsrkValid = 0U;
+    loaded.peerSignCounterValid = 0U;
+    loaded.signingReserved = 0U;
+    if (sameFlashBond) {
+      if (flashRecord.peerCsrkValid != 0U) {
+        memcpy(loaded.peerCsrk, flashRecord.peerCsrk,
+               sizeof(loaded.peerCsrk));
+        loaded.peerCsrkValid = 1U;
+        loaded.peerSignCounter = flashRecord.peerSignCounter;
+        loaded.peerSignCounterValid = flashRecord.peerSignCounterValid;
+      }
+      if (flashRecord.localCsrkValid != 0U) {
+        memcpy(loaded.localCsrk, flashRecord.localCsrk,
+               sizeof(loaded.localCsrk));
+        loaded.localCsrkValid = 1U;
+        loaded.localSignCounter = flashRecord.localSignCounter;
+      }
+    }
+  } else if (flashLoaded) {
+    loaded = flashRecord;
   }
   if (!loadedFromStore) {
     loadedFromStore = readRetainedBondRecord(&loaded);
@@ -2675,7 +2967,8 @@ bool BleRadio::persistBondRecord(const BleBondRecord& record) {
 
   const bool retentionOk = writeRetainedBondRecord(record);
   bool flashOk = false;
-  if (connected_) {
+  const bool deferStorage = connected_ || bleRunningInIsr();
+  if (deferStorage) {
     bondFlashPersistPending_ = true;
     cccdFlashPersistPending_ = true;
   } else {
@@ -2685,23 +2978,26 @@ bool BleRadio::persistBondRecord(const BleBondRecord& record) {
     }
   }
   const bool callbackPresent = bondSaveCallback_ != nullptr;
-  bool callbackOk = false;
-  if (callbackPresent) {
+  bool callbackOk = !callbackPresent;
+  if (callbackPresent && !deferStorage) {
     callbackOk = bondSaveCallback_(&record, bondCallbackContext_);
+  } else if (callbackPresent) {
+    bondSigningCounterPersistPending_ = true;
   }
-  const bool stored = retentionOk || flashOk || (callbackPresent && callbackOk);
+  const bool stored = retentionOk || flashOk || callbackOk ||
+                      bondSigningCounterPersistPending_;
   if (stored) {
     memcpy(&bondRecord_, &record, sizeof(bondRecord_));
     bondRecordValid_ = true;
     bondStorageLoaded_ = true;
-    if (connected_) {
+    if (deferStorage) {
       emitBleTrace("BOND_DEFERRED");
     } else {
       persistBondedCccdState();
       emitBleTrace("BOND_SAVED");
     }
   }
-  return stored && (!callbackPresent || callbackOk);
+  return stored && (callbackOk || bondSigningCounterPersistPending_);
 }
 
 bool BleRadio::flushDeferredBondStorage() {
@@ -2712,16 +3008,30 @@ bool BleRadio::flushDeferredBondStorage() {
       ok = flashOk && ok;
       if (flashOk) {
         emitBleTrace("BOND_FLASH_FLUSHED");
+        bondFlashPersistPending_ = false;
       }
     } else {
       ok = false;
     }
-    bondFlashPersistPending_ = false;
+  }
+  if (bondSigningCounterPersistPending_) {
+    bool callbackOk = true;
+    if (bondSaveCallback_ != nullptr && bondRecordValid_) {
+      callbackOk = bondSaveCallback_(&bondRecord_, bondCallbackContext_);
+    }
+    ok = callbackOk && ok;
+    if (callbackOk && !bondFlashPersistPending_) {
+      bondSigningCounterPersistPending_ = false;
+      emitBleTrace("BOND_SIGN_COUNTERS_FLUSHED");
+    }
   }
   if (cccdFlashPersistPending_) {
-    const bool cccdOk = persistBondedCccdState();
+    const bool cccdOk = persistBondedCccdState(true);
     ok = cccdOk && ok;
-    cccdFlashPersistPending_ = false;
+    if (cccdOk) {
+      cccdFlashPersistPending_ = false;
+      emitBleTrace("CCCD_FLASH_FLUSHED");
+    }
   }
   return ok;
 }
@@ -2734,6 +3044,7 @@ bool BleRadio::clearPersistentBondRecord() {
   cccdFlashPersistPending_ = false;
   bondLocalIdentityMigrationPending_ = false;
   bondLocalIdentityMigrationRetryAtUs_ = 0U;
+  bondSigningCounterPersistPending_ = false;
   const bool cccdOk = clearPersistentCccdRecord();
   const bool flashOk = clearFlashBondRecord();
   bool callbackOk = true;
@@ -2747,6 +3058,15 @@ bool BleRadio::clearPersistentBondRecord() {
 bool BleRadio::primeBondForCurrentPeer() {
   bondKeyPrimedForConnection_ = false;
   bondIdentityMatchedForConnection_ = false;
+  smpPeerCsrkValid_ = false;
+  smpLocalCsrkValid_ = false;
+  smpPeerSignCounterValid_ = false;
+  memset(smpPeerCsrk_, 0, sizeof(smpPeerCsrk_));
+  memset(smpLocalCsrk_, 0, sizeof(smpLocalCsrk_));
+  smpPeerSignCounter_ = 0U;
+  smpLocalSignCounter_ = 0U;
+  smpPeerSignCounterReservedUntil_ = 0U;
+  smpLocalSignCounterReservedUntil_ = 0U;
   if (!bondStorageLoaded_) {
     loadBondRecordFromPersistence();
   }
@@ -2862,8 +3182,24 @@ bool BleRadio::primeBondForCurrentPeer() {
                     : 16U;
   reduceSmpEncryptionKey(smpStk_);
   reduceSmpEncryptionKey(smpPeerLtk_);
+  if (bondRecord_.peerCsrkValid != 0U) {
+    memcpy(smpPeerCsrk_, bondRecord_.peerCsrk, sizeof(smpPeerCsrk_));
+    smpPeerCsrkValid_ = true;
+    smpPeerSignCounter_ = bondRecord_.peerSignCounter;
+    smpPeerSignCounterReservedUntil_ = bondRecord_.peerSignCounter;
+    smpPeerSignCounterValid_ =
+        bondRecord_.peerSignCounterValid != 0U;
+  }
+  if (bondRecord_.localCsrkValid != 0U) {
+    memcpy(smpLocalCsrk_, bondRecord_.localCsrk, sizeof(smpLocalCsrk_));
+    smpLocalCsrkValid_ = true;
+    smpLocalSignCounter_ = bondRecord_.localSignCounter;
+    smpLocalSignCounterReservedUntil_ = bondRecord_.localSignCounter;
+  }
   connectionEncAuthenticated_ =
       (bondRecord_.reserved[0] & kBleBondRecordFlagAuthenticated) != 0U;
+  connectionEncSecureConnections_ =
+      (bondRecord_.reserved[0] & kBleBondRecordFlagSecureConnections) != 0U;
   smpBondingRequested_ = true;
   smpExpectPeerEncKey_ = false;
   bondKeyPrimedForConnection_ = true;

@@ -2,6 +2,8 @@
 """Focused regression tests for the Arduino upload wrapper."""
 
 import importlib.util
+import io
+import os
 import shutil
 import struct
 import subprocess
@@ -22,6 +24,9 @@ UPLOAD_PATH = (
     / "upload.py"
 )
 PLATFORM_PATH = UPLOAD_PATH.parents[1] / "platform.txt"
+PLATFORM_TOOLS = UPLOAD_PATH.parent
+HOST_TOOLS = ROOT / "tools" / "board_manager" / "nrf54l15hosttools"
+LEGACY_HOST_TOOLS = PLATFORM_TOOLS / "nrf54l15hosttools" / "1.1.3"
 UF2_EMITTER = UPLOAD_PATH.parent / "uf2" / "uf2_emit.py"
 UF2_CONV = UPLOAD_PATH.parent / "uf2" / "uf2conv.py"
 SPEC = importlib.util.spec_from_file_location("nrf54_upload", UPLOAD_PATH)
@@ -64,6 +69,133 @@ class ProtectedTargetRecoveryTests(unittest.TestCase):
 
         self.assertEqual(actual.returncode, 0)
         recover.assert_called_once()
+
+
+class LinuxProbePermissionTests(unittest.TestCase):
+    def test_lm20a_pyocd_uses_external_registration_without_mutating_pyocd(self):
+        source = UPLOAD_PATH.read_text(encoding="utf-8")
+        self.assertFalse((PLATFORM_TOOLS / "patch_lm20b_target.py").exists())
+        self.assertNotIn("patch_lm20b_target", source)
+        command = UPLOAD.append_pyocd_target_script(["pyocd", "load"], "nrf54lm20a")
+        self.assertEqual(
+            command,
+            [
+                "pyocd",
+                "load",
+                "--script",
+                str(PLATFORM_TOOLS / "pyocd_register_lm20b.py"),
+            ],
+        )
+
+    def test_every_shipped_udev_rule_covers_both_xiao_probe_ids(self):
+        for rule in (
+            HOST_TOOLS / "setup/60-seeed-xiao-nrf54-cmsis-dap.rules",
+            PLATFORM_TOOLS / "setup/60-seeed-xiao-nrf54-cmsis-dap.rules",
+            LEGACY_HOST_TOOLS / "setup/60-seeed-xiao-nrf54-cmsis-dap.rules",
+        ):
+            source = rule.read_text(encoding="utf-8")
+            with self.subTest(rule=rule):
+                for product in ("0066", "0068"):
+                    self.assertEqual(source.count(f'idProduct}}=="{product}"'), 3)
+
+    def test_every_linux_installer_retriggers_both_xiao_probe_ids(self):
+        for installer in (
+            HOST_TOOLS / "setup/install_linux_host_deps.sh",
+            PLATFORM_TOOLS / "setup/install_linux_host_deps.sh",
+            LEGACY_HOST_TOOLS / "setup/install_linux_host_deps.sh",
+        ):
+            source = installer.read_text(encoding="utf-8")
+            with self.subTest(installer=installer):
+                for product in ("0066", "0068"):
+                    trigger = (
+                        "trigger --attr-match=idVendor=2886 "
+                        f"--attr-match=idProduct={product}"
+                    )
+                    self.assertGreaterEqual(source.count(trigger), 2)
+
+    def test_canonical_udev_installer_executes_both_triggers(self):
+        with tempfile.TemporaryDirectory(prefix="nrf54-udev-test-") as directory:
+            root = Path(directory)
+            rule_dir = root / "rules.d"
+            rule_dir.mkdir()
+            log = root / "udevadm.log"
+            fake_udevadm = root / "udevadm"
+            fake_udevadm.write_text(
+                "#!/usr/bin/env bash\n"
+                'printf "%s\\n" "$*" >>"${UDEVADM_TEST_LOG}"\n',
+                encoding="utf-8",
+            )
+            fake_udevadm.chmod(0o755)
+            destination = rule_dir / "60-seeed-xiao-nrf54-cmsis-dap.rules"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "RULE_DST": str(destination),
+                    "UDEVADM_BIN": str(fake_udevadm),
+                    "UDEVADM_TEST_LOG": str(log),
+                }
+            )
+
+            completed = subprocess.run(
+                [str(HOST_TOOLS / "setup/install_linux_host_deps.sh"), "--udev"],
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            commands = log.read_text(encoding="utf-8")
+            self.assertIn("idProduct=0066", commands)
+            self.assertIn("idProduct=0068", commands)
+            self.assertEqual(destination.read_bytes(), (
+                HOST_TOOLS / "setup/60-seeed-xiao-nrf54-cmsis-dap.rules"
+            ).read_bytes())
+
+    def test_permission_hint_reports_the_connected_lm20a_product_id(self):
+        denied = subprocess.CompletedProcess(
+            ["pyocd", "list"], 1, "", "No connected debug probes"
+        )
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(UPLOAD.sys, "platform", "linux"),
+            mock.patch.object(UPLOAD, "tool_available", return_value=True),
+            mock.patch.object(
+                UPLOAD,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    ["lsusb"], 0, "Bus 001 Device 002: ID 2886:0068 Seeed\n", ""
+                ),
+            ),
+            mock.patch.object(
+                UPLOAD, "matching_probe_hidraw_nodes", return_value=[Path("/dev/hidraw0")]
+            ),
+            mock.patch.object(UPLOAD, "probe_hidraw_nodes_accessible", return_value=False),
+            mock.patch.object(UPLOAD.sys, "stderr", stderr),
+        ):
+            UPLOAD.print_linux_probe_permission_hint(denied)
+
+        self.assertIn("2886:0068", stderr.getvalue())
+        self.assertNotIn("2886:0066 is present", stderr.getvalue())
+
+    def test_preflight_reports_the_product_id_from_hidraw_sysfs(self):
+        node = Path("/dev/hidraw0")
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(UPLOAD.sys, "platform", "linux"),
+            mock.patch.object(UPLOAD, "matching_probe_hidraw_nodes", return_value=[node]),
+            mock.patch.object(UPLOAD, "probe_hidraw_nodes_accessible", return_value=False),
+            mock.patch.object(
+                UPLOAD,
+                "_sysfs_usb_identity_for_hidraw",
+                return_value=("2886", "0068"),
+            ),
+            mock.patch.object(UPLOAD.sys, "stderr", stderr),
+        ):
+            blocked = UPLOAD.preflight_linux_probe_access(None)
+
+        self.assertTrue(blocked)
+        self.assertIn("2886:0068", stderr.getvalue())
 
 
 class PlatformRecipeTests(unittest.TestCase):

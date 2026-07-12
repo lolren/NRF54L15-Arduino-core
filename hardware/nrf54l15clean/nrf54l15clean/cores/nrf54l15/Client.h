@@ -1,5 +1,10 @@
 /*
- * Arduino Client base class compatibility header.
+ * Client.h - Arduino Client base class.
+ * Copyright (c) 2011 Adrian McEwen. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * Modified for the nRF54 Arduino Core in 2026: reformatted and adapted to the
+ * local Stream/IPAddress API. See ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #ifndef client_h

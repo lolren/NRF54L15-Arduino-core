@@ -1,7 +1,7 @@
 # nRF54 Arduino Core Deep Audit Report
 
 Audit date: 2026-07-09  
-Remediation update: 2026-07-11
+Remediation update: 2026-07-12
 Repository: `/home/lolren/Desktop/eport_nrf54/nrf54-arduino-core`  
 Local reference set: `/home/lolren/Desktop/eport_nrf54/datasheets`
 
@@ -14,12 +14,114 @@ two XIAO schematics, but no standalone Nordic anomaly/errata document and no
 HOLYIOT or PCA10156 schematic. Claims that require those missing documents are
 explicitly marked as unverified.
 
+## High/Critical Revalidation Correction - 2026-07-12
+
+The blanket all-resolved statement recorded in the 2026-07-11 remediation
+update is superseded by this revalidation. The targeted review reclassifies
+FINDING-003 and the status-position premise of FINDING-065 as audit errors, and
+confirms FINDING-034 resolved in the current tree after adjacent `CracenIkg`
+hardening. This targeted disposition does not independently re-prove every
+other historical finding or replace the complete release gate. No current
+all-fixed claim should be inferred from the historical finding text or the
+original machine-readable appendix.
+
+### FINDING-003 correction: audit false positive
+
+FINDING-003 incorrectly interpreted `PDM.SAMPLE.MAXCNT` as a count of 16-bit
+samples. Nordic's authoritative nrfx integration selects unified byte-access
+DMA for both target families and deliberately converts an `int16_t` element
+count to bytes:
+
+* `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace/modules/hal/nordic/nrfx/bsp/stable/soc/nrfx_mdk_fixups.h:619-628` defines `DMA_BUFFER_UNIFIED_BYTE_ACCESS` for nRF54L15, and lines 752-773 define it for nRF54LM20A.
+* `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace/modules/hal/nordic/nrfx/hal/nrf_pdm.h:1053-1060` writes `num * sizeof(int16_t)` to `SAMPLE.MAXCNT` under that device contract.
+* Nordic's generated device headers describe `BUFFSIZE` as a byte length at `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace/modules/hal/nordic/nrfx/bsp/stable/mdk/nrf54l15_types.h:20562-20569` and `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace/modules/hal/nordic/nrfx/bsp/stable/mdk/nrf54lm20a_types.h:20230-20237`.
+
+The current `Pdm::capture` implementation therefore correctly validates the
+element count and writes `sampleCount * sizeof(int16_t)` in
+`hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_crypto_analog.inc`.
+The focused contract is `scripts/test_lm20a_pdm_contract.py`; its source-local
+compile record is `build/lm20a-mic-pdm-byte-count-final.json`. Connected-board
+evidence in `measurements/lm20a_pdm_v1_byte_count/summary.json` records 108
+fresh 8,192-sample captures on LM20A UID `3377B9D6`, each taking 504-505 ms,
+with zero timeouts, underfills or DMA guard failures. The earlier direct-count
+experiment is retained in
+`measurements/lm20a_pdm_v1_final/serial_and_summary.log`; it produced zeroed,
+premature buffers rather than proving an overrun.
+
+Revalidated classification: **False positive; superseded by authoritative
+Nordic unified-byte DMA evidence.** The original FINDING-003 text is retained
+below as audit history. Programming `MAXCNT = sampleCount` would be a
+regression, not a fix.
+
+### FINDING-065 correction: status positions were misread
+
+FINDING-065's claimed LM20 status positions were wrong. The authoritative
+Nordic nRF54LM20A header defines `ANYHEALTHTESTFAIL` at bit 6,
+`STARTUPFAIL` at bit 10, per-share repetition failures at bits 12-15,
+per-share proportion failures at bits 16-19, and
+`CONDITIONINGISTOOSLOW` at bit 20:
+
+* `/home/lolren/Desktop/test_pi_nrf54/ncs-workspace/modules/hal/nordic/nrfx/bsp/stable/mdk/nrf54lm20a_types.h:4600-4657`
+* `/home/lolren/Desktop/eport_nrf54/datasheets/m20a.txt:10171-10201` is the source table whose compressed PDF-to-text bit diagram was misread by the original audit.
+
+The current tree uses those positions in
+`hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/nrf54lm20b_types.h:4218-4243`,
+adds the aggregate bit-6 mask, and uses the LM20 `WARMUPPERIOD`,
+`SAMPLINGPERIOD` and start-pulse sequence in
+`hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_crypto_analog.inc:137-175`.
+The specific claim that copied bit-10/12-20 definitions cause the HAL to miss
+LM20 health failures is therefore **false and superseded**.
+
+This correction does not certify the entire raw LM20 device header as a clean
+generated artifact. `cores/nrf54lm20b/nrf54lm20b_types.h` is still a locally
+maintained derivative with targeted LM20 corrections; replacing or
+mechanically reconciling the complete file against Nordic's current generated
+header remains worthwhile provenance and maintenance work. That raw-header
+cleanup is distinct from, and must not be cited as evidence for, the erroneous
+FINDING-065 status-position claim.
+
+### FINDING-034 and `CracenIkg`: resolved fail-closed in the current tree
+
+The register-map defect described by FINDING-034 is not present in the current
+wrapper. In
+`hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_cracen_pke.h:161-177`,
+the base addresses come from the active device header, CRACEN `ENABLE` is
+`+0x400`, interrupt disable is `INTENCLR +0x308`, and PKE status is the real
+`PK.STATUS +0x200C`. The active headers select L15 CRACEN/CRACENCORE bases
+`0x50048000`/`0x51800000` and LM20 bases
+`0x50059000`/`0x50010000`; adding the CryptoRAM offset `+0x8000` therefore
+produces the documented data addresses `0x51808000` and `0x50018000` rather
+than a hard-coded cross-chip alias.
+
+The adjacent typed implementation is hardened in
+`hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal.h:581-670`
+and
+`hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_security.cpp:315-801`:
+
+* CryptoRAM uses the active `coreBase + 0x8000`, 0x200-byte slots, 16 L15 slots and 15 LM20 slots. Null, zero-length, oversized and out-of-range accesses are rejected, as are CPU-inaccessible pages outside 8-12 after IKG enters Secure Mode.
+* Enabling waits for PKE zeroization to finish. Operand reads never clear the write-once `PROTECTEDRAMLOCK` to gain access, and setting that lock requires active CRACEN plus successful readback.
+* Success and key-presence queries require a live core. IKG start and key generation require a pre-valid hardware seed; the API cannot validate an unknown seed or synthesize deterministic seed material. LM20 exposes SEEDVALID/SEEDLOCK as KMU-managed state, while L15 locking requires an already-valid seed and verified readback.
+* High-level ECDSA, point-multiplication and result APIs whose validated microcode protocol is not implemented zero their outputs and return false instead of reporting fabricated success. The two affected examples are non-destructive status and CryptoRAM-boundary diagnostics.
+
+Verification evidence:
+
+* `python3 scripts/test_cracen_ikg_contract.py` passes all 7 focused contract tests.
+* `build/cracen-ikg-seed-example-compiles.json` records 2/2 passing builds of `KmuCracenIkgSeedProof` on L15 and LM20.
+* `build/cracen-operand-ram-example-compiles.json` records 2/2 passing builds of `CracenEccTest` on L15 and LM20.
+
+Revalidated classification: **Resolved in the current tree, with unsupported
+operations fail-closed.** No runtime IKG key-generation claim is made. Safe
+production seed provisioning and a validated PSA/NCS PKE/microcode integration
+remain outside this Arduino HAL and must not be inferred from these static and
+compile checks.
+
 ## Remediation Update - 2026-07-11
 
-Current status for this checkout: **all 71 original audit items have been
-addressed in the 1.0.0-rc1 source tree**. The findings below are retained as the
-original audit record; the 0.9.216 remediation baseline and subsequent
-follow-ups together record the current source-tree result.
+Status recorded at that checkpoint: **all 71 original audit items were reported
+as addressed in the 1.0.0-rc1 source tree**. The 2026-07-12 revalidation above
+supersedes that blanket status. The findings below are retained as the original
+audit record; the 0.9.216 remediation baseline and subsequent follow-ups record
+the source-tree history rather than a current release decision.
 
 The fixes cover the critical IRQ/vector map defects, cache/RRAMC/MEMCONF register definitions, PDM/EasyDMA sizing, UARTE/Serial1 routing and baud handling, SPI/TWIM/GPIOTE/GPIO/analog/tone API defects, System OFF/GRTC timed wake, low-power board state handling, Windows upload/APPROTECT retry behavior, release archive/index generation tooling, and the BLE HID mouse pairing/encryption/reporting path. The two items originally marked as needing human verification were converted into code-level mitigations, regression checks and focused example builds; external BLE certification and radio/power characterization still require dedicated lab equipment and are not claimed by this source audit.
 
@@ -320,6 +422,12 @@ Medium; consumers may currently avoid the API, but correct cache maintenance aff
 Related findings: FINDING-029, FINDING-066
 
 ### FINDING-003: PDM EasyDMA count is doubled and can overwrite caller memory
+
+> **2026-07-12 revalidation correction:** This finding is an audit false
+> positive. Nordic's unified-byte DMA contract requires an `int16_t` element
+> count to be multiplied by `sizeof(int16_t)` before writing `MAXCNT`. See the
+> correction and connected-board guard evidence at the top of this report.
+> The original finding text below is retained only as audit history.
 
 Severity: Critical  
 Confidence: High  
@@ -1685,6 +1793,13 @@ Related findings: FINDING-026
 
 ### FINDING-034: CRACEN PKE wrapper uses wrong control offsets and an invalid disable operation
 
+> **2026-07-12 revalidation status:** Resolved in the current tree. The wrapper
+> now uses the active chip bases and documented `ENABLE`, `INTENCLR` and
+> `PK.STATUS` offsets; adjacent `CracenIkg` APIs were hardened to use bounded
+> chip-relative CryptoRAM and fail closed. See the evidence and explicit
+> runtime limits at the top of this report. The original text below is retained
+> only as audit history.
+
 Severity: High  
 Confidence: High  
 Status: Definite  
@@ -2751,7 +2866,7 @@ Peripheral/system block: Example/build/GRTC BLE service
 
 Repository evidence:
 
-* File: `hardware/nrf54l15clean/nrf54l15clean/examples/Power/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino`; `examples/XiaoL15/...`; HAL implementation
+* File: `hardware/nrf54l15clean/nrf54l15clean/examples/Power/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino`; `libraries/nRF54-Board-Examples/examples/XIAO-nRF54L15-Sense/SenseDelayRailRetentionProbe/...`; HAL implementation
 * Line(s): both sketches 93-108; `libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal.cpp:138`
 * Code summary: Each sketch defines the same strong C symbol already strongly defined by the linked library. GCC 7-2017q4 and GCC 9.2.1 both report multiple definition. In the top-level sweep these were the two failures out of 83 examples.
 
@@ -3048,6 +3163,14 @@ Medium because P3 support touches shared GPIO abstractions.
 Related findings: FINDING-008, FINDING-010, FINDING-045
 
 ### FINDING-065: LM20 CRACEN RNG health checks use copied L15 bit definitions
+
+> **2026-07-12 revalidation correction:** The status-position premise is
+> false. Nordic's nRF54LM20A header places `STARTUPFAIL` at bit 10, the
+> per-share fields at bits 12-19, and `CONDITIONINGISTOOSLOW` at bit 20, as the
+> current tree does. See the correction at the top of this report. The raw
+> LM20 header still merits full generated-header reconciliation, but that
+> maintenance task is not this claimed security defect. The original text
+> below is retained only as audit history.
 
 Severity: High  
 Confidence: High  
@@ -3427,7 +3550,7 @@ arduino-cli compile \
   --fqbn auditnrf54:auditnrf54:<board> \
   --build-property compiler.path=/home/lolren/.arduino15/packages/arduino/tools/arm-none-eabi-gcc/7-2017q4/bin/ \
   --build-path /tmp/nrf-gcc7-<board> \
-  hardware/nrf54l15clean/nrf54l15clean/examples/CoreVersionProbe
+  hardware/nrf54l15clean/nrf54l15clean/examples/Basics/CoreVersionProbe
 ```
 
 | Profile | GCC 7 result | Program | RAM | Notes |
@@ -3707,7 +3830,11 @@ For compactness, `P` below means `hardware/nrf54l15clean/nrf54l15clean`, and `HA
 
 ## Machine-Readable Summary
 
-The following is valid JSON. File paths are repository-relative and intentionally abbreviated to the smallest ownership-relevant set.
+The following is the valid JSON snapshot of the original 2026-07-09 audit. It
+is retained for provenance and is not a current remediation-status manifest;
+in particular, consult the 2026-07-12 corrections for FINDING-003,
+FINDING-034 and FINDING-065. File paths are repository-relative and
+intentionally abbreviated to the smallest ownership-relevant set.
 
 ```json
 {
@@ -3772,7 +3899,7 @@ The following is valid JSON. File paths are repository-relative and intentionall
     {"id":"FINDING-055","severity":"Low","confidence":"High","status":"Definite","affected_files":["docs/board-reference.md","hardware/nrf54l15clean/nrf54l15clean/boards.txt"],"affected_boards":["XIAO nRF54L15 / Sense"]},
     {"id":"FINDING-056","severity":"Low","confidence":"High","status":"Definite","affected_files":["hardware/nrf54l15clean/nrf54l15clean/cores/nrf54l15/Adafruit_TinyUSB.h","hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/Adafruit_TinyUSB.h"],"affected_boards":["All"]},
     {"id":"FINDING-057","severity":"High","confidence":"High","status":"Needs human verification","affected_files":["hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/matter_secp256r1.cpp","hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/matter_rng.h"],"affected_boards":["L15/LM20 Matter stage builds"]},
-    {"id":"FINDING-058","severity":"Medium","confidence":"High","status":"Definite","affected_files":["hardware/nrf54l15clean/nrf54l15clean/examples/Power/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino","hardware/nrf54l15clean/nrf54l15clean/examples/XiaoL15/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino","hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal.cpp"],"affected_boards":["XIAO nRF54L15"]},
+    {"id":"FINDING-058","severity":"Medium","confidence":"High","status":"Definite","affected_files":["hardware/nrf54l15clean/nrf54l15clean/examples/Power/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino","hardware/nrf54l15clean/nrf54l15clean/libraries/nRF54-Board-Examples/examples/XIAO-nRF54L15-Sense/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino","hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal.cpp"],"affected_boards":["XIAO nRF54L15"]},
     {"id":"FINDING-059","severity":"High","confidence":"High","status":"Definite","affected_files":["hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_i2s.inc"],"affected_boards":["nRF54L15 I2S users"]},
     {"id":"FINDING-060","severity":"High","confidence":"High","status":"Definite","affected_files":["hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_i2s.inc"],"affected_boards":["nRF54L15 I2S users"]},
     {"id":"FINDING-061","severity":"High","confidence":"High","status":"Definite","affected_files":["hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/nrf54lm20b.h","hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/cmsis.h","hardware/nrf54l15clean/nrf54l15clean/cores/nrf54lm20b/startup_nrf54lm20b.S"],"affected_boards":["XIAO nRF54LM20A/B"]},

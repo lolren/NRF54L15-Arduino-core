@@ -1,7 +1,10 @@
 /*
- * Arduino Print - Output class for Arduino
+ * Print.h - base class providing Arduino print() and println().
+ * Copyright (c) 2008 David A. Mellis. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Licensed under the Apache License 2.0
+ * Modified for the nRF54 Arduino Core in 2026: reformatted and adapted to the
+ * local String and C++ API. See ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #ifndef Print_h

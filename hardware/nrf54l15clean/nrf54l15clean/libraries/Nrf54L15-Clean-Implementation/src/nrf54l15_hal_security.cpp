@@ -33,6 +33,13 @@ bool waitRramcReady(NRF_RRAMC_Type* rramc, uint32_t spinLimit) {
   return false;
 }
 
+constexpr bool kSeedStateManagedByKmu =
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+    true;
+#else
+    false;
+#endif
+
 }  // namespace
 
 Kmu::Kmu(uint32_t base, uint32_t rramcBase)
@@ -308,6 +315,10 @@ bool Kmu::pushBlock(uint8_t slot, uint32_t spinLimit) {
 CracenIkg::CracenIkg(uint32_t controlBase, uint32_t coreBase)
     : cracen_(reinterpret_cast<NRF_CRACEN_Type*>(controlBase)),
       core_(reinterpret_cast<NRF_CRACENCORE_Type*>(coreBase)),
+      operandRamBase_(coreBase == 0U
+                          ? 0U
+                          : static_cast<uintptr_t>(coreBase) +
+                                kPkOperandRamOffset),
       active_(false) {}
 
 bool CracenIkg::begin(uint32_t spinLimit) {
@@ -319,10 +330,15 @@ bool CracenIkg::begin(uint32_t spinLimit) {
     return false;
   }
 
-  cracen_->ENABLE |= CRACEN_ENABLE_PKEIKG_Msk | CRACEN_ENABLE_CRYPTOMASTER_Msk;
-  active_ = true;
+  cracen_->ENABLE |=
+      CRACEN_ENABLE_PKEIKG_Msk | CRACEN_ENABLE_CRYPTOMASTER_Msk;
   clearEvent();
-  return waitReady(spinLimit);
+  active_ = waitReady(spinLimit);
+  if (!active_) {
+    cracen_->ENABLE &=
+        ~(CRACEN_ENABLE_PKEIKG_Msk | CRACEN_ENABLE_CRYPTOMASTER_Msk);
+  }
+  return active_;
 #endif
 }
 
@@ -382,7 +398,8 @@ uint8_t CracenIkg::privateKeyCapacity() const {
 }
 
 bool CracenIkg::okay() const {
-  return (status() & CRACENCORE_IKG_STATUS_OKAY_Msk) != 0U;
+  return core_ != nullptr &&
+         (status() & CRACENCORE_IKG_STATUS_OKAY_Msk) != 0U;
 }
 
 bool CracenIkg::seedError() const {
@@ -402,11 +419,33 @@ bool CracenIkg::ctrDrbgBusy() const {
 }
 
 bool CracenIkg::symmetricKeysStored() const {
-  return (status() & CRACENCORE_IKG_STATUS_SYMKEYSTORED_Msk) != 0U;
+  return core_ != nullptr &&
+         (status() & CRACENCORE_IKG_STATUS_SYMKEYSTORED_Msk) != 0U;
 }
 
 bool CracenIkg::privateKeysStored() const {
-  return (status() & CRACENCORE_IKG_STATUS_PRIVKEYSTORED_Msk) != 0U;
+  return core_ != nullptr &&
+         (status() & CRACENCORE_IKG_STATUS_PRIVKEYSTORED_Msk) != 0U;
+}
+
+bool CracenIkg::seedValid() const {
+  if (cracen_ == nullptr) {
+    return false;
+  }
+  return (cracen_->SEEDVALID & CRACEN_SEEDVALID_VALID_Msk) ==
+         (CRACEN_SEEDVALID_VALID_Enabled << CRACEN_SEEDVALID_VALID_Pos);
+}
+
+bool CracenIkg::seedLocked() const {
+  if (cracen_ == nullptr) {
+    return false;
+  }
+  return (cracen_->SEEDLOCK & CRACEN_SEEDLOCK_ENABLE_Msk) ==
+         (CRACEN_SEEDLOCK_ENABLE_Enabled << CRACEN_SEEDLOCK_ENABLE_Pos);
+}
+
+bool CracenIkg::seedStateManagedByKmu() const {
+  return kSeedStateManagedByKmu;
 }
 
 bool CracenIkg::markSeedValid(bool valid) {
@@ -414,12 +453,17 @@ bool CracenIkg::markSeedValid(bool valid) {
   (void)valid;
   return false;
 #else
-  if (cracen_ == nullptr) {
+  // LM20 seed validity is asserted by the KMU after all seed words are
+  // pushed. Its SEEDVALID register is read-only in practice. On L15, this
+  // raw API cannot prove that a complete nonzero KMU seed was pushed, so it
+  // deliberately refuses to bless the current contents.
+  if (cracen_ == nullptr || kSeedStateManagedByKmu || valid || seedLocked()) {
     return false;
   }
-  cracen_->SEEDVALID = valid ? CRACEN_SEEDVALID_VALID_Enabled
-                             : CRACEN_SEEDVALID_VALID_Disabled;
-  return true;
+  cracen_->SEEDVALID =
+      CRACEN_SEEDVALID_VALID_Disabled << CRACEN_SEEDVALID_VALID_Pos;
+  __asm volatile("dsb 0xF" ::: "memory");
+  return !seedValid();
 #endif
 }
 
@@ -427,11 +471,19 @@ bool CracenIkg::lockSeed() {
 #if defined(NRF_TRUSTZONE_NONSECURE)
   return false;
 #else
-  if (cracen_ == nullptr) {
+  // On LM20 the KMU owns SEEDLOCK and software writes have no effect. On
+  // L15, writing SEEDLOCK while SEEDVALID is clear would itself validate an
+  // unknown seed, so require an already-valid seed and verify the readback.
+  if (cracen_ == nullptr || kSeedStateManagedByKmu || !seedValid()) {
     return false;
   }
-  cracen_->SEEDLOCK = CRACEN_SEEDLOCK_ENABLE_Enabled;
-  return true;
+  if (seedLocked()) {
+    return true;
+  }
+  cracen_->SEEDLOCK =
+      CRACEN_SEEDLOCK_ENABLE_Enabled << CRACEN_SEEDLOCK_ENABLE_Pos;
+  __asm volatile("dsb 0xF" ::: "memory");
+  return seedLocked();
 #endif
 }
 
@@ -439,11 +491,16 @@ bool CracenIkg::lockProtectedRam() {
 #if defined(NRF_TRUSTZONE_NONSECURE)
   return false;
 #else
-  if (cracen_ == nullptr) {
+  if (cracen_ == nullptr || !active_) {
     return false;
   }
-  cracen_->PROTECTEDRAMLOCK = CRACEN_PROTECTEDRAMLOCK_ENABLE_Enabled;
-  return true;
+  cracen_->PROTECTEDRAMLOCK = CRACEN_PROTECTEDRAMLOCK_ENABLE_Enabled
+                              << CRACEN_PROTECTEDRAMLOCK_ENABLE_Pos;
+  __asm volatile("dsb 0xF" ::: "memory");
+  return (cracen_->PROTECTEDRAMLOCK &
+          CRACEN_PROTECTEDRAMLOCK_ENABLE_Msk) ==
+         (CRACEN_PROTECTEDRAMLOCK_ENABLE_Enabled
+          << CRACEN_PROTECTEDRAMLOCK_ENABLE_Pos);
 #endif
 }
 
@@ -452,7 +509,7 @@ bool CracenIkg::softResetKeys(uint32_t spinLimit) {
   (void)spinLimit;
   return false;
 #else
-  if (core_ == nullptr) {
+  if (core_ == nullptr || !active_) {
     return false;
   }
   core_->IKG.SOFTRST = CRACENCORE_IKG_SOFTRST_SOFTRST_KEY;
@@ -465,7 +522,7 @@ bool CracenIkg::initInput() {
 #if defined(NRF_TRUSTZONE_NONSECURE)
   return false;
 #else
-  if (core_ == nullptr) {
+  if (core_ == nullptr || !active_) {
     return false;
   }
   core_->IKG.INITDATA = CRACENCORE_IKG_INITDATA_INITDATA_Msk;
@@ -479,7 +536,12 @@ bool CracenIkg::writeNonce(const uint32_t* words, size_t wordCount) {
   (void)wordCount;
   return false;
 #else
-  if (core_ == nullptr || (wordCount != 0U && words == nullptr)) {
+  const size_t maxWords =
+      static_cast<size_t>((hwConfig() &
+                           CRACENCORE_IKG_HWCONFIG_NONCELENGTH_Msk) >>
+                          CRACENCORE_IKG_HWCONFIG_NONCELENGTH_Pos);
+  if (core_ == nullptr || !active_ || wordCount > maxWords ||
+      (wordCount != 0U && words == nullptr)) {
     return false;
   }
   for (size_t i = 0; i < wordCount; ++i) {
@@ -495,7 +557,12 @@ bool CracenIkg::writePersonalization(const uint32_t* words, size_t wordCount) {
   (void)wordCount;
   return false;
 #else
-  if (core_ == nullptr || (wordCount != 0U && words == nullptr)) {
+  const size_t maxWords = static_cast<size_t>(
+      (hwConfig() &
+       CRACENCORE_IKG_HWCONFIG_PERSONALIZATIONSTRINGLENGTH_Msk) >>
+      CRACENCORE_IKG_HWCONFIG_PERSONALIZATIONSTRINGLENGTH_Pos);
+  if (core_ == nullptr || !active_ || wordCount > maxWords ||
+      (wordCount != 0U && words == nullptr)) {
     return false;
   }
   for (size_t i = 0; i < wordCount; ++i) {
@@ -510,7 +577,7 @@ bool CracenIkg::setReseedInterval(uint64_t interval) {
   (void)interval;
   return false;
 #else
-  if (core_ == nullptr) {
+  if (core_ == nullptr || !active_ || (interval >> 48U) != 0U) {
     return false;
   }
   core_->IKG.RESEEDINTERVALLSB = static_cast<uint32_t>(interval & 0xFFFFFFFFULL);
@@ -528,7 +595,7 @@ bool CracenIkg::start(uint32_t spinLimit) {
   if (!active_ && !begin(spinLimit)) {
     return false;
   }
-  if (core_ == nullptr) {
+  if (core_ == nullptr || !active_ || !seedValid()) {
     return false;
   }
 
@@ -544,12 +611,14 @@ bool CracenIkg::waitReady(uint32_t spinLimit) const {
   }
   while (spinLimit-- > 0U) {
     const uint32_t ikgStatus = core_->IKG.STATUS;
-    const uint32_t pke = core_->IKG.PKESTATUS;
+    const uint32_t ikgPkeStatus = core_->IKG.PKESTATUS;
+    const uint32_t pkStatus = core_->PK.STATUS;
     if ((ikgStatus & CRACENCORE_IKG_STATUS_CATASTROPHICERROR_Msk) != 0U) {
       return false;
     }
     if ((ikgStatus & CRACENCORE_IKG_STATUS_CTRDRBGBUSY_Msk) == 0U &&
-        (pke & CRACENCORE_IKG_PKESTATUS_ERASEBUSY_Msk) == 0U) {
+        (ikgPkeStatus & CRACENCORE_IKG_PKESTATUS_ERASEBUSY_Msk) == 0U &&
+        (pkStatus & CRACENCORE_PK_STATUS_PKBUSY_Msk) == 0U) {
       return true;
     }
   }
@@ -578,28 +647,30 @@ bool CracenIkg::waitGenerationComplete(uint32_t spinLimit) const {
 // ─── PKE / PK Engine direct access ───────────────────────────
 
 bool CracenIkg::pkStart() {
-  if (core_ == nullptr) return false;
+  if (core_ == nullptr || !active_) return false;
+  core_->PK.CONTROL = CRACENCORE_PK_CONTROL_CLEARIRQ_Msk;
+  __asm volatile("dsb 0xF" ::: "memory");
   core_->PK.CONTROL = CRACENCORE_PK_CONTROL_START_Msk;
   return true;
 }
 
 bool CracenIkg::pkBusy() const {
-  if (core_ == nullptr) return true;
+  if (core_ == nullptr || !active_) return true;
   return (core_->PK.STATUS & CRACENCORE_PK_STATUS_PKBUSY_Msk) != 0U;
 }
 
 void CracenIkg::pkClearIrq() {
-  if (core_ == nullptr) return;
+  if (core_ == nullptr || !active_) return;
   core_->PK.CONTROL = CRACENCORE_PK_CONTROL_CLEARIRQ_Msk;
 }
 
 void CracenIkg::pkSetCommand(uint32_t cmd) {
-  if (core_ == nullptr) return;
+  if (core_ == nullptr || !active_) return;
   core_->PK.COMMAND = cmd;
 }
 
 void CracenIkg::pkSetPointers(uint8_t a, uint8_t b, uint8_t c, uint8_t n) {
-  if (core_ == nullptr) return;
+  if (core_ == nullptr || !active_) return;
   uint32_t ptrs = ((uint32_t)(a & 0xF) << CRACENCORE_PK_POINTERS_OPPTRA_Pos) |
                   ((uint32_t)(b & 0xF) << CRACENCORE_PK_POINTERS_OPPTRB_Pos) |
                   ((uint32_t)(c & 0xF) << CRACENCORE_PK_POINTERS_OPPTRC_Pos) |
@@ -608,49 +679,71 @@ void CracenIkg::pkSetPointers(uint8_t a, uint8_t b, uint8_t c, uint8_t n) {
 }
 
 void CracenIkg::pkSetOpsize(uint32_t size) {
-  if (core_ == nullptr) return;
+  if (core_ == nullptr || !active_) return;
   core_->PK.OPSIZE = size;
 }
 
-void CracenIkg::pkWriteOperand(int slot, const uint8_t* data, size_t len) {
-  if (core_ == nullptr || data == nullptr || slot < 0 || slot > 15) return;
-  // PK data memory at 0x51808000, 256 bytes per slot, word-aligned access
-  volatile uint32_t* pkRam = (volatile uint32_t*)(0x51808000UL + (uint32_t)(slot * 256));
-  size_t words = (len + 3) / 4;
-  for (size_t i = 0; i < words; i++) {
-    uint32_t w = 0;
-    if (i*4 < len) w |= (uint32_t)data[i*4];
-    if (i*4+1 < len) w |= (uint32_t)data[i*4+1] << 8;
-    if (i*4+2 < len) w |= (uint32_t)data[i*4+2] << 16;
-    if (i*4+3 < len) w |= (uint32_t)data[i*4+3] << 24;
-    pkRam[i] = w;
+bool CracenIkg::operandAccessAllowed(int slot, const void* data,
+                                    size_t len) const {
+  if (core_ == nullptr || cracen_ == nullptr || !active_ ||
+      operandRamBase_ == 0U || data == nullptr || len == 0U ||
+      len > kPkOperandSlotSize || slot < 0 ||
+      slot >= static_cast<int>(kPkOperandSlotCount)) {
+    return false;
   }
+  // Once isolated keys exist, hardware Secure Mode only exposes pages 8-12
+  // to the CPU. Reject the other pages before the bus can fault.
+  return !privateKeysStored() || (slot >= 8 && slot <= 12);
+}
+
+bool CracenIkg::pkWriteOperand(int slot, const uint8_t* data, size_t len) {
+  if (!operandAccessAllowed(slot, data, len)) {
+    return false;
+  }
+  volatile uint32_t* pkRam = reinterpret_cast<volatile uint32_t*>(
+      operandRamBase_ + static_cast<uintptr_t>(slot) * kPkOperandSlotSize);
+  const size_t words = (len + 3U) / 4U;
+  for (size_t i = 0; i < words; ++i) {
+    uint32_t value = 0U;
+    for (size_t byte = 0; byte < 4U && i * 4U + byte < len; ++byte) {
+      value |= static_cast<uint32_t>(data[i * 4U + byte]) << (byte * 8U);
+    }
+    pkRam[i] = value;
+  }
+  __asm volatile("dsb 0xF" ::: "memory");
+  return true;
 }
 
 bool CracenIkg::pkReadOperand(int slot, uint8_t* data, size_t len) {
-  if (core_ == nullptr || data == nullptr || slot < 0 || slot > 15) return false;
-  // Disable protected RAM lock so CPU can read PK data memory
-  if (cracen_ != nullptr) {
-    cracen_->PROTECTEDRAMLOCK = CRACEN_PROTECTEDRAMLOCK_ENABLE_Disabled;
+  if (!operandAccessAllowed(slot, data, len)) {
+    return false;
   }
   __asm volatile("dsb 0xF" ::: "memory");
-  volatile const uint32_t* pkRam = (volatile const uint32_t*)(0x51808000UL + (uint32_t)(slot * 256));
-  size_t words = (len + 3) / 4;
-  for (size_t i = 0; i < words; i++) {
-    uint32_t w = pkRam[i];
-    if (i*4 < len) data[i*4] = (uint8_t)(w & 0xFF);
-    if (i*4+1 < len) data[i*4+1] = (uint8_t)((w>>8) & 0xFF);
-    if (i*4+2 < len) data[i*4+2] = (uint8_t)((w>>16) & 0xFF);
-    if (i*4+3 < len) data[i*4+3] = (uint8_t)((w>>24) & 0xFF);
+  volatile const uint32_t* pkRam = reinterpret_cast<volatile const uint32_t*>(
+      operandRamBase_ + static_cast<uintptr_t>(slot) * kPkOperandSlotSize);
+  const size_t words = (len + 3U) / 4U;
+  for (size_t i = 0; i < words; ++i) {
+    const uint32_t value = pkRam[i];
+    for (size_t byte = 0; byte < 4U && i * 4U + byte < len; ++byte) {
+      data[i * 4U + byte] =
+          static_cast<uint8_t>(value >> (byte * 8U));
+    }
   }
   return true;
 }
 
 bool CracenIkg::pkWaitComplete(uint32_t spinLimit) {
+  if (core_ == nullptr || !active_) {
+    return false;
+  }
   while (spinLimit-- > 0U) {
-    if (!pkBusy()) {
-      uint32_t st = core_->PK.STATUS;
-      return (st & CRACENCORE_PK_STATUS_ERRORFLAGS_Msk) == 0U;
+    const uint32_t currentStatus = core_->PK.STATUS;
+    if ((currentStatus & CRACENCORE_PK_STATUS_ERRORFLAGS_Msk) != 0U) {
+      return false;
+    }
+    if ((currentStatus & CRACENCORE_PK_STATUS_PKBUSY_Msk) == 0U &&
+        (currentStatus & CRACENCORE_PK_STATUS_INTRPTSTATUS_Msk) != 0U) {
+      return true;
     }
   }
   return false;
@@ -659,113 +752,52 @@ bool CracenIkg::pkWaitComplete(uint32_t spinLimit) {
 // ─── IKG high-level ECC operations ─────────────────────────────
 
 bool CracenIkg::ikgGenerateKey() {
-  if (core_ == nullptr) return false;
-  // Set up IKG for P-256 key generation
-  // Write personalization and nonce for DRBG seeding
-  uint32_t pers[8] = {};
-  uint32_t nonce[8] = {};
-  for (int i = 0; i < 8; i++) {
-    pers[i] = 0x4E524635UL + i;  // "NRF5" pattern
-    nonce[i] = (uint32_t)(i * 0x9E3779B9UL + 0x12345678UL);
+  if (core_ == nullptr || !active_ || !seedValid()) {
+    return false;
   }
-  if (!initInput()) return false;
-  if (!writePersonalization(pers, 8)) return false;
-  if (!writeNonce(nonce, 8)) return false;
-  if (!markSeedValid(true)) return false;
-  if (!start(1000000UL)) return false;
-  return waitGenerationComplete(1000000UL) && privateKeysStored();
+  if (!softResetKeys(1000000UL) || !seedValid() || !initInput()) {
+    return false;
+  }
+  return start(1000000UL) && privateKeysStored();
 }
 
 bool CracenIkg::ikgEcdsaSign(const uint8_t hash[32]) {
-  if (core_ == nullptr || hash == nullptr) return false;
-  if (!privateKeysStored()) return false;
-  // Let IKG configure PK
-  
-  pkWriteOperand(1, hash, 32);
-  
-  // Set IKG command: ECDSA sign with key slot 0
-  core_->IKG.PKECOMMAND = 
-      CRACENCORE_IKG_PKECOMMAND_SECUREMODE_ACTIVATED << CRACENCORE_IKG_PKECOMMAND_SECUREMODE_Pos |
-      (0U << CRACENCORE_IKG_PKECOMMAND_SELECTEDKEY_Pos) |
-      CRACENCORE_IKG_PKECOMMAND_OPSEL_ECDSA << CRACENCORE_IKG_PKECOMMAND_OPSEL_Pos;
-  
-  core_->IKG.PKECONTROL = CRACENCORE_IKG_PKECONTROL_PKESTART_Msk;
-  
-  // Wait for completion
-  uint32_t spin = 5000000UL;
-  while (spin-- > 0U) {
-    uint32_t st = core_->IKG.PKESTATUS;
-    if ((st & 0x1) != 0) return false;  // ERROR (bit 0)
-    if ((st & 0x4) == 0) return true;   // IKGPKBUSY cleared = done
-  }
+  (void)hash;
   return false;
 }
 
 bool CracenIkg::ikgPointMul(const uint8_t scalar[32], const uint8_t pointX[32], const uint8_t pointY[32]) {
-  if (core_ == nullptr) return false;
-  // Let IKG configure PK
-  
-  pkWriteOperand(0, scalar, 32);
-  pkWriteOperand(4, pointX, 32);
-  pkWriteOperand(5, pointY, 32);
-  
-  // Set IKG command: PTMUL
-  core_->IKG.PKECOMMAND = 
-      CRACENCORE_IKG_PKECOMMAND_SECUREMODE_ACTIVATED << CRACENCORE_IKG_PKECOMMAND_SECUREMODE_Pos |
-      CRACENCORE_IKG_PKECOMMAND_OPSEL_PTMUL << CRACENCORE_IKG_PKECOMMAND_OPSEL_Pos;
-  
-  core_->IKG.PKECONTROL = CRACENCORE_IKG_PKECONTROL_PKESTART_Msk;
-  
-  uint32_t spin = 5000000UL;
-  while (spin-- > 0U) {
-    uint32_t st = core_->IKG.PKESTATUS;
-    if ((st & 0x1) != 0) return false;
-    if ((st & 0x4) == 0) return true;
-  }
+  (void)scalar;
+  (void)pointX;
+  (void)pointY;
   return false;
 }
 
 bool CracenIkg::ikgReadPublicKey(uint8_t pubKey[65]) {
-  if (core_ == nullptr || pubKey == nullptr) return false;
-  if (!privateKeysStored()) return false;
-  
-  // Let IKG configure PK
-  
-  core_->IKG.PKECOMMAND = 
-      CRACENCORE_IKG_PKECOMMAND_SECUREMODE_ACTIVATED << CRACENCORE_IKG_PKECOMMAND_SECUREMODE_Pos |
-      (0U << CRACENCORE_IKG_PKECOMMAND_SELECTEDKEY_Pos) |
-      CRACENCORE_IKG_PKECOMMAND_OPSEL_PUBKEY << CRACENCORE_IKG_PKECOMMAND_OPSEL_Pos;
-  
-  // Trigger
-  core_->IKG.PKECONTROL = CRACENCORE_IKG_PKECONTROL_PKESTART_Msk;
-  
-  // Wait for completion (IKGPKBUSY bit 2 = 0x4)
-  uint32_t spin = 10000000UL;
-  while (spin-- > 0U) {
-    uint32_t st = core_->IKG.PKESTATUS;
-    if (st & 0x1) return false;  // ERROR
-    if ((st & 0x4) == 0 && spin < 9999990UL) break;  // IKGPKBUSY cleared (with debounce: skip first few iterations)
+  if (pubKey != nullptr) {
+    memset(pubKey, 0, 65U);
   }
-  if (spin == 0) return false;
-  
-  pubKey[0] = 0x04;
-  if (!pkReadOperand(7, pubKey + 1, 32)) return false;
-  if (!pkReadOperand(8, pubKey + 33, 32)) return false;
-  return true;
+  return false;
 }
 
 bool CracenIkg::ikgReadEcdsaSignature(uint8_t r[32], uint8_t s[32]) {
-  // ECDSA result: r in slot 2, s in slot 3
-  if (!pkReadOperand(2, r, 32)) return false;
-  if (!pkReadOperand(3, s, 32)) return false;
-  return true;
+  if (r != nullptr) {
+    memset(r, 0, 32U);
+  }
+  if (s != nullptr) {
+    memset(s, 0, 32U);
+  }
+  return false;
 }
 
 bool CracenIkg::ikgReadPointMulResult(uint8_t x[32], uint8_t y[32]) {
-  // PTMUL result: x in slot 7, y in slot 8
-  if (!pkReadOperand(7, x, 32)) return false;
-  if (!pkReadOperand(8, y, 32)) return false;
-  return true;
+  if (x != nullptr) {
+    memset(x, 0, 32U);
+  }
+  if (y != nullptr) {
+    memset(y, 0, 32U);
+  }
+  return false;
 }
 
 uint32_t CracenIkg::pkStatus() const {

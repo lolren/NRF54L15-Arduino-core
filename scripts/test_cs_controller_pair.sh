@@ -277,14 +277,36 @@ extract_transfer_keys() {
   awk -v role="${role}" '
     $0 ~ ("cs_result role=" role " result=PASS") {
       id = ""; crc = ""; token = "";
+      pbr = ""; distance = ""; used = 0; steps = 0; bytes = 0;
+      acks = 0; cont = 0; dropped = 1; rejected = 1;
       for (i = 1; i <= NF; ++i) {
         gsub(/\r/, "", $i);
         split($i, field, "=");
         if (field[1] == "transfer_id") id = field[2];
         if (field[1] == "transfer_crc32") crc = field[2];
         if (field[1] == "session_token") token = field[2];
+        if (field[1] == "pbr_m") pbr = field[2];
+        if (field[1] == "distance_m") distance = field[2];
+        if (field[1] == "used_channels") used = field[2] + 0;
+        if (field[1] == "steps") steps = field[2] + 0;
+        if (field[1] == "bytes") bytes = field[2] + 0;
+        if (field[1] == "transfer_acks") acks = field[2] + 0;
+        if (field[1] == "hci_continue") cont = field[2] + 0;
+        if (field[1] == "dropped") dropped = field[2] + 0;
+        if (field[1] == "rejected") rejected = field[2] + 0;
       }
-      if (id != "" && crc != "" && token != "") print id, crc, token;
+      number = "^[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)$";
+      valid = 0;
+      if (role == "initiator") {
+        valid = pbr ~ number && pbr + 0 > 0 && distance ~ number &&
+                distance + 0 > 0 && used >= 4 && cont >= 1 && dropped == 0;
+      } else if (role == "reflector") {
+        valid = steps > 3 && bytes > 0 && acks > 0 && cont >= 1 &&
+                dropped == 0 && rejected == 0;
+      }
+      if (valid && id != "" && crc != "" && token != "") {
+        print id, crc, token;
+      }
     }
   ' "${log}" | sort -u
 }
@@ -332,6 +354,10 @@ validate_positive() {
   echo "${phase}=PASS initiator_ranges=${initiator_count} reflector_results=${reflector_count} matched_sessions=${matched}"
 }
 
+if [[ "${CS_FUNCTIONS_ONLY:-0}" == 1 ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 command -v arduino-cli >/dev/null || die "arduino-cli is required"
 command -v "${pyocd_bin}" >/dev/null || die "pyOCD is required"
 command -v timeout >/dev/null || die "GNU timeout is required"
@@ -377,8 +403,11 @@ if [[ "${run_negative}" == 1 ]]; then
     "${negative_log}" "${negative_session}"
   ! grep -Fq 'cs_result role=initiator result=PASS' "${negative_session}" || \
     die "silent-peer: initiator accepted a range"
-  grep -Fq 'cs_result role=initiator result=RETRY' "${negative_session}" || \
-    die "silent-peer: no rejected/timeout procedure observed"
+  ! grep -Eq 'fatal_stage=|dropped=[1-9][0-9]*|rejected=[1-9][0-9]*' \
+    "${negative_session}" || die "silent-peer: fatal/drop/reject marker"
+  grep -Eq 'cs_result role=initiator result=RETRY .*reason=session_sync .*bytes=0([[:space:]]|$)' \
+    "${negative_session}" || \
+    die "silent-peer: expected zero-byte session-sync timeout was not observed"
   echo "silent_peer=PASS accepted_ranges=0"
 
   recovery_initiator_log="${log_dir}/recovery-initiator.log"

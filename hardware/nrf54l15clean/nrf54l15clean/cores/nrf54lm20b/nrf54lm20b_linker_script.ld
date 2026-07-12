@@ -86,17 +86,27 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH
 
-    .bond_storage (NOLOAD) :
+    .bond_storage ORIGIN(FLASH_BOND) (NOLOAD) :
     {
         . = ALIGN(4);
         _sbond_storage = .;
-        KEEP(*(.bond_storage))
-        KEEP(*(.bond_storage*))
+        KEEP(*(.bond_base_storage))
+        . = ALIGN(4);
+    } >FLASH_BOND
+    ASSERT(SIZEOF(.bond_storage) <= 0x50,
+           "BLE base bond storage exceeds its stable 80-byte slot")
+
+    .bond_cccd_storage ORIGIN(FLASH_BOND) + 0x50 (NOLOAD) :
+    {
+        . = ALIGN(4);
+        KEEP(*(.bond_cccd_storage))
         . = ALIGN(4);
         _ebond_storage = .;
     } >FLASH_BOND
+    ASSERT(SIZEOF(.bond_cccd_storage) <= 0x8C,
+           "BLE CCCD storage exceeds its stable 140-byte slot")
 
-    .prefs_storage (NOLOAD) :
+    .prefs_storage ORIGIN(FLASH_BOND) + 0xDC (NOLOAD) :
     {
         . = ALIGN(4);
         _sprefs_storage = .;
@@ -105,8 +115,10 @@ SECTIONS
         . = ALIGN(4);
         _eprefs_storage = .;
     } >FLASH_BOND
+    ASSERT(SIZEOF(.prefs_storage) <= 0xAE0,
+           "Preferences storage exceeds its stable 2784-byte slot")
 
-    .eeprom_storage (NOLOAD) :
+    .eeprom_storage ORIGIN(FLASH_BOND) + 0xBBC (NOLOAD) :
     {
         . = ALIGN(4);
         _seeprom_storage = .;
@@ -115,6 +127,20 @@ SECTIONS
         . = ALIGN(4);
         _eeeprom_storage = .;
     } >FLASH_BOND
+    ASSERT(SIZEOF(.eeprom_storage) <= 0x40C,
+           "EEPROM storage exceeds its stable 1036-byte slot")
+
+    .bond_signing_storage ORIGIN(FLASH_BOND) + 0xFC8 (NOLOAD) :
+    {
+        . = ALIGN(4);
+        _sbond_signing_storage = .;
+        KEEP(*(.bond_signing_storage))
+        KEEP(*(.bond_signing_storage*))
+        . = ALIGN(4);
+        _ebond_signing_storage = .;
+    } >FLASH_BOND
+    ASSERT(SIZEOF(.bond_signing_storage) <= 0x38,
+           "BLE signing extension exceeds the stable 56-byte slot")
 
     .ARM.extab : { *(.ARM.extab* .gnu.linkonce.armextab.*) } >FLASH
     .ARM : { __exidx_start = .; *(.ARM.exidx*) __exidx_end = .; } >FLASH

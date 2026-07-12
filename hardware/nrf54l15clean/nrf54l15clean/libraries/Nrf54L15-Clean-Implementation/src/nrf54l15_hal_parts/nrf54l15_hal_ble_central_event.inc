@@ -141,6 +141,17 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       }
     }
     if (connectionPendingTxValid_) {
+      if (connectionPendingTxLlid_ == kBlePduLlControl &&
+          connectionPendingTxLength_ == 12U &&
+          connectionPendingTxPayload_[0] == kBleLlCtrlConnectionUpdateInd &&
+          !connectionUpdatePending_) {
+        const uint16_t instant =
+            static_cast<uint16_t>(currentEventCounter + 6U);
+        writeLe16(&connectionPendingTxPayload_[10], instant);
+        connectionUpdateInstant_ = instant;
+        connectionUpdatePending_ = true;
+        emitBleTrace("CONN_PARAM_IND_ARMED");
+      }
       txLlid = connectionPendingTxLlid_;
       txLength = connectionPendingTxLength_;
       if (txLength > 0U) {

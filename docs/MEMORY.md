@@ -7,7 +7,8 @@ Load this at session start after context compaction.
 - **Archive**: MUST have single root dir. No symlinks (Windows fails).
 - **Index**: tool dependencies are arm-none-eabi-gcc and nrf54l15hosttools.
 - **CDN**: After delete+recreate, CDN caches old file ~5min. Use new version number.
-- **Host tools**: 1.1.4 with pyOCD 0.44.1. Upload for all 5 platforms.
+- **Host tools**: 1.1.5 with pyOCD 0.44.1 and packaged license notices. Upload
+  support for all 5 platforms.
 - **Upload detach**: `pyocd commander -c resume` after flash (AppImage compatible)
 
 ## Hardware
@@ -52,10 +53,11 @@ Load this at session start after context compaction.
 - All Linux users use AppImage Arduino IDE
 - Sandboxed Python CANNOT use system pip packages
 - Must use `pyocd commander` CLI (not Python API) for AppImage compat
-- Host tools wheelhouse provides pyocd for AppImage
+- Host tools install pinned pyOCD into a tool-local runtime from the configured
+  Python package index; first recovery setup requires network access
 
 ## Host Tools
-- Permanent release: `host-tools-v1.1.4` (never delete)
-- 5 platforms, pyOCD 0.44.1
-- URL: https://github.com/lolren/nrf54-arduino-core/releases/tag/host-tools-v1.1.4
+- Permanent release: `host-tools-v1.1.5` (never delete)
+- 5 platforms, pinned pyOCD 0.44.1 bootstrap, no redistributed wheelhouse
+- URL: https://github.com/lolren/nrf54-arduino-core/releases/tag/host-tools-v1.1.5
 - Only update when tools version bumps (1.2.0+)

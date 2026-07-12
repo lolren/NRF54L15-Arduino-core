@@ -214,6 +214,7 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionEncRxEnabled_(false),
       connectionEncTxEnabled_(false),
       connectionEncAuthenticated_(false),
+      connectionEncSecureConnections_(false),
       connectionEncStartReqPending_(false),
       connectionEncStartReqTxPending_(false),
       connectionEncAwaitingStartRsp_(false),
@@ -252,6 +253,7 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       cccdFlashPersistPending_(false),
       bondLocalIdentityMigrationPending_(false),
       bondLocalIdentityMigrationRetryAtUs_(0U),
+      bondSigningCounterPersistPending_(false),
       connectionBondedEncryptionRequested_(false),
       traceCallback_(nullptr),
       traceCallbackContext_(nullptr),
@@ -259,10 +261,14 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       smpLocalInitiator_(false),
       smpExpectPeerEncKey_(false),
       smpExpectPeerIdKey_(false),
+      smpExpectPeerSignKey_(false),
       smpDistributeLocalIdKey_(false),
+      smpDistributeLocalSignKey_(false),
       smpLocalIdInfoSent_(false),
       smpLocalIdAddressSent_(false),
       smpLocalIdAddressAcked_(false),
+      smpLocalSignInfoSent_(false),
+      smpLocalSignInfoAcked_(false),
       smpLocalIoCapabilities_(kSmpIoCapNoInputNoOutput),
       smpPendingUserPasskey_(false),
       smpPendingUserPasskeyMatchRequest_(false),
@@ -273,9 +279,19 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       smpPeerIrkValid_(false),
       smpPeerIdentityAddressValid_(false),
       smpPeerIdentityAddressRandom_(false),
+      smpPeerCsrkValid_(false),
+      smpLocalCsrkValid_(false),
+      smpPeerSignCounterValid_(false),
       smpPeerLtk_{0},
       smpPeerIrk_{0},
       smpPeerIdentityAddress_{0},
+      smpPeerCsrk_{0},
+      smpLocalCsrk_{0},
+      smpPeerSignCounter_(0U),
+      smpLocalSignCounter_(0U),
+      smpPeerSignCounterReservedUntil_(0U),
+      smpLocalSignCounterReservedUntil_(0U),
+      signedWriteReplayRejectCount_(0U),
       smpEncReqRand_{0},
       smpEncReqEdiv_(0U),
       smpKeySize_(16U),
@@ -1423,15 +1439,36 @@ bool BleRadio::setGattBatteryLevel(uint8_t percent) {
     return false;
   }
   const uint32_t irqState = bleEnterCritical();
-  if (gapBatteryLevel_ != percent) {
-    gapBatteryLevel_ = percent;
-    if (connected_ && connectionBatteryNotificationsEnabled_) {
-      connectionBatteryNotificationPending_ = true;
-    }
-    bleExitCritical(irqState);
-    return true;
+  if (gapBatteryLevel_ != percent && connected_ &&
+      connectionBatteryNotificationsEnabled_) {
+    connectionBatteryNotificationPending_ = true;
   }
   gapBatteryLevel_ = percent;
+  bleExitCritical(irqState);
+  return true;
+}
+
+bool BleRadio::writeGattBatteryLevel(uint8_t percent) {
+  if (percent > 100U) {
+    return false;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  gapBatteryLevel_ = percent;
+  bleExitCritical(irqState);
+  return true;
+}
+
+bool BleRadio::notifyGattBatteryLevel(uint8_t percent) {
+  if (percent > 100U) {
+    return false;
+  }
+  const uint32_t irqState = bleEnterCritical();
+  gapBatteryLevel_ = percent;
+  if (!connected_ || !connectionBatteryNotificationsEnabled_) {
+    bleExitCritical(irqState);
+    return false;
+  }
+  connectionBatteryNotificationPending_ = true;
   bleExitCritical(irqState);
   return true;
 }

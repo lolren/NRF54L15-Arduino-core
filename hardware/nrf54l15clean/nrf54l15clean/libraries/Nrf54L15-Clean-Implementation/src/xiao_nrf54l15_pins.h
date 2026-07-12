@@ -12,10 +12,63 @@ struct Pin {
 constexpr Pin kPinDisconnected{0xFF, 0xFF};
 
 inline constexpr bool isConnected(const Pin& p) {
-  return p.port <= 2U && p.pin <= 31U;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  return ((p.port == 0U) && (p.pin <= 9U)) ||
+         ((p.port == 1U) && (p.pin <= 31U)) ||
+         ((p.port == 2U) && (p.pin <= 5U)) ||
+         ((p.port == 3U) && (p.pin <= 12U));
+#else
+  return ((p.port == 0U) && (p.pin <= 6U)) ||
+         ((p.port == 1U) && (p.pin <= 16U)) ||
+         ((p.port == 2U) && (p.pin <= 10U));
+#endif
 }
 
-// XIAO 14-pin header from schematic page "04 Debug & XIAO Header".
+// XIAO header and board nets are product-specific. Keep these raw HAL pins in
+// sync with each Arduino variant so portable low-level examples route correctly.
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+constexpr Pin kPinD0{1, 0};
+constexpr Pin kPinD1{1, 31};
+constexpr Pin kPinD2{1, 30};
+constexpr Pin kPinD3{1, 29};
+constexpr Pin kPinD4{1, 3};
+constexpr Pin kPinD5{1, 7};
+constexpr Pin kPinD6{1, 8};
+constexpr Pin kPinD7{1, 9};
+constexpr Pin kPinD8{1, 4};
+constexpr Pin kPinD9{1, 5};
+constexpr Pin kPinD10{1, 6};
+constexpr Pin kPinD11{3, 0};
+constexpr Pin kPinD12{3, 1};
+constexpr Pin kPinD13{3, 2};
+constexpr Pin kPinD14{3, 3};
+constexpr Pin kPinD15{3, 4};
+
+constexpr Pin kPinA0 = kPinD0;
+constexpr Pin kPinA1 = kPinD1;
+constexpr Pin kPinA2 = kPinD2;
+constexpr Pin kPinA3 = kPinD3;
+constexpr Pin kPinA4 = kPinD4;
+constexpr Pin kPinA5 = kPinDisconnected;
+constexpr Pin kPinA6 = kPinDisconnected;
+constexpr Pin kPinA7 = kPinDisconnected;
+
+constexpr Pin kPinUserLed{1, 22};
+constexpr Pin kPinUserButton{0, 9};
+constexpr Pin kPinSAMD11Tx{1, 10};
+constexpr Pin kPinSAMD11Rx{1, 11};
+constexpr Pin kPinVbatEnable = kPinDisconnected;
+constexpr Pin kPinVbatSense = kPinDisconnected;
+constexpr Pin kPinImuScl{0, 7};
+constexpr Pin kPinImuSda{0, 8};
+constexpr Pin kPinImuInt{0, 6};
+constexpr Pin kPinImuMicPowerEnable = kPinDisconnected;
+constexpr Pin kPinMicClk{1, 13};
+constexpr Pin kPinMicData{1, 14};
+constexpr Pin kPinRfSwitchPower = kPinDisconnected;
+constexpr Pin kPinRfSwitchCtl = kPinDisconnected;
+#else
+// XIAO nRF54L15 14-pin header from schematic page "04 Debug & XIAO Header".
 constexpr Pin kPinD0{1, 4};
 constexpr Pin kPinD1{1, 5};
 constexpr Pin kPinD2{1, 6};
@@ -73,6 +126,7 @@ constexpr Pin kPinMicData{1, 13};
 // 0 -> RF1 (onboard chip antenna), 1 -> RF2 (alternate path).
 constexpr Pin kPinRfSwitchPower{2, 3};
 constexpr Pin kPinRfSwitchCtl{2, 5};
+#endif
 
 // Default peripheral pin groups used in the HAL examples.
 constexpr Pin kDefaultI2cScl = kPinD5;
@@ -90,6 +144,18 @@ inline constexpr int8_t saadcInputForPin(const Pin& pin) {
     return -1;
   }
   switch (pin.pin) {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+    case 0:
+      return 0;
+    case 31:
+      return 1;
+    case 30:
+      return 2;
+    case 29:
+      return 3;
+    case 3:
+      return 7;
+#else
     case 4:
       return 0;  // AIN0
     case 5:
@@ -106,6 +172,7 @@ inline constexpr int8_t saadcInputForPin(const Pin& pin) {
       return 6;  // AIN6
     case 14:
       return 7;  // AIN7
+#endif
     default:
       return -1;
   }

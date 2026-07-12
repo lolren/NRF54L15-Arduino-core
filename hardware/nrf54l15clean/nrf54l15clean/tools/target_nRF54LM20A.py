@@ -1,4 +1,16 @@
-# nRF54LM20A/B target for pyOCD — self-contained, works on pyOCD 0.42+
+# Copyright (c) 2006-2013 Arm Limited
+# Copyright (c) 2010-2023 Nordic Semiconductor ASA. All rights reserved.
+# Copyright (c) 2019 Monadnock Systems Ltd.
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# Copyright (c) 2025 StarSphere. All rights reserved.
+# Copyright (c) 2026 Arm Limited
+# SPDX-License-Identifier: Apache-2.0
+#
+# Adapted for this core in 2026: pyOCD's nRF54L family/target structure and
+# nRF54L15 flash algorithm were adjusted for the nRF54LM20A/B memory map,
+# RRAMC base, and recovery registration path.
+#
+# nRF54LM20A/B target for pyOCD - self-contained, works on pyOCD 0.42+
 from ...core.memory_map import FlashRegion, RamRegion, MemoryMap
 from ...debug.svd.loader import SVDFile
 from ..family.target_nRF54L import NRF54L

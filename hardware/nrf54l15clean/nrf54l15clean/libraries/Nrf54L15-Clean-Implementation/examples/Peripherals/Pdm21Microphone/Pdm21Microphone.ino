@@ -5,10 +5,10 @@
  *
  *   Pdm mic(nrf54l15::PDM21_BASE);
  *
- * Pins below are raw nRF54L15 port pins for an external digital microphone.
- * Change them to match your board wiring. The XIAO Sense onboard microphone is
- * normally handled by the board audio path; this sketch is for validating and
- * using the separate PDM21 instance.
+ * Pins below are raw GPIO port pins for an external digital microphone. P1.06
+ * and P1.07 are exposed on every supported board profile and satisfy the PDM21
+ * routing restriction. Change them to another supported route if needed. The
+ * XIAO Sense onboard microphone is normally handled by its board example.
  */
 
 #include <Arduino.h>
@@ -18,10 +18,9 @@
 
 using namespace xiao_nrf54l15;
 
-static constexpr Pin kPdm21Clk{0, 4};
-static constexpr Pin kPdm21Din{0, 5};
+static constexpr Pin kPdm21Clk{1, 6};
+static constexpr Pin kPdm21Din{1, 7};
 static constexpr size_t kSampleCount = 256;
-static constexpr uint32_t kCaptureSpinLimit = 4000000UL;
 
 static Pdm g_pdm(nrf54l15::PDM21_BASE);
 alignas(4) static int16_t g_samples[kSampleCount];
@@ -74,13 +73,13 @@ void setup() {
   printPin(F("CLK: "), kPdm21Clk);
   printPin(F("DIN: "), kPdm21Din);
 
-  if (!g_pdm.begin(kPdm21Clk, kPdm21Din, true, 40, PDM_RATIO_RATIO_Ratio64,
-                   PdmEdge::kLeftRising)) {
+  if (!g_pdm.begin(kPdm21Clk, kPdm21Din, true, 25, PDM_RATIO_RATIO_Ratio80,
+                   PdmEdge::kLeftFalling)) {
     Serial.println(F("ERROR: PDM21 begin failed. Check pins and board support."));
     return;
   }
 
-  const bool captured = g_pdm.capture(g_samples, kSampleCount, kCaptureSpinLimit);
+  const bool captured = g_pdm.capture(g_samples, kSampleCount);
   g_pdm.end();
 
   if (!captured) {

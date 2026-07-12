@@ -3,11 +3,11 @@
 // Board A (PERIPHERAL): Advertises as "X54-PAIR",
 //   exposes custom GATT service with notify + write characteristics.
 //   Sends SMP Security Request for JustWorks pairing after connect.
-//   Stores bond record in Preferences, restores on reboot.
+//   Uses the core's built-in RRAM bond store and restores on reboot.
 //
 // Board B (CENTRAL): Scans for "X54-PAIR", initiates connection,
 //   subscribes to notifications, sends periodic writes.
-//   Stores bond record in Preferences.
+//   Uses the core's built-in RRAM bond store.
 //
 // Flash instructions:
 //   Board A: set ROLE = PERIPHERAL
@@ -24,7 +24,6 @@
 //   numeric-comparison value after logging it to Serial.
 
 #include <Arduino.h>
-#include <Preferences.h>
 #include <string.h>
 #include <stdio.h>
 #include "matter_secp256r1.h"
@@ -45,6 +44,9 @@ namespace {
 #if !defined(BLE_PAIR_USE_NUMERIC_COMPARISON)
 #define BLE_PAIR_USE_NUMERIC_COMPARISON 0
 #endif
+#if !defined(BLE_PAIR_USE_SIGNED_WRITE)
+#define BLE_PAIR_USE_SIGNED_WRITE 0
+#endif
 #if !defined(BLE_PAIR_AUTO_ACCEPT_PROMPTS)
 #define BLE_PAIR_AUTO_ACCEPT_PROMPTS 1
 #endif
@@ -58,10 +60,13 @@ namespace {
 #if !defined(BLE_PAIR_PRIVACY_ROTATION_MS)
 #define BLE_PAIR_PRIVACY_ROTATION_MS 5000UL
 #endif
-#if BLE_PAIR_USE_STATIC_PIN && BLE_PAIR_USE_NUMERIC_COMPARISON
-#error "BLE_PAIR_USE_STATIC_PIN and BLE_PAIR_USE_NUMERIC_COMPARISON are mutually exclusive"
+#if (BLE_PAIR_USE_STATIC_PIN + BLE_PAIR_USE_NUMERIC_COMPARISON + \
+     BLE_PAIR_USE_SIGNED_WRITE) > 1
+#error "BLE pairing security test modes are mutually exclusive"
 #endif
-#if BLE_PAIR_USE_PRIVACY && (BLE_PAIR_USE_STATIC_PIN || BLE_PAIR_USE_NUMERIC_COMPARISON)
+#if BLE_PAIR_USE_PRIVACY && (BLE_PAIR_USE_STATIC_PIN || \
+                             BLE_PAIR_USE_NUMERIC_COMPARISON || \
+                             BLE_PAIR_USE_SIGNED_WRITE)
 #error "BLE_PAIR_USE_PRIVACY is a separate release-gate mode"
 #endif
 
@@ -88,6 +93,8 @@ constexpr char kStaticPin[] = "123456";
 constexpr char kAdvName[] = "X54-PAIR-NC";
 #elif BLE_PAIR_USE_STATIC_PIN
 constexpr char kAdvName[] = "X54-PAIR-PIN";
+#elif BLE_PAIR_USE_SIGNED_WRITE
+constexpr char kAdvName[] = "X54-PAIR-SIGN";
 #else
 constexpr char kAdvName[] = "X54-PAIR";
 #endif
@@ -141,10 +148,11 @@ constexpr uint16_t kSvcUuid = 0x5A00U;
 constexpr uint16_t kNotifyUuid = 0x5A01U;
 constexpr uint16_t kWriteUuid = 0x5A02U;
 constexpr uint8_t kNotifyProp = 0x12U;  // read + notify
-constexpr uint8_t kWriteProp  = 0x04U;  // write without response
+constexpr uint8_t kWriteProp =
+    BLE_PAIR_USE_SIGNED_WRITE ? kBleGattPropAuthenticatedSignedWrites
+                              : kBleGattPropWriteNoRsp;
 
 BleRadio g_ble;
-Preferences g_prefs;
 uint16_t g_svcHandle = 0U;
 uint16_t g_notifyHandle = 0U;
 uint16_t g_notifyCccd = 0U;
@@ -157,6 +165,9 @@ uint32_t g_lastSecurityRequestMs = 0U;
 bool g_prevConnected = false;
 bool g_prevEncrypted = false;
 bool g_centralSeen = false;
+#if BLE_PAIR_USE_SIGNED_WRITE
+uint32_t g_signedWriteCallbackCount = 0U;
+#endif
 char g_traceBuffer[kTraceBufferDepth][kTraceBufferEntryLen] = {};
 uint8_t g_traceBufferHead = 0U;
 uint8_t g_traceBufferCount = 0U;
@@ -174,38 +185,15 @@ bool g_privacyBondAarSeen = false;
 bool g_privacyBondPrimedSeen = false;
 #endif
 
-// ─── Bond persistence ─────────────────────────────────────────
-
-#if BLE_PAIR_USE_PRIVACY
-static constexpr char kNs[] = "ble_pair_priv";
-#elif BLE_PAIR_USE_NUMERIC_COMPARISON
-static constexpr char kNs[] = "ble_pair_nc";
-#elif BLE_PAIR_USE_STATIC_PIN
-static constexpr char kNs[] = "ble_pair_pin";
-#else
-static constexpr char kNs[] = "ble_pair";
-#endif
-static constexpr char kBondKey[] = "bond";
-
-bool loadBond(BleBondRecord* out, void*) {
-  if (g_prefs.getBytesLength(kBondKey) == sizeof(BleBondRecord)) {
-    g_prefs.getBytes(kBondKey, out, sizeof(BleBondRecord));
-    Serial.println("ble_pair bond-loaded");
-    return true;
+bool signingBondReady(BleBondRecord* out = nullptr) {
+  BleBondRecord record{};
+  if (!g_ble.getBondRecord(&record) || record.peerCsrkValid == 0U ||
+      record.localCsrkValid == 0U) {
+    return false;
   }
-  return false;
-}
-
-bool saveBond(const BleBondRecord* rec, void*) {
-  if (!rec) return false;
-  g_prefs.putBytes(kBondKey, rec, sizeof(BleBondRecord));
-  Serial.println("ble_pair bond-saved");
-  return true;
-}
-
-bool clearBondStored(void*) {
-  g_prefs.remove(kBondKey);
-  Serial.println("ble_pair bond-cleared-storage");
+  if (out != nullptr) {
+    *out = record;
+  }
   return true;
 }
 
@@ -213,6 +201,13 @@ bool clearBondStored(void*) {
 
 void onGattWrite(uint16_t h, const uint8_t* d, uint16_t n, bool, void*) {
   if (h != g_writeHandle || !d) return;
+#if BLE_PAIR_USE_SIGNED_WRITE
+  ++g_signedWriteCallbackCount;
+  Serial.print("ble_pair signed-write callback count=");
+  Serial.print(g_signedWriteCallbackCount);
+  Serial.print(" value=");
+  Serial.println((n > 0U) ? d[0] : 0U);
+#endif
   Serial.print("ble_pair gatt-write val=");
   if (n == 1U) {
     Serial.println(d[0] ? "ON" : "OFF");
@@ -324,6 +319,22 @@ void printStatus() {
   Serial.print(bonded?1:0);
   Serial.print(" notif=");
   Serial.print(g_notifySeq);
+#if BLE_PAIR_USE_SIGNED_WRITE
+  BleBondRecord signingBond{};
+  const bool signingReady = signingBondReady(&signingBond);
+  Serial.print(" sign_ready=");
+  Serial.print(signingReady ? 1 : 0);
+  Serial.print(" sign_callbacks=");
+  Serial.print(g_signedWriteCallbackCount);
+  Serial.print(" peer_sign_valid=");
+  Serial.print(signingReady ? signingBond.peerSignCounterValid : 0U);
+  Serial.print(" peer_sign_counter=");
+  Serial.print(signingReady ? signingBond.peerSignCounter : 0U);
+  Serial.print(" sign_replays=");
+  Serial.print(g_ble.signedWriteReplayRejectCount());
+  Serial.print(" local_sign_next=");
+  Serial.print(signingReady ? signingBond.localSignCounter : 0U);
+#endif
 
   BleEncryptionDebugCounters dbg;
   g_ble.getEncryptionDebugCounters(&dbg);
@@ -688,6 +699,12 @@ void dumpTraceBuffer() {
 
 void onBleTrace(const char* message, void*) {
   appendTraceBuffer(message);
+  if (message != nullptr && strcmp(message, "BOND_FLASH_FLUSHED") == 0) {
+    Serial.println("ble_pair bond-saved");
+  }
+  if (message != nullptr && strcmp(message, "BOND_PRIMED") == 0) {
+    Serial.println("ble_pair bond-loaded");
+  }
 #if BLE_PAIR_USE_PRIVACY
   if (message == nullptr) return;
   if (strcmp(message, "SMP_ID_INFO_RX") == 0) g_privacyIdInfoSeen = true;
@@ -873,8 +890,11 @@ void handleCmd(const char* c) {
   if (strcmp(c,"privacy")==0) { printPrivacyEvidence(); return; }
 #endif
   if (strcmp(c,"clear")==0) {
-    g_ble.clearBondRecord(true);
-    Serial.println("ble_pair bond-cleared");
+    const bool cleared = g_ble.clearBondRecord(true);
+    Serial.print("ble_pair bond-clear-persistent=");
+    Serial.println(cleared ? 1 : 0);
+    Serial.println(cleared ? "ble_pair bond-cleared"
+                           : "ble_pair bond-clear-failed");
     return;
   }
   if (strcmp(c,"reboot")==0) {
@@ -953,8 +973,6 @@ void setup() {
   Serial.print(ROLE==DemoRole::PERIPHERAL?"PERIPHERAL":"CENTRAL");
   Serial.println(") ===");
 
-  g_prefs.begin(kNs, false);
-
   if (!g_ble.begin(kTxPowerDbm)) {
     Serial.println("ble_pair FATAL: radio init failed");
     return;
@@ -969,7 +987,6 @@ void setup() {
   }
 #endif
   g_ble.setPeripheralPreferredDataLength(251U);
-  g_ble.setBondPersistenceCallbacks(loadBond, saveBond, clearBondStored, nullptr);
 #if BLE_PAIR_USE_NUMERIC_COMPARISON
   g_ble.setSecurityFixedPasskey(nullptr);
   g_ble.setSecurityIoCapabilities(kIoCapDisplayYesNo);
@@ -999,9 +1016,18 @@ void setup() {
                                            &g_notifyHandle, &g_notifyCccd)) {
       Serial.println("ble_pair FATAL: notify char failed"); return;
     }
-    if (!g_ble.addCustomGattCharacteristic(g_svcHandle, kWriteUuid,
-                                           kWriteProp, nullptr, 0,
-                                           &g_writeHandle)) {
+    bool writeCharacteristicOk = false;
+#if BLE_PAIR_USE_SIGNED_WRITE
+    BleRadio::BleCustomGattDescriptorConfig signedWriteConfig{};
+    signedWriteConfig.writePermission = BleRadio::kBleGattPermSignedNoMitm;
+    writeCharacteristicOk = g_ble.addCustomGattCharacteristicWithDescriptors(
+        g_svcHandle, kWriteUuid, kWriteProp, nullptr, 0U, &g_writeHandle,
+        nullptr, &signedWriteConfig, nullptr);
+#else
+    writeCharacteristicOk = g_ble.addCustomGattCharacteristic(
+        g_svcHandle, kWriteUuid, kWriteProp, nullptr, 0U, &g_writeHandle);
+#endif
+    if (!writeCharacteristicOk) {
       Serial.println("ble_pair FATAL: write char failed"); return;
     }
     g_ble.setCustomGattWriteHandler(g_writeHandle, onGattWrite, nullptr);
@@ -1035,7 +1061,8 @@ void loop() {
         Serial.println("ble_pair connected");
         // On a fresh peer this starts pairing; on a bonded peer it asks the
         // central to re-enable link-layer encryption.
-        if (!g_ble.isConnectionEncrypted()) {
+        if (!g_ble.isConnectionEncrypted() &&
+            !(BLE_PAIR_USE_SIGNED_WRITE && signingBondReady())) {
           g_lastSecurityRequestMs = millis();
         }
       } else {
@@ -1061,6 +1088,7 @@ void loop() {
       g_ble.advertiseInteractEvent(&adv, 350U, 350000UL, 700000UL);
     } else {
       if (!encrypted &&
+          !(BLE_PAIR_USE_SIGNED_WRITE && signingBondReady()) &&
           (millis() - g_lastSecurityRequestMs) >=
               ((g_lastSecurityRequestMs == 0U) ? kInitialPairDelayMs
                                                 : kPairRetryMs)) {

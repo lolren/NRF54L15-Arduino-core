@@ -1,7 +1,13 @@
 /*
- * Arduino Header for nRF54L15 - Clean Bare-Metal Core
+ * Arduino.h - main include file for the Arduino SDK.
+ * Copyright (c) 2005-2013 Arduino Team. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * This header exposes Arduino-compatible APIs for the nRF54L15 using
+ * Modified for the nRF54 Arduino Core in 2026: replaced AVR hardware bindings
+ * with nRF54 register-level APIs while retaining the portable Arduino macros,
+ * types, and core declarations. See ../../LICENSES/LGPL-2.1-or-later.txt.
+ *
+ * This header exposes Arduino-compatible APIs for nRF54 devices using
  * register-level peripheral control.
  */
 
@@ -228,6 +234,10 @@ void systemOffWakeReset(unsigned long ms) __attribute__((noreturn));
 bool wasSystemOffWakeReset(void);
 bool wasSystemOffWakeFromGrtc(void);
 void clearSystemOffWakeResetReason(void);
+// Non-zero when the previous System OFF attempt aborted through a guarded
+// software reset before the SoC entered System OFF.
+uint32_t nrf54SystemOffAbortStage(void);
+void nrf54ClearSystemOffAbortStage(void);
 uint32_t nrf54ResetReason(void);
 void nrf54ClearResetReason(uint32_t mask);
 

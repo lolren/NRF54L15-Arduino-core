@@ -11,6 +11,22 @@ struct BleBondRecordV1 {
   uint8_t reserved[3];
 };
 
+struct BleBondRecordV2 {
+  uint8_t peerAddress[6];
+  uint8_t peerAddressRandom;
+  uint8_t peerIdentityAddress[6];
+  uint8_t peerIdentityAddressRandom;
+  uint8_t localAddress[6];
+  uint8_t localAddressRandom;
+  uint8_t ltk[16];
+  uint8_t rand[8];
+  uint8_t peerIrk[16];
+  uint8_t peerIrkValid;
+  uint16_t ediv;
+  uint8_t keySize;
+  uint8_t reserved[2];
+};
+
 struct BleBondRetentionBlob {
   uint32_t magic;
   uint16_t version;
@@ -18,6 +34,42 @@ struct BleBondRetentionBlob {
   uint32_t crc32;
   xiao_nrf54l15::BleBondRecord record;
 };
+
+// The original flash slot is intentionally frozen at the version-2 size.
+// Preferences, EEPROM, and bonded CCCDs follow it in the same 4 KB RRAM page.
+struct BleBondFlashBlob {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t recordLength;
+  uint32_t crc32;
+  BleBondRecordV2 record;
+};
+
+struct BleBondSigningState {
+  uint8_t peerCsrk[16];
+  uint8_t localCsrk[16];
+  uint32_t peerSignCounter;
+  uint32_t localSignCounter;
+  uint8_t peerCsrkValid;
+  uint8_t localCsrkValid;
+  uint8_t peerSignCounterValid;
+  uint8_t reserved;
+};
+
+struct BleBondSigningBlob {
+  uint32_t magic;
+  uint32_t baseRecordCrc32;
+  uint32_t signingStateCrc32;
+  BleBondSigningState state;
+};
+
+constexpr uint32_t kBleBondSigningMagic = 0x33474953UL;  // "SIG3"
+static_assert(sizeof(BleBondFlashBlob) == 80U,
+              "the legacy BLE bond flash slot must remain 80 bytes");
+static_assert(sizeof(BleBondSigningState) == 44U,
+              "the signing extension must fit the legacy page slack");
+static_assert(sizeof(BleBondSigningBlob) == 56U,
+              "the signing extension consumes the 56-byte page slack");
 
 struct BleCccdBondEntry {
   uint16_t handle;
@@ -49,10 +101,13 @@ struct BleCccdRetentionBlob {
 
 __attribute__((section(".noinit"))) BleBondRetentionBlob g_bleBondRetention;
 __attribute__((section(".noinit"))) BleCccdRetentionBlob g_bleCccdRetention;
-__attribute__((section(".bond_storage"), aligned(4)))
-volatile BleBondRetentionBlob g_bleBondFlashStorage;
-__attribute__((section(".bond_storage"), aligned(4)))
+__attribute__((section(".bond_base_storage"), aligned(4)))
+volatile BleBondFlashBlob g_bleBondFlashStorage;
+__attribute__((section(".bond_cccd_storage"), aligned(4)))
 volatile BleCccdRetentionBlob g_bleCccdFlashStorage;
+__attribute__((section(".bond_signing_storage"), aligned(4)))
+volatile BleBondSigningBlob g_bleBondSigningFlashStorage;
+bool g_bleBondStorageWriteInProgress = false;
 
 constexpr uint8_t kAttOpErrorRsp = 0x01U;
 constexpr uint8_t kAttOpExchangeMtuReq = 0x02U;
@@ -527,7 +582,9 @@ uint32_t crc32(const uint8_t* data, size_t length) {
 
 bool bleBondRecordLooksSane(const xiao_nrf54l15::BleBondRecord& record) {
   if (record.peerAddressRandom > 1U || record.peerIdentityAddressRandom > 1U ||
-      record.localAddressRandom > 1U || record.peerIrkValid > 1U) {
+      record.localAddressRandom > 1U || record.peerIrkValid > 1U ||
+      record.peerCsrkValid > 1U || record.localCsrkValid > 1U ||
+      record.peerSignCounterValid > 1U) {
     return false;
   }
   if (record.keySize < 7U || record.keySize > 16U) {
@@ -540,7 +597,28 @@ bool bleBondRecordLooksSane(const xiao_nrf54l15::BleBondRecord& record) {
       break;
     }
   }
-  return keyNonZero;
+  if (!keyNonZero) {
+    return false;
+  }
+
+  if (record.peerSignCounterValid != 0U && record.peerCsrkValid == 0U) {
+    return false;
+  }
+  return true;
+}
+
+void clearBondRecordV3Tail(xiao_nrf54l15::BleBondRecord* record) {
+  if (record == nullptr) {
+    return;
+  }
+  memset(record->peerCsrk, 0, sizeof(record->peerCsrk));
+  memset(record->localCsrk, 0, sizeof(record->localCsrk));
+  record->peerSignCounter = 0U;
+  record->localSignCounter = 0U;
+  record->peerCsrkValid = 0U;
+  record->localCsrkValid = 0U;
+  record->peerSignCounterValid = 0U;
+  record->signingReserved = 0U;
 }
 
 void clearBondRecordV2Tail(xiao_nrf54l15::BleBondRecord* record) {
@@ -552,6 +630,7 @@ void clearBondRecordV2Tail(xiao_nrf54l15::BleBondRecord* record) {
   memset(record->peerIrk, 0, sizeof(record->peerIrk));
   record->peerIrkValid = 0U;
   memset(record->reserved, 0, sizeof(record->reserved));
+  clearBondRecordV3Tail(record);
 }
 
 void convertLegacyBondRecord(const BleBondRecordV1& legacy,
@@ -569,6 +648,31 @@ void convertLegacyBondRecord(const BleBondRecordV1& legacy,
   outRecord->ediv = legacy.ediv;
   outRecord->keySize = legacy.keySize;
   clearBondRecordV2Tail(outRecord);
+}
+
+void convertV2BondRecord(const BleBondRecordV2& legacy,
+                         xiao_nrf54l15::BleBondRecord* outRecord) {
+  if (outRecord == nullptr) {
+    return;
+  }
+  memset(outRecord, 0, sizeof(*outRecord));
+  memcpy(outRecord->peerAddress, legacy.peerAddress,
+         sizeof(outRecord->peerAddress));
+  outRecord->peerAddressRandom = legacy.peerAddressRandom;
+  memcpy(outRecord->peerIdentityAddress, legacy.peerIdentityAddress,
+         sizeof(outRecord->peerIdentityAddress));
+  outRecord->peerIdentityAddressRandom = legacy.peerIdentityAddressRandom;
+  memcpy(outRecord->localAddress, legacy.localAddress,
+         sizeof(outRecord->localAddress));
+  outRecord->localAddressRandom = legacy.localAddressRandom;
+  memcpy(outRecord->ltk, legacy.ltk, sizeof(outRecord->ltk));
+  memcpy(outRecord->rand, legacy.rand, sizeof(outRecord->rand));
+  memcpy(outRecord->peerIrk, legacy.peerIrk, sizeof(outRecord->peerIrk));
+  outRecord->peerIrkValid = legacy.peerIrkValid;
+  outRecord->ediv = legacy.ediv;
+  outRecord->keySize = legacy.keySize;
+  memcpy(outRecord->reserved, legacy.reserved, sizeof(outRecord->reserved));
+  clearBondRecordV3Tail(outRecord);
 }
 
 NRF_RRAMC_Type* bondRramc() {
@@ -612,20 +716,50 @@ void copyFromVolatileMemory(const volatile uint8_t* src, uint8_t* dst, size_t le
 
 bool writeBondStorageToRram(volatile void* target, const void* src, size_t len) {
   NRF_RRAMC_Type* const rramc = bondRramc();
-  if (rramc == nullptr || target == nullptr || src == nullptr || len == 0U) {
+  if (rramc == nullptr || target == nullptr || src == nullptr || len == 0U ||
+      bleRunningInIsr()) {
     return false;
   }
 
   const uint32_t targetAddress =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target));
+  const uint32_t bufferedWordCount = static_cast<uint32_t>(
+      ((targetAddress & 0x0FUL) + len + 15U) / 16U);
+  if (bufferedWordCount == 0U || bufferedWordCount > 32U) {
+    return false;
+  }
+  const uint32_t lockIrqState = bleEnterCritical();
+  if (g_bleBondStorageWriteInProgress) {
+    bleExitCritical(lockIrqState);
+    return false;
+  }
+  g_bleBondStorageWriteInProgress = true;
+  bleExitCritical(lockIrqState);
+
   const uint8_t* const source = reinterpret_cast<const uint8_t*>(src);
   const uint32_t prevConfig = rramc->CONFIG;
-  const uint32_t writeConfig = prevConfig | RRAMC_CONFIG_WEN_Msk;
+  const uint32_t writeConfig =
+      (prevConfig & ~RRAMC_CONFIG_WRITEBUFSIZE_Msk) |
+      RRAMC_CONFIG_WEN_Msk |
+      (bufferedWordCount << RRAMC_CONFIG_WRITEBUFSIZE_Pos);
   bool writeOk = true;
+  bool bufferNeedsClear = false;
 
-  rramc->CONFIG = writeConfig;
-  if (!waitForBondRramcReady(rramc, kBleBondRramcSpinLimit)) {
-    writeOk = false;
+  if ((prevConfig & RRAMC_CONFIG_WRITEBUFSIZE_Msk) != 0U &&
+      ((rramc->BUFSTATUS.WRITEBUFEMPTY &
+        RRAMC_BUFSTATUS_WRITEBUFEMPTY_EMPTY_Msk) == 0U)) {
+    rramc->EVENTS_READY = 0U;
+    rramc->TASKS_COMMITWRITEBUF =
+        RRAMC_TASKS_COMMITWRITEBUF_TASKS_COMMITWRITEBUF_Trigger;
+    writeOk = waitForBondRramcReady(rramc, kBleBondRramcSpinLimit);
+    bufferNeedsClear = !writeOk;
+  }
+  if (writeOk) {
+    rramc->CONFIG = writeConfig;
+    bufferNeedsClear = true;
+    if (!waitForBondRramcReady(rramc, kBleBondRramcSpinLimit)) {
+      writeOk = false;
+    }
   }
 
   if (writeOk) {
@@ -645,74 +779,198 @@ bool writeBondStorageToRram(volatile void* target, const void* src, size_t len) 
 
   if (writeOk) {
     rramc->EVENTS_READY = 0U;
-    rramc->TASKS_COMMITWRITEBUF = 1U;
+    rramc->TASKS_COMMITWRITEBUF =
+        RRAMC_TASKS_COMMITWRITEBUF_TASKS_COMMITWRITEBUF_Trigger;
     writeOk = waitForBondRramcReady(rramc, kBleBondRramcSpinLimit);
+    if (writeOk) {
+      bufferNeedsClear = false;
+    }
   }
 
+  if (bufferNeedsClear) {
+    rramc->EVENTS_READY = 0U;
+    rramc->TASKS_CLRWRITEBUF =
+        RRAMC_TASKS_CLRWRITEBUF_TASKS_CLRWRITEBUF_Trigger;
+    if (!waitForBondRramcReady(rramc, kBleBondRramcSpinLimit)) {
+      writeOk = false;
+    }
+  }
+
+  rramc->EVENTS_ACCESSERROR = 0U;
   rramc->CONFIG = prevConfig;
   if (!waitForBondRramcReady(rramc, kBleBondRramcSpinLimit)) {
     writeOk = false;
   }
+  const uint32_t unlockIrqState = bleEnterCritical();
+  g_bleBondStorageWriteInProgress = false;
+  bleExitCritical(unlockIrqState);
   return writeOk;
 }
 
-bool writeBondBlobToRram(const BleBondRetentionBlob& blob) {
-  return writeBondStorageToRram(&g_bleBondFlashStorage, &blob, sizeof(blob));
-}
-
-void clearFlashBondBlobImage(BleBondRetentionBlob* blob) {
-  if (blob == nullptr) {
+void copyBondRecordV2(const xiao_nrf54l15::BleBondRecord& record,
+                      BleBondRecordV2* outRecord) {
+  if (outRecord == nullptr) {
     return;
   }
-  memset(blob, 0, sizeof(*blob));
+  memset(outRecord, 0, sizeof(*outRecord));
+  memcpy(outRecord->peerAddress, record.peerAddress,
+         sizeof(outRecord->peerAddress));
+  outRecord->peerAddressRandom = record.peerAddressRandom;
+  memcpy(outRecord->peerIdentityAddress, record.peerIdentityAddress,
+         sizeof(outRecord->peerIdentityAddress));
+  outRecord->peerIdentityAddressRandom = record.peerIdentityAddressRandom;
+  memcpy(outRecord->localAddress, record.localAddress,
+         sizeof(outRecord->localAddress));
+  outRecord->localAddressRandom = record.localAddressRandom;
+  memcpy(outRecord->ltk, record.ltk, sizeof(outRecord->ltk));
+  memcpy(outRecord->rand, record.rand, sizeof(outRecord->rand));
+  memcpy(outRecord->peerIrk, record.peerIrk, sizeof(outRecord->peerIrk));
+  outRecord->peerIrkValid = record.peerIrkValid;
+  outRecord->ediv = record.ediv;
+  outRecord->keySize = record.keySize;
+  memcpy(outRecord->reserved, record.reserved, sizeof(outRecord->reserved));
 }
 
 void buildFlashBondBlob(const xiao_nrf54l15::BleBondRecord& record,
-                        BleBondRetentionBlob* blob) {
+                        BleBondFlashBlob* blob) {
   if (blob == nullptr) {
     return;
   }
   memset(blob, 0, sizeof(*blob));
   blob->magic = kBleBondRetentionMagic;
-  blob->version = kBleBondRetentionVersion;
-  blob->recordLength = static_cast<uint16_t>(sizeof(record));
-  memcpy(&blob->record, &record, sizeof(record));
-  blob->crc32 = crc32(reinterpret_cast<const uint8_t*>(&blob->record), sizeof(blob->record));
+  blob->version = 2U;
+  blob->recordLength = static_cast<uint16_t>(sizeof(blob->record));
+  copyBondRecordV2(record, &blob->record);
+  blob->crc32 = crc32(reinterpret_cast<const uint8_t*>(&blob->record),
+                      sizeof(blob->record));
 }
 
-bool readFlashBondBlob(BleBondRetentionBlob* outBlob) {
+void buildFlashSigningBlob(const xiao_nrf54l15::BleBondRecord& record,
+                           uint32_t baseRecordCrc32,
+                           BleBondSigningBlob* blob) {
+  if (blob == nullptr) {
+    return;
+  }
+  memset(blob, 0, sizeof(*blob));
+  blob->magic = kBleBondSigningMagic;
+  blob->baseRecordCrc32 = baseRecordCrc32;
+  memcpy(blob->state.peerCsrk, record.peerCsrk,
+         sizeof(blob->state.peerCsrk));
+  memcpy(blob->state.localCsrk, record.localCsrk,
+         sizeof(blob->state.localCsrk));
+  blob->state.peerSignCounter = record.peerSignCounter;
+  blob->state.localSignCounter = record.localSignCounter;
+  blob->state.peerCsrkValid = record.peerCsrkValid;
+  blob->state.localCsrkValid = record.localCsrkValid;
+  blob->state.peerSignCounterValid = record.peerSignCounterValid;
+  blob->signingStateCrc32 =
+      crc32(reinterpret_cast<const uint8_t*>(&blob->state),
+            sizeof(blob->state));
+}
+
+bool signingStateLooksSane(const BleBondSigningState& state) {
+  if (state.peerCsrkValid > 1U || state.localCsrkValid > 1U ||
+      state.peerSignCounterValid > 1U || state.reserved != 0U) {
+    return false;
+  }
+  return state.peerSignCounterValid == 0U || state.peerCsrkValid != 0U;
+}
+
+void applySigningState(const BleBondSigningState& state,
+                       xiao_nrf54l15::BleBondRecord* record) {
+  if (record == nullptr) {
+    return;
+  }
+  memcpy(record->peerCsrk, state.peerCsrk, sizeof(record->peerCsrk));
+  memcpy(record->localCsrk, state.localCsrk, sizeof(record->localCsrk));
+  record->peerSignCounter = state.peerSignCounter;
+  record->localSignCounter = state.localSignCounter;
+  record->peerCsrkValid = state.peerCsrkValid;
+  record->localCsrkValid = state.localCsrkValid;
+  record->peerSignCounterValid = state.peerSignCounterValid;
+  record->signingReserved = 0U;
+}
+
+bool readFlashBondBlob(BleBondFlashBlob* outBlob) {
   if (outBlob == nullptr) {
     return false;
   }
-  copyFromVolatileMemory(reinterpret_cast<const volatile uint8_t*>(&g_bleBondFlashStorage),
-                         reinterpret_cast<uint8_t*>(outBlob), sizeof(*outBlob));
+  copyFromVolatileMemory(
+      reinterpret_cast<const volatile uint8_t*>(&g_bleBondFlashStorage),
+      reinterpret_cast<uint8_t*>(outBlob), sizeof(*outBlob));
   return true;
 }
 
-bool writeFlashBondBlob(const BleBondRetentionBlob& blob) {
-  if (!writeBondBlobToRram(blob)) {
+bool readFlashSigningBlob(BleBondSigningBlob* outBlob) {
+  if (outBlob == nullptr) {
     return false;
   }
-  BleBondRetentionBlob verify{};
-  if (!readFlashBondBlob(&verify)) {
+  copyFromVolatileMemory(
+      reinterpret_cast<const volatile uint8_t*>(&g_bleBondSigningFlashStorage),
+      reinterpret_cast<uint8_t*>(outBlob), sizeof(*outBlob));
+  return true;
+}
+
+bool writeFlashBondBlob(const BleBondFlashBlob& blob) {
+  if (!writeBondStorageToRram(&g_bleBondFlashStorage, &blob, sizeof(blob))) {
     return false;
   }
-  return (memcmp(&verify, &blob, sizeof(blob)) == 0);
+  BleBondFlashBlob verify{};
+  return readFlashBondBlob(&verify) &&
+         memcmp(&verify, &blob, sizeof(blob)) == 0;
+}
+
+bool writeFlashSigningBlob(const BleBondSigningBlob& blob) {
+  if (!writeBondStorageToRram(&g_bleBondSigningFlashStorage, &blob,
+                              sizeof(blob))) {
+    return false;
+  }
+  BleBondSigningBlob verify{};
+  return readFlashSigningBlob(&verify) &&
+         memcmp(&verify, &blob, sizeof(blob)) == 0;
 }
 
 bool clearFlashBondRecord() {
-  BleBondRetentionBlob blob{};
-  clearFlashBondBlobImage(&blob);
-  return writeFlashBondBlob(blob);
+  const BleBondFlashBlob base{};
+  const BleBondSigningBlob signing{};
+  const bool baseOk = writeFlashBondBlob(base);
+  const bool signingOk = writeFlashSigningBlob(signing);
+  return baseOk && signingOk;
 }
 
 bool writeFlashBondRecord(const xiao_nrf54l15::BleBondRecord& record) {
   if (!bleBondRecordLooksSane(record)) {
     return false;
   }
-  BleBondRetentionBlob blob{};
-  buildFlashBondBlob(record, &blob);
-  return writeFlashBondBlob(blob);
+  BleBondFlashBlob base{};
+  BleBondSigningBlob signing{};
+  buildFlashBondBlob(record, &base);
+  buildFlashSigningBlob(record, base.crc32, &signing);
+  const bool baseOk = writeFlashBondBlob(base);
+  const bool signingOk = baseOk && writeFlashSigningBlob(signing);
+  return baseOk && signingOk;
+}
+
+bool writeFlashBondSigningState(
+    const xiao_nrf54l15::BleBondRecord& record) {
+  if (!bleBondRecordLooksSane(record)) {
+    return false;
+  }
+  BleBondFlashBlob base{};
+  if (!readFlashBondBlob(&base) || base.magic != kBleBondRetentionMagic ||
+      base.version != 2U || base.recordLength != sizeof(base.record) ||
+      base.crc32 != crc32(reinterpret_cast<const uint8_t*>(&base.record),
+                          sizeof(base.record))) {
+    return false;
+  }
+  BleBondRecordV2 expectedBase{};
+  copyBondRecordV2(record, &expectedBase);
+  if (memcmp(&base.record, &expectedBase, sizeof(expectedBase)) != 0) {
+    return false;
+  }
+  BleBondSigningBlob signing{};
+  buildFlashSigningBlob(record, base.crc32, &signing);
+  return writeFlashSigningBlob(signing);
 }
 
 bool readFlashBondRecord(xiao_nrf54l15::BleBondRecord* outRecord) {
@@ -720,32 +978,41 @@ bool readFlashBondRecord(xiao_nrf54l15::BleBondRecord* outRecord) {
     return false;
   }
 
-  BleBondRetentionBlob blob{};
-  if (!readFlashBondBlob(&blob)) {
+  BleBondFlashBlob base{};
+  if (!readFlashBondBlob(&base) || base.magic != kBleBondRetentionMagic) {
     return false;
   }
-  if (blob.magic != kBleBondRetentionMagic) {
-    return false;
-  }
-  if (blob.version == kBleBondRetentionVersion &&
-      blob.recordLength == sizeof(blob.record)) {
+
+  if (base.version == 2U &&
+      base.recordLength == sizeof(BleBondRecordV2)) {
     const uint32_t computedCrc =
-        crc32(reinterpret_cast<const uint8_t*>(&blob.record), sizeof(blob.record));
-    if (computedCrc != blob.crc32) {
+        crc32(reinterpret_cast<const uint8_t*>(&base.record),
+              sizeof(base.record));
+    if (computedCrc != base.crc32) {
       return false;
     }
-    if (!bleBondRecordLooksSane(blob.record)) {
-      return false;
+    convertV2BondRecord(base.record, outRecord);
+
+    BleBondSigningBlob signing{};
+    if (readFlashSigningBlob(&signing) &&
+        signing.magic == kBleBondSigningMagic &&
+        signing.baseRecordCrc32 == base.crc32 &&
+        signing.signingStateCrc32 ==
+            crc32(reinterpret_cast<const uint8_t*>(&signing.state),
+                  sizeof(signing.state)) &&
+        signingStateLooksSane(signing.state)) {
+      applySigningState(signing.state, outRecord);
     }
-    memcpy(outRecord, &blob.record, sizeof(*outRecord));
-    return true;
+    return bleBondRecordLooksSane(*outRecord);
   }
-  if (blob.version == 1U && blob.recordLength == sizeof(BleBondRecordV1)) {
+
+  if (base.version == 1U &&
+      base.recordLength == sizeof(BleBondRecordV1)) {
     BleBondRecordV1 legacy{};
-    memcpy(&legacy, &blob.record, sizeof(legacy));
+    memcpy(&legacy, &base.record, sizeof(legacy));
     const uint32_t computedCrc =
         crc32(reinterpret_cast<const uint8_t*>(&legacy), sizeof(legacy));
-    if (computedCrc != blob.crc32) {
+    if (computedCrc != base.crc32) {
       return false;
     }
     convertLegacyBondRecord(legacy, outRecord);
@@ -792,6 +1059,18 @@ bool readRetainedBondRecord(xiao_nrf54l15::BleBondRecord* outRecord) {
     }
     memcpy(outRecord, &g_bleBondRetention.record, sizeof(*outRecord));
     return true;
+  }
+  if (g_bleBondRetention.version == 2U &&
+      g_bleBondRetention.recordLength == sizeof(BleBondRecordV2)) {
+    BleBondRecordV2 legacy{};
+    memcpy(&legacy, &g_bleBondRetention.record, sizeof(legacy));
+    const uint32_t computedCrc =
+        crc32(reinterpret_cast<const uint8_t*>(&legacy), sizeof(legacy));
+    if (computedCrc != g_bleBondRetention.crc32) {
+      return false;
+    }
+    convertV2BondRecord(legacy, outRecord);
+    return bleBondRecordLooksSane(*outRecord);
   }
   if (g_bleBondRetention.version == 1U &&
       g_bleBondRetention.recordLength == sizeof(BleBondRecordV1)) {
@@ -995,7 +1274,7 @@ bool BleRadio::clearPersistentCccdRecord() {
   return clearFlashCccdBondRecord();
 }
 
-bool BleRadio::persistBondedCccdState() {
+bool BleRadio::persistBondedCccdState(bool forceFlash) {
   if (!bondRecordValid_) {
     return false;
   }
@@ -1017,7 +1296,7 @@ bool BleRadio::persistBondedCccdState() {
 
   const bool retentionOk = writeRetainedCccdBondRecord(record);
   bool flashOk = false;
-  if (connected_) {
+  if (connected_ && !forceFlash) {
     cccdFlashPersistPending_ = true;
   } else {
     flashOk = writeFlashCccdBondRecord(record);
@@ -1026,9 +1305,9 @@ bool BleRadio::persistBondedCccdState() {
     }
   }
   if (retentionOk || flashOk) {
-    emitBleTrace(connected_ ? "CCCD_DEFERRED" : "CCCD_SAVED");
+    emitBleTrace(connected_ && !forceFlash ? "CCCD_DEFERRED" : "CCCD_SAVED");
   }
-  return retentionOk || flashOk;
+  return forceFlash ? flashOk : (retentionOk || flashOk);
 }
 
 bool BleRadio::restoreBondedCccdState() {

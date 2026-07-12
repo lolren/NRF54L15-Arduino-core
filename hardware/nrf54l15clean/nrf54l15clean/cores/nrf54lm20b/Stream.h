@@ -1,5 +1,11 @@
 /*
- * Arduino Stream - base class for character-based streams.
+ * Stream.h - base class for character-based Arduino streams.
+ * Copyright (c) 2010 David A. Mellis. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * Parsing functions are based on Michael Margolis' TextFinder library.
+ * Modified for the nRF54 Arduino Core in 2026: reformatted and adapted to the
+ * local Arduino API implementation. See ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #ifndef Stream_h

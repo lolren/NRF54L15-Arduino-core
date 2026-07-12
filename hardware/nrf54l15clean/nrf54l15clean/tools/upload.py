@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional, List, Set, Dict, Tuple
 
 CMSIS_DAP_VENDOR_ID = "2886"
-CMSIS_DAP_PRODUCT_IDS = {"0066", "0068"}  # L15=0066, LM20B=0068
+CMSIS_DAP_PRODUCT_IDS = ("0066", "0068")  # L15=0066, LM20A=0068
 
 def _is_cmsis_dap_product(pid_str):
     return pid_str in CMSIS_DAP_PRODUCT_IDS
@@ -754,6 +754,27 @@ def matching_probe_hidraw_nodes() -> List[Path]:
 def probe_hidraw_nodes_accessible(nodes: List[Path]) -> bool:
     return any(os.access(node, os.R_OK | os.W_OK) for node in nodes)
 
+def probe_usb_ids_for_hidraw_nodes(nodes: List[Path]) -> List[str]:
+    identities = set()
+    for node in nodes:
+        vendor, product = _sysfs_usb_identity_for_hidraw(node)
+        if vendor == CMSIS_DAP_VENDOR_ID and product in CMSIS_DAP_PRODUCT_IDS:
+            identities.add(f"{vendor}:{product}")
+    return sorted(identities)
+
+def cmsis_dap_usb_ids_in_lsusb(output: str) -> List[str]:
+    normalized = output.lower()
+    return [
+        f"{CMSIS_DAP_VENDOR_ID}:{product}"
+        for product in CMSIS_DAP_PRODUCT_IDS
+        if f"{CMSIS_DAP_VENDOR_ID}:{product}" in normalized
+    ]
+
+def format_probe_usb_ids(identities: List[str]) -> str:
+    if identities:
+        return " and ".join(identities)
+    return "2886:0066 or 2886:0068"
+
 def port_looks_like_probe_serial(port: Optional[str]) -> bool:
     if not port:
         return False
@@ -857,8 +878,8 @@ def print_linux_probe_permission_hint(
         return
 
     lsusb_result = run(["lsusb"])
-    probe_id = next((f"{CMSIS_DAP_VENDOR_ID}:{pid}" for pid in CMSIS_DAP_PRODUCT_IDS), f"{CMSIS_DAP_VENDOR_ID}:0066")
-    if probe_id not in (lsusb_result.stdout or "").lower():
+    probe_ids = cmsis_dap_usb_ids_in_lsusb(lsusb_result.stdout or "")
+    if not probe_ids:
         return
 
     hidraw_nodes = matching_probe_hidraw_nodes()
@@ -868,7 +889,8 @@ def print_linux_probe_permission_hint(
         return
 
     print(
-        "HINT: CMSIS-DAP probe 2886:0066 is present but hidraw access is denied. "
+        f"HINT: CMSIS-DAP probe {format_probe_usb_ids(probe_ids)} is present but "
+        "hidraw access is denied. "
         "Access must be granted on /dev/hidraw*, not only on /dev/ttyACM*.",
         file=sys.stderr,
     )
@@ -887,8 +909,10 @@ def preflight_linux_probe_access(
     if hidraw_nodes:
         if probe_hidraw_nodes_accessible(hidraw_nodes):
             return False
+        probe_ids = probe_usb_ids_for_hidraw_nodes(hidraw_nodes)
         print(
-            "ERROR: CMSIS-DAP probe 2886:0066 is present but hidraw access is denied.",
+            f"ERROR: CMSIS-DAP probe {format_probe_usb_ids(probe_ids)} is present "
+            "but hidraw access is denied.",
             file=sys.stderr,
         )
         print(
@@ -1065,14 +1089,6 @@ def choose_recovery_runner(openocd_bin: str, host_tools_path: Optional[Path]) ->
         return "pyocd"
     raise RuntimeError("No supported recovery uploader found (pyOCD is required)")
 
-def _ensure_lm20b_target():
-    """Re-apply LM20B target patch if needed."""
-    try:
-        import importlib, patch_lm20b_target
-        importlib.reload(patch_lm20b_target)
-    except Exception:
-        pass
-
 def upload_pyocd(
     hex_path: str,
     target: str,
@@ -1085,7 +1101,6 @@ def upload_pyocd(
     safe_mode: bool = False,
     port: Optional[str] = None,
 ) -> int:
-    _ensure_lm20b_target()
     pyocd_cmd = pyocd_cmd if pyocd_cmd is not None else detect_pyocd_command(host_tools_path)
     if pyocd_cmd is None:
         print("ERROR: pyocd is not installed or not available in PATH", file=sys.stderr)
@@ -1551,11 +1566,6 @@ def main() -> int:
         if detect_pyocd_command(host_tools_path) is None:
             if install_pyocd(host_tools_path):
                 print("pyocd installation succeeded.")
-                try:
-                    import importlib, patch_lm20b_target
-                    importlib.reload(patch_lm20b_target)
-                except Exception:
-                    pass
             else:
                 print("pyocd installation failed.", file=sys.stderr)
                 print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)

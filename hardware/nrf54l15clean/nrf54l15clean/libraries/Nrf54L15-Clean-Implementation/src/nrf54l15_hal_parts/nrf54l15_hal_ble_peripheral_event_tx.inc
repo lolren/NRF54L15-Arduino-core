@@ -1852,6 +1852,9 @@
                   popCustomGattNotification();
                   continue;
                 }
+                if (!customGattHvxPermissionSatisfied(&custom)) {
+                  return;
+                }
 
                 const bool indicationFlowReady =
                     !connectionServiceChangedIndicationAwaitingConfirm_ &&

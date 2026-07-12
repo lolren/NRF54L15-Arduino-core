@@ -36,10 +36,11 @@ from typing import Callable, Iterable, Sequence
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = ROOT / "hardware" / "nrf54l15clean" / "nrf54l15clean"
 LIBRARY_EXAMPLES = PLATFORM / "libraries" / "Nrf54L15-Clean-Implementation" / "examples"
-CORE_VERSION_PROBE = PLATFORM / "examples" / "CoreVersionProbe"
+CORE_VERSION_PROBE = PLATFORM / "examples" / "Basics" / "CoreVersionProbe"
 CS_SCRIPT = ROOT / "scripts" / "test_cs_controller_pair.sh"
 LOCAL_PACKAGER = "localnrf54"
 DECLARED_COMPILER_VERSION = "7-2017q4"
+EXPECTED_STABLE_VERSION = "1.0.0"
 
 FQBN_L15 = f"{LOCAL_PACKAGER}:nrf54l15clean:xiao_nrf54l15"
 FQBN_LM20 = f"{LOCAL_PACKAGER}:nrf54l15clean:xiao_nrf54lm20b"
@@ -52,6 +53,7 @@ PHASE_NAMES = (
     "boot",
     "ble_phy_mtu_dle",
     "ble_pair_bond",
+    "ble_signed_write",
     "ble_numeric_comparison",
     "ble_numeric_comparison_reject",
     "ble_oob_pairing",
@@ -74,6 +76,134 @@ def source_platform_version() -> str:
 
 class GateFailure(RuntimeError):
     """A test phase failed after preserving all of its artifacts."""
+
+
+def validate_release_source_state(
+    source_version: str,
+    git_revision: str,
+    git_dirty: bool,
+    *,
+    expected_revision: str | None = None,
+    description: str,
+) -> None:
+    """Reject source state that cannot support a stable release decision."""
+    if source_version != EXPECTED_STABLE_VERSION:
+        raise GateFailure(
+            f"{description}: expected stable source version "
+            f"{EXPECTED_STABLE_VERSION}, found {source_version}"
+        )
+    if git_dirty:
+        raise GateFailure(f"{description}: git worktree is not clean")
+    if expected_revision is not None and git_revision != expected_revision:
+        raise GateFailure(
+            f"{description}: git revision changed "
+            f"{expected_revision} -> {git_revision}"
+        )
+
+
+@dataclass(frozen=True)
+class SystemOffBoot:
+    boot: int
+    wake: int
+    abort_stage: int
+    reset_reason: int
+    entered: bool
+
+
+def validate_system_off_log(
+    text: str, description: str, minimum_cycles: int = 2
+) -> int:
+    """Validate consecutive, GRTC-sourced System OFF boot transitions."""
+    marker = "LowPowerGrtcPwmSystemOff"
+    starts = [match.start() for match in re.finditer(marker, text)]
+    boots: list[SystemOffBoot] = []
+    final_block_truncated = False
+
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(text)
+        block = text[start:end]
+        boot = re.search(r"\bboot=([0-9]+)", block)
+        wake = re.search(r"\bwake_from_grtc_or_off=([01])", block)
+        abort = re.search(r"\bsystem_off_abort_stage=([0-9]+)", block)
+        reset_reason = re.search(
+            r"\breset_reason_snapshot=0x([0-9A-Fa-f]+)", block
+        )
+        if (boot is None or wake is None or abort is None or
+                reset_reason is None):
+            if not boots:
+                # Serial data from the flash/reset boundary can begin midway
+                # through an older boot. Ignore it until the deliberate reset
+                # boot below provides a complete synchronization anchor.
+                continue
+            if index == len(starts) - 1:
+                final_block_truncated = True
+                break
+            raise GateFailure(
+                f"{description}: incomplete System OFF boot block after "
+                "capture synchronization"
+            )
+
+        wake_value = int(wake.group(1))
+        reset_reason_value = int(reset_reason.group(1), 16)
+        if not boots and not (
+            wake_value == 0 and (reset_reason_value & 0x40) != 0
+        ):
+            # Anchor to the explicit SREQ reset issued by the gate. Earlier
+            # output can belong to the image boot caused by programming.
+            continue
+        boots.append(SystemOffBoot(
+            boot=int(boot.group(1)),
+            wake=wake_value,
+            abort_stage=int(abort.group(1)),
+            reset_reason=reset_reason_value,
+            entered="Entering SYSTEM OFF for" in block,
+        ))
+
+    if len(boots) < minimum_cycles + 1:
+        suffix = " (final block was truncated)" if final_block_truncated else ""
+        raise GateFailure(
+            f"{description}: captured {len(boots)} complete synchronized boot "
+            f"block(s), need {minimum_cycles + 1}{suffix}"
+        )
+
+    for record in boots:
+        if record.abort_stage != 0:
+            raise GateFailure(
+                f"{description}: boot {record.boot} reported System OFF "
+                f"abort stage {record.abort_stage}"
+            )
+
+    completed_cycles = 0
+    for current, following in zip(boots, boots[1:]):
+        if not current.entered:
+            raise GateFailure(
+                f"{description}: boot {current.boot} reset without entering "
+                "System OFF"
+            )
+        expected_boot = (current.boot + 1) & 0xFFFFFFFF
+        if following.boot != expected_boot:
+            raise GateFailure(
+                f"{description}: non-consecutive boot counter "
+                f"{current.boot} -> {following.boot}, expected {expected_boot}"
+            )
+        if following.wake == 0:
+            raise GateFailure(
+                f"{description}: boot {following.boot} followed a System OFF "
+                "entry without an OFF/GRTC wake reason"
+            )
+        if (following.reset_reason & 0x800) == 0:
+            raise GateFailure(
+                f"{description}: boot {following.boot} did not report the "
+                "GRTC reset-reason bit"
+            )
+        completed_cycles += 1
+
+    if completed_cycles < minimum_cycles:
+        raise GateFailure(
+            f"{description}: only {completed_cycles} consecutive timed "
+            f"System OFF/GRTC wake cycle(s), need {minimum_cycles}"
+        )
+    return completed_cycles
 
 
 @dataclass(frozen=True)
@@ -104,6 +234,7 @@ class SerialCapture:
         self._serial_module = serial
         self._handles: dict[str, object] = {}
         self._chunks: dict[str, list[bytes]] = {}
+        self._generations: dict[str, int] = {}
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -112,6 +243,7 @@ class SerialCapture:
             handle.reset_input_buffer()
             self._handles[board.role] = handle
             self._chunks[board.role] = []
+            self._generations[board.role] = 0
 
     def start(self) -> None:
         for role, handle in self._handles.items():
@@ -121,10 +253,13 @@ class SerialCapture:
 
     def _read(self, role: str, handle: object) -> None:
         while not self._stop.is_set():
+            with self._lock:
+                generation = self._generations[role]
             data = handle.read(4096)  # type: ignore[attr-defined]
             if data:
                 with self._lock:
-                    self._chunks[role].append(data)
+                    if generation == self._generations[role]:
+                        self._chunks[role].append(data)
 
     def text(self, role: str) -> str:
         with self._lock:
@@ -150,9 +285,17 @@ class SerialCapture:
         handle = self._handles.get(role)
         if handle is None:
             raise GateFailure(f"serial capture has no handle for {role}")
-        handle.reset_input_buffer()  # type: ignore[attr-defined]
         with self._lock:
+            self._generations[role] += 1
             self._chunks[role].clear()
+        handle.reset_input_buffer()  # type: ignore[attr-defined]
+        # Let any read that began before the generation change return, then
+        # invalidate it once more before the reset command starts the fixture.
+        time.sleep(0.06)
+        with self._lock:
+            self._generations[role] += 1
+            self._chunks[role].clear()
+        handle.reset_input_buffer()  # type: ignore[attr-defined]
 
 
 class ReleaseGate:
@@ -171,11 +314,25 @@ class ReleaseGate:
         self.logs_dir.mkdir()
         self.command_dir.mkdir()
         self.results: list[PhaseResult] = []
+        self._seen_oob_records: set[tuple[str, str]] = set()
         self._command_index = 0
         self.compiler_path = find_compiler_path(args.compiler_path)
         self.source_version = source_platform_version()
         self.git_revision = run_checked(["git", "rev-parse", "HEAD"]).strip()
         self.git_dirty = bool(run_checked(["git", "status", "--porcelain"]).strip())
+        self.git_revision_end = self.git_revision
+        self.git_dirty_end = self.git_dirty
+        self.source_version_end = self.source_version
+        self.source_end_verified: bool | None = (
+            None if args.gate_scope == "full" else True
+        )
+        if args.gate_scope == "full":
+            validate_release_source_state(
+                self.source_version,
+                self.git_revision,
+                self.git_dirty,
+                description="full gate start",
+            )
         self.cli_root = self.outdir / "arduino-cli"
         self.cli_config = self._register_source_core()
 
@@ -289,6 +446,64 @@ class ReleaseGate:
             timeout=self.args.flash_timeout,
         )
 
+    def clear_bond_retention_cache(
+        self, phase: str, board: Board, build_phase: str
+    ) -> None:
+        artifacts = self.build_dir / build_phase / board.role / "artifacts"
+        images = sorted(artifacts.glob("*.elf"))
+        if len(images) != 1:
+            raise GateFailure(
+                f"{phase}/{board.role}: expected one ELF for retention lookup, "
+                f"found {images}"
+            )
+        nm = self.compiler_path / "arm-none-eabi-nm"
+        result = self.command(
+            f"nm_{phase}_{board.role}",
+            [str(nm), "-S", "-a", str(images[0])],
+            timeout=self.args.compile_timeout,
+        )
+        ranges: list[tuple[int, int]] = []
+        for line in result.stdout.splitlines():
+            if "g_bleBondRetention" not in line and "g_bleCccdRetention" not in line:
+                continue
+            fields = line.split()
+            if len(fields) < 4:
+                continue
+            ranges.append((int(fields[0], 16), int(fields[1], 16)))
+        if len(ranges) != 2 or any(length <= 0 for _, length in ranges):
+            raise GateFailure(
+                f"{phase}/{board.role}: could not resolve both BLE retention "
+                f"ranges from {images[0]}: {ranges}"
+            )
+
+        cmd = [
+            self.args.pyocd, "commander", "--no-config", "-W",
+            "-t", board.target, "-u", board.uid, "-c", "halt",
+        ]
+        readbacks: list[tuple[Path, int, int]] = []
+        for index, (address, length) in enumerate(ranges):
+            readback = (
+                self.command_dir /
+                f"retention_readback_{phase}_{board.role}_{index}.bin"
+            )
+            cmd.extend(["-c", f"fill 8 0x{address:08x} 0x{length:x} 0"])
+            cmd.extend([
+                "-c",
+                f"savemem 0x{address:08x} 0x{length:x} {readback}",
+            ])
+            readbacks.append((readback, address, length))
+        self.command(
+            f"clear_retention_{phase}_{board.role}", cmd,
+            timeout=self.args.flash_timeout,
+        )
+        for readback, address, length in readbacks:
+            data = readback.read_bytes() if readback.is_file() else b""
+            if len(data) != length or any(data):
+                raise GateFailure(
+                    f"{phase}/{board.role}: retained cache readback was not "
+                    f"all zero at 0x{address:08x} ({len(data)}/{length} bytes)"
+                )
+
     def capture(self, phase: str, boards: Sequence[Board], seconds: float,
                 reset_order: Sequence[Board]) -> dict[str, str]:
         capture = SerialCapture(boards)
@@ -314,6 +529,30 @@ class ReleaseGate:
             raise
         self.results.append(PhaseResult(name, "PASS", time.monotonic() - started, detail))
         self.write_summary()
+
+    def verify_source_end_state(self) -> None:
+        """Ensure a full release gate tested one immutable clean revision."""
+        self.source_version_end = source_platform_version()
+        self.git_revision_end = run_checked(["git", "rev-parse", "HEAD"]).strip()
+        self.git_dirty_end = bool(
+            run_checked(["git", "status", "--porcelain"]).strip()
+        )
+        if self.args.gate_scope != "full":
+            self.source_end_verified = True
+            return
+        try:
+            validate_release_source_state(
+                self.source_version_end,
+                self.git_revision_end,
+                self.git_dirty_end,
+                expected_revision=self.git_revision,
+                description="full gate completion",
+            )
+        except GateFailure:
+            self.source_end_verified = False
+            self.write_summary()
+            raise
+        self.source_end_verified = True
 
     def save_logs(self, phase: str, logs: dict[str, str]) -> None:
         for role, output in logs.items():
@@ -342,6 +581,14 @@ class ReleaseGate:
     def require(log: str, marker: str, description: str) -> None:
         if marker not in log:
             raise GateFailure(f"{description}: missing serial marker {marker!r}")
+
+    @staticmethod
+    def require_exact_line(log: str, line: str, description: str) -> None:
+        pattern = rf"^{re.escape(line)}\r?$"
+        if re.search(pattern, log, flags=re.MULTILINE) is None:
+            raise GateFailure(
+                f"{description}: missing exact serial line {line!r}"
+            )
 
     @staticmethod
     def require_count(log: str, marker: str, minimum: int, description: str) -> None:
@@ -377,6 +624,34 @@ class ReleaseGate:
             for role, text in logs.items()
         }
 
+    def phy_logs_since_start(self, logs: dict[str, str],
+                             description: str) -> dict[str, str]:
+        return {
+            self.l15.role: self.since_last(
+                logs[self.l15.role], "Ble2MPhyProbe start",
+                f"{description}/{self.l15.role}",
+            ),
+            self.lm20.role: self.since_last(
+                logs[self.lm20.role], "Ble2MPhyCentralProbe start",
+                f"{description}/{self.lm20.role}",
+            ),
+        }
+
+    def validate_phy_cycle(self, logs: dict[str, str], description: str,
+                           *, require_disconnect: bool = False) -> None:
+        self.reject_fatal(logs, description)
+        peripheral_log = logs[self.l15.role]
+        central_log = logs[self.lm20.role]
+        if require_disconnect:
+            self.require(central_log, "disconnected", description)
+        self.require(central_log, "request data length 251: queued", description)
+        self.require(central_log, "request mtu 247: queued", description)
+        self.require(central_log, "notifications enabled", description)
+        self.require(central_log, "request 2M phy: queued", description)
+        self.require(central_log, "cycle phase: 1M long notify confirmed", description)
+        self.require(central_log, "cycle phase: 2M long notify reconfirmed", description)
+        self.require(peripheral_log, "cycle phase: 2M return complete", description)
+
     def clear_pair_bonds(self, phase: str) -> None:
         self.halt(phase, self.l15)
         self.halt(phase, self.lm20)
@@ -399,8 +674,14 @@ class ReleaseGate:
         finally:
             logs = capture.stop()
             self.save_logs(phase, logs)
+        logs = self.pair_logs_since_boot(logs, phase)
         for board in (self.l15, self.lm20):
-            self.require(logs[board.role], "ble_pair bond-cleared-storage",
+            if "ble_pair bond-clear-persistent=0" in logs[board.role] or \
+                    "ble_pair bond-clear-failed" in logs[board.role]:
+                raise GateFailure(
+                    f"{phase}/{board.role}: persistent bond clear failed"
+                )
+            self.require(logs[board.role], "ble_pair bond-clear-persistent=1",
                          f"{phase}/{board.role}")
             self.require(logs[board.role], "ble_pair bond-cleared",
                          f"{phase}/{board.role}")
@@ -427,11 +708,15 @@ class ReleaseGate:
         logs = self.capture("boot", [self.l15, self.lm20], self.args.boot_capture_s,
                             [self.l15, self.lm20])
         for board in (self.l15, self.lm20):
-            self.require(logs[board.role], f"Core version: {self.source_version}",
-                         f"boot/{board.role}")
-            self.require(logs[board.role],
-                         f"Core version heartbeat: {self.source_version}",
-                         f"boot/{board.role}")
+            self.require_exact_line(
+                logs[board.role], f"Core version: {self.source_version}",
+                f"boot/{board.role}",
+            )
+            self.require_exact_line(
+                logs[board.role],
+                f"Core version heartbeat: {self.source_version}",
+                f"boot/{board.role}",
+            )
         return f"both boards programmed and reported {self.source_version}"
 
     def phy_pair_phase(self, *, recovery: bool) -> str:
@@ -446,34 +731,54 @@ class ReleaseGate:
         if recovery:
             capture = SerialCapture([self.l15, self.lm20])
             capture.start()
+            initial_logs: dict[str, str] = {}
             try:
+                capture.clear(self.l15.role)
+                capture.clear(self.lm20.role)
                 self.reset(phase, self.l15)
                 time.sleep(0.35)
                 self.reset(phase, self.lm20)
                 time.sleep(self.args.phy_cycle_s)
+
+                initial_logs = {
+                    self.l15.role: capture.text(self.l15.role),
+                    self.lm20.role: capture.text(self.lm20.role),
+                }
+                # The recovery run is a separate assertion. Discard every
+                # byte from the first cycle before resetting the peripheral.
+                capture.clear(self.l15.role)
+                capture.clear(self.lm20.role)
                 self.reset(phase, self.l15)
                 time.sleep(self.args.recovery_capture_s)
             finally:
-                logs = capture.stop()
-            for role, text in logs.items():
-                (self.logs_dir / f"{phase}_{role}.log").write_text(text, encoding="utf-8")
-            self.reject_fatal(logs, phase)
-            self.require_count(logs[self.lm20.role], "cycle phase: 2M long notify reconfirmed", 2,
-                               phase)
-            self.require(logs[self.lm20.role], "disconnected", phase)
+                recovery_logs = capture.stop()
+            self.save_logs(f"{phase}_initial", initial_logs)
+            self.save_logs(phase, recovery_logs)
+
+            initial_session = self.phy_logs_since_start(
+                initial_logs, f"{phase}/initial"
+            )
+            recovery_session = {
+                self.l15.role: self.since_last(
+                    recovery_logs[self.l15.role], "Ble2MPhyProbe start",
+                    f"{phase}/post-reset/{self.l15.role}",
+                ),
+                self.lm20.role: self.since_last(
+                    recovery_logs[self.lm20.role], "disconnected",
+                    f"{phase}/post-reset/{self.lm20.role}",
+                ),
+            }
+            self.validate_phy_cycle(initial_session, f"{phase}/initial")
+            self.validate_phy_cycle(
+                recovery_session, f"{phase}/post-reset",
+                require_disconnect=True,
+            )
             return "two complete 2M/1M/2M cycles with a peripheral reset and automatic reconnect"
 
         logs = self.capture(phase, [self.l15, self.lm20], self.args.phy_cycle_s,
                             [self.l15, self.lm20])
-        self.reject_fatal(logs, phase)
-        central_log = logs[self.lm20.role]
-        self.require(central_log, "request data length 251: queued", phase)
-        self.require(central_log, "request mtu 247: queued", phase)
-        self.require(central_log, "notifications enabled", phase)
-        self.require(central_log, "request 2M phy: queued", phase)
-        self.require(central_log, "cycle phase: 1M long notify confirmed", phase)
-        self.require(central_log, "cycle phase: 2M long notify reconfirmed", phase)
-        self.require(logs[self.l15.role], "cycle phase: 2M return complete", phase)
+        logs = self.phy_logs_since_start(logs, phase)
+        self.validate_phy_cycle(logs, phase)
         return "ATT discovery/CCCD, MTU 247, DLE 251, and 2M/1M/2M long-notify cycle"
 
     def pair_bond_phase(self) -> str:
@@ -485,8 +790,8 @@ class ReleaseGate:
         self.flash(phase, self.l15, peripheral_image)
         self.flash(phase, self.lm20, central_image)
 
-        # Preferences persists independently of the application image. Clear
-        # both role-specific records through the sketch API before measuring.
+        # Built-in RRAM bond storage persists independently of the application
+        # image. Clear both role-specific records through the sketch API first.
         self.clear_pair_bonds(f"{phase}_clear")
 
         logs = self.pair_logs_since_boot(
@@ -496,8 +801,11 @@ class ReleaseGate:
         )
         self.reject_fatal(logs, phase)
         for role, text in logs.items():
-            self.require(text, "ble_pair bond-saved", f"{phase}/{role}")
             self.require(text, "encryption=ON", f"{phase}/{role}")
+            self.require_regex(
+                text, r"conn=1 enc=1 auth=0 bond=1",
+                f"{phase}/{role}",
+            )
         self.require(logs[self.lm20.role], "ble_pair central: subscribed", phase)
         self.require(logs[self.lm20.role], "ble_pair central: wrote", phase)
         self.require(logs[self.lm20.role], "ble_pair central: notify=", phase)
@@ -525,6 +833,117 @@ class ReleaseGate:
             if "ble_pair bond-saved" in text:
                 raise GateFailure(f"{reconnect_phase}/{role}: peer paired again")
         return "Just Works pairing, retained bond reload, encrypted reconnect, subscription, and write"
+
+    def signed_write_phase(self) -> str:
+        phase = "ble_signed_write"
+        peripheral = LIBRARY_EXAMPLES / "BLE" / "Security" / "BlePairPeripheral"
+        central = LIBRARY_EXAMPLES / "BLE" / "Security" / "BlePairCentral"
+        defines = (
+            "BLE_PAIR_USE_SIGNED_WRITE=1",
+            "BLE_PAIR_TEST_EXACT_PEER_COUNTER_AFTER_RELOAD=1",
+        )
+        peripheral_image = self.compile(
+            phase, self.l15, peripheral, cpp_defines=defines
+        )
+        central_image = self.compile(
+            phase, self.lm20, central, cpp_defines=defines
+        )
+        self.flash(phase, self.l15, peripheral_image)
+        self.flash(phase, self.lm20, central_image)
+        self.clear_pair_bonds(f"{phase}_clear")
+
+        pair_logs = self.pair_logs_since_boot(
+            self.capture(
+                f"{phase}_pair", [self.l15, self.lm20],
+                self.args.pair_capture_s, [self.l15, self.lm20]
+            ),
+            f"{phase}_pair",
+        )
+        self.reject_fatal(pair_logs, f"{phase}_pair")
+        for role, output in pair_logs.items():
+            self.require(output, "encryption=ON", f"{phase}_pair/{role}")
+            self.require(output, "sign_ready=1", f"{phase}_pair/{role}")
+            self.require_regex(
+                output, r"conn=1 enc=1 auth=0 bond=1",
+                f"{phase}_pair/{role}",
+            )
+
+        first_logs = self.pair_logs_since_boot(
+            self.capture(
+                f"{phase}_counter0", [self.l15, self.lm20],
+                self.args.pair_reconnect_capture_s, [self.l15, self.lm20]
+            ),
+            f"{phase}_counter0",
+        )
+        self.reject_fatal(first_logs, f"{phase}_counter0")
+        first_central = first_logs[self.lm20.role]
+        first_peripheral = first_logs[self.l15.role]
+        self.require(
+            first_central,
+            "ble_pair signed-write queued counter=0 next=1 value=1",
+            f"{phase}_counter0/central",
+        )
+        self.require(
+            first_central, "ble_pair signed-replay queued counter=0",
+            f"{phase}_counter0/central",
+        )
+        self.require(
+            first_peripheral,
+            "ble_pair signed-write callback count=1 value=1",
+            f"{phase}_counter0/peripheral",
+        )
+        self.require_regex(
+            first_peripheral,
+            r"conn=1 enc=0 auth=0 bond=1 .*sign_callbacks=1 "
+            r"peer_sign_valid=1 peer_sign_counter=0 sign_replays=1",
+            f"{phase}_counter0/peripheral",
+        )
+        if "signed-write callback count=2" in first_peripheral:
+            raise GateFailure(f"{phase}_counter0: replay reached GATT callback")
+
+        # A normal reset can preserve .noinit SRAM. Clear only the retained
+        # caches through the debugger so the next boot must load the bond,
+        # CSRKs, and counter high-water marks from built-in RRAM storage.
+        self.clear_bond_retention_cache(f"{phase}_cold_reload", self.l15, phase)
+        self.clear_bond_retention_cache(f"{phase}_cold_reload", self.lm20, phase)
+
+        second_logs = self.pair_logs_since_boot(
+            self.capture(
+                f"{phase}_counter1", [self.l15, self.lm20],
+                self.args.pair_reconnect_capture_s, [self.l15, self.lm20]
+            ),
+            f"{phase}_counter1",
+        )
+        self.reject_fatal(second_logs, f"{phase}_counter1")
+        second_central = second_logs[self.lm20.role]
+        second_peripheral = second_logs[self.l15.role]
+        self.require(
+            second_central,
+            "ble_pair signed-write queued counter=1 next=2 value=2",
+            f"{phase}_counter1/central",
+        )
+        self.require(
+            second_central, "ble_pair signed-replay queued counter=1",
+            f"{phase}_counter1/central",
+        )
+        self.require(
+            second_peripheral,
+            "ble_pair signed-write callback count=1 value=2",
+            f"{phase}_counter1/peripheral",
+        )
+        self.require_regex(
+            second_peripheral,
+            r"conn=1 enc=0 auth=0 bond=1 .*sign_callbacks=1 "
+            r"peer_sign_valid=1 peer_sign_counter=1 sign_replays=1",
+            f"{phase}_counter1/peripheral",
+        )
+        if "signed-write callback count=2" in second_peripheral:
+            raise GateFailure(f"{phase}_counter1: replay reached GATT callback")
+
+        return (
+            "encrypted SignKey distribution, unencrypted signed write, replay "
+            "rejection, and monotonic RRAM counters after retained SRAM is cleared"
+        )
 
     def numeric_comparison_phase(self) -> str:
         phase = "ble_numeric_comparison"
@@ -556,7 +975,6 @@ class ReleaseGate:
             )
             values[board.role] = match.group(1)
             self.require(output, "ble_pair prompt-accepted", f"{phase}/{board.role}")
-            self.require(output, "ble_pair bond-saved", f"{phase}/{board.role}")
             self.require(output, "encryption=ON", f"{phase}/{board.role}")
             self.require_regex(
                 output, r"conn=1 enc=1 auth=1 bond=1",
@@ -568,6 +986,11 @@ class ReleaseGate:
         self.require(logs[self.lm20.role], "ble_pair central: wrote", phase)
         self.require(logs[self.lm20.role], "ble_pair central: notify=", phase)
         self.require(logs[self.l15.role], "ble_pair gatt-write val=", phase)
+
+        # Force the reconnect to deserialize the MITM/authenticated flag from
+        # built-in RRAM instead of accepting the retained .noinit cache.
+        self.clear_bond_retention_cache(f"{phase}_cold_reload", self.l15, phase)
+        self.clear_bond_retention_cache(f"{phase}_cold_reload", self.lm20, phase)
 
         reconnect_phase = f"{phase}_reconnect"
         reconnect_logs = self.pair_logs_since_boot(
@@ -713,6 +1136,18 @@ class ReleaseGate:
                 time.sleep(0.05)
             if len(oob_records) != len(publishers):
                 raise GateFailure(f"{phase}: timed out waiting for local OOB record(s)")
+            current_records: dict[str, tuple[str, str]] = {}
+            for board in publishers:
+                match = oob_records[board.role]
+                record = (match.group(1).upper(), match.group(2).upper())
+                if int(record[0], 16) == 0 or int(record[1], 16) == 0:
+                    raise GateFailure(f"{phase}/{board.role}: local OOB r/c is all zero")
+                if record in self._seen_oob_records:
+                    raise GateFailure(f"{phase}/{board.role}: local OOB record was reused")
+                current_records[board.role] = record
+            if mode == 0 and current_records[self.l15.role] == current_records[self.lm20.role]:
+                raise GateFailure(f"{phase}: both boards generated the same OOB record")
+            self._seen_oob_records.update(current_records.values())
             if self.lm20.role in oob_records:
                 record = oob_records[self.lm20.role]
                 capture.send(
@@ -840,6 +1275,7 @@ class ReleaseGate:
         self.reject_fatal(logs, phase)
         initial_identity: dict[str, str] = {}
         initial_rpa: dict[str, str] = {}
+        initial_irk: dict[str, str] = {}
         address_pattern = (
             r"ble_pair PRIVACY_ENABLED local_identity="
             r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}) active_rpa="
@@ -850,6 +1286,13 @@ class ReleaseGate:
             match = self.require_regex(output, address_pattern, f"{phase}/{board.role}")
             initial_identity[board.role] = match.group(1).upper()
             initial_rpa[board.role] = match.group(2).upper()
+            irk_match = self.require_regex(
+                output, r"ble_pair local_irk=([0-9A-Fa-f]{32})",
+                f"{phase}/{board.role}",
+            )
+            initial_irk[board.role] = irk_match.group(1).upper()
+            if int(initial_irk[board.role], 16) == 0:
+                raise GateFailure(f"{phase}/{board.role}: local IRK is all zero")
             if initial_rpa[board.role] == initial_identity[board.role]:
                 raise GateFailure(f"{phase}/{board.role}: active RPA equals identity")
             if (int(initial_rpa[board.role].rsplit(":", 1)[1], 16) & 0xC0) != 0x40:
@@ -857,9 +1300,15 @@ class ReleaseGate:
                     f"{phase}/{board.role}: active address is not an RPA: "
                     f"{initial_rpa[board.role]}"
                 )
-            self.require(output, "ble_pair local_irk=", f"{phase}/{board.role}")
-            self.require(output, "ble_pair bond-saved", f"{phase}/{board.role}")
             self.require(output, "encryption=ON", f"{phase}/{board.role}")
+            self.require_regex(
+                output, r"conn=1 enc=1 auth=0 bond=1",
+                f"{phase}/{board.role}",
+            )
+        if initial_identity[self.l15.role] == initial_identity[self.lm20.role]:
+            raise GateFailure(f"{phase}: both boards reported the same local identity")
+        if initial_irk[self.l15.role] == initial_irk[self.lm20.role]:
+            raise GateFailure(f"{phase}: both boards reported the same local IRK")
         evidence = self.request_pair_evidence(f"{phase}_evidence", "privacy")
         for board in (self.l15, self.lm20):
             self.require_regex(
@@ -867,6 +1316,11 @@ class ReleaseGate:
                 r"ble_pair privacy_evidence id_info=1 id_addr=1 bond_aar=[01] bond_primed=[01]",
                 f"{phase}_evidence/{board.role}",
             )
+
+        # Force identity, IRK, and privacy flags through the RRAM serializer;
+        # an ordinary reset alone preserves the .noinit bond cache.
+        self.clear_bond_retention_cache(f"{phase}_cold_reload", self.l15, phase)
+        self.clear_bond_retention_cache(f"{phase}_cold_reload", self.lm20, phase)
 
         reconnect_phase = f"{phase}_reconnect"
         reconnect_logs = self.pair_logs_since_boot(
@@ -883,10 +1337,18 @@ class ReleaseGate:
                                        f"{reconnect_phase}/{board.role}")
             identity = match.group(1).upper()
             rpa = match.group(2).upper()
+            irk = self.require_regex(
+                output, r"ble_pair local_irk=([0-9A-Fa-f]{32})",
+                f"{reconnect_phase}/{board.role}",
+            ).group(1).upper()
             if identity != initial_identity[board.role]:
                 raise GateFailure(
                     f"{reconnect_phase}/{board.role}: identity changed "
                     f"{initial_identity[board.role]} -> {identity}"
+                )
+            if irk != initial_irk[board.role]:
+                raise GateFailure(
+                    f"{reconnect_phase}/{board.role}: local IRK changed"
                 )
             if rpa == initial_rpa[board.role]:
                 raise GateFailure(f"{reconnect_phase}/{board.role}: RPA did not rotate")
@@ -921,10 +1383,11 @@ class ReleaseGate:
                             [self.l15, self.lm20])
         for board in (self.l15, self.lm20):
             text = logs[board.role]
-            self.require(text, "LowPowerGrtcPwmSystemOff", f"{phase}/{board.role}")
-            self.require(text, "Entering SYSTEM OFF for", f"{phase}/{board.role}")
-            self.require(text, "wake_from_grtc_or_off=1", f"{phase}/{board.role}")
-        return "both boards entered timed System OFF and rebooted from the GRTC wake source"
+            description = f"{phase}/{board.role}"
+            if "GRTC PWM begin failed" in text:
+                raise GateFailure(f"{description}: GRTC PWM initialization failed")
+            validate_system_off_log(text, description, minimum_cycles=2)
+        return "both boards completed two consecutive timed System OFF/GRTC wake cycles"
 
     def cs_phase(self) -> str:
         phase = "channel_sounding"
@@ -953,8 +1416,16 @@ class ReleaseGate:
 
     def write_summary(self) -> None:
         completed_phases = [result.name for result in self.results]
-        failed = any(result.status == "FAIL" for result in self.results)
-        complete = completed_phases == self.args.expected_phases
+        failed = (
+            any(result.status == "FAIL" for result in self.results) or
+            self.source_end_verified is False
+        )
+        source_complete = (
+            self.args.gate_scope != "full" or self.source_end_verified is True
+        )
+        complete = (
+            completed_phases == self.args.expected_phases and source_complete
+        )
         if failed:
             outcome = "FAIL"
         elif complete:
@@ -971,8 +1442,12 @@ class ReleaseGate:
             "expected_phases": self.args.expected_phases,
             "completed_phases": completed_phases,
             "source_version": self.source_version,
+            "source_version_end": self.source_version_end,
             "git_revision": self.git_revision,
+            "git_revision_end": self.git_revision_end,
             "git_dirty": self.git_dirty,
+            "git_dirty_end": self.git_dirty_end,
+            "source_end_verified": self.source_end_verified,
             "source_platform": str(PLATFORM),
             "arduino_cli_config": str(self.cli_config),
             "compiler_path": str(self.compiler_path),
@@ -1106,7 +1581,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rpa-capture-s", type=float, default=72.0)
     parser.add_argument("--rpa-min-addresses", type=int, default=2)
     parser.add_argument("--privacy-rotation-ms", type=int, default=5000)
-    parser.add_argument("--system-off-capture-s", type=float, default=13.0)
+    parser.add_argument("--system-off-capture-s", type=float, default=18.0)
     parser.add_argument("--cs-capture-s", type=float, default=35.0)
     parser.add_argument("--cs-negative-s", type=float, default=12.0)
     parser.add_argument("--cs-recovery-s", type=float, default=35.0)
@@ -1170,6 +1645,8 @@ def main() -> int:
             gate.run_phase("ble_phy_mtu_dle", lambda: gate.phy_pair_phase(recovery=False))
         if should_run("ble_pair_bond", full_only=True):
             gate.run_phase("ble_pair_bond", gate.pair_bond_phase)
+        if should_run("ble_signed_write", full_only=True):
+            gate.run_phase("ble_signed_write", gate.signed_write_phase)
         if should_run("ble_numeric_comparison", full_only=True):
             gate.run_phase("ble_numeric_comparison", gate.numeric_comparison_phase)
         if should_run("ble_numeric_comparison_reject", full_only=True):
@@ -1203,6 +1680,7 @@ def main() -> int:
                 f"phase coverage mismatch: expected {args.expected_phases}, "
                 f"completed {completed_phases}"
             )
+        gate.verify_source_end_state()
         gate.write_summary()
         outcome = "SUBSET_PASS" if args.gate_scope == "subset" else "PASS"
         print(f"two_board_release_gate={outcome}")

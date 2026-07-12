@@ -95,10 +95,12 @@ install_udev_rules() {
     install -m 0644 "${RULE_SRC}" "${RULE_DST}"
     "${UDEVADM_BIN}" control --reload-rules
     "${UDEVADM_BIN}" trigger --attr-match=idVendor=2886 --attr-match=idProduct=0066
+    "${UDEVADM_BIN}" trigger --attr-match=idVendor=2886 --attr-match=idProduct=0068
   elif command -v sudo >/dev/null 2>&1; then
     sudo install -m 0644 "${RULE_SRC}" "${RULE_DST}"
     sudo "${UDEVADM_BIN}" control --reload-rules
     sudo "${UDEVADM_BIN}" trigger --attr-match=idVendor=2886 --attr-match=idProduct=0066
+    sudo "${UDEVADM_BIN}" trigger --attr-match=idVendor=2886 --attr-match=idProduct=0068
   else
     echo "Need write access to ${rule_dir}. Re-run with sudo available or as root." >&2
     exit 1

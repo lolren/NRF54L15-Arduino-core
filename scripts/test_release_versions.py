@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import subprocess
 import sys
@@ -193,7 +194,7 @@ class ReleaseVersionTests(unittest.TestCase):
                 {
                     "packager": "nrf54l15clean",
                     "name": "nrf54l15hosttools",
-                    "version": "1.1.4",
+                    "version": build_release.HOST_TOOL_VERSION,
                 }
             ]
         }
@@ -202,8 +203,102 @@ class ReleaseVersionTests(unittest.TestCase):
                 platform,
                 "nrf54l15hosttools",
             ),
-            "1.1.4",
+            build_release.HOST_TOOL_VERSION,
         )
+
+    def test_hosttools_requirements_are_pinned_without_redistributed_wheels(self) -> None:
+        hosttools = ROOT / "tools" / "board_manager" / build_release.HOST_TOOL_NAME
+        build_release.validate_host_tool_source(hosttools)
+        requirements = (hosttools / build_release.HOST_TOOL_REQUIREMENTS_FILE).read_text(
+            encoding="utf-8"
+        )
+        for requirement in build_release.REQUIRED_HOST_TOOL_REQUIREMENTS:
+            self.assertIn(requirement, requirements.splitlines())
+        self.assertEqual(list(hosttools.rglob("*.whl")), [])
+
+    def test_release_workflow_uses_curated_immutable_release_notes(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        for mutable_ref in (
+            "actions/checkout@v4",
+            "actions/setup-python@v5",
+            "arduino/setup-arduino-cli@v2",
+        ):
+            self.assertNotIn(mutable_ref, workflow)
+        self.assertIn('NOTES="docs/RELEASE_${VERSION}.md"', workflow)
+        self.assertIn('test -f "${NOTES}"', workflow)
+        self.assertIn("body_path: ${{ steps.vars.outputs.notes }}", workflow)
+        self.assertIn("generate_release_notes: true", workflow)
+        publish = workflow.index("uses: softprops/action-gh-release@")
+        verify = workflow.index("name: Verify draft release assets", publish)
+        self.assertLess(
+            workflow.index("body_path: ${{ steps.vars.outputs.notes }}", publish), verify
+        )
+
+    def test_tools_only_preflight_accepts_prerelease_archive_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            asset = root / "hosttools.tar.bz2"
+            asset.write_bytes(b"host-tools-prerelease-test")
+            checksum = hashlib.sha256(asset.read_bytes()).hexdigest()
+            index = {
+                "packages": [
+                    {
+                        "platforms": [
+                            {
+                                "version": "1.0.1-rc1",
+                                "url": "https://invalid.example/platform.tar.bz2",
+                                "archiveFileName": "platform.tar.bz2",
+                                "checksum": "SHA-256:unused",
+                                "size": "0",
+                                "toolsDependencies": [
+                                    {
+                                        "name": build_release.HOST_TOOL_NAME,
+                                        "version": build_release.HOST_TOOL_VERSION,
+                                    }
+                                ],
+                            }
+                        ],
+                        "tools": [
+                            {
+                                "name": build_release.HOST_TOOL_NAME,
+                                "version": build_release.HOST_TOOL_VERSION,
+                                "systems": [
+                                    {
+                                        "host": "x86_64-pc-linux-gnu",
+                                        "url": asset.as_uri(),
+                                        "archiveFileName": asset.name,
+                                        "checksum": f"SHA-256:{checksum}",
+                                        "size": str(asset.stat().st_size),
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+            index_path = root / "archive-index.json"
+            index_path.write_text(json.dumps(index), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "verify_public_release.py"),
+                    "--index",
+                    str(index_path),
+                    "--version",
+                    "1.0.1-rc1",
+                    "--include-tools",
+                    "--tools-only",
+                    "--retries",
+                    "1",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("tool nrf54l15hosttools", completed.stdout)
+            self.assertNotIn("platform 1.0.1-rc1 OK", completed.stdout)
 
     def test_validation_only_is_read_only(self) -> None:
         platform_before = (PLATFORM / "platform.txt").read_bytes()

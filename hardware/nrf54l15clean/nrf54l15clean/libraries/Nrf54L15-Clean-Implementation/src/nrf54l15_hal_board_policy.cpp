@@ -1,6 +1,7 @@
 #include "nrf54l15_hal_board_policy_internal.h"
 
 #include <Arduino.h>
+#include "npm1300.h"
 #include "variant.h"
 
 namespace xiao_nrf54l15::hal_internal {
@@ -62,7 +63,11 @@ bool BoardControl::hasSwitchedBatterySense() {
 }
 
 bool BoardControl::hasImuMicPowerGate() {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  return true;
+#else
   return NRF54L15_BOARD_HAS_IMU_MIC_POWER_GATE != 0;
+#endif
 }
 
 bool BoardControl::setAntennaPath(BoardAntennaPath path) {
@@ -90,18 +95,31 @@ BoardAntennaPath BoardControl::antennaPath() {
 }
 
 bool BoardControl::setImuMicEnabled(bool enable) {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  if (!enable) {
+    return npm1300_ldo1_enable(false);
+  }
+  return npm1300_ldo1_set_mode(NPM1300_LDSW_MODE_LDO) &&
+         npm1300_ldo1_set_voltage(NPM1300_LDO_VOLTAGE_3V3) &&
+         npm1300_ldo1_enable(true);
+#else
   if (!hasImuMicPowerGate()) {
     (void)enable;
     return false;
   }
   return arduinoXiaoNrf54l15SetImuMicEnable(enable ? 1U : 0U) != 0U;
+#endif
 }
 
 bool BoardControl::imuMicEnabled() {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  return npm1300_ldo1_is_enabled();
+#else
   if (!hasImuMicPowerGate()) {
     return false;
   }
   return arduinoXiaoNrf54l15GetImuMicEnable() != 0U;
+#endif
 }
 
 bool BoardControl::setRfSwitchPowerEnabled(bool enable) {

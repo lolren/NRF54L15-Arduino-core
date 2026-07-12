@@ -1,1 +1,2 @@
 pyocd==0.44.1
+libusb-package==1.0.30.0

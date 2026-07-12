@@ -20,7 +20,6 @@ static constexpr int8_t kTxPowerDbm = 0;
 static constexpr uint32_t kAdvIntervalMs = 100;
 static constexpr uint32_t kStatusIntervalMs = 1000;
 static constexpr uint32_t kNotifyIntervalMs = 1200;
-static constexpr uint32_t kPhyRequestRetryMs = 500;
 static constexpr uint32_t kHold1MBeforeReturnMs = 3500;
 static constexpr uint16_t kRequestedMtu = 247U;
 // ATT MTU 247 carries at most 244 bytes after the three-byte ATT notification
@@ -49,7 +48,6 @@ static uint8_t g_lastTxPhy = kBlePhyNone;
 static uint8_t g_lastRxPhy = kBlePhyNone;
 static uint32_t g_lastReportMs = 0U;
 static uint32_t g_lastNotifyMs = 0U;
-static uint32_t g_lastPhyRequestMs = 0U;
 static uint32_t g_phaseSinceMs = 0U;
 static uint32_t g_notifySequence = 0U;
 static uint32_t g_notifySentCount = 0U;
@@ -128,12 +126,6 @@ static bool longNotifyReady(const BleConnectionInfo& info) {
          (g_ble.currentDataLength() >= 251U);
 }
 
-static bool initial2MRequestReady() {
-  return g_ble.isCustomGattCccdEnabled(g_notifyValueHandle, false) &&
-         (g_ble.currentAttMtu() >= kRequestedMtu) &&
-         (g_ble.currentDataLength() >= 251U);
-}
-
 static void queueLongNotify(const BleConnectionInfo& info) {
   uint8_t value[kLongNotificationValueLength];
   uint16_t valueLength = 0U;
@@ -159,23 +151,6 @@ static void queueLongNotify(const BleConnectionInfo& info) {
   g_notifyPending = false;
 }
 
-static bool maybeQueuePhyRequest(uint8_t txPhy, uint8_t rxPhy,
-                                 const char* reason, uint32_t nowMs) {
-  if ((nowMs - g_lastPhyRequestMs) < kPhyRequestRetryMs) {
-    return false;
-  }
-  g_lastPhyRequestMs = nowMs;
-  const bool queued = (txPhy == rxPhy) ? g_ble.requestPHY(txPhy)
-                                       : g_ble.requestPreferredPhy(txPhy, rxPhy);
-  if (queued) {
-    Serial.print("request phy ");
-    Serial.print(reason);
-    Serial.print(": queued\r\n");
-    return true;
-  }
-  return false;
-}
-
 static void maybeDrivePhyCycle(const BleConnectionInfo& info, uint32_t nowMs) {
   switch (g_cyclePhase) {
     case PhyCyclePhase::kRequestInitial2M:
@@ -183,11 +158,8 @@ static void maybeDrivePhyCycle(const BleConnectionInfo& info, uint32_t nowMs) {
         g_cyclePhase = PhyCyclePhase::kWaitForFallback1M;
         g_phaseSinceMs = nowMs;
         Serial.print("cycle phase: 2M active\r\n");
-        return;
       }
-      if (initial2MRequestReady()) {
-        maybeQueuePhyRequest(kBlePhy2M, kBlePhy2M, "2M", nowMs);
-      }
+      // The central owns the initial PHY procedure and update instant.
       return;
 
     case PhyCyclePhase::kWaitForFallback1M:
@@ -207,8 +179,9 @@ static void maybeDrivePhyCycle(const BleConnectionInfo& info, uint32_t nowMs) {
 
     case PhyCyclePhase::kHold1MBeforeReturn:
       if ((info.txPhy == kBlePhy2M) && (info.rxPhy == kBlePhy2M)) {
-        g_cyclePhase = PhyCyclePhase::kWaitForFallback1M;
+        g_cyclePhase = PhyCyclePhase::kComplete;
         g_phaseSinceMs = nowMs;
+        Serial.print("cycle phase: 2M return complete\r\n");
         return;
       }
       if ((info.txPhy == kBlePhy1M) && (info.rxPhy == kBlePhy1M) &&
@@ -225,7 +198,7 @@ static void maybeDrivePhyCycle(const BleConnectionInfo& info, uint32_t nowMs) {
         Serial.print("cycle phase: 2M return complete\r\n");
         return;
       }
-      maybeQueuePhyRequest(kBlePhy2M, kBlePhy2M, "2M_return", nowMs);
+      // The central owns the return request and its update instant.
       return;
 
     case PhyCyclePhase::kComplete:
@@ -284,7 +257,6 @@ void loop() {
       g_lastTxPhy = kBlePhyNone;
       g_lastRxPhy = kBlePhyNone;
       g_lastNotifyMs = 0U;
-      g_lastPhyRequestMs = 0U;
       g_phaseSinceMs = 0U;
       g_notifySequence = 0U;
       g_notifySentCount = 0U;
@@ -303,6 +275,9 @@ void loop() {
   if (!g_wasConnected) {
     g_wasConnected = true;
     g_lastNotifyMs = millis();
+    g_flexiblePreferenceSet = g_ble.setPreferredPhyOptions(
+        static_cast<uint8_t>(kBlePhy1M | kBlePhy2M),
+        static_cast<uint8_t>(kBlePhy1M | kBlePhy2M));
     Gpio::write(kPinUserLed, false);
     printConnectionState("connected", info);
   }

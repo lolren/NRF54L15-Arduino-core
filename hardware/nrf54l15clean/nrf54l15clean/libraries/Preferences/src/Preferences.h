@@ -1,4 +1,11 @@
 /*
+ * Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Modified for the nRF54 Arduino Core in 2026: retained the Arduino-ESP32
+ * Preferences API while replacing NVS handles and types with a compact RRAM
+ * namespace/key store.
+ *
  * Preferences - flash-backed key/value storage for nrf54l15clean.
  *
  * Data survives reboot and power cycle.

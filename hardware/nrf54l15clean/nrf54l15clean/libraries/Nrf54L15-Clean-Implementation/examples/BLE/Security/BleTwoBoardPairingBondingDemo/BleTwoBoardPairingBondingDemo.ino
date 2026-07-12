@@ -3,11 +3,11 @@
 // Board A (PERIPHERAL): Advertises as "X54-PAIR",
 //   exposes custom GATT service with notify + write characteristics.
 //   Sends SMP Security Request for JustWorks pairing after connect.
-//   Stores bond record in Preferences, restores on reboot.
+//   Uses the core's built-in RRAM bond store and restores on reboot.
 //
 // Board B (CENTRAL): Scans for "X54-PAIR", initiates connection,
 //   subscribes to notifications, sends periodic writes.
-//   Stores bond record in Preferences.
+//   Uses the core's built-in RRAM bond store.
 //
 // Flash instructions:
 //   Board A: set ROLE = PERIPHERAL
@@ -16,7 +16,6 @@
 // Serial commands:  status, clear
 
 #include <Arduino.h>
-#include <Preferences.h>
 #include <string.h>
 #include <stdio.h>
 #include "matter_secp256r1.h"
@@ -46,7 +45,6 @@ constexpr uint8_t kNotifyProp = 0x12U;  // read + notify
 constexpr uint8_t kWriteProp  = 0x04U;  // write without response
 
 BleRadio g_ble;
-Preferences g_prefs;
 uint16_t g_svcHandle = 0U;
 uint16_t g_notifyHandle = 0U;
 uint16_t g_notifyCccd = 0U;
@@ -62,33 +60,6 @@ bool g_centralSeen = false;
 char g_traceBuffer[kTraceBufferDepth][kTraceBufferEntryLen] = {};
 uint8_t g_traceBufferHead = 0U;
 uint8_t g_traceBufferCount = 0U;
-
-// ─── Bond persistence ─────────────────────────────────────────
-
-static constexpr char kNs[] = "ble_pair";
-static constexpr char kBondKey[] = "bond";
-
-bool loadBond(BleBondRecord* out, void*) {
-  if (g_prefs.getBytesLength(kBondKey) == sizeof(BleBondRecord)) {
-    g_prefs.getBytes(kBondKey, out, sizeof(BleBondRecord));
-    Serial.println("ble_pair bond-loaded");
-    return true;
-  }
-  return false;
-}
-
-bool saveBond(const BleBondRecord* rec, void*) {
-  if (!rec) return false;
-  g_prefs.putBytes(kBondKey, rec, sizeof(BleBondRecord));
-  Serial.println("ble_pair bond-saved");
-  return true;
-}
-
-bool clearBondStored(void*) {
-  g_prefs.remove(kBondKey);
-  Serial.println("ble_pair bond-cleared-storage");
-  return true;
-}
 
 // ─── Peripheral: GATT write handler ──────────────────────────
 
@@ -411,8 +382,6 @@ void setup() {
   Serial.print(ROLE==DemoRole::PERIPHERAL?"PERIPHERAL":"CENTRAL");
   Serial.println(") ===");
 
-  g_prefs.begin(kNs, false);
-
   if (!g_ble.begin(kTxPowerDbm)) {
     Serial.println("ble_pair FATAL: radio init failed");
     return;
@@ -420,7 +389,6 @@ void setup() {
   g_ble.setBackgroundConnectionServiceEnabled(true);
   g_ble.setTraceCallback(onBleTrace, nullptr);
   g_ble.loadAddressFromFicr(true);
-  g_ble.setBondPersistenceCallbacks(loadBond, saveBond, clearBondStored, nullptr);
 
   if (ROLE == DemoRole::PERIPHERAL) {
     g_ble.setAdvertisingName(kAdvName, true);

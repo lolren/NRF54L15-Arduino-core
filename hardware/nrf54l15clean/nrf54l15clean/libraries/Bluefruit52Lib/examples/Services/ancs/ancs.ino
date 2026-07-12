@@ -196,15 +196,15 @@ void ancs_notification_callback(AncsNotification_t* notif)
     char u202D[3] = { 0xE2, 0x80, 0xAD }; // U+202D in UTF-8
     char u202C[3] = { 0xE2, 0x80, 0xAC }; // U+202C in UTF-8
 
-    int len = strlen(buffer);
+    size_t len = strlen(buffer);
 
-    if ( 0 == memcmp(&buffer[len-3], u202C, 3) )
+    if ( len >= 3 && 0 == memcmp(&buffer[len-3], u202C, 3) )
     {
       len -= 3;
       buffer[len] = 0; // chop ending U+202C
     }
 
-    if ( 0 == memcmp(buffer, u202D, 3) )
+    if ( len >= 3 && 0 == memcmp(buffer, u202D, 3) )
     {
       memmove(buffer, buffer+3, len-2); // move null-terminator as well
     }

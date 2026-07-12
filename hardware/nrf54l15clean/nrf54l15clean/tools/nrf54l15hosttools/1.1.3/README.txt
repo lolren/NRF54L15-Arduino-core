@@ -2,7 +2,8 @@ Nrf54L15 host tools 1.1.3
 
 What's new in 1.1.3:
 - pyOCD 0.44.1 with built-in nrf54lm20a target support
-- No manual pip install needed for XIAO nRF54LM20A upload
+- Setup installs pinned pyOCD into the tool-local runtime; the first recovery
+  setup requires access to the configured Python package index
 
 Linux Mint / Ubuntu extra step:
 - If upload fails with permission errors, run:

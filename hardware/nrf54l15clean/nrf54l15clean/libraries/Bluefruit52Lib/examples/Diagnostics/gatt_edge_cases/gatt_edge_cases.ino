@@ -16,7 +16,11 @@
   1. Connect with nRF Connect or another BLE scanner.
   2. Request MTU 247, then read 0xFEE1. It should return 244 bytes.
   3. Write 244 bytes to 0xFEE2, then read 0xFEE2 back and compare.
-  4. Write a new label to the 0x2901 descriptor under 0xFEE3, then read it.
+  4. Try a 245-byte queued write to 0xFEE2. It must fail with Invalid
+     Attribute Value Length and leave the previous value unchanged.
+  5. Try a two-byte write to fixed-length 0xFEE3. It must fail with Invalid
+     Attribute Value Length and leave the one-byte value unchanged.
+  6. Write a new label to the 0x2901 descriptor under 0xFEE3, then read it.
 */
 
 #include <bluefruit.h>
@@ -25,7 +29,7 @@ static constexpr uint16_t kServiceUuid = 0xFEE0;
 static constexpr uint16_t kLongReadUuid = 0xFEE1;
 static constexpr uint16_t kLongWriteUuid = 0xFEE2;
 static constexpr uint16_t kDescriptorProbeUuid = 0xFEE3;
-static constexpr uint16_t kLongLen = BLUEFRUIT_GATT_VALUE_MAX_LEN;
+static constexpr uint16_t kLongLen = 244U;
 static constexpr uint32_t kStatusEveryMs = 5000UL;
 
 BLEService edgeService(kServiceUuid);

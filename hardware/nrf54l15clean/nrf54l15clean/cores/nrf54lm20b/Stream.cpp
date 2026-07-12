@@ -1,5 +1,13 @@
 /*
- * Arduino Stream parsing helpers.
+ * Stream.cpp - parsing methods for the Arduino Stream class.
+ * Copyright (c) 2008 David A. Mellis. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * Parsing functions are based on Michael Margolis' TextFinder library.
+ * findMulti/findUntil routines were written by Jim Leonard/Xuth.
+ *
+ * Modified for the nRF54 Arduino Core in 2026: reformatted and adapted to the
+ * local Arduino API implementation. See ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #include "Arduino.h"

@@ -21,9 +21,6 @@
  */
 #include <bluefruit.h>
 
-// OTA DFU service
-BLEDfu bledfu;
-
 // Peripheral uart service
 BLEUart bleuart;
 
@@ -51,9 +48,6 @@ void setup()
   // Callbacks for Central
   Bluefruit.Central.setConnectCallback(cent_connect_callback);
   Bluefruit.Central.setDisconnectCallback(cent_disconnect_callback);
-
-  // To be consistent OTA DFU should be added first if it exists
-  bledfu.begin();
 
   // Configure and Start BLE Uart Service
   bleuart.begin();

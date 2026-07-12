@@ -46,6 +46,73 @@ alignas(4) NRF_VDMADESCRIPTOR_Type g_aarOutJobs[2] = {};
 alignas(4) volatile int16_t g_saadcSampleScratch = 0;
 volatile bool g_cracenRngOwned = false;
 
+void clearPdmEvent(volatile uint32_t* event) {
+  *event = 0U;
+  // Nordic requires an event-register readback before a following task can
+  // safely rely on the cleared state.
+  (void)*event;
+}
+
+bool waitForPdmEvent(volatile uint32_t* event, volatile uint32_t* error,
+                     uint32_t timeoutUs) {
+  const uint32_t startedUs = micros();
+  do {
+    if (*event != 0U) {
+      return true;
+    }
+    if (error != nullptr && *error != 0U) {
+      return false;
+    }
+  } while (static_cast<uint32_t>(micros() - startedUs) < timeoutUs);
+  return *event != 0U;
+}
+
+uint16_t pdmRatioDivisor(uint8_t ratio) {
+  switch (ratio) {
+#if !defined(NRF54LM20A_XXAA) && !defined(NRF54LM20B_XXAA)
+    case PDM_RATIO_RATIO_Ratio32:
+      return 32U;
+#endif
+    case PDM_RATIO_RATIO_Ratio48:
+      return 48U;
+    case PDM_RATIO_RATIO_Ratio50:
+      return 50U;
+    case PDM_RATIO_RATIO_Ratio64:
+      return 64U;
+    case PDM_RATIO_RATIO_Ratio80:
+      return 80U;
+    case PDM_RATIO_RATIO_Ratio96:
+      return 96U;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+    case PDM_RATIO_RATIO_Ratio150:
+      return 150U;
+    case PDM_RATIO_RATIO_Ratio192:
+      return 192U;
+    case PDM_RATIO_RATIO_Custom:
+      return 0U;
+#else
+    case PDM_RATIO_RATIO_Ratio100:
+      return 100U;
+    case PDM_RATIO_RATIO_Ratio128:
+      return 128U;
+#endif
+    default:
+      return 0U;
+  }
+}
+
+uint32_t pdmCaptureTimeoutUs(size_t sampleCount, uint32_t sampleRateHz) {
+  if (sampleRateHz == 0U) {
+    return 250000UL;
+  }
+  const uint64_t expectedUs =
+      (static_cast<uint64_t>(sampleCount) * 1000000ULL + sampleRateHz - 1U) /
+      sampleRateHz;
+  const uint64_t budgetUs = expectedUs * 2ULL + 250000ULL;
+  return (budgetUs > UINT32_MAX) ? UINT32_MAX
+                                 : static_cast<uint32_t>(budgetUs);
+}
+
 bool tryAcquireCracenRng() {
   const uint32_t primask = __get_PRIMASK();
   __disable_irq();
@@ -69,6 +136,14 @@ void releaseCracenRng() {
 }
 
 bool isQdecPortSupported(const Pin& pin) {
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  return pin.port == 1U || pin.port == 3U;
+#else
+  return pin.port == 1U;
+#endif
+}
+
+bool isPdmPortSupported(const Pin& pin) {
 #if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
   return pin.port == 1U || pin.port == 3U;
 #else
@@ -1913,49 +1988,86 @@ uint32_t Watchdog::requestStatus() const { return wdt_->REQSTATUS; }
 
 Pdm::Pdm(uint32_t base)
     : pdm_(reinterpret_cast<NRF_PDM_Type*>(static_cast<uintptr_t>(base))),
-      configured_(false) {}
+      configured_(false),
+      clkPin_(kPinDisconnected),
+      dinPin_(kPinDisconnected),
+      modeConfig_(0U),
+      ratioConfig_(PDM_RATIO_RATIO_Ratio80),
+      prescalerConfig_(25U),
+      sampleRateHz_(16000UL) {}
+
+void Pdm::applyConfiguration() {
+  pdm_->PSEL.CLK = make_psel(clkPin_.port, clkPin_.pin);
+  pdm_->PSEL.DIN = make_psel(dinPin_.port, dinPin_.pin);
+  pdm_->MODE = modeConfig_;
+  pdm_->GAINL = PDM_GAINL_GAINL_DefaultGain;
+  pdm_->GAINR = PDM_GAINR_GAINR_DefaultGain;
+  pdm_->RATIO = ratioConfig_;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  reg32(reinterpret_cast<uintptr_t>(pdm_) + 0x54CUL) = 0U;
+#endif
+  pdm_->PRESCALER = prescalerConfig_;
+  pdm_->DMA.TERMINATEONBUSERROR =
+      PDM_DMA_TERMINATEONBUSERROR_ENABLE_Enabled;
+  __DSB();
+}
 
 bool Pdm::begin(const Pin& clk, const Pin& din, bool mono, uint8_t prescalerDiv,
                 uint8_t ratio, PdmEdge edge) {
-  if (!isConnected(clk) || !isConnected(din)) {
+  if (!isConnected(clk) || !isConnected(din) ||
+      !isPdmPortSupported(clk) || !isPdmPortSupported(din) ||
+      (clk.port == din.port && clk.pin == din.pin)) {
     return false;
   }
-  if (prescalerDiv < PDM_PRESCALER_DIVISOR_Min) {
-    prescalerDiv = PDM_PRESCALER_DIVISOR_Min;
+  if (prescalerDiv < PDM_PRESCALER_DIVISOR_Min ||
+      prescalerDiv > PDM_PRESCALER_DIVISOR_Max ||
+      ratio > PDM_RATIO_RATIO_Max ||
+      static_cast<uint32_t>(edge) > PDM_MODE_EDGE_Max) {
+    return false;
   }
-  if (prescalerDiv > PDM_PRESCALER_DIVISOR_Max) {
-    prescalerDiv = PDM_PRESCALER_DIVISOR_Max;
-  }
-  if (ratio > PDM_RATIO_RATIO_Max) {
-    ratio = PDM_RATIO_RATIO_Ratio64;
+  const uint16_t ratioDivisor = pdmRatioDivisor(ratio);
+  if (ratioDivisor == 0U) {
+    return false;
   }
 
-  if (!Gpio::configure(clk, GpioDirection::kOutput, GpioPull::kDisabled) ||
+  // Nordic's PDM setup requires CLK to idle low before output ownership is
+  // handed to the peripheral.
+  if (!Gpio::write(clk, false) ||
+      !Gpio::configure(clk, GpioDirection::kOutput, GpioPull::kDisabled) ||
       !Gpio::configure(din, GpioDirection::kInput, GpioPull::kDisabled)) {
     return false;
   }
 
-  pdm_->ENABLE = PDM_ENABLE_ENABLE_Disabled;
-  pdm_->TASKS_STOP = PDM_TASKS_STOP_TASKS_STOP_Trigger;
-  pdm_->EVENTS_STOPPED = 0U;
+  if (configured_) {
+    end();
+  }
 
-  pdm_->PSEL.CLK = make_psel(clk.port, clk.pin);
-  pdm_->PSEL.DIN = make_psel(din.port, din.pin);
+  pdm_->ENABLE = PDM_ENABLE_ENABLE_Disabled;
+  __DSB();
+  (void)pdm_->ENABLE;
+  clearPdmEvent(&pdm_->EVENTS_STARTED);
+  clearPdmEvent(&pdm_->EVENTS_END);
+  clearPdmEvent(&pdm_->EVENTS_STOPPED);
+  clearPdmEvent(&pdm_->EVENTS_DMA.BUSERROR);
 
   uint32_t mode = 0;
   mode |= ((mono ? PDM_MODE_OPERATION_Mono : PDM_MODE_OPERATION_Stereo)
            << PDM_MODE_OPERATION_Pos);
   mode |= ((static_cast<uint32_t>(edge) << PDM_MODE_EDGE_Pos) & PDM_MODE_EDGE_Msk);
-  pdm_->MODE = mode;
+  clkPin_ = clk;
+  dinPin_ = din;
+  modeConfig_ = mode;
+  ratioConfig_ =
+      ((static_cast<uint32_t>(ratio) << PDM_RATIO_RATIO_Pos) &
+       PDM_RATIO_RATIO_Msk);
+  prescalerConfig_ =
+      (static_cast<uint32_t>(prescalerDiv) << PDM_PRESCALER_DIVISOR_Pos);
+  sampleRateHz_ =
+      32000000UL / static_cast<uint32_t>(prescalerDiv) / ratioDivisor;
+  applyConfiguration();
 
-  pdm_->GAINL = PDM_GAINL_GAINL_DefaultGain;
-  pdm_->GAINR = PDM_GAINR_GAINR_DefaultGain;
-  pdm_->RATIO = ((static_cast<uint32_t>(ratio) << PDM_RATIO_RATIO_Pos) &
-                 PDM_RATIO_RATIO_Msk);
-  pdm_->PRESCALER = (static_cast<uint32_t>(prescalerDiv) << PDM_PRESCALER_DIVISOR_Pos);
-  pdm_->DMA.TERMINATEONBUSERROR = PDM_DMA_TERMINATEONBUSERROR_ENABLE_Enabled;
-
-  pdm_->ENABLE = PDM_ENABLE_ENABLE_Enabled;
+  // Match nrfx: configuration does not power the PDM until a buffer is armed.
+  __DSB();
   configured_ = true;
   return true;
 }
@@ -1965,17 +2077,52 @@ void Pdm::end() {
     return;
   }
 
-  pdm_->TASKS_STOP = PDM_TASKS_STOP_TASKS_STOP_Trigger;
-  waitForNonZero(&pdm_->EVENTS_STOPPED, 300000UL);
-
+  (void)stopAndReleaseDma(100000UL);
   pdm_->ENABLE = PDM_ENABLE_ENABLE_Disabled;
+  __DSB();
+  (void)pdm_->ENABLE;
+  __ISB();
+  pdm_->SAMPLE.MAXCNT = 0U;
+  pdm_->SAMPLE.PTR = 0U;
+  __DSB();
   pdm_->PSEL.CLK = PSEL_DISCONNECTED;
   pdm_->PSEL.DIN = PSEL_DISCONNECTED;
   configured_ = false;
 }
 
-bool Pdm::capture(int16_t* samples, size_t sampleCount, uint32_t spinLimit) {
-  if (!configured_ || samples == nullptr || sampleCount == 0U) {
+bool Pdm::stopAndReleaseDma(uint32_t timeoutUs) {
+  bool stoppedBeforeDeadline = true;
+  if (pdm_->ENABLE != PDM_ENABLE_ENABLE_Disabled) {
+    clearPdmEvent(&pdm_->EVENTS_STOPPED);
+    __DSB();
+    pdm_->TASKS_STOP = PDM_TASKS_STOP_TASKS_STOP_Trigger;
+    stoppedBeforeDeadline =
+        waitForPdmEvent(&pdm_->EVENTS_STOPPED, nullptr, timeoutUs);
+    if (!stoppedBeforeDeadline) {
+      // STOPPED is the product-specification fence that proves EasyDMA has
+      // released caller memory. A forced ENABLE/PSEL clear is not equivalent.
+      // Preserve memory safety even if a hardware fault makes this wait
+      // unbounded; the caller must never regain a still-owned stack buffer.
+      while (pdm_->EVENTS_STOPPED == 0U) {
+        __NOP();
+      }
+    }
+  }
+
+  // STOPPED guarantees that PDM and EasyDMA no longer access caller memory.
+  pdm_->ENABLE = PDM_ENABLE_ENABLE_Disabled;
+  __DSB();
+  (void)pdm_->ENABLE;
+  clearPdmEvent(&pdm_->EVENTS_STARTED);
+  clearPdmEvent(&pdm_->EVENTS_END);
+  clearPdmEvent(&pdm_->EVENTS_STOPPED);
+  clearPdmEvent(&pdm_->EVENTS_DMA.BUSERROR);
+  __DSB();
+  return stoppedBeforeDeadline;
+}
+
+bool Pdm::capture(int16_t* samples, size_t sampleCount, uint32_t timeoutUs) {
+  if (!configured_ || samples == nullptr || sampleCount < kDrainSampleCount) {
     return false;
   }
 
@@ -1984,40 +2131,60 @@ bool Pdm::capture(int16_t* samples, size_t sampleCount, uint32_t spinLimit) {
     return false;
   }
 
-  const uint32_t bytes = static_cast<uint32_t>(sampleCount * sizeof(int16_t));
-  if (bytes > PDM_SAMPLE_MAXCNT_BUFFSIZE_Max) {
+  if (sampleCount >
+      (PDM_SAMPLE_MAXCNT_BUFFSIZE_Max / sizeof(int16_t))) {
     return false;
   }
+  const uint32_t dmaByteCount =
+      static_cast<uint32_t>(sampleCount * sizeof(int16_t));
+  const uint32_t captureTimeoutUs =
+      (timeoutUs == 0U) ? pdmCaptureTimeoutUs(sampleCount, sampleRateHz_)
+                        : timeoutUs;
 
-  pdm_->EVENTS_STARTED = 0U;
-  pdm_->EVENTS_END = 0U;
-  pdm_->EVENTS_STOPPED = 0U;
-  pdm_->EVENTS_DMA.BUSERROR = 0U;
+  clearPdmEvent(&pdm_->EVENTS_STARTED);
+  clearPdmEvent(&pdm_->EVENTS_END);
+  clearPdmEvent(&pdm_->EVENTS_STOPPED);
+  clearPdmEvent(&pdm_->EVENTS_DMA.BUSERROR);
+  __DSB();
 
   pdm_->SAMPLE.PTR = static_cast<uint32_t>(ptr);
-  pdm_->SAMPLE.MAXCNT = bytes;
+  pdm_->SAMPLE.MAXCNT = dmaByteCount;
+  __DSB();
 
+  // LM20 STOP resets internal PDM clock/filter latches while their register
+  // image remains readable. Reapply the stored configuration before ENABLE.
+  applyConfiguration();
+  pdm_->ENABLE = PDM_ENABLE_ENABLE_Enabled;
+  __DSB();
+  (void)pdm_->ENABLE;
   pdm_->TASKS_START = PDM_TASKS_START_TASKS_START_Trigger;
-  if (!waitForNonZero(&pdm_->EVENTS_STARTED, spinLimit)) {
+  if (!waitForPdmEvent(&pdm_->EVENTS_STARTED, &pdm_->EVENTS_DMA.BUSERROR,
+                       captureTimeoutUs)) {
+    (void)stopAndReleaseDma(100000UL);
+    Cache::invalidateForDma(samples, dmaByteCount);
     return false;
   }
 
-  bool endSeen = false;
-  uint32_t spins = spinLimit;
-  while (spins-- > 0U) {
-    if (pdm_->EVENTS_END != 0U) {
-      endSeen = true;
-      break;
-    }
-    if (pdm_->EVENTS_DMA.BUSERROR != 0U) {
-      break;
-    }
-  }
+  // SAMPLE is double-buffered. Queue an owned drain buffer as soon as the
+  // caller's buffer is latched so END cannot advance into a zero-length or
+  // stale bank before the polling code issues STOP.
+  clearPdmEvent(&pdm_->EVENTS_STARTED);
+  pdm_->SAMPLE.PTR =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(drainSamples_));
+  pdm_->SAMPLE.MAXCNT =
+      static_cast<uint32_t>(sizeof(drainSamples_));
+  __DSB();
 
-  pdm_->TASKS_STOP = PDM_TASKS_STOP_TASKS_STOP_Trigger;
-  const bool stopped = waitForNonZero(&pdm_->EVENTS_STOPPED, 300000UL);
+  const bool endSeen =
+      waitForPdmEvent(&pdm_->EVENTS_END, &pdm_->EVENTS_DMA.BUSERROR,
+                      captureTimeoutUs);
+
   const bool busError = (pdm_->EVENTS_DMA.BUSERROR != 0U);
-  pdm_->EVENTS_DMA.BUSERROR = 0U;
+  const bool stoppedBeforeDeadline = stopAndReleaseDma(100000UL);
+  // stopAndReleaseDma never returns before STOPPED, including its late-fence
+  // failure path. Discard any CPU cache lines populated before/during RX so
+  // callers also observe coherent partial data after a false return.
+  Cache::invalidateForDma(samples, dmaByteCount);
 
-  return endSeen && stopped && !busError;
+  return endSeen && stoppedBeforeDeadline && !busError;
 }

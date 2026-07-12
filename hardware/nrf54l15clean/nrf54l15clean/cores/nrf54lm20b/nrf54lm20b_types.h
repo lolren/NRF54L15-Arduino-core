@@ -4047,79 +4047,35 @@ typedef struct {
   #define CRACENCORE_RNGCONTROL_CONTROL_CONDBYPASS_BYPASS (0x1UL) /*!< the conditioning function is bypassed (to observe entropy
                                                                        source directly).*/
 
-/* INTENREP @Bit 4 : Interrupt enable for Repetition Count Test failure. */
+/* INTENREP @Bit 4 : Enable interrupt if any of the health test fails. */
   #define CRACENCORE_RNGCONTROL_CONTROL_INTENREP_Pos (4UL) /*!< Position of INTENREP field.                                    */
   #define CRACENCORE_RNGCONTROL_CONTROL_INTENREP_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_INTENREP_Pos) /*!< Bit mask of
                                                                             INTENREP field.*/
 
-/* INTENPROP @Bit 5 : Interrupt enable for Adaptive Proportion Test failure (1024-sample window). */
-  #define CRACENCORE_RNGCONTROL_CONTROL_INTENPROP_Pos (5UL) /*!< Position of INTENPROP field.                                  */
-  #define CRACENCORE_RNGCONTROL_CONTROL_INTENPROP_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_INTENPROP_Pos) /*!< Bit mask of
-                                                                            INTENPROP field.*/
-
-/* INTENFULL @Bit 7 : Interrupt enable for FIFO full. */
+/* INTENFULL @Bit 7 : Enable interrupt if FIFO is full. */
   #define CRACENCORE_RNGCONTROL_CONTROL_INTENFULL_Pos (7UL) /*!< Position of INTENFULL field.                                  */
   #define CRACENCORE_RNGCONTROL_CONTROL_INTENFULL_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_INTENFULL_Pos) /*!< Bit mask of
                                                                             INTENFULL field.*/
 
-/* SOFTRST @Bit 8 : Software reset: */
+/* SOFTRST @Bit 8 : Datapath content flush and control FSM */
   #define CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Pos (8UL) /*!< Position of SOFTRST field.                                      */
   #define CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Pos) /*!< Bit mask of
                                                                             SOFTRST field.*/
-  #define CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Min (0x0UL) /*!< Min enumerator value of SOFTRST field.                        */
-  #define CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Max (0x1UL) /*!< Max enumerator value of SOFTRST field.                        */
-  #define CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_NORMAL (0x0UL) /*!< Normal mode.                                               */
-  #define CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_CTEST (0x1UL) /*!< The continuous test, the conditioning function and the FIFO
-                                                                   are reset.*/
-
-/* INTENPRE @Bit 9 : Interrupt enable for AIS31 preliminary noise alarm. */
-  #define CRACENCORE_RNGCONTROL_CONTROL_INTENPRE_Pos (9UL) /*!< Position of INTENPRE field.                                    */
-  #define CRACENCORE_RNGCONTROL_CONTROL_INTENPRE_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_INTENPRE_Pos) /*!< Bit mask of
-                                                                            INTENPRE field.*/
-
-/* INTENALM @Bit 10 : Interrupt enable for AIS31 noise alarm. */
-  #define CRACENCORE_RNGCONTROL_CONTROL_INTENALM_Pos (10UL) /*!< Position of INTENALM field.                                   */
-  #define CRACENCORE_RNGCONTROL_CONTROL_INTENALM_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_INTENALM_Pos) /*!< Bit mask of
-                                                                            INTENALM field.*/
 
 /* FORCEACTIVEROS @Bit 11 : Force oscillators to run when FIFO is full. */
   #define CRACENCORE_RNGCONTROL_CONTROL_FORCEACTIVEROS_Pos (11UL) /*!< Position of FORCEACTIVEROS field.                       */
   #define CRACENCORE_RNGCONTROL_CONTROL_FORCEACTIVEROS_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_FORCEACTIVEROS_Pos) /*!< Bit
                                                                             mask of FORCEACTIVEROS field.*/
 
-/* HEALTHTESTBYPASS @Bit 12 : Bypass NIST tests such that the results of the start-up and online test do not affect the FSM
-                              state. */
+/* IGNOREHEALTHTESTSFAILFORFSM @Bit 12 : Results of the health tests during start-up and online test do not affect the control
+                                         FSM state. */
 
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTBYPASS_Pos (12UL) /*!< Position of HEALTHTESTBYPASS field.                   */
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTBYPASS_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTBYPASS_Pos) /*!<
-                                                                            Bit mask of HEALTHTESTBYPASS field.*/
+  #define CRACENCORE_RNGCONTROL_CONTROL_IGNOREHEALTHTESTSFAILFORFSM_Pos (12UL) /*!< Position of IGNOREHEALTHTESTSFAILFORFSM
+                                                                            field.*/
+  #define CRACENCORE_RNGCONTROL_CONTROL_IGNOREHEALTHTESTSFAILFORFSM_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_IGNOREHEALTHTESTSFAILFORFSM_Pos)
+                                                                            /*!< Bit mask of IGNOREHEALTHTESTSFAILFORFSM field.*/
 
-/* AIS31BYPASS @Bit 13 : Bypass AIS31 tests such that the results of the start-up and online tests do not affect the FSM state.
-                         */
-
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31BYPASS_Pos (13UL) /*!< Position of AIS31BYPASS field.                             */
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31BYPASS_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_AIS31BYPASS_Pos) /*!< Bit mask
-                                                                            of AIS31BYPASS field.*/
-
-/* HEALTHTESTSEL @Bit 14 : Select input to health test module: */
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_Pos (14UL) /*!< Position of HEALTHTESTSEL field.                         */
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_Pos) /*!< Bit
-                                                                            mask of HEALTHTESTSEL field.*/
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_Min (0x0UL) /*!< Min enumerator value of HEALTHTESTSEL field.            */
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_Max (0x1UL) /*!< Max enumerator value of HEALTHTESTSEL field.            */
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_BEFORE (0x0UL) /*!< Before conditioning.                                 */
-  #define CRACENCORE_RNGCONTROL_CONTROL_HEALTHTESTSEL_AFTER (0x1UL) /*!< After conditioning.                                   */
-
-/* AIS31TESTSEL @Bit 15 : Select input to the AIS31 test module: */
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_Pos (15UL) /*!< Position of AIS31TESTSEL field.                           */
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_Pos) /*!< Bit mask
-                                                                            of AIS31TESTSEL field.*/
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_Min (0x0UL) /*!< Min enumerator value of AIS31TESTSEL field.              */
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_Max (0x1UL) /*!< Max enumerator value of AIS31TESTSEL field.              */
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_BEFORE (0x0UL) /*!< Before conditioning.                                  */
-  #define CRACENCORE_RNGCONTROL_CONTROL_AIS31TESTSEL_AFTER (0x1UL) /*!< After conditioning.                                    */
-
-/* NB128BITBLOCKS @Bits 16..19 : Number of 128 bit blocks used in AES-CBCMAC post-processing. */
+/* NB128BITBLOCKS @Bits 16..19 : Number of 128 bit blocks used in conditioning (AES-CBC-MAC) post-processing. */
   #define CRACENCORE_RNGCONTROL_CONTROL_NB128BITBLOCKS_Pos (16UL) /*!< Position of NB128BITBLOCKS field.                       */
   #define CRACENCORE_RNGCONTROL_CONTROL_NB128BITBLOCKS_Msk (0xFUL << CRACENCORE_RNGCONTROL_CONTROL_NB128BITBLOCKS_Pos) /*!< Bit
                                                                             mask of NB128BITBLOCKS field.*/
@@ -4128,6 +4084,37 @@ typedef struct {
   #define CRACENCORE_RNGCONTROL_CONTROL_FIFOWRITESTARTUP_Pos (20UL) /*!< Position of FIFOWRITESTARTUP field.                   */
   #define CRACENCORE_RNGCONTROL_CONTROL_FIFOWRITESTARTUP_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_FIFOWRITESTARTUP_Pos) /*!<
                                                                             Bit mask of FIFOWRITESTARTUP field.*/
+
+/* DISREPETTESTS @Bit 21 : All repetition tests (each share) are disabled via this single bit. */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISREPETTESTS_Pos (21UL) /*!< Position of DISREPETTESTS field.                         */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISREPETTESTS_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_DISREPETTESTS_Pos) /*!< Bit
+                                                                            mask of DISREPETTESTS field.*/
+
+/* DISPROPTESTS @Bit 22 : All proportion tests (each share) are disabled via this single bit. */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISPROPTESTS_Pos (22UL) /*!< Position of DISPROPTESTS field.                           */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISPROPTESTS_Msk (0x1UL << CRACENCORE_RNGCONTROL_CONTROL_DISPROPTESTS_Pos) /*!< Bit mask
+                                                                            of DISPROPTESTS field.*/
+
+/* DISAUTOCORRTESTS @Bits 23..24 : Disable specific delay(s) check in auto-correlation test - same RO: */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISAUTOCORRTESTS_Pos (23UL) /*!< Position of DISAUTOCORRTESTS field.                   */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISAUTOCORRTESTS_Msk (0x3UL << CRACENCORE_RNGCONTROL_CONTROL_DISAUTOCORRTESTS_Pos) /*!<
+                                                                            Bit mask of DISAUTOCORRTESTS field.*/
+
+/* DISCORRTESTS @Bits 27..29 : Disable specific delay(s) check in correlation test - different ROs: */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISCORRTESTS_Pos (27UL) /*!< Position of DISCORRTESTS field.                           */
+  #define CRACENCORE_RNGCONTROL_CONTROL_DISCORRTESTS_Msk (0x7UL << CRACENCORE_RNGCONTROL_CONTROL_DISCORRTESTS_Pos) /*!< Bit mask
+                                                                            of DISCORRTESTS field.*/
+
+/* BLENDINGMETHOD @Bits 30..31 : Select blending method */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_Pos (30UL) /*!< Position of BLENDINGMETHOD field.                       */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_Msk (0x3UL << CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_Pos) /*!< Bit
+                                                                            mask of BLENDINGMETHOD field.*/
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_Min (0x0UL) /*!< Min enumerator value of BLENDINGMETHOD field.          */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_Max (0x3UL) /*!< Max enumerator value of BLENDINGMETHOD field.          */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_CONCATENATION (0x0UL) /*!< Concatenation                                */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_XORLEVEL1 (0x1UL) /*!< XOR level 1                                      */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_XORLEVEL2 (0x2UL) /*!< XOR level 2                                      */
+  #define CRACENCORE_RNGCONTROL_CONTROL_BLENDINGMETHOD_VONNEUMANN (0x3UL) /*!< VON-NEUMANN debiasing                           */
 
 
 /* CRACENCORE_RNGCONTROL_FIFOLEVEL: FIFO level register. */
@@ -20989,8 +20976,8 @@ typedef struct {
   #define PDM_MODE_EDGE_Msk (0x1UL << PDM_MODE_EDGE_Pos) /*!< Bit mask of EDGE field.                                          */
   #define PDM_MODE_EDGE_Min (0x0UL)                  /*!< Min enumerator value of EDGE field.                                  */
   #define PDM_MODE_EDGE_Max (0x1UL)                  /*!< Max enumerator value of EDGE field.                                  */
-  #define PDM_MODE_EDGE_LeftFalling (0x1UL)          /*!< Left (or mono) is sampled on falling edge of PDM_CLK                 */
-  #define PDM_MODE_EDGE_LeftRising (0x0UL)           /*!< Left (or mono) is sampled on rising edge of PDM_CLK                  */
+  #define PDM_MODE_EDGE_LeftFalling (0x0UL)          /*!< Left (or mono) is sampled on falling edge of PDM_CLK                 */
+  #define PDM_MODE_EDGE_LeftRising (0x1UL)           /*!< Left (or mono) is sampled on rising edge of PDM_CLK                  */
 
 
 /* PDM_GAINL: Left output gain adjustment */
@@ -21032,14 +21019,14 @@ typedef struct {
   #define PDM_RATIO_RATIO_Msk (0x7UL << PDM_RATIO_RATIO_Pos) /*!< Bit mask of RATIO field.                                     */
   #define PDM_RATIO_RATIO_Min (0x0UL)                /*!< Min enumerator value of RATIO field.                                 */
   #define PDM_RATIO_RATIO_Max (0x7UL)                /*!< Max enumerator value of RATIO field.                                 */
-  #define PDM_RATIO_RATIO_Ratio32 (0x0UL)            /*!< Ratio of 32                                                          */
-  #define PDM_RATIO_RATIO_Ratio48 (0x1UL)            /*!< Ratio of 48                                                          */
-  #define PDM_RATIO_RATIO_Ratio50 (0x2UL)            /*!< Ratio of 50                                                          */
-  #define PDM_RATIO_RATIO_Ratio64 (0x3UL)            /*!< Ratio of 64                                                          */
-  #define PDM_RATIO_RATIO_Ratio80 (0x4UL)            /*!< Ratio of 80                                                          */
-  #define PDM_RATIO_RATIO_Ratio96 (0x5UL)            /*!< Ratio of 96                                                          */
-  #define PDM_RATIO_RATIO_Ratio100 (0x6UL)           /*!< Ratio of 100                                                         */
-  #define PDM_RATIO_RATIO_Ratio128 (0x7UL)           /*!< Ratio of 128                                                         */
+  #define PDM_RATIO_RATIO_Ratio48 (0x0UL)            /*!< Ratio of 48                                                          */
+  #define PDM_RATIO_RATIO_Ratio50 (0x1UL)            /*!< Ratio of 50                                                          */
+  #define PDM_RATIO_RATIO_Ratio64 (0x2UL)            /*!< Ratio of 64                                                          */
+  #define PDM_RATIO_RATIO_Ratio80 (0x3UL)            /*!< Ratio of 80                                                          */
+  #define PDM_RATIO_RATIO_Ratio96 (0x4UL)            /*!< Ratio of 96                                                          */
+  #define PDM_RATIO_RATIO_Ratio150 (0x5UL)           /*!< Ratio of 150                                                         */
+  #define PDM_RATIO_RATIO_Ratio192 (0x6UL)           /*!< Ratio of 192                                                         */
+  #define PDM_RATIO_RATIO_Custom (0x7UL)             /*!< Custom ratio configured through FILTER.CTRL                          */
 
 
 /* PDM_PRESCALER: The prescaler is used to set the PDM frequency */

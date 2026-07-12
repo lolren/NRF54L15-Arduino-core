@@ -17,7 +17,6 @@
 uint8_t connection_count = 0;
 
 // BLE Service
-BLEDfu  bledfu;  // OTA DFU service
 BLEDis  bledis;  // device information
 BLEUart bleuart; // uart over ble
 
@@ -41,9 +40,6 @@ void setup()
 
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
-
-  // To be consistent OTA DFU should be added first if it exists
-  bledfu.begin();
 
   // Configure and Start Device Information Service
   bledis.setManufacturer("Adafruit Industries");

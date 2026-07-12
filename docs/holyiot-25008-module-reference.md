@@ -112,12 +112,6 @@ That means:
 
 Dedicated examples for this board now appear in:
 
-- `File -> Examples -> HOLYIOT-25008 Board Examples -> Holyiot25008RgbButton`
-- `File -> Examples -> HOLYIOT-25008 Board Examples -> Holyiot25008Lis2dh12Spi`
-- `File -> Examples -> HOLYIOT-25008 Board Examples -> Holyiot25008UartPadsAsGpio`
-
-Legacy board-package copies also remain under:
-
-- `File -> Examples -> Boards -> Holyiot25008RgbButton`
-- `File -> Examples -> Boards -> Holyiot25008Lis2dh12Spi`
-- `File -> Examples -> Boards -> Holyiot25008UartPadsAsGpio`
+- `File -> Examples -> nRF54 Board Examples -> HOLYIOT-25008 -> Holyiot25008RgbButton`
+- `File -> Examples -> nRF54 Board Examples -> HOLYIOT-25008 -> Holyiot25008Lis2dh12Spi`
+- `File -> Examples -> nRF54 Board Examples -> HOLYIOT-25008 -> Holyiot25008UartPadsAsGpio`

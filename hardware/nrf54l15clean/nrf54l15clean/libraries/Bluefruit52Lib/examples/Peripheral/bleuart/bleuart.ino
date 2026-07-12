@@ -1,6 +1,5 @@
 #include <bluefruit.h>
 
-BLEDfu bledfu;
 BLEDis bledis;
 BLEUart bleuart;
 BLEBas blebas;
@@ -47,7 +46,6 @@ void setup() {
   Bluefruit.Periph.setConnectCallback(connectCallback);
   Bluefruit.Periph.setDisconnectCallback(disconnectCallback);
 
-  bledfu.begin();
   bledis.setManufacturer("Seeed Studio");
   bledis.setModel("XIAO nRF54L15");
   bledis.setSoftwareRev("0.3.6");

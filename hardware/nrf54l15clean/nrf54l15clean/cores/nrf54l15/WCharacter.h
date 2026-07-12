@@ -1,7 +1,11 @@
 /*
- * Arduino WCharacter - Character classification and conversion
+ * WCharacter.h - character utility functions for Wiring and Arduino.
+ * Copyright (c) 2010 Hernando Barragan. All rights reserved.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
- * Licensed under the Apache License 2.0
+ * Modified for the nRF54 Arduino Core in 2026: adapted the inline helpers to
+ * the local Arduino types and compiler. See
+ * ../../LICENSES/LGPL-2.1-or-later.txt.
  */
 
 #ifndef WCharacter_h

@@ -12,7 +12,7 @@ def main() -> int:
     if not site_dir.is_dir():
         print(
             f"pyocd runtime not installed under {site_dir}. "
-            "Run setup/install_linux_host_deps.sh --python first.",
+            "Run the platform host setup helper first.",
             file=sys.stderr,
         )
         return 2

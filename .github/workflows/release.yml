@@ -8,20 +8,24 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.10"
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
 
       - name: Install compiler dependency
         run: |
@@ -33,6 +37,9 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          NOTES="docs/RELEASE_${VERSION}.md"
+          test -f "${NOTES}"
+          echo "notes=${NOTES}" >> "${GITHUB_OUTPUT}"
           if [[ "${VERSION}" == *-* ]]; then
             echo "prerelease=true" >> "${GITHUB_OUTPUT}"
           else
@@ -78,6 +85,16 @@ jobs:
           rm -rf dist
           mkdir -p dist
 
+      - name: Run release contract suites
+        run: |
+          python3 ./scripts/test_core_io_regressions.py
+          python3 ./scripts/test_bluefruit_client_contracts.py
+          python3 ./scripts/test_upload_helper.py
+          python3 ./scripts/test_release_versions.py
+          python3 ./scripts/test_lm20a_pdm_contract.py
+          python3 ./scripts/test_cracen_ikg_contract.py
+          python3 ./scripts/test_lm20a_cracen_rng_header.py
+
       - name: Build release artifacts
         run: |
           if [ -d "hardware/nrf54l15clean/nrf54l15clean" ]; then
@@ -90,6 +107,7 @@ jobs:
             --source-version "${SOURCE_VERSION}" \
             --repo-url "https://github.com/${GITHUB_REPOSITORY}" \
             --release-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v{version}" \
+            --host-tools-release-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/host-tools-v{host_tool_version}" \
             --reuse-existing-hosttools
 
       - name: Verify release build did not rewrite tracked version files
@@ -141,34 +159,142 @@ jobs:
           diff -u package_nrf54l15clean_stable_index.json dist/package_nrf54l15clean_stable_index.json
           diff -u package_nrf54l15clean_archive_index.json dist/package_nrf54l15clean_archive_index.json
 
-      - name: Remove stale assets from existing tag release
+      - name: Verify immutable host-tools release is public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          HOST_TAG="$(python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          from urllib.parse import urlsplit
+
+          index = json.loads(
+              Path("dist/package_nrf54l15clean_archive_index.json").read_text()
+          )
+          package = index["packages"][0]
+          platform = next(
+              item for item in package["platforms"] if item["version"] == os.environ["VERSION"]
+          )
+          dependency = next(
+              item
+              for item in platform["toolsDependencies"]
+              if item["name"] == "nrf54l15hosttools"
+          )
+          tool = next(
+              item
+              for item in package["tools"]
+              if item["name"] == dependency["name"]
+              and item["version"] == dependency["version"]
+          )
+          tags = {
+              PurePosixPath(urlsplit(system["url"]).path).parts[-2]
+              for system in tool["systems"]
+          }
+          if len(tags) != 1:
+              raise SystemExit(f"host tool URLs do not share one release tag: {tags}")
+          print(tags.pop())
+          PY
+          )"
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${HOST_TAG}" \
+            --jq '.immutable')" = "true"
+          python3 ./scripts/verify_public_release.py \
+            --index dist/package_nrf54l15clean_archive_index.json \
+            --version "${{ steps.vars.outputs.version }}" \
+            --include-tools \
+            --tools-only \
+            --retries 3 \
+            --retry-delay 5
+
+      - name: Detect an existing immutable release
+        id: existing_release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          VERSION="${{ steps.vars.outputs.version }}"
-          if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            exit 0
+          if RESPONSE="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>&1)"; then
+            printf '%s\n' "${RESPONSE}" >existing-release.json
+            python3 - <<'PY'
+          import json
+
+          release = json.load(open("existing-release.json", encoding="utf-8"))
+          if not release.get("immutable", False):
+              raise SystemExit("existing release is mutable; refusing to replace its assets")
+          PY
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          elif [[ "${RESPONSE}" == *"HTTP 404"* ]]; then
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          else
+            printf '%s\n' "${RESPONSE}" >&2
+            exit 1
           fi
-          RELEASE_ID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.id')"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate --jq '.[] | [.id, .name] | @tsv' | \
-          while IFS=$'\t' read -r ASSET_ID ASSET_NAME; do
-            case "${ASSET_NAME}" in
-              "nrf54l15clean-${VERSION}-"*.tar.bz2|package_nrf54l15clean_index.json|package_nrf54l15clean_stable_index.json|package_nrf54l15clean_archive_index.json|release-manifest.json)
-                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}"
-                ;;
-            esac
-          done
 
       - name: Publish GitHub release assets
-        uses: softprops/action-gh-release@v2
+        if: steps.existing_release.outputs.exists == 'false'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          overwrite_files: true
+          draft: true
           prerelease: ${{ steps.vars.outputs.prerelease }}
-          make_latest: ${{ steps.vars.outputs.prerelease == 'false' }}
+          make_latest: false
           files: |
             dist/*
+          body_path: ${{ steps.vars.outputs.notes }}
           generate_release_notes: true
+
+      - name: Verify draft release assets before publication
+        if: steps.existing_release.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERIFY_DIR="$(mktemp -d)"
+          trap 'rm -rf "${VERIFY_DIR}"' EXIT
+          gh release download "${GITHUB_REF_NAME}" --dir "${VERIFY_DIR}"
+          python3 - "${VERIFY_DIR}" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          expected_dir = Path("dist")
+          actual_dir = Path(sys.argv[1])
+          expected = {path.name: path for path in expected_dir.iterdir() if path.is_file()}
+          actual = {path.name: path for path in actual_dir.iterdir() if path.is_file()}
+          if expected.keys() != actual.keys():
+              raise SystemExit(
+                  "draft asset set mismatch: "
+                  f"missing={sorted(expected.keys() - actual.keys())}, "
+                  f"extra={sorted(actual.keys() - expected.keys())}"
+              )
+          for name, local_path in expected.items():
+              remote_path = actual[name]
+              local = local_path.read_bytes()
+              remote = remote_path.read_bytes()
+              if len(local) != len(remote):
+                  raise SystemExit(f"draft asset size mismatch: {name}")
+              if hashlib.sha256(local).digest() != hashlib.sha256(remote).digest():
+                  raise SystemExit(f"draft asset SHA-256 mismatch: {name}")
+              print(f"draft asset verified: {name}")
+          PY
+
+      - name: Publish verified draft release
+        if: steps.existing_release.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ steps.vars.outputs.prerelease }}" == "true" ]]; then
+            gh release edit "${GITHUB_REF_NAME}" --draft=false --prerelease
+          else
+            gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
+          fi
+
+      - name: Verify release is immutable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+            --jq '.immutable')" = "true"
 
       - name: Verify public release bytes
         run: |

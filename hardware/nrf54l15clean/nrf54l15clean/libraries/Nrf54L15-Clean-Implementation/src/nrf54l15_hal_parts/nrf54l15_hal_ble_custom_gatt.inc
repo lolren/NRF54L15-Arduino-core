@@ -197,7 +197,8 @@ BleRadio::findCustomCharacteristicByReportReferenceHandle(
 
 bool BleRadio::customGattPermissionSatisfied(uint8_t permission,
                                              uint8_t defaultDenyError,
-                                             uint8_t* outAttError) const {
+                                             uint8_t* outAttError,
+                                             bool signedWrite) const {
   if (outAttError != nullptr) {
     *outAttError = defaultDenyError;
   }
@@ -216,7 +217,6 @@ bool BleRadio::customGattPermissionSatisfied(uint8_t permission,
       }
       return false;
     case kBleGattPermEncWithMitm:
-    case kBleGattPermEncWithLescMitm:
       if (!isConnectionEncrypted()) {
         if (outAttError != nullptr) {
           *outAttError = kAttErrInsufficientEncryption;
@@ -230,7 +230,24 @@ bool BleRadio::customGattPermissionSatisfied(uint8_t permission,
         *outAttError = kAttErrInsufficientAuthentication;
       }
       return false;
+    case kBleGattPermEncWithLescMitm:
+      if (!isConnectionEncrypted()) {
+        if (outAttError != nullptr) {
+          *outAttError = kAttErrInsufficientEncryption;
+        }
+        return false;
+      }
+      if (isConnectionAuthenticated() && connectionEncSecureConnections_) {
+        return true;
+      }
+      if (outAttError != nullptr) {
+        *outAttError = kAttErrInsufficientAuthentication;
+      }
+      return false;
     case kBleGattPermSignedNoMitm:
+      if (signedWrite) {
+        return true;
+      }
       if (isConnectionEncrypted()) {
         return true;
       }
@@ -239,6 +256,15 @@ bool BleRadio::customGattPermissionSatisfied(uint8_t permission,
       }
       return false;
     case kBleGattPermSignedWithMitm:
+      if (signedWrite) {
+        if (connectionEncAuthenticated_) {
+          return true;
+        }
+        if (outAttError != nullptr) {
+          *outAttError = kAttErrInsufficientAuthentication;
+        }
+        return false;
+      }
       if (!isConnectionEncrypted()) {
         if (outAttError != nullptr) {
           *outAttError = kAttErrInsufficientAuthentication;
@@ -253,7 +279,7 @@ bool BleRadio::customGattPermissionSatisfied(uint8_t permission,
       }
       return false;
     default:
-      return true;
+      return false;
   }
 }
 
@@ -309,9 +335,21 @@ bool BleRadio::customGattReadPermissionSatisfied(
                                        kAttErrReadNotPermitted, outAttError);
 }
 
+bool BleRadio::customGattHvxPermissionSatisfied(
+    const BleCustomCharacteristicState* characteristic) const {
+  if (characteristic == nullptr) {
+    return false;
+  }
+  // NO_ACCESS is valid for notify-only values: it disables ATT reads but not
+  // server-initiated Handle Value notifications/indications. Positive
+  // security modes still gate HVX on the live link state.
+  return characteristic->readPermission == kBleGattPermNoAccess ||
+         customGattReadPermissionSatisfied(characteristic, nullptr);
+}
+
 bool BleRadio::customGattWritePermissionSatisfied(
     const BleCustomCharacteristicState* characteristic,
-    uint8_t* outAttError) const {
+    uint8_t* outAttError, bool signedWrite) const {
   if (characteristic == nullptr) {
     if (outAttError != nullptr) {
       *outAttError = kAttErrWriteNotPermitted;
@@ -319,7 +357,8 @@ bool BleRadio::customGattWritePermissionSatisfied(
     return false;
   }
   return customGattPermissionSatisfied(characteristic->writePermission,
-                                       kAttErrWriteNotPermitted, outAttError);
+                                       kAttErrWriteNotPermitted, outAttError,
+                                       signedWrite);
 }
 
 bool BleRadio::addCustomGattService(uint16_t uuid16, uint16_t* outServiceHandle) {
@@ -487,7 +526,8 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
                                                  BleCustomGattDescriptorHandles* outDescriptorHandles) {
   constexpr uint8_t kAllowedProps = static_cast<uint8_t>(
       kBleGattPropRead | kBleGattPropWriteNoRsp | kBleGattPropWrite |
-      kBleGattPropNotify | kBleGattPropIndicate);
+      kBleGattPropNotify | kBleGattPropIndicate |
+      kBleGattPropAuthenticatedSignedWrites);
   if (connected_ || uuid == nullptr ||
       customGattCharacteristicCount_ >= kCustomGattMaxCharacteristics ||
       (properties == 0U) || ((properties & ~kAllowedProps) != 0U) ||
@@ -497,7 +537,15 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
   if (uuidSize == kBleUuid16Size && readLe16(uuid) == 0U) {
     return false;
   }
-  if (initialValueLength > kCustomGattMaxValueLength ||
+  const uint16_t maxValueLength =
+      (descriptors != nullptr) ? descriptors->maxValueLength
+                               : kCustomGattMaxValueLength;
+  const bool fixedValueLength =
+      (descriptors != nullptr) && descriptors->fixedValueLength;
+  if (maxValueLength > kCustomGattMaxValueLength ||
+      initialValueLength > maxValueLength ||
+      (fixedValueLength && initialValueLength != 0U &&
+       initialValueLength != maxValueLength) ||
       (initialValueLength > 0U && initialValue == nullptr)) {
     return false;
   }
@@ -593,7 +641,11 @@ bool BleRadio::addCustomGattCharacteristicCommon(uint16_t serviceHandle,
     memcpy(characteristic.reportReference, descriptors->reportReference,
            kCustomGattReportReferenceLength);
   }
-  characteristic.valueLength = initialValueLength;
+  characteristic.maxValueLength = maxValueLength;
+  characteristic.fixedValueLength = fixedValueLength;
+  characteristic.valueLength =
+      (fixedValueLength && initialValueLength == 0U) ? maxValueLength
+                                                    : initialValueLength;
   if (initialValueLength > 0U) {
     memcpy(characteristic.value, initialValue, initialValueLength);
   }
@@ -631,6 +683,13 @@ bool BleRadio::setCustomGattCharacteristicValue(uint16_t valueHandle,
   BleCustomCharacteristicState* characteristic =
       findCustomCharacteristicByValueHandle(valueHandle);
   if (characteristic == nullptr) {
+    bleExitCritical(irqState);
+    return false;
+  }
+  const bool lengthAllowed = characteristic->fixedValueLength
+                                 ? (valueLength == characteristic->maxValueLength)
+                                 : (valueLength <= characteristic->maxValueLength);
+  if (!lengthAllowed) {
     bleExitCritical(irqState);
     return false;
   }
@@ -791,6 +850,12 @@ bool BleRadio::notifyCustomGattCharacteristic(uint16_t valueHandle, bool indicat
     bleExitCritical(irqState);
     return false;
   }
+  if (!customGattHvxPermissionSatisfied(characteristic)) {
+    emitBleTrace(indicate ? "ATT_IND_HOLD_PERMISSION"
+                          : "ATT_NOTIFY_HOLD_PERMISSION");
+    bleExitCritical(irqState);
+    return false;
+  }
 
   const bool notifyEnabled =
       ((characteristic->properties & kBleGattPropNotify) != 0U) &&
@@ -869,7 +934,10 @@ bool BleRadio::notifyCustomGattCharacteristic(uint16_t valueHandle, bool indicat
       const bool payloadFitsCurrentLink =
           (currentAttMtu() >= requiredAttMtu) &&
           (currentTxDataPduPayloadLength() >= requiredDataLength);
+      const bool readPermissionSatisfied =
+          customGattHvxPermissionSatisfied(&pendingCharacteristic);
       if (pendingModeEnabled &&
+          readPermissionSatisfied &&
           (!queuedNow.indication || indicationFlowReady) &&
           payloadFitsCurrentLink) {
         writeLe16(&connectionPendingTxPayload_[0],
@@ -1385,17 +1453,13 @@ bool BleRadio::queueCentralConnParamUpdateInd() {
 
   static constexpr uint8_t kConnUpdateWinSize = 1U;
   static constexpr uint16_t kConnUpdateWinOffset = 0U;
-  static constexpr uint16_t kConnUpdateInstantDeltaEvents = 6U;
-  const uint16_t instant =
-      static_cast<uint16_t>(connectionEventCounter_ + kConnUpdateInstantDeltaEvents);
-
   connectionPendingTxPayload_[0] = kBleLlCtrlConnectionUpdateInd;
   connectionPendingTxPayload_[1] = kConnUpdateWinSize;
   writeLe16(&connectionPendingTxPayload_[2], kConnUpdateWinOffset);
   writeLe16(&connectionPendingTxPayload_[4], interval);
   writeLe16(&connectionPendingTxPayload_[6], latency);
   writeLe16(&connectionPendingTxPayload_[8], timeout);
-  writeLe16(&connectionPendingTxPayload_[10], instant);
+  writeLe16(&connectionPendingTxPayload_[10], 0U);
   connectionPendingTxLlid_ = kBlePduLlControl;
   connectionPendingTxLength_ = 12U;
   connectionPendingTxValid_ = true;
@@ -1405,8 +1469,8 @@ bool BleRadio::queueCentralConnParamUpdateInd() {
   connectionPendingIntervalUnits_ = interval;
   connectionPendingLatency_ = latency;
   connectionPendingTimeoutUnits_ = timeout;
-  connectionUpdateInstant_ = instant;
-  connectionUpdatePending_ = true;
+  connectionUpdateInstant_ = 0U;
+  connectionUpdatePending_ = false;
   connectionCentralConnParamIndPending_ = false;
   emitBleTrace("CONN_PARAM_IND_TX");
   return true;
@@ -1613,11 +1677,8 @@ bool BleRadio::applyPendingConnectionPhyUpdateAtInstant(uint16_t currentEventCou
     connectionCurrentTxPhy_ = txPhy;
     connectionCurrentRxPhy_ = rxPhy;
     if (changed) {
-      connectionMaxTxPayloadLength_ = kBleDefaultDataPduMaxPayload;
-      connectionMaxRxPayloadLength_ = kBleDefaultDataPduMaxPayload;
-      connectionDataLengthUpdatePending_ = true;
-      connectionDataLengthUpdateInFlight_ = false;
-      connectionDataLengthUpdateComplete_ = false;
+      // PHY updates preserve the negotiated LL data-length octets. Resetting
+      // DLE here can make both peers initiate LL_LENGTH_REQ simultaneously.
       emitBleTrace((txPhy == kBlePhyCoded) ? "LL_PHY_CODED_APPLIED"
                    : ((txPhy == kBlePhy2M) ? "LL_PHY_2M_APPLIED"
                                            : "LL_PHY_1M_APPLIED"));
@@ -1763,7 +1824,8 @@ bool BleRadio::applyCustomGattCharacteristicValueWrite(uint16_t handle,
                                                        uint16_t valueLength,
                                                        bool withResponse,
                                                        uint8_t* outErrorCode,
-                                                       bool allowDeferredCallback) {
+                                                       bool allowDeferredCallback,
+                                                       bool signedWrite) {
   if (outErrorCode != nullptr) {
     *outErrorCode = kAttErrWriteNotPermitted;
   }
@@ -1771,8 +1833,10 @@ bool BleRadio::applyCustomGattCharacteristicValueWrite(uint16_t handle,
   BleCustomCharacteristicState* valueTarget =
       findCustomCharacteristicByValueHandle(handle);
   if (valueTarget != nullptr) {
-    if ((valueLength > kCustomGattMaxValueLength) ||
-        (valueLength > 0U && value == nullptr)) {
+    const bool lengthAllowed = valueTarget->fixedValueLength
+                                   ? (valueLength == valueTarget->maxValueLength)
+                                   : (valueLength <= valueTarget->maxValueLength);
+    if (!lengthAllowed || (valueLength > 0U && value == nullptr)) {
       if (outErrorCode != nullptr) {
         *outErrorCode = kAttErrInvalidAttrValueLen;
       }
@@ -1782,14 +1846,20 @@ bool BleRadio::applyCustomGattCharacteristicValueWrite(uint16_t handle,
     const bool allowWriteCmd =
         ((valueTarget->properties &
           (kBleGattPropWriteNoRsp | kBleGattPropWrite)) != 0U);
-    if ((withResponse && !allowWriteReq) || (!withResponse && !allowWriteCmd)) {
+    const bool allowSignedWrite =
+        ((valueTarget->properties &
+          kBleGattPropAuthenticatedSignedWrites) != 0U);
+    if ((signedWrite && !allowSignedWrite) ||
+        (!signedWrite && withResponse && !allowWriteReq) ||
+        (!signedWrite && !withResponse && !allowWriteCmd)) {
       if (outErrorCode != nullptr) {
         *outErrorCode = kAttErrWriteNotPermitted;
       }
       return false;
     }
     uint8_t permissionError = kAttErrWriteNotPermitted;
-    if (!customGattWritePermissionSatisfied(valueTarget, &permissionError)) {
+    if (!customGattWritePermissionSatisfied(valueTarget, &permissionError,
+                                            signedWrite)) {
       if (outErrorCode != nullptr) {
         *outErrorCode = permissionError;
       }
@@ -1836,9 +1906,11 @@ bool BleRadio::applyCustomGattCharacteristicValueWrite(uint16_t handle,
 
 bool BleRadio::writeCustomGattCharacteristic(uint16_t handle, const uint8_t* value,
                                              uint16_t valueLength, bool withResponse,
-                                             uint8_t* outErrorCode) {
+                                             uint8_t* outErrorCode,
+                                             bool signedWrite) {
   if (applyCustomGattCharacteristicValueWrite(handle, value, valueLength,
-                                              withResponse, outErrorCode, true)) {
+                                              withResponse, outErrorCode, true,
+                                              signedWrite)) {
     return true;
   }
 
@@ -1854,7 +1926,7 @@ bool BleRadio::writeCustomGattCharacteristic(uint16_t handle, const uint8_t* val
     }
     uint8_t permissionError = kAttErrWriteNotPermitted;
     if (!customGattWritePermissionSatisfied(userDescriptionTarget,
-                                            &permissionError)) {
+                                            &permissionError, signedWrite)) {
       if (outErrorCode != nullptr) {
         *outErrorCode = permissionError;
       }

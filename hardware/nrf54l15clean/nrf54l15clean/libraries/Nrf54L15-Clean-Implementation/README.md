@@ -166,8 +166,9 @@ Module-board note:
 - module defaults are documented in the root docs at
   `docs/holyiot-25007-module-reference.md`
   and `docs/holyiot-25008-module-reference.md`
-- dedicated library examples for the 25008 onboard hardware now appear under
-  `File -> Examples -> Nrf54L15-Clean-Implementation -> Board`
+- board-specific sketches are grouped under
+  `File -> Examples -> nRF54 Board Examples`, with separate submenus for
+  XIAO nRF54L15 Sense, XIAO nRF54LM20A Sense, HOLYIOT-25008, and the Nordic DK
 
 Compatibility note:
 

@@ -11,11 +11,10 @@
  * This is a good starting point for any sensor node that needs to report
  * battery state to a phone app.
  *
- * Tip: setGattBatteryLevel() updates the in-memory value but does NOT
- * automatically push a notification. The BLE core sends a notification
- * implicitly on the next connection event if the central has enabled the CCCD.
- * You can verify the notification was sent by watching the tx payload check
- * at the bottom of loop().
+ * Tip: setGattBatteryLevel() updates the in-memory value and schedules a
+ * notification on the next connection event when the value changes and the
+ * central has enabled the CCCD. You can verify the notification was sent by
+ * watching the tx payload check at the bottom of loop().
  */
 
 #include <Arduino.h>

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import runpy
@@ -349,6 +350,250 @@ def validate_ble_disconnect_reason_contracts() -> None:
     print("PASS BLE central MIC, peer, and internal disconnect classification")
 
 
+def validate_ble_connection_parameter_contracts() -> None:
+    parts = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts"
+    )
+    connection_api = (parts / "nrf54l15_hal_ble_connection_api.inc").read_text(
+        encoding="utf-8"
+    )
+    crypto_service = (
+        parts / "nrf54l15_hal_internal_crypto_service.inc"
+    ).read_text(encoding="utf-8")
+    access_address_validator = function_body(
+        crypto_service, "bool isValidBleConnectionAccessAddress("
+    )
+    for invalid_contract in (
+        "accessAddress == kBleAccessAddress",
+        "accessAddress == 0U",
+        "accessAddress == 0xFFFFFFFFUL",
+        "static_cast<uint8_t>(accessAddress >> 8U) == octet0",
+        "diffBits <= 1U",
+        "maxRunLength > 6U",
+        "transitions > 24U",
+        "__builtin_popcount(accessAddress & 0xFFU) < 3",
+        "low16Transitions > 11U",
+        "topTransitions >= 2U",
+    ):
+        assert invalid_contract in access_address_validator
+
+    def host_access_address_valid(access_address: int) -> bool:
+        access_address &= 0xFFFFFFFF
+        if access_address in (0x8E89BED6, 0x00000000, 0xFFFFFFFF):
+            return False
+        octet0 = access_address & 0xFF
+        if all(((access_address >> shift) & 0xFF) == octet0 for shift in (8, 16, 24)):
+            return False
+        if ((access_address ^ 0x8E89BED6) & 0xFFFFFFFF).bit_count() <= 1:
+            return False
+
+        bits = [(access_address >> bit) & 1 for bit in range(32)]
+        transitions = sum(bits[bit] != bits[bit - 1] for bit in range(1, 32))
+        max_run_length = 1
+        run_length = 1
+        for bit in range(1, 32):
+            if bits[bit] == bits[bit - 1]:
+                run_length += 1
+                max_run_length = max(max_run_length, run_length)
+            else:
+                run_length = 1
+        if max_run_length > 6 or transitions > 24:
+            return False
+        if (access_address & 0xFF).bit_count() < 3:
+            return False
+        if sum(bits[bit] != bits[bit - 1] for bit in range(1, 16)) > 11:
+            return False
+        return sum(bits[bit] != bits[bit - 1] for bit in range(27, 32)) >= 2
+
+    for access_address in (0xAF9A8C69, 0xD7A46C5B, 0xC59A3B6D):
+        assert host_access_address_valid(access_address)
+    for access_address in (
+        0x8E89BED6,
+        0x00000000,
+        0xFFFFFFFF,
+        0x703A0788,  # only two ones in the least-significant octet
+        0x87985AA5,  # thirteen transitions in the least-significant 16 bits
+    ):
+        assert not host_access_address_valid(access_address)
+
+    access_address_generator = function_body(
+        crypto_service, "uint32_t generateBleConnectionAccessAddress("
+    )
+    assert access_address_generator.count("isValidBleConnectionAccessAddress(") == 1
+    assert "kFallbackCandidates" not in access_address_generator
+    assert "return 0U;" in access_address_generator
+    pseudo_random_word = function_body(
+        crypto_service, "uint32_t nextPseudoRandomWord("
+    )
+    assert "0xA5A55A5AUL" not in pseudo_random_word
+    for signature in (
+        "bool BleRadio::initiateConnection(",
+        "bool BleRadio::initiateConnectionBudgeted(",
+    ):
+        body = function_body(connection_api, signature)
+        assert "connParamsAreValid(intervalUnits, intervalUnits, 0U," in body
+        assert "hopIncrement < 5U || hopIncrement > 16U" in body
+
+    scanning = (
+        parts / "nrf54l15_hal_ble_scanning_connections.inc"
+    ).read_text(encoding="utf-8")
+    for signature in (
+        "bool BleRadio::initiateConnectionOnce(",
+        "bool BleRadio::initiateConnectionOnceBudgeted(",
+    ):
+        body = function_body(scanning, signature)
+        assert "connParamsAreValid(intervalUnits, intervalUnits, 0U," in body
+        assert body.index("connParamsAreValid(") < body.index(
+            "setAdvertisingChannel(channel)"
+        )
+        assert body.count("fillBleSecurityRandomBytes(") == 1
+        assert "fillPseudoRandomBytes(" not in body
+        assert "CENTRAL_CONNECT_ENTROPY_UNAVAILABLE" in body
+        assert body.index("fillBleSecurityRandomBytes(") < body.index(
+            "setAdvertisingChannel(channel)"
+        )
+        assert body.index("fillBleSecurityRandomBytes(") < body.index(
+            "receivePacketOnCurrentChannel"
+        )
+        assert "generateBleConnectionAccessAddress(accessAddressSeed)" in body
+        assert "if (accessAddress == 0U)" in body
+        assert "CENTRAL_CONNECT_AA_GENERATION_FAILED" in body
+        assert body.index("generateBleConnectionAccessAddress(") < body.index(
+            "writeLe32(&llData[0], accessAddress)"
+        )
+        assert body.index("receivePacketOnCurrentChannel") < body.index(
+            "generateBleConnectionAccessAddress("
+        )
+        assert "readLe24(&connectionEntropy[4])" in body
+        assert "crcInit ^=" not in body
+
+    peripheral_start = function_body(
+        scanning, "bool BleRadio::startConnectionFromConnectInd("
+    )
+    first_state_mutation = peripheral_start.index("memcpy(connectionPeerAddress_")
+    required_precommit_checks = (
+        "length != 34U",
+        "connParamsAreValid(intervalUnits, intervalUnits, latency,",
+        "winSize < 1U || winSize > maxWinSize",
+        "winOffset > intervalUnits",
+        "(channelMap[4] & 0xE0U) != 0U",
+        "bitCount37(channelMap) < 2U",
+        "hopIncrement < 5U || hopIncrement > 16U",
+        "!isValidBleConnectionAccessAddress(accessAddress)",
+    )
+    for check in required_precommit_checks:
+        assert check in peripheral_start
+        assert peripheral_start.index(check) < first_state_mutation
+    assert "minU16(8U" in peripheral_start
+    assert "intervalUnits - 1U" in peripheral_start
+    assert "winOffset >= intervalUnits" not in peripheral_start
+    assert peripheral_start.index("winOffset > intervalUnits") < peripheral_start.index(
+        "g_ble_periph_connect_win_offset = winOffset;"
+    )
+
+    central_start = function_body(
+        scanning, "bool BleRadio::startCentralConnection("
+    )
+    assert "connParamsAreValid(intervalUnits, intervalUnits, 0U," in central_start
+    assert "!isValidBleConnectionAccessAddress(accessAddress)" in central_start
+    assert central_start.index("connParamsAreValid(") < central_start.index(
+        "memcpy(connectionPeerAddress_"
+    )
+
+    ll_security = (
+        parts / "nrf54l15_hal_ble_ll_security.inc"
+    ).read_text(encoding="utf-8")
+    ll_control = function_body(
+        ll_security, "bool BleRadio::buildLlControlResponse("
+    )
+    conn_update = ll_control[ll_control.index("case kBleLlCtrlConnectionUpdateInd:") :]
+    conn_update = conn_update[: conn_update.index("case kBleLlCtrlChannelMapInd:")]
+    assert "winSize < 1U || winSize > maxWinSize" in conn_update
+    assert "winOffset > interval" in conn_update
+    assert "winOffset >= interval" not in conn_update
+    assert "minU16(8U" in conn_update
+    assert conn_update.index("winOffset > interval") < conn_update.index(
+        "connectionPendingWinOffset_ = winOffset;"
+    )
+    channel_map = ll_control[ll_control.index("case kBleLlCtrlChannelMapInd:") :]
+    channel_map = channel_map[: channel_map.index("case kBleLlCtrlEncReq:")]
+    assert "reservedBitsClear = (map[4] & 0xE0U) == 0U" in channel_map
+    assert "map[4] &= 0x1FU" not in channel_map
+    print(
+        "PASS BLE access addresses and connection windows validate before "
+        "transmit/state mutation"
+    )
+
+
+def validate_ble_persistence_layout_contracts() -> None:
+    source_root = PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
+    bond_store = (
+        source_root / "nrf54l15_hal_parts/nrf54l15_hal_internal_gatt_bond.inc"
+    ).read_text(encoding="utf-8")
+
+    for contract in (
+        "struct BleBondFlashBlob",
+        "struct BleBondSigningBlob",
+        "sizeof(BleBondFlashBlob) == 80U",
+        "sizeof(BleBondSigningState) == 44U",
+        "sizeof(BleBondSigningBlob) == 56U",
+        'section(".bond_base_storage")',
+        'section(".bond_cccd_storage")',
+        'section(".bond_signing_storage")',
+    ):
+        assert contract in bond_store
+
+    signing_write = function_body(
+        bond_store, "bool writeFlashBondSigningState("
+    )
+    assert "base.magic != kBleBondRetentionMagic" in signing_write
+    assert "base.version != 2U" in signing_write
+    assert "base.crc32" in signing_write
+    assert "memcmp(&base.record, &expectedBase" in signing_write
+    assert "writeFlashSigningBlob(signing)" in signing_write
+
+    flash_read = function_body(bond_store, "bool readFlashBondRecord(")
+    assert "signing.baseRecordCrc32 == base.crc32" in flash_read
+    assert "signing.signingStateCrc32" in flash_read
+    assert "signingStateLooksSane(signing.state)" in flash_read
+    assert "applySigningState(signing.state, outRecord);" in flash_read
+
+    slot_layout = (
+        (".bond_storage ORIGIN(FLASH_BOND) (NOLOAD)", 0x000, 0x050),
+        (".bond_cccd_storage ORIGIN(FLASH_BOND) + 0x50 (NOLOAD)", 0x050, 0x08C),
+        (".prefs_storage ORIGIN(FLASH_BOND) + 0xDC (NOLOAD)", 0x0DC, 0xAE0),
+        (".eeprom_storage ORIGIN(FLASH_BOND) + 0xBBC (NOLOAD)", 0xBBC, 0x40C),
+        (".bond_signing_storage ORIGIN(FLASH_BOND) + 0xFC8 (NOLOAD)", 0xFC8, 0x038),
+    )
+    assert all(
+        offset + size == slot_layout[index + 1][1]
+        for index, (_, offset, size) in enumerate(slot_layout[:-1])
+    )
+    assert slot_layout[-1][1] + slot_layout[-1][2] == 0x1000
+    linker_paths = (
+        PLATFORM / "cores/nrf54l15/nrf54l15_linker_script.ld",
+        PLATFORM / "cores/nrf54l15/nrf54l15_linker_script_no_vpr.ld",
+        PLATFORM / "cores/nrf54l15/nrf54lm20b_linker_script.ld",
+        PLATFORM / "cores/nrf54lm20b/nrf54lm20b_linker_script.ld",
+    )
+    for linker_path in linker_paths:
+        linker = linker_path.read_text(encoding="utf-8")
+        assert re.search(r"FLASH_BOND\s*\([^)]*\).*LENGTH\s*=\s*0x1000", linker)
+        previous = -1
+        for declaration, _, size in slot_layout:
+            position = linker.index(declaration)
+            assert position > previous
+            previous = position
+            section_name = declaration.split()[0]
+            assert f"ASSERT(SIZEOF({section_name}) <= 0x{size:X}" in linker
+        assert "KEEP(*(.bond_base_storage))" in linker
+        assert "KEEP(*(.bond_cccd_storage))" in linker
+        assert "KEEP(*(.bond_signing_storage))" in linker
+
+    print("PASS fixed BLE bond/CCCD/preferences/EEPROM/signing flash layout")
+
+
 def validate_custom_gatt_initial_value_capacity_contracts() -> None:
     source_root = (
         PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
@@ -406,11 +651,53 @@ def validate_custom_gatt_initial_value_capacity_contracts() -> None:
     common_body = function_body(
         implementation, "bool BleRadio::addCustomGattCharacteristicCommon("
     )
-    assert "initialValueLength > kCustomGattMaxValueLength" in common_body
-    assert "characteristic.valueLength = initialValueLength;" in common_body
+    assert "maxValueLength > kCustomGattMaxValueLength" in common_body
+    assert "initialValueLength > maxValueLength" in common_body
+    assert "fixedValueLength && initialValueLength != 0U" in common_body
+    assert "initialValueLength != maxValueLength" in common_body
+    assert "characteristic.maxValueLength = maxValueLength;" in common_body
+    assert "characteristic.fixedValueLength = fixedValueLength;" in common_body
     assert "memcpy(characteristic.value, initialValue, initialValueLength);" in common_body
+    assert "uint16_t maxValueLength;" in header
+    assert "bool fixedValueLength;" in header
     assert "uint16_t valueLength;" in header
     assert "uint8_t value[kCustomGattMaxValueLength];" in header
+
+    set_value_body = function_body(
+        implementation, "bool BleRadio::setCustomGattCharacteristicValue("
+    )
+    assert "characteristic->fixedValueLength" in set_value_body
+    assert "valueLength == characteristic->maxValueLength" in set_value_body
+    assert "valueLength <= characteristic->maxValueLength" in set_value_body
+    peer_write_body = function_body(
+        implementation, "bool BleRadio::applyCustomGattCharacteristicValueWrite("
+    )
+    assert "valueTarget->fixedValueLength" in peer_write_body
+    assert "valueLength == valueTarget->maxValueLength" in peer_write_body
+    assert "valueLength <= valueTarget->maxValueLength" in peer_write_body
+
+    permission_check = function_body(
+        implementation, "bool BleRadio::customGattPermissionSatisfied("
+    )
+    lesc_permission = permission_check[
+        permission_check.index("case kBleGattPermEncWithLescMitm:") :
+    ]
+    lesc_permission = lesc_permission[
+        : lesc_permission.index("case kBleGattPermSignedNoMitm:")
+    ]
+    assert "!isConnectionEncrypted()" in lesc_permission
+    assert (
+        "isConnectionAuthenticated() && connectionEncSecureConnections_"
+        in lesc_permission
+    )
+    assert "kAttErrInsufficientAuthentication" in lesc_permission
+
+    att = (
+        source_root / "nrf54l15_hal_parts/nrf54l15_hal_ble_att_l2cap.inc"
+    ).read_text(encoding="utf-8")
+    prepare_write = att[att.index("case kAttOpPrepareWriteReq:") :]
+    prepare_write = prepare_write[: prepare_write.index("case kAttOpExecuteWriteReq:")]
+    assert "? customValueTarget->maxValueLength" in prepare_write
     enqueue_signature = re.search(
         r"enqueueCustomGattNotification\s*\([^;]*uint16_t\s+valueLength\s*\);",
         header,
@@ -425,16 +712,95 @@ def validate_custom_gatt_initial_value_capacity_contracts() -> None:
     assert capacity_guard in enqueue_body
     assert narrowing_store in enqueue_body
     assert enqueue_body.index(capacity_guard) < enqueue_body.index(narrowing_store)
+    notify_body = function_body(
+        implementation, "bool BleRadio::notifyCustomGattCharacteristic("
+    )
+    assert "customGattHvxPermissionSatisfied(characteristic)" in notify_body
+    assert notify_body.index(
+        "customGattHvxPermissionSatisfied(characteristic)"
+    ) < notify_body.index("enqueueCustomGattNotification(")
+    assert "customGattHvxPermissionSatisfied(&pendingCharacteristic)" in notify_body
+    hvx_permission = function_body(
+        implementation, "bool BleRadio::customGattHvxPermissionSatisfied("
+    )
+    assert "readPermission == kBleGattPermNoAccess" in hvx_permission
+    assert "customGattReadPermissionSatisfied(characteristic, nullptr)" in hvx_permission
+    peripheral_tx = (
+        source_root / "nrf54l15_hal_parts/nrf54l15_hal_ble_peripheral_event_tx.inc"
+    ).read_text(encoding="utf-8")
+    peripheral_tail = (
+        source_root / "nrf54l15_hal_parts/nrf54l15_hal_ble_peripheral_event_tail.inc"
+    ).read_text(encoding="utf-8")
+    assert "customGattHvxPermissionSatisfied(&custom)" in peripheral_tx
+    assert "customGattHvxPermissionSatisfied(&custom)" in peripheral_tail
     bluefruit = (
         PLATFORM / "libraries/Bluefruit52Lib/src/bluefruit.cpp"
     ).read_text(encoding="utf-8")
     bluefruit_begin = function_body(bluefruit, "err_t BLECharacteristic::begin()")
-    assert "const uint16_t initialLen = clampValueLen(_value_len);" in bluefruit_begin
+    assert "inheritServiceSecurity(_read_perm, _service->_read_perm)" in bluefruit_begin
+    assert "inheritServiceSecurity(_write_perm, _service->_write_perm)" in bluefruit_begin
+    assert "!securityModesCanInherit(_read_perm, _service->_read_perm)" in bluefruit_begin
+    assert "!securityModesCanInherit(_write_perm, _service->_write_perm)" in bluefruit_begin
+    assert "return ERROR_INVALID_PARAM;" in bluefruit_begin
+    assert "descriptors.maxValueLength = _max_len;" in bluefruit_begin
+    assert "descriptors.fixedValueLength = _fixed_len;" in bluefruit_begin
+    assert "_rd_authorize_cb != nullptr || _wr_authorize_cb != nullptr" in bluefruit_begin
+    assert "return ERROR_NOT_SUPPORTED;" in bluefruit_begin
+    assert "min<uint16_t>(clampValueLen(_value_len), _max_len)" in bluefruit_begin
     assert "0xFFU" not in bluefruit_begin
+
+    set_fixed = function_body(bluefruit, "void BLECharacteristic::setFixedLen(")
+    assert "if (fixed_len == 0U)" in set_fixed
+    assert "_fixed_len = false;" in set_fixed
+    set_buffer = function_body(bluefruit, "void BLECharacteristic::setBuffer(")
+    assert "setMaxLen(bufsize);" in set_buffer
+    local_write = function_body(bluefruit, "uint16_t BLECharacteristic::write(const void*")
+    assert "_fixed_len ? _max_len" in local_write
+    assert "min<uint16_t>(clampValueLen(len), _max_len)" in local_write
+    assert "service security must raise an open characteristic" in bluefruit
+    assert "a stronger characteristic permission must be preserved" in bluefruit
+    assert "service inheritance must not open a disabled operation" in bluefruit
+    assert "a disabled service operation must remain disabled" in bluefruit
+    assert "signed and encrypted requirements must not be ordered" in bluefruit
+    assert "incompatible security modes must fail closed" in bluefruit
     print(
-        "PASS custom GATT stores 512-byte values and rejects oversized "
-        "single-PDU notifications before narrowing"
+        "PASS custom GATT max/fixed lengths, service-security inheritance, "
+        "secure HVX, LESC permissions, authorization fail-closed, and notification narrowing"
     )
+
+
+def validate_phy_preserves_data_length_contract() -> None:
+    implementation = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal_parts/nrf54l15_hal_ble_custom_gatt.inc"
+    ).read_text(encoding="utf-8")
+    body = function_body(
+        implementation, "bool BleRadio::applyPendingConnectionPhyUpdateAtInstant("
+    )
+    assert "connectionMaxTxPayloadLength_ = kBleDefaultDataPduMaxPayload" not in body
+    assert "connectionMaxRxPayloadLength_ = kBleDefaultDataPduMaxPayload" not in body
+    assert "connectionDataLengthUpdatePending_ = true" not in body
+    peripheral_probe = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Connections/Ble2MPhyProbe/Ble2MPhyProbe.ino"
+    ).read_text(encoding="utf-8")
+    central_probe = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Connections/Ble2MPhyCentralProbe/Ble2MPhyCentralProbe.ino"
+    ).read_text(encoding="utf-8")
+    handle_write = function_body(central_probe, "static void handleWriteResponse()")
+    assert "g_phyRequestIssued = g_ble.requestPHY(kBlePhy2M)" in handle_write
+    initial_phase = peripheral_probe.split(
+        "case PhyCyclePhase::kRequestInitial2M:", 1
+    )[1].split("case PhyCyclePhase::kWaitForFallback1M:", 1)[0]
+    assert "maybeQueuePhyRequest" not in initial_phase
+    return_phase = peripheral_probe.split(
+        "case PhyCyclePhase::kRequestReturn2M:", 1
+    )[1].split("case PhyCyclePhase::kComplete:", 1)[0]
+    assert "maybeQueuePhyRequest" not in return_phase
+    assert "request phy 2M return: queued" in central_probe
+    assert "kBlePhy1M | kBlePhy2M" in peripheral_probe
+    print("PASS PHY updates preserve negotiated LL data length")
 
 
 def validate_parser_output_validity_contracts() -> None:
@@ -694,6 +1060,11 @@ def validate_channel_sounding_public_examples_contracts() -> None:
     assert not public_uf2, (
         f"UF2 build artifacts are not allowed in public CS examples: {public_uf2}"
     )
+    pair_gate = (ROOT / "scripts/test_cs_controller_pair.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "silent-peer: fatal/drop/reject marker" in pair_gate
+    assert "reason=session_sync .*bytes=0" in pair_gate
     print(
         "PASS exactly two controller-backed public Channel Sounding examples "
         "and no UF2 artifacts"
@@ -727,6 +1098,9 @@ def validate_system_off_wake_contracts() -> None:
         systemoff_entry_body = function_body(
             source, "static void enterSystemOffInternal(bool disableRamRetention"
         )
+        reset_reason_clear_body = function_body(
+            source, "static bool clearResetReasonsForSystemOff(void)"
+        )
         program_body = function_body(
             source, "static system_off_wake_program_status_t programSystemOffWakeUs("
         )
@@ -746,7 +1120,15 @@ def validate_system_off_wake_contracts() -> None:
         assert "kScbScrSleepDeep_Msk" in systemoff_entry_body
         assert "__asm volatile(\"wfi\")" in systemoff_entry_body
         assert "timedWake && anyGrtcCompareEvent(NRF_GRTC)" in systemoff_entry_body
-        assert "abortSystemOffWithReset();" in systemoff_entry_body
+        assert "abortSystemOffWithReset(" in systemoff_entry_body
+        assert "clearSystemOffAbortDiagnostic();" in systemoff_entry_body
+        assert "kSystemOffAbortDmaQuiesce" in systemoff_entry_body
+        assert "kSystemOffAbortPreEntryCompare" in systemoff_entry_body
+        assert "kSystemOffAbortResetReasonClear" in systemoff_entry_body
+        assert "resetAfterSystemOffEvent();" in systemoff_entry_body
+        assert "g_system_off_abort_magic" in source
+        assert "__attribute__((section(\".noinit\")))" in source
+        assert "uint32_t nrf54SystemOffAbortStage(void)" in source
         assert "__asm volatile(\"wfe\")" not in systemoff_entry_body
         wfi_index = systemoff_entry_body.index("__asm volatile(\"wfi\")")
         fallback_index = systemoff_entry_body.index(
@@ -755,11 +1137,47 @@ def validate_system_off_wake_contracts() -> None:
         assert systemoff_entry_body.index("kScbScrSleepDeep_Msk") < (
             systemoff_entry_body.index("NRF_REGULATORS->SYSTEMOFF")
         )
+        assert "nrf54_core_clear_reset_reason(0xFFFFFFFFUL);" in reset_reason_clear_body
+        assert "NRF_RESET->RESETREAS" in reset_reason_clear_body
+        assert "kSystemOffResetReasonClearSpinLimit" in reset_reason_clear_body
+        assert "kSystemOffResetReasonStableReads" in reset_reason_clear_body
+        assert "consecutiveZeroReads" in reset_reason_clear_body
+        assert "return false;" in reset_reason_clear_body
+        assert systemoff_entry_body.index("clearResetReasonsForSystemOff()") < (
+            systemoff_entry_body.index("NRF_REGULATORS->SYSTEMOFF")
+        )
         assert wfi_index < fallback_index
         assert fallback_index < (
-            systemoff_entry_body.index("abortSystemOffWithReset();", fallback_index)
+            systemoff_entry_body.index("resetAfterSystemOffEvent();", fallback_index)
         )
         print(f"PASS {chip} timed SYSTEMOFF absolute GRTC compare/channel contract")
+
+    system_off_probe = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/LowPower/"
+        "LowPowerGrtcPwmSystemOff/LowPowerGrtcPwmSystemOff.ino"
+    ).read_text(encoding="utf-8")
+    assert "nrf54SystemOffAbortStage()" in system_off_probe
+    assert "nrf54ClearSystemOffAbortStage()" in system_off_probe
+    assert 'Serial.print("system_off_abort_stage=");' in system_off_probe
+    assert 'Serial.print("debug_interface_settle_ms=");' in system_off_probe
+    assert "RESET_RESETREAS_DIF_Msk" in system_off_probe
+    assert 'Serial.print("reset_reason_snapshot=0x");' in system_off_probe
+    assert 'Serial.print("reset_reason_off=");' in system_off_probe
+    assert 'Serial.print("debug_c_debugen=");' in system_off_probe
+
+    gate = (ROOT / "scripts/run_two_board_release_gate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "self._generations[role] += 1" in gate
+    assert "if generation == self._generations[role]" in gate
+    assert 'r"\\bsystem_off_abort_stage=([0-9]+)"' in gate
+    assert "followed a System OFF" in gate
+    assert "consecutive timed" in gate
+    assert "reset_reason_value & 0x40" in gate
+    assert "wake_value == 0" in gate
+    assert "savemem 0x{address:08x}" in gate
+    assert "if len(data) != length or any(data):" in gate
 
     hal_source = (
         PLATFORM
@@ -768,6 +1186,184 @@ def validate_system_off_wake_contracts() -> None:
     hal_arm_body = function_body(hal_source, "void armSystemOffWakeCompare(")
     assert "GRTC_CC_CCEN_ACTIVE_Enable" in hal_arm_body
     print("PASS HAL timed SYSTEMOFF compare explicit enable contract")
+
+
+def validate_two_board_gate_parser_contracts() -> None:
+    namespace = runpy.run_path(str(ROOT / "scripts/run_two_board_release_gate.py"))
+    gate_failure = namespace["GateFailure"]
+    release_gate = namespace["ReleaseGate"]
+    validate_source = namespace["validate_release_source_state"]
+    validate_system_off = namespace["validate_system_off_log"]
+    board_type = namespace["Board"]
+
+    release_gate.require_exact_line(
+        "Core version: 1.0.0\r\nCore version heartbeat: 1.0.0\r\n",
+        "Core version: 1.0.0",
+        "exact-version",
+    )
+    try:
+        release_gate.require_exact_line(
+            "Core version: 1.0.0-rc1\n",
+            "Core version: 1.0.0",
+            "exact-version",
+        )
+        raise AssertionError("RC suffix satisfied the stable version line")
+    except gate_failure:
+        pass
+
+    validate_source(
+        "1.0.0", "abc", False, expected_revision="abc",
+        description="source-state",
+    )
+    for version, revision, dirty, expected in (
+        ("1.0.0-rc1", "abc", False, "abc"),
+        ("1.0.0", "abc", True, "abc"),
+        ("1.0.0", "def", False, "abc"),
+    ):
+        try:
+            validate_source(
+                version, revision, dirty, expected_revision=expected,
+                description="source-state",
+            )
+            raise AssertionError("invalid full-gate source state was accepted")
+        except gate_failure:
+            pass
+
+    def off_block(boot: int, wake: int, reason: int, *, entered: bool = True) -> str:
+        suffix = "Entering SYSTEM OFF for 5000 ms\n" if entered else ""
+        return (
+            "LowPowerGrtcPwmSystemOff\n"
+            f"boot={boot}\n"
+            f"wake_from_grtc_or_off={wake}\n"
+            "system_off_abort_stage=0\n"
+            f"reset_reason_snapshot=0x{reason:X}\n"
+            f"{suffix}"
+        )
+
+    wrap_log = (
+        "LowPowerGrtcPwmSystemOff\npartial-old-boot\n" +
+        off_block(0xFFFFFFFE, 0, 0x40) +
+        off_block(0xFFFFFFFF, 1, 0x800) +
+        off_block(0, 1, 0x800, entered=False) +
+        "LowPowerGrtcPwmSystemOff\nboot="
+    )
+    assert validate_system_off(wrap_log, "wrap") == 2
+
+    invalid_logs = (
+        off_block(8, 0, 0x40) +
+        off_block(9, 1, 0x800) +
+        off_block(10, 1, 0x100, entered=False),
+        off_block(8, 0, 0x40) +
+        off_block(9, 1, 0x800) +
+        off_block(11, 1, 0x800, entered=False),
+        off_block(8, 0, 0x40) +
+        off_block(9, 1, 0x800) +
+        "LowPowerGrtcPwmSystemOff\nboot=",
+        off_block(8, 0, 0x40) +
+        "LowPowerGrtcPwmSystemOff\nboot=9\n" +
+        off_block(10, 1, 0x800, entered=False),
+    )
+    for invalid_log in invalid_logs:
+        try:
+            validate_system_off(invalid_log, "invalid")
+            raise AssertionError("invalid System OFF transition was accepted")
+        except gate_failure:
+            pass
+
+    gate = object.__new__(release_gate)
+    gate.l15 = board_type("l15", "a", "t", "f", "p", "c")
+    gate.lm20 = board_type("lm20", "b", "t", "f", "p", "c")
+    phy_logs = {
+        "l15": (
+            "Ble2MPhyProbe start\ncycle phase: 2M return complete OLD\n"
+            "Ble2MPhyProbe start\ncycle phase: 2M return complete\n"
+        ),
+        "lm20": (
+            "Ble2MPhyCentralProbe start\n"
+            "cycle phase: 2M long notify reconfirmed OLD\n"
+            "Ble2MPhyCentralProbe start\n"
+            "request data length 251: queued\nrequest mtu 247: queued\n"
+            "notifications enabled\nrequest 2M phy: queued\n"
+            "cycle phase: 1M long notify confirmed\n"
+            "cycle phase: 2M long notify reconfirmed\n"
+        ),
+    }
+    phy_session = gate.phy_logs_since_start(phy_logs, "phy")
+    assert "OLD" not in phy_session["l15"]
+    assert "OLD" not in phy_session["lm20"]
+    gate.validate_phy_cycle(phy_session, "phy")
+
+    stale_only_logs = {
+        "l15": (
+            "cycle phase: 2M return complete\n"
+            "Ble2MPhyProbe start\nwaiting\n"
+        ),
+        "lm20": (
+            "request data length 251: queued\nrequest mtu 247: queued\n"
+            "notifications enabled\nrequest 2M phy: queued\n"
+            "cycle phase: 1M long notify confirmed\n"
+            "cycle phase: 2M long notify reconfirmed\n"
+            "Ble2MPhyCentralProbe start\nscanning\n"
+        ),
+    }
+    try:
+        gate.validate_phy_cycle(
+            gate.phy_logs_since_start(stale_only_logs, "stale-phy"),
+            "stale-phy",
+        )
+        raise AssertionError("pre-start PHY markers satisfied the fresh session")
+    except gate_failure:
+        pass
+
+    cs_script = ROOT / "scripts/test_cs_controller_pair.sh"
+    with tempfile.TemporaryDirectory(prefix="nrf54-cs-gate-contract-") as directory:
+        temp = Path(directory)
+        initiator_log = temp / "initiator.log"
+        reflector_log = temp / "reflector.log"
+        initiator_log.write_text(
+            "cs_result role=initiator result=PASS pbr_m=1 distance_m=1 "
+            "used_channels=4 hci_continue=1 dropped=0 transfer_id=11 "
+            "transfer_crc32=AA session_token=TOKENA\n"
+            "cs_result role=initiator result=PASS pbr_m=1 distance_m=1 "
+            "used_channels=0 hci_continue=1 dropped=0 transfer_id=22 "
+            "transfer_crc32=BB session_token=TOKENB\n",
+            encoding="utf-8",
+        )
+        reflector_log.write_text(
+            "cs_result role=reflector result=PASS steps=8 bytes=40 "
+            "transfer_acks=1 hci_continue=1 dropped=0 rejected=0 "
+            "transfer_id=22 transfer_crc32=BB session_token=TOKENB\n"
+            "cs_result role=reflector result=PASS steps=0 bytes=40 "
+            "transfer_acks=1 hci_continue=1 dropped=0 rejected=0 "
+            "transfer_id=11 transfer_crc32=AA session_token=TOKENA\n",
+            encoding="utf-8",
+        )
+
+        def cs_keys(role: str, log: Path) -> set[str]:
+            completed = subprocess.run(
+                [
+                    "bash", "-c",
+                    'CS_FUNCTIONS_ONLY=1 source "$1" ""; '
+                    'extract_transfer_keys "$2" "$3"',
+                    "bash", str(cs_script), role, str(log),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            return set(completed.stdout.splitlines())
+
+        initiator_keys = cs_keys("initiator", initiator_log)
+        reflector_keys = cs_keys("reflector", reflector_log)
+        assert initiator_keys == {"11 AA TOKENA"}
+        assert reflector_keys == {"22 BB TOKENB"}
+        assert not initiator_keys.intersection(reflector_keys)
+
+    print(
+        "PASS two-board exact-version/source-state, fresh PHY, GRTC wake, "
+        "and role-filtered CS parser contracts"
+    )
 
 
 def validate_xiao_low_power_board_contracts() -> None:
@@ -834,7 +1430,7 @@ def validate_xiao_low_power_board_contracts() -> None:
 
     delay_probe_paths = [
         PLATFORM / "examples/Power/DelayAutoLowPowerMeasure/DelayAutoLowPowerMeasure.ino",
-        PLATFORM / "examples/XiaoL15/DelayAutoLowPowerMeasure/DelayAutoLowPowerMeasure.ino",
+        PLATFORM / "libraries/nRF54-Board-Examples/examples/XIAO-nRF54L15/DelayAutoLowPowerMeasure/DelayAutoLowPowerMeasure.ino",
     ]
     delay_probes = [path.read_text(encoding="utf-8") for path in delay_probe_paths]
     assert delay_probes[0] == delay_probes[1], "delay-current probe copies diverged"
@@ -855,7 +1451,7 @@ def validate_xiao_low_power_board_contracts() -> None:
 def validate_xiao_retention_probe_contracts() -> None:
     probe_paths = [
         PLATFORM / "examples/Power/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino",
-        PLATFORM / "examples/XiaoL15/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino",
+        PLATFORM / "libraries/nRF54-Board-Examples/examples/XIAO-nRF54L15-Sense/SenseDelayRailRetentionProbe/SenseDelayRailRetentionProbe.ino",
     ]
     probes = [path.read_text(encoding="utf-8") for path in probe_paths]
     assert probes[0] == probes[1], "retention probe copies diverged"
@@ -901,20 +1497,16 @@ def validate_xiao_retention_probe_contracts() -> None:
 
 
 def validate_serial_fabric_runtime_probe_contracts() -> None:
-    probe_paths = [
-        PLATFORM / "examples/Serial/SerialFabricRuntimeProbe/SerialFabricRuntimeProbe.ino",
-        PLATFORM / "examples/Peripherals/SerialFabricRuntimeProbe/SerialFabricRuntimeProbe.ino",
-    ]
-    probes = [path.read_text(encoding="utf-8") for path in probe_paths]
-    assert probes[0] == probes[1], "serial-fabric probe copies diverged"
-    probe = probes[0]
+    probe = (
+        PLATFORM / "examples/Serial/SerialFabricRuntimeProbe/SerialFabricRuntimeProbe.ino"
+    ).read_text(encoding="utf-8")
     assert "void announceStage(const char* stage)" in probe
     assert "Serial.flush();" in probe
     assert "g_lastStatusMs" in probe
     assert "(now - g_lastStatusMs) >= 1000UL" in probe
     for stage in ("uart22", "uart30", "twim22", "twim30", "spim22", "spim30"):
         assert f'announceStage("{stage}")' in probe
-    print("PASS serial-fabric runtime probe duplicate and CLI-status contract")
+    print("PASS serial-fabric runtime probe CLI-status contract")
 
 
 def validate_ble_security_hardening_contracts() -> None:
@@ -931,6 +1523,13 @@ def validate_ble_security_hardening_contracts() -> None:
     assert "rng.fill(out, len, spinLimit)" in random_fill
     assert "memset(out, 0, len);" in random_fill
     assert "fillPseudoRandomBytes" not in random_fill
+    assert "reverseInPlace(cmacMessage, cmacMessageLen)" in crypto_service
+    assert "outMac[i] = cmac[7U - i]" in crypto_service
+    crypto_self_test = function_body(
+        crypto_service, "bool bleHardwareCryptoSelfTest()"
+    )
+    assert "ATT_SIGNED_WRITE_CMD example vector" in crypto_self_test
+    assert "0xF1U, 0x87U, 0x1EU, 0x93U" in crypto_self_test
 
     crypto_hal = (parts / "nrf54l15_hal_crypto_analog.inc").read_text(
         encoding="utf-8"
@@ -983,13 +1582,383 @@ def validate_ble_security_hardening_contracts() -> None:
     )
     assert "kBleBondRecordFlagAuthenticated" in bond_build
     assert "kBleBondRecordFlagSecureConnections" in bond_build
+    assert "record.peerCsrk" in bond_build
+    assert "record.localCsrk" in bond_build
+    signed_verify = function_body(
+        ll_security, "bool BleRadio::verifyAttSignedWrite("
+    )
+    assert "receivedCounter <= smpPeerSignCounter_" in signed_verify
+    assert "persistActiveSigningCounters" not in signed_verify
+    assert signed_verify.index("if (difference != 0U)") < signed_verify.index(
+        "smpPeerSignCounter_ = receivedCounter;"
+    )
+    assert signed_verify.index("smpPeerSignCounter_ = receivedCounter;") < signed_verify.index(
+        'emitBleTrace("ATT_SIGNED_WRITE_VERIFIED")'
+    )
+    assert "smpPeerSignCounter_ = oldCounter" not in signed_verify
+    assert "bondRecord_ = oldBondRecord" not in signed_verify
+
+    peer_counter_persist = function_body(
+        ll_security, "bool BleRadio::persistDeferredSignedWriteCounter("
+    )
+    assert "kPeerCounterReservation" not in peer_counter_persist
+    assert "signCounter == smpPeerSignCounterReservedUntil_" in peer_counter_persist
+    assert "bondRecord_.peerSignCounter = signCounter;" in peer_counter_persist
+    assert "persistActiveSigningCounters(true)" in peer_counter_persist
+    assert 'emitBleTrace("ATT_SIGNED_WRITE_COUNTER_PERSISTED")' in peer_counter_persist
+    assert peer_counter_persist.index(
+        "persistActiveSigningCounters(true)"
+    ) < peer_counter_persist.index(
+        "smpPeerSignCounterReservedUntil_ = signCounter;"
+    )
+
+    deferred_signed_apply = function_body(
+        ll_security, "void BleRadio::applyDeferredSignedGattWrite("
+    )
+    assert "persistDeferredSignedWriteCounter(signCounter)" in deferred_signed_apply
+    assert deferred_signed_apply.index(
+        "persistDeferredSignedWriteCounter(signCounter)"
+    ) < deferred_signed_apply.index("findCustomCharacteristicByValueHandle(")
+    assert deferred_signed_apply.index(
+        "persistDeferredSignedWriteCounter(signCounter)"
+    ) < deferred_signed_apply.index("writeCustomGattCharacteristic(")
+    assert "&ignoredError, true" in deferred_signed_apply
+
+    signing_persist = function_body(
+        ll_security, "bool BleRadio::persistActiveSigningCounters("
+    )
+    assert "writeRetainedBondRecord(bondRecord_)" in signing_persist
+    assert "writeFlashBondRecord(bondRecord_)" in signing_persist
+    assert "writeFlashBondSigningState(bondRecord_)" in signing_persist
+    assert "if (requireDurable)" in signing_persist
+    assert "bondFlashPersistPending_ = true;" in signing_persist
+    assert "bondSigningCounterPersistPending_ = true" not in signing_persist
+    bond_load = function_body(
+        ll_security, "bool BleRadio::loadBondRecordFromPersistence()"
+    )
+    assert "only the matching, CRC-checked built-in extension" in bond_load
+    assert "memset(loaded.peerCsrk, 0, sizeof(loaded.peerCsrk));" in bond_load
+    assert "memset(loaded.localCsrk, 0, sizeof(loaded.localCsrk));" in bond_load
+    assert bond_load.index("loaded.peerCsrkValid = 0U;") < bond_load.index(
+        "if (sameFlashBond)"
+    )
+    ll_control = function_body(
+        ll_security, "bool BleRadio::buildLlControlResponse("
+    )
+    conn_param_req = ll_control[ll_control.index("case kBleLlCtrlConnectionParamReq:") :]
+    conn_param_req = conn_param_req[: conn_param_req.index("case kBleLlCtrlFeatureReq:")]
+    assert "connParamsAreValid" in conn_param_req
+    assert "chooseAcceptedConnIntervalUnits" in conn_param_req
+    assert "connectionCentralConnParamIndPending_ = true" in conn_param_req
+    assert "rejectProcedureCollision()" in conn_param_req
 
     smp = (parts / "nrf54l15_hal_ble_att_l2cap.inc").read_text(encoding="utf-8")
     assert "SMP_SECURITY_REQUEST_BOND_UPGRADE" in smp
     assert "clearSmpPairingState();" in smp
     assert "kBleBondRecordFlagSecureConnections" in smp
     assert "SMP_RESERVED_CODE_IGNORED" in smp
-    print("PASS BLE SMP, bond-upgrade, timeout, and fail-closed RNG contracts")
+    pairing_request = smp[smp.index("case kSmpCodePairingRequest:") :]
+    pairing_request = pairing_request[: pairing_request.index("case kSmpCodePairingPublicKey:")]
+    assert "smp[1] > kSmpIoCapKeyboardDisplay" in pairing_request
+    assert "(smp[3] & 0xC0U) != 0U" in pairing_request
+    assert "~kSmpKeyDistDefinedMask" in pairing_request
+    assert "kSmpKeyDistSignKeyMask" in pairing_request
+    signed_write = smp[smp.index("case kAttOpSignedWriteCmd:") :]
+    signed_write = signed_write[: signed_write.index("case kAttOpErrorRsp:")]
+    assert "verifyAttSignedWrite" in signed_write
+    assert "enqueueDeferredSignedGattWrite" in signed_write
+    assert signed_write.index("verifyAttSignedWrite") < signed_write.index(
+        "enqueueDeferredSignedGattWrite"
+    )
+    assert "writeCustomGattCharacteristic" not in signed_write
+
+    timing = (parts / "nrf54l15_hal_internal_ble_timing.inc").read_text(
+        encoding="utf-8"
+    )
+    assert "kSmpKeyDistLinkKeyMask = 0x08U" in timing
+    supported_mask = timing[
+        timing.index("constexpr uint8_t kSmpKeyDistSupportedMask") :
+    ]
+    supported_mask = supported_mask[
+        : supported_mask.index("constexpr uint8_t kSmpKeyDistDefinedMask")
+    ]
+    assert "kSmpKeyDistLinkKeyMask" not in supported_mask
+    defined_mask = timing[
+        timing.index("constexpr uint8_t kSmpKeyDistDefinedMask") :
+    ]
+    defined_mask = defined_mask[: defined_mask.index(";") + 1]
+    assert "kSmpKeyDistSupportedMask | kSmpKeyDistLinkKeyMask" in defined_mask
+
+    pairing_response = smp[smp.index("case kSmpCodePairingResponse:") :]
+    pairing_response = pairing_response[
+        : pairing_response.index("case kSmpCodeSecurityRequest:")
+    ]
+    assert pairing_response.count("~kSmpKeyDistDefinedMask") == 2
+    assert pairing_response.count("kSmpKeyDistSupportedMask") == 2
+    assert pairing_response.count("kSmpKeyDistEncKeyMask") >= 1
+    assert pairing_response.count("kSmpKeyDistIdKeyMask") >= 2
+    assert pairing_response.count("kSmpKeyDistSignKeyMask") >= 2
+    assert "memcmp(smpPairingRsp_, smp, kSmpPairingResponseLen)" in pairing_response
+    # The raw response participates in retransmission matching and legacy c1.
+    # Strip unsupported CTKD LinkKey bits only from negotiated state.
+    assert "smpPairingRsp_[5] &= kSmpKeyDistSupportedMask;" not in pairing_response
+    assert "smpPairingRsp_[6] &= kSmpKeyDistSupportedMask;" not in pairing_response
+
+    connection_api = (parts / "nrf54l15_hal_ble_connection_api.inc").read_text(
+        encoding="utf-8"
+    )
+    signed_tx = function_body(
+        connection_api, "bool BleRadio::queueAttSignedWriteCommand("
+    )
+    assert "kLocalCounterReservation = 16U" in signed_tx
+    assert "smpLocalSignCounter_ >= smpLocalSignCounterReservedUntil_" in signed_tx
+    assert "bondRecord_.localSignCounter = reservedUntil;" in signed_tx
+    assert "persistActiveSigningCounters(true)" in signed_tx
+    assert signed_tx.index("persistActiveSigningCounters(true)") < signed_tx.index(
+        "queueAttRequest(request"
+    )
+    assert signed_tx.index("persistActiveSigningCounters(true)") < signed_tx.index(
+        "smpLocalSignCounterReservedUntil_ = reservedUntil;"
+    )
+    assert signed_tx.index("smpLocalSignCounter_ = signCounter + 1U;") < signed_tx.index(
+        "queueAttRequest(request"
+    )
+    assert "smpLocalSignCounter_ = signCounter;" not in signed_tx
+    assert "bondRecord_ = oldBondRecord" not in signed_tx
+
+    deferred_dispatch = function_body(
+        connection_api, "void BleRadio::dispatchDeferredGattWrites()"
+    )
+    assert "slot.signedWrite != 0U" in deferred_dispatch
+    assert "applyDeferredSignedGattWrite(" in deferred_dispatch
+    deferred_work = function_body(
+        connection_api, "void BleRadio::serviceDeferredApplicationWork()"
+    )
+    assert "if (bleRunningInIsr())" in deferred_work
+    assert "flushDeferredBondStorage()" in deferred_work
+    assert "dispatchDeferredGattWrites();" in deferred_work
+
+    bond_store = (parts / "nrf54l15_hal_internal_gatt_bond.inc").read_text(
+        encoding="utf-8"
+    )
+    assert "struct BleBondRecordV2" in bond_store
+    assert "convertV2BondRecord" in bond_store
+    cccd_persist = function_body(
+        bond_store, "bool BleRadio::persistBondedCccdState(bool forceFlash)"
+    )
+    assert "connected_ && !forceFlash" in cccd_persist
+    assert "writeFlashCccdBondRecord(record)" in cccd_persist
+    assert "return forceFlash ? flashOk" in cccd_persist
+    deferred_storage_flush = function_body(
+        ll_security, "bool BleRadio::flushDeferredBondStorage()"
+    )
+    assert "persistBondedCccdState(true)" in deferred_storage_flush
+    assert deferred_storage_flush.index(
+        "persistBondedCccdState(true)"
+    ) < deferred_storage_flush.index("cccdFlashPersistPending_ = false;")
+
+    prime_bond = function_body(
+        ll_security, "bool BleRadio::primeBondForCurrentPeer()"
+    )
+    assert "smpPeerSignCounterReservedUntil_ = bondRecord_.peerSignCounter;" in prime_bond
+    assert "smpLocalSignCounterReservedUntil_ = bondRecord_.localSignCounter;" in prime_bond
+    assert "connectionEncSecureConnections_ =" in prime_bond
+    assert "kBleBondRecordFlagSecureConnections" in prime_bond
+    print(
+        "PASS BLE SMP/LinkKey masks, exact inbound signed counters, outbound "
+        "reservations, CCCD foreground flush, LL CPR, and fail-closed RNG"
+    )
+
+
+def validate_two_board_gate_bond_clear_contracts() -> None:
+    runner = (ROOT / "scripts/run_two_board_release_gate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "ble_pair bond-clear-persistent=1" in runner
+    assert "ble_pair bond-clear-persistent=0" in runner
+    assert "ble_pair bond-clear-failed" in runner
+    assert "ble_pair bond-cleared-storage" not in runner
+    assert "logs = self.pair_logs_since_boot(logs, phase)" in runner
+    assert runner.count(
+        'self.clear_bond_retention_cache(f"{phase}_cold_reload", self.l15, phase)'
+    ) == 3
+    assert runner.count(
+        'self.clear_bond_retention_cache(f"{phase}_cold_reload", self.lm20, phase)'
+    ) == 3
+
+    security_examples = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Security"
+    )
+    for sketch in (
+        security_examples / "BlePairCentral/BlePairCentral.ino",
+        security_examples / "BlePairPeripheral/BlePairPeripheral.ino",
+    ):
+        source = sketch.read_text(encoding="utf-8")
+        clear_handler = function_body(source, "void handleCmd(const char* c)")
+        assert "const bool cleared = g_ble.clearBondRecord(true);" in clear_handler
+        assert 'Serial.print("ble_pair bond-clear-persistent=");' in clear_handler
+        assert '"ble_pair bond-clear-failed"' in clear_handler
+    print("PASS two-board gate persistent bond-clear evidence contract")
+
+
+def validate_board_example_menu_contracts() -> None:
+    library = PLATFORM / "libraries/nRF54-Board-Examples"
+    properties = {}
+    for line in (library / "library.properties").read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            properties[key] = value
+
+    assert properties["name"] == "nRF54 Board Examples"
+    assert properties["version"] == "1.0.0"
+    assert properties["license"] == "MIT"
+    assert properties["architectures"] == "nrf54l15clean"
+    assert "Nrf54L15-Clean-Implementation" in properties["depends"]
+    assert "Adafruit SPIFlash" in properties["depends"]
+
+    expected = {
+        "HOLYIOT-25008": {
+            "Holyiot25008Lis2dh12Spi",
+            "Holyiot25008RgbButton",
+            "Holyiot25008UartPadsAsGpio",
+        },
+        "Nordic-nRF54L15-DK": {"Nrf54L15DkLinearGpioMap"},
+        "XIAO-nRF54L15": {
+            "DelayAutoLowPowerMeasure",
+            "InterruptPwmApiProbe",
+            "XiaoBoardControlPins",
+        },
+        "XIAO-nRF54L15-Sense": {
+            "SenseDelayRailRetentionProbe",
+            "XiaoSenseImuAccelGyro",
+            "XiaoSenseImuWhoAmI",
+            "XiaoSenseMicLevel",
+        },
+        "XIAO-nRF54LM20A": {
+            "FlashInfo",
+            "FlashReadWrite",
+            "QspiFlashDeepSleep",
+            "QspiFlashInfo",
+            "QspiFlashReadWrite",
+            "XiaoRgbLed",
+        },
+        "XIAO-nRF54LM20A-Sense": {
+            "XiaoLM20A_ImuAccelGyro",
+            "XiaoLM20A_ImuWhoAmI",
+            "XiaoLM20A_MicLevel",
+        },
+    }
+
+    examples = library / "examples"
+    actual = {category: set() for category in expected}
+    sketch_paths = {}
+    for ino in sorted(examples.rglob("*.ino")):
+        relative = ino.relative_to(examples)
+        assert len(relative.parts) == 3, (
+            f"board example must use category/sketch/sketch.ino: {relative}"
+        )
+        category, sketch, filename = relative.parts
+        assert category in expected, f"unexpected board example category: {category}"
+        assert filename == f"{sketch}.ino", f"invalid Arduino sketch layout: {relative}"
+        actual[category].add(sketch)
+        sketch_paths[sketch] = ino
+    assert actual == expected, f"board example menu changed: {actual}"
+
+    visible_examples = list(PLATFORM.glob("libraries/*/examples/**/*.ino"))
+    for sketch, canonical in sketch_paths.items():
+        matches = [path for path in visible_examples if path.stem == sketch]
+        assert matches == [canonical], (
+            f"{sketch} must have exactly one visible library menu location: {matches}"
+        )
+
+    stale_roots = (
+        PLATFORM / "examples/HolyIoT",
+        PLATFORM / "examples/XiaoL15",
+        PLATFORM / "examples/XiaoLM20A",
+        PLATFORM / "libraries/Adafruit_SPIFlash/examples",
+        PLATFORM / "libraries/HOLYIOT-25008-Examples/examples",
+    )
+    for root in stale_roots:
+        assert not list(root.rglob("*.ino")), f"stale board menu examples remain in {root}"
+
+    generic_board_examples = {
+        path.stem
+        for path in (
+            PLATFORM / "libraries/Nrf54L15-Clean-Implementation/examples/Board"
+        ).rglob("*.ino")
+    }
+    assert generic_board_examples == {
+        "BoardBatteryAntennaBusControl",
+        "PofWarningMonitor",
+    }
+
+    matrix = runpy.run_path(str(ROOT / "scripts/build_all_examples.py"))
+    category_targets = {
+        "HOLYIOT-25008": ("holyiot_25008_nrf54l15",),
+        "Nordic-nRF54L15-DK": ("nrf54l15dk_pca10156",),
+        "XIAO-nRF54L15": ("xiao_nrf54l15",),
+        "XIAO-nRF54L15-Sense": ("xiao_nrf54l15",),
+        "XIAO-nRF54LM20A": ("xiao_nrf54lm20b",),
+        "XIAO-nRF54LM20A-Sense": ("xiao_nrf54lm20b",),
+    }
+    for category, sketches in expected.items():
+        for sketch in sketches:
+            relative = sketch_paths[sketch].relative_to(PLATFORM).as_posix()
+            assert matrix["applicable_boards"](relative, True) == category_targets[category]
+    print("PASS board-oriented example menu layout, uniqueness, and FQBN routing")
+
+
+def validate_platform_example_uniqueness_contracts() -> None:
+    examples = PLATFORM / "examples"
+    canonical = (
+        "Basics/CoreVersionProbe/CoreVersionProbe.ino",
+        "EGU/EguTriggerDemo/EguTriggerDemo.ino",
+        "KMU/KmuCracenIkgSeedProof/KmuCracenIkgSeedProof.ino",
+        "KMU/KmuMetadataProbe/KmuMetadataProbe.ino",
+        "PWM/PwmDatasheetStress/PwmDatasheetStress.ino",
+        "Peripherals/PeripheralProbe/PeripheralProbe.ino",
+        "SPI/HighSpeedSpi32MHzProbe/HighSpeedSpi32MHzProbe.ino",
+        "Runtime/RuntimePeripheralPinRemap/RuntimePeripheralPinRemap.ino",
+        "Serial/SerialFabricExtraInstanceProbe/SerialFabricExtraInstanceProbe.ino",
+        "Serial/SerialFabricRuntimeProbe/SerialFabricRuntimeProbe.ino",
+        "Serial/SerialNonBlockingWriteProbe/SerialNonBlockingWriteProbe.ino",
+        "TAMPC/TampcAdvancedConfigProbe/TampcAdvancedConfigProbe.ino",
+        "TAMPC/TampcStatusReporter/TampcStatusReporter.ino",
+        "VBAT/VbatReadViaAnalogRead/VbatReadViaAnalogRead.ino",
+        "VBAT/VddReadViaInternalSaadc/VddReadViaInternalSaadc.ino",
+        "VPR/VprCrc32OffloadProbe/VprCrc32OffloadProbe.ino",
+        "VPR/VprCrc32cOffloadProbe/VprCrc32cOffloadProbe.ino",
+        "VPR/VprFnv1aOffloadProbe/VprFnv1aOffloadProbe.ino",
+        "VPR/VprHibernateContextProbe/VprHibernateContextProbe.ino",
+        "VPR/VprHibernateResumeProbe/VprHibernateResumeProbe.ino",
+        "VPR/VprHibernateWakeProbe/VprHibernateWakeProbe.ino",
+        "VPR/VprRestartLifecycleProbe/VprRestartLifecycleProbe.ino",
+        "VPR/VprSharedTransportProbe/VprSharedTransportProbe.ino",
+        "VPR/VprTickerAsyncEventProbe/VprTickerAsyncEventProbe.ino",
+        "VPR/VprTickerOffloadProbe/VprTickerOffloadProbe.ino",
+        "Wire/WireImuRemapScanner/WireImuRemapScanner.ino",
+        "Wire/WireRepeatedStartProbe/WireRepeatedStartProbe.ino",
+        "Wire/WireTargetResponder/WireTargetResponder.ino",
+    )
+    missing = [relative for relative in canonical if not (examples / relative).is_file()]
+    assert not missing, f"canonical platform examples are missing: {missing}"
+
+    paths_by_digest = {}
+    duplicate_groups = []
+    for sketch in sorted(examples.rglob("*.ino")):
+        digest = hashlib.sha256(sketch.read_bytes()).hexdigest()
+        previous = paths_by_digest.get(digest)
+        if previous is not None:
+            duplicate_groups.append(
+                (previous.relative_to(examples), sketch.relative_to(examples))
+            )
+        else:
+            paths_by_digest[digest] = sketch
+    assert not duplicate_groups, (
+        f"byte-identical platform examples create duplicate menu entries: {duplicate_groups}"
+    )
+    print("PASS platform examples have one canonical path per byte-identical sketch")
 
 
 def compile_and_run_host_tests(temp: Path) -> None:
@@ -1039,6 +2008,17 @@ def compile_and_run_host_tests(temp: Path) -> None:
     run([str(math_test)], env=sanitizer_env)
     print("PASS map extreme-range UBSan")
 
+    ancs_test = temp / "ble_ancs_response_parser_test"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{PLATFORM / 'libraries' / 'Bluefruit52Lib' / 'src'}",
+        str(TESTS / "ble_ancs_response_parser_test.cpp"),
+        "-o", str(ancs_test),
+    ])
+    run([str(ancs_test)], env=sanitizer_env)
+    print("PASS ANCS fragmented Data Source parser ASan+UBSan")
+
     for chip, contract in CHIPS.items():
         nvic_test = temp / f"nvic_layout_{chip}"
         run(common + [
@@ -1059,17 +2039,24 @@ def main() -> int:
     validate_pca10156_serial_route_contracts()
     validate_thread_crypto_build_contracts()
     validate_ble_disconnect_reason_contracts()
+    validate_ble_connection_parameter_contracts()
+    validate_ble_persistence_layout_contracts()
     validate_custom_gatt_initial_value_capacity_contracts()
+    validate_phy_preserves_data_length_contract()
     validate_parser_output_validity_contracts()
     validate_zigbee_persistence_reset_contracts()
     validate_protocol_typed_reset_contracts()
     validate_channel_sounding_public_examples_contracts()
     validate_spi_contracts()
     validate_system_off_wake_contracts()
+    validate_two_board_gate_parser_contracts()
     validate_xiao_low_power_board_contracts()
     validate_xiao_retention_probe_contracts()
     validate_serial_fabric_runtime_probe_contracts()
     validate_ble_security_hardening_contracts()
+    validate_two_board_gate_bond_clear_contracts()
+    validate_board_example_menu_contracts()
+    validate_platform_example_uniqueness_contracts()
     with tempfile.TemporaryDirectory(prefix="nrf54-core-io-") as directory:
         compile_and_run_host_tests(Path(directory))
     return 0

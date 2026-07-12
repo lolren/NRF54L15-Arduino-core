@@ -580,6 +580,14 @@ class Kmu {
 
 class CracenIkg {
  public:
+  static constexpr uintptr_t kPkOperandRamOffset = 0x8000U;
+  static constexpr size_t kPkOperandSlotSize = 0x200U;
+#if defined(NRF54LM20A_XXAA) || defined(NRF54LM20B_XXAA)
+  static constexpr uint8_t kPkOperandSlotCount = 15U;
+#else
+  static constexpr uint8_t kPkOperandSlotCount = 16U;
+#endif
+
   explicit CracenIkg(uint32_t controlBase = nrf54l15::CRACEN_BASE,
                      uint32_t coreBase = nrf54l15::CRACENCORE_BASE);
 
@@ -602,6 +610,11 @@ class CracenIkg {
   bool symmetricKeysStored() const;
   bool privateKeysStored() const;
 
+  bool seedValid() const;
+  bool seedLocked() const;
+  bool seedStateManagedByKmu() const;
+  // Directly validating an unknown seed is unsafe, so valid=true is rejected.
+  // L15 callers may invalidate an unlocked seed; LM20 seed state is KMU-owned.
   bool markSeedValid(bool valid = true);
   bool lockSeed();
   bool lockProtectedRam();
@@ -612,18 +625,20 @@ class CracenIkg {
   bool setReseedInterval(uint64_t interval);
   bool start(uint32_t spinLimit = 600000UL);
 
-  // PKE (Public Key Engine) access for ECC operations
+  // Raw PKE access. Each operand occupies one 0x200-byte CryptoRAM slot.
   bool pkStart();
   bool pkBusy() const;
   void pkClearIrq();
   void pkSetCommand(uint32_t cmd);
   void pkSetPointers(uint8_t a, uint8_t b, uint8_t c, uint8_t n);
   void pkSetOpsize(uint32_t size);
-  void pkWriteOperand(int slot, const uint8_t* data, size_t len);
+  bool pkWriteOperand(int slot, const uint8_t* data, size_t len);
   bool pkReadOperand(int slot, uint8_t* data, size_t len);
   bool pkWaitComplete(uint32_t spinLimit = 1000000UL);
 
-  // High-level ECC operations via IKG
+  // Derives isolated keys only when trusted provisioning already marked the
+  // hardware seed valid. Direct high-level PKE operations remain unsupported
+  // and fail closed; use a validated PSA/NCS integration for those operations.
   bool ikgGenerateKey();
   bool ikgEcdsaSign(const uint8_t hash[32]);
   bool ikgPointMul(const uint8_t scalar[32], const uint8_t pointX[32], const uint8_t pointY[32]);
@@ -646,9 +661,11 @@ class CracenIkg {
  private:
   bool waitReady(uint32_t spinLimit) const;
   bool waitGenerationComplete(uint32_t spinLimit) const;
+  bool operandAccessAllowed(int slot, const void* data, size_t len) const;
 
   NRF_CRACEN_Type* cracen_;
   NRF_CRACENCORE_Type* core_;
+  uintptr_t operandRamBase_;
   bool active_;
 };
 
@@ -1111,7 +1128,8 @@ class BoardControl {
   // changing the remembered desired active path.
   static BoardAntennaPath antennaPath();
 
-  // Controls the shared IMU + microphone power/enable rail on XIAO nRF54L15.
+  // Controls the shared IMU + microphone rail: the GPIO gate on XIAO
+  // nRF54L15, or nPM1300 LDO1 on XIAO nRF54LM20A.
   static bool setImuMicEnabled(bool enable);
   static bool imuMicEnabled();
 
@@ -1363,17 +1381,33 @@ class Pdm {
   explicit Pdm(uint32_t base = nrf54l15::PDM20_BASE);
 
   bool begin(const Pin& clk, const Pin& din, bool mono = true,
-             uint8_t prescalerDiv = 40,
-             uint8_t ratio = PDM_RATIO_RATIO_Ratio64,
-             PdmEdge edge = PdmEdge::kLeftRising);
+             uint8_t prescalerDiv = 25,
+             uint8_t ratio = PDM_RATIO_RATIO_Ratio80,
+             PdmEdge edge = PdmEdge::kLeftFalling);
   void end();
 
+  // sampleCount is the number of int16_t samples. nRF54 EasyDMA MAXCNT is
+  // byte-addressed, so capture converts this count to bytes internally. A zero
+  // timeout derives a time budget from the configured sample rate and count.
+  // At least 64 samples are required so the owned second DMA bank can be queued
+  // safely after STARTED at every supported sample rate.
   bool capture(int16_t* samples, size_t sampleCount,
-               uint32_t spinLimit = 4000000UL);
+               uint32_t timeoutUs = 0UL);
 
  private:
+  static constexpr size_t kDrainSampleCount = 64U;
+  void applyConfiguration();
+  bool stopAndReleaseDma(uint32_t timeoutUs);
+
   NRF_PDM_Type* pdm_;
   bool configured_;
+  Pin clkPin_;
+  Pin dinPin_;
+  uint32_t modeConfig_;
+  uint32_t ratioConfig_;
+  uint32_t prescalerConfig_;
+  uint32_t sampleRateHz_;
+  alignas(4) int16_t drainSamples_[kDrainSampleCount];
 };
 
 struct I2sTxConfig {
@@ -1942,6 +1976,7 @@ enum BleGattCharacteristicProperty : uint8_t {
   kBleGattPropWrite = 0x08U,
   kBleGattPropNotify = 0x10U,
   kBleGattPropIndicate = 0x20U,
+  kBleGattPropAuthenticatedSignedWrites = 0x40U,
 };
 
 struct BleScanPacket {
@@ -2453,6 +2488,14 @@ struct BleBondRecord {
   uint16_t ediv;
   uint8_t keySize;
   uint8_t reserved[2];
+  uint8_t peerCsrk[16];
+  uint8_t localCsrk[16];
+  uint32_t peerSignCounter;
+  uint32_t localSignCounter;
+  uint8_t peerCsrkValid;
+  uint8_t localCsrkValid;
+  uint8_t peerSignCounterValid;
+  uint8_t signingReserved;
 };
 
 // OOB (Out-of-Band) pairing data for LE Secure Connections
@@ -2499,6 +2542,8 @@ class BleRadio {
     uint8_t readPermission = kBleGattPermOpen;
     uint8_t writePermission = kBleGattPermOpen;
     uint8_t reportReferenceReadPermission = 0U;  // 0 = inherit value read permission.
+    uint16_t maxValueLength = kCustomGattMaxValueLength;
+    bool fixedValueLength = false;
   };
 
   struct BleCustomGattDescriptorHandles {
@@ -2561,6 +2606,8 @@ class BleRadio {
   bool setGattDeviceName(const char* name);
   bool setGattAppearance(uint16_t appearance);
   bool setGattBatteryLevel(uint8_t percent);
+  bool writeGattBatteryLevel(uint8_t percent);
+  bool notifyGattBatteryLevel(uint8_t percent);
   bool clearCustomGatt();
   bool addCustomGattService(uint16_t uuid16, uint16_t* outServiceHandle = nullptr);
   bool addCustomGattService128(const uint8_t uuid128[16],
@@ -2710,6 +2757,18 @@ class BleRadio {
   bool queueAttReadRequest(uint16_t handle);
   bool queueAttWriteRequest(uint16_t handle, const uint8_t* value,
                             uint8_t valueLength, bool withResponse = true);
+  // Queue an ATT Signed Write Command on an unencrypted bonded link. The
+  // local CSRK and monotonic signing counter come from the persisted bond.
+  bool queueAttSignedWriteCommand(uint16_t handle, const uint8_t* value,
+                                  uint8_t valueLength);
+  uint32_t signedWriteReplayRejectCount() const;
+  // Compute the eight-octet MAC portion of an ATT authentication signature.
+  // The CSRK uses the little-endian SMP wire representation.
+  static bool computeAttDataSignature(const uint8_t csrk[16],
+                                      const uint8_t* attMessage,
+                                      uint8_t attMessageLength,
+                                      uint32_t signCounter,
+                                      uint8_t outMac[8]);
   bool queueAttPrepareWriteRequest(uint16_t handle, uint16_t offset,
                                    const uint8_t* value, uint8_t valueLength);
   bool queueAttExecuteWriteRequest(bool execute);
@@ -2885,6 +2944,8 @@ class BleRadio {
     uint8_t userDescription[kCustomGattMaxUserDescriptionLength];
     uint8_t presentationFormat[kCustomGattPresentationFormatLength];
     uint8_t reportReference[kCustomGattReportReferenceLength];
+    uint16_t maxValueLength;
+    bool fixedValueLength;
     uint16_t valueLength;
     uint8_t value[kCustomGattMaxValueLength];
   };
@@ -2901,6 +2962,8 @@ class BleRadio {
     uint16_t valueHandle;
     uint16_t valueLength;
     uint8_t withResponse;
+    uint8_t signedWrite;
+    uint32_t signCounter;
     uint8_t value[kCustomGattMaxValueLength];
   };
 
@@ -3154,6 +3217,16 @@ class BleRadio {
   void serviceSecureConnectionsWork();
   void serviceSmpKeyDistribution();
   bool completeSmpKeyDistributionIfDone();
+  bool prepareLocalSigningKey();
+  bool persistActiveSigningCounters(bool requireDurable);
+  bool verifyAttSignedWrite(const uint8_t* attRequest,
+                            uint16_t requestLength,
+                            uint32_t* outSignCounter);
+  bool persistDeferredSignedWriteCounter(uint32_t signCounter);
+  void applyDeferredSignedGattWrite(uint16_t valueHandle,
+                                    const uint8_t* value,
+                                    uint16_t valueLength,
+                                    uint32_t signCounter);
   bool localIdentityDistributionAvailable() const;
   bool isBondRecordUsable(const BleBondRecord& record) const;
   bool loadBondRecordFromPersistence();
@@ -3165,7 +3238,7 @@ class BleRadio {
   bool clearPersistentBondRecord();
   bool buildCurrentBondRecord(BleBondRecord* outRecord) const;
   bool primeBondForCurrentPeer();
-  bool persistBondedCccdState();
+  bool persistBondedCccdState(bool forceFlash = false);
   bool restoreBondedCccdState();
   bool clearPersistentCccdRecord();
   void clearCustomGattConnectionState();
@@ -3204,24 +3277,29 @@ class BleRadio {
       uint16_t reportReferenceHandle) const;
   bool customGattPermissionSatisfied(uint8_t permission,
                                      uint8_t defaultDenyError,
-                                     uint8_t* outAttError) const;
+                                     uint8_t* outAttError,
+                                     bool signedWrite = false) const;
   bool customGattPermissionRequiresSecurity(uint8_t permission) const;
   bool customGattHasSecureHidService() const;
   bool customGattReadPermissionSatisfied(
       const BleCustomCharacteristicState* characteristic,
       uint8_t* outAttError) const;
+  bool customGattHvxPermissionSatisfied(
+      const BleCustomCharacteristicState* characteristic) const;
   bool customGattWritePermissionSatisfied(
       const BleCustomCharacteristicState* characteristic,
-      uint8_t* outAttError) const;
+      uint8_t* outAttError, bool signedWrite = false) const;
   bool applyCustomGattCharacteristicValueWrite(uint16_t handle,
                                                const uint8_t* value,
                                                uint16_t valueLength,
                                                bool withResponse,
                                                uint8_t* outErrorCode,
-                                               bool allowDeferredCallback);
+                                               bool allowDeferredCallback,
+                                               bool signedWrite = false);
   bool writeCustomGattCharacteristic(uint16_t handle, const uint8_t* value,
                                      uint16_t valueLength, bool withResponse,
-                                     uint8_t* outErrorCode);
+                                     uint8_t* outErrorCode,
+                                     bool signedWrite = false);
   static void deferredCustomGattPeerWriteCallback(uint16_t valueHandle,
                                                   const uint8_t* value,
                                                   uint16_t valueLength,
@@ -3259,6 +3337,10 @@ class BleRadio {
   bool enqueueDeferredGattWrite(BleGattWriteCallback callback, void* context,
                                 uint16_t valueHandle, const uint8_t* value,
                                 uint16_t valueLength, bool withResponse);
+  bool enqueueDeferredSignedGattWrite(uint16_t valueHandle,
+                                      const uint8_t* value,
+                                      uint16_t valueLength,
+                                      uint32_t signCounter);
   void dispatchDeferredGattWrites();
   bool enqueueDeferredTrace(const char* message);
   void dispatchDeferredTraces();
@@ -3543,6 +3625,7 @@ class BleRadio {
   bool connectionEncRxEnabled_;
   bool connectionEncTxEnabled_;
   bool connectionEncAuthenticated_;
+  bool connectionEncSecureConnections_;
   bool connectionEncStartReqPending_;
   bool connectionEncStartReqTxPending_;
   bool connectionEncAwaitingStartRsp_;
@@ -3581,6 +3664,7 @@ class BleRadio {
   bool cccdFlashPersistPending_;
   bool bondLocalIdentityMigrationPending_;
   uint32_t bondLocalIdentityMigrationRetryAtUs_;
+  bool bondSigningCounterPersistPending_;
   bool connectionBondedEncryptionRequested_;
   BleTraceCallback traceCallback_;
   void* traceCallbackContext_;
@@ -3588,10 +3672,14 @@ class BleRadio {
   bool smpLocalInitiator_;
   bool smpExpectPeerEncKey_;
   bool smpExpectPeerIdKey_;
+  bool smpExpectPeerSignKey_;
   bool smpDistributeLocalIdKey_;
+  bool smpDistributeLocalSignKey_;
   bool smpLocalIdInfoSent_;
   bool smpLocalIdAddressSent_;
   bool smpLocalIdAddressAcked_;
+  bool smpLocalSignInfoSent_;
+  bool smpLocalSignInfoAcked_;
   uint8_t smpLocalIoCapabilities_;
   bool smpPendingUserPasskey_;
   bool smpPendingUserPasskeyMatchRequest_;
@@ -3602,9 +3690,19 @@ class BleRadio {
   bool smpPeerIrkValid_;
   bool smpPeerIdentityAddressValid_;
   bool smpPeerIdentityAddressRandom_;
+  bool smpPeerCsrkValid_;
+  bool smpLocalCsrkValid_;
+  bool smpPeerSignCounterValid_;
   uint8_t smpPeerLtk_[16];
   uint8_t smpPeerIrk_[16];
   uint8_t smpPeerIdentityAddress_[6];
+  uint8_t smpPeerCsrk_[16];
+  uint8_t smpLocalCsrk_[16];
+  uint32_t smpPeerSignCounter_;
+  uint32_t smpLocalSignCounter_;
+  uint32_t smpPeerSignCounterReservedUntil_;
+  uint32_t smpLocalSignCounterReservedUntil_;
+  uint32_t signedWriteReplayRejectCount_;
   uint8_t smpEncReqRand_[8];
   uint16_t smpEncReqEdiv_;
   uint8_t smpKeySize_;

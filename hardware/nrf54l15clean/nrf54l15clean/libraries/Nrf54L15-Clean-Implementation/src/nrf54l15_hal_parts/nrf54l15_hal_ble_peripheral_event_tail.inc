@@ -428,8 +428,10 @@
         const bool payloadFitsCurrentLink =
             (currentAttMtu() >= requiredAttMtu) &&
             (currentTxDataPduPayloadLength() >= requiredDataLength);
+        const bool readPermissionSatisfied =
+            customGattHvxPermissionSatisfied(&custom);
         const bool canTransmit =
-            modeEnabled && payloadFitsCurrentLink &&
+            modeEnabled && readPermissionSatisfied && payloadFitsCurrentLink &&
             (!queuedCustom.indication || indicationFlowReady);
         if (!modeEnabled) {
           popCustomGattNotification();
