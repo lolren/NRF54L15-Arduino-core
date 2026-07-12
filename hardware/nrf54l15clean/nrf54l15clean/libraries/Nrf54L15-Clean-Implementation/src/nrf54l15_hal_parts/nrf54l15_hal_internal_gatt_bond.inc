@@ -546,24 +546,6 @@ void writeLe32(uint8_t* p, uint32_t v) {
   p[3] = static_cast<uint8_t>((v >> 24U) & 0xFFU);
 }
 
-void fillPseudoRandomBytes(uint8_t* out, uint8_t len, uint32_t seed) {
-  if (out == nullptr || len == 0U) {
-    return;
-  }
-
-  uint32_t state = seed ^ 0xA55AA55AUL;
-  if (state == 0U) {
-    state = 0x1F123BB5UL;
-  }
-  for (uint8_t i = 0U; i < len; ++i) {
-    // Xorshift32 for lightweight deterministic byte generation.
-    state ^= (state << 13U);
-    state ^= (state >> 17U);
-    state ^= (state << 5U);
-    out[i] = static_cast<uint8_t>(state & 0xFFU);
-  }
-}
-
 uint32_t crc32(const uint8_t* data, size_t length) {
   if (data == nullptr || length == 0U) {
     return 0U;
