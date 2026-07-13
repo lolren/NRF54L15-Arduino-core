@@ -1376,6 +1376,8 @@ enum class PdmEdge : uint8_t {
   kLeftFalling = PDM_MODE_EDGE_LeftFalling,
 };
 
+#define NRF54L15_PDM_HAS_CONTINUOUS_STREAM 1
+
 class Pdm {
  public:
   struct StreamEvent {
