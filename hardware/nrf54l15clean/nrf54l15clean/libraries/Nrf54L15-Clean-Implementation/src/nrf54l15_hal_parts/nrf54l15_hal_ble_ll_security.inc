@@ -33,6 +33,10 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
     outPayload[1] = opcode;
     outPayload[2] = kBleLlErrorPinOrKeyMissing;
     *outLength = 3U;
+    if (connectionRole_ == BleConnectionRole::kPeripheral &&
+        opcode == kBleLlCtrlEncReq) {
+      connectionMissingKeyTerminatePending_ = true;
+    }
     emitBleTrace("LL_REJECT_PIN_OR_KEY_MISSING");
     return true;
   };
@@ -3230,6 +3234,7 @@ void BleRadio::clearSmpSecurityState() {
 }
 
 void BleRadio::clearConnectionSecurityState() {
+  connectionMissingKeyTerminatePending_ = false;
   clearSmpSecurityState();
   clearPendingL2capTxFragment();
   clearEncryptionState();

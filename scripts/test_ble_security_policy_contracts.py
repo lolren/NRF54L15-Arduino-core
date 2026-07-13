@@ -807,6 +807,47 @@ def validate_local_enckey_distribution_source() -> None:
     )
 
 
+def validate_stale_bond_recovery_source() -> None:
+    header = source(HAL / "nrf54l15_hal.h")
+    security = source(PARTS / "nrf54l15_hal_ble_ll_security.inc")
+    event_rx = source(PARTS / "nrf54l15_hal_ble_peripheral_event_rx.inc")
+    event_tx = source(PARTS / "nrf54l15_hal_ble_peripheral_event_tx.inc")
+    event_tail = source(PARTS / "nrf54l15_hal_ble_peripheral_event_tail.inc")
+
+    assert "connectionMissingKeyTerminatePending_" in header
+    ll_control = function_body(
+        security,
+        ("bool BleRadio::buildLlControlResponse(",),
+        "LL security control responder",
+    )
+    for token in (
+        "kBleLlErrorPinOrKeyMissing",
+        "connectionRole_ == BleConnectionRole::kPeripheral",
+        "opcode == kBleLlCtrlEncReq",
+        "connectionMissingKeyTerminatePending_ = true",
+    ):
+        assert token in ll_control, f"missing stale-bond reject contract: {token}"
+    for token in (
+        "peerAckedLastTx",
+        "kBleLlCtrlRejectExtInd",
+        "kBleLlErrorPinOrKeyMissing",
+        "terminateMissingKey = true",
+        "kBleLlCtrlTerminateInd",
+        "terminateMicFailure ? 0x05U : 0x06U",
+    ):
+        assert token in event_tx, f"missing stale-bond termination fence: {token}"
+    assert "bool terminateMissingKey = false;" in event_rx
+    assert "terminateMissingKey ? kBleLlErrorPinOrKeyMissing" in event_tail
+    clear = function_body(
+        security,
+        ("void BleRadio::clearConnectionSecurityState()",),
+        "connection security reset",
+    )
+    assert "connectionMissingKeyTerminatePending_ = false" in clear
+    assert "SMP_BONDED_ENCRYPTION_COMPLETE" in event_tail
+    assert "stopSmpTimer" in event_tail
+
+
 def run_group(name: str, check: Callable[[], None]) -> str | None:
     try:
         check()
@@ -829,6 +870,7 @@ def main() -> int:
         ("source.passkey_request", validate_passkey_request_source),
         ("source.sc_legacy_defer_resume", validate_sc_and_legacy_defer_resume_source),
         ("source.local_enckey_distribution", validate_local_enckey_distribution_source),
+        ("source.stale_bond_recovery", validate_stale_bond_recovery_source),
     )
     failures = [failure for name, check in groups if (failure := run_group(name, check))]
     if failures:

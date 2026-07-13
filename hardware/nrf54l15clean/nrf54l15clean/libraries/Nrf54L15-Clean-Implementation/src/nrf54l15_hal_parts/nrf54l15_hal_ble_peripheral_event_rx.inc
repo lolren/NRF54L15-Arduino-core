@@ -1742,6 +1742,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
   bool peerTerminateIndReceived = false;
   uint8_t peerTerminateErrorCode = 0U;
   bool terminateMicFailure = false;
+  bool terminateMissingKey = false;
   uint8_t rxLength = rxLengthRaw;
   auto recordMicFailPacket = [&](uint8_t rawLen) {
     const uint8_t copyLen =

@@ -54,6 +54,18 @@
     }
   }
 
+  if (!terminateInd && connectionMissingKeyTerminatePending_ &&
+      peerAckedLastTx &&
+      connectionLastTxPlainLlid_ == kBlePduLlControl &&
+      connectionLastTxPlainLength_ >= 3U &&
+      connectionLastTxPlainPayload_[0] == kBleLlCtrlRejectExtInd &&
+      connectionLastTxPlainPayload_[2] == kBleLlErrorPinOrKeyMissing) {
+    connectionMissingKeyTerminatePending_ = false;
+    terminateInd = true;
+    terminateMissingKey = true;
+    emitBleTrace("TERMINATE_MISSING_KEY");
+  }
+
   if (event != nullptr) {
     event->packetIsNew = packetIsNew;
     event->peerAckedLastTx = peerAckedLastTx;
@@ -738,13 +750,16 @@
     txLength = connectionLastTxLength_;
   }
 
-  if (terminateInd && terminateMicFailure) {
+  if (terminateInd && (terminateMicFailure || terminateMissingKey)) {
     txLlid = kBlePduLlControl;
     txLength = 2U;
     connectionTxPayload_[0] = kBleLlCtrlTerminateInd;
-    connectionTxPayload_[1] = kBleLlErrorMicFailure;
+    connectionTxPayload_[1] = terminateMicFailure
+                                  ? kBleLlErrorMicFailure
+                                  : kBleLlErrorPinOrKeyMissing;
     ++encDebug_.encClearCount;
-    encDebug_.encLastClearReason = 0x05U;  // MIC failure terminate.
+    // Distinguish integrity failures from stale/missing bond recovery in dumps.
+    encDebug_.encLastClearReason = terminateMicFailure ? 0x05U : 0x06U;
     connectionEncRxEnabled_ = false;
     connectionEncTxEnabled_ = false;
     connectionLastTxLlid_ = txLlid;
@@ -756,7 +771,8 @@
   // Preserve a snapshot of the plaintext payload for retransmissions and for
   // `BleConnectionEvent::txPayload` visibility (the working buffer is reused later).
   const bool txPayloadIsNewPlain =
-      txCanUseFreshPayload || (terminateInd && terminateMicFailure);
+      txCanUseFreshPayload ||
+      (terminateInd && (terminateMicFailure || terminateMissingKey));
   if (txPayloadIsNewPlain) {
     connectionLastTxPlainLlid_ = txLlid;
     connectionLastTxPlainLength_ = txLength;

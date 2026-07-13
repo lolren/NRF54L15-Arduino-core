@@ -4046,6 +4046,7 @@ class BleRadio {
   uint8_t connectionCustomNotificationQueueCount_;
   uint16_t connectionCustomIndicationAwaitingHandle_;
   bool connectionSmpSecurityRequestPending_;
+  bool connectionMissingKeyTerminatePending_;
   BleGattWriteCallback customGattWriteCallback_;
   void* customGattWriteContext_;
   BleEncryptionDebugCounters encDebug_;

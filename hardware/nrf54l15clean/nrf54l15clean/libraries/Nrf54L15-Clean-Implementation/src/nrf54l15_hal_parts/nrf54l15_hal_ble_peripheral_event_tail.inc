@@ -534,6 +534,12 @@
   if (connectionEncEnableTxOnNextEvent_ && lastTxOkForEncEnable && !terminateInd) {
     connectionEncTxEnabled_ = true;
     connectionEncEnableTxOnNextEvent_ = false;
+    if (connectionEncRxEnabled_ && bondKeyPrimedForConnection_ &&
+        smpPairingState_ == kSmpPairingStateIdle) {
+      stopSmpTimer();
+      smpTimedOutForConnection_ = false;
+      emitBleTrace("SMP_BONDED_ENCRYPTION_COMPLETE");
+    }
   }
 
   if (terminateInd) {
@@ -543,11 +549,16 @@
             : (peerTerminateIndReceived ? BleDisconnectReason::kPeerTerminate
                                         : BleDisconnectReason::kInternalTerminate);
     const uint8_t disconnectErrorCode =
-        terminateMicFailure ? kBleLlErrorMicFailure : peerTerminateErrorCode;
+        terminateMicFailure
+            ? kBleLlErrorMicFailure
+            : (terminateMissingKey ? kBleLlErrorPinOrKeyMissing
+                                   : peerTerminateErrorCode);
     if (terminateMicFailure) {
       emitBleTrace("TERMINATE_MIC_FAILURE");
     } else if (peerTerminateIndReceived) {
       emitBleTrace("PEER_TERMINATE");
+    } else if (terminateMissingKey) {
+      emitBleTrace("TERMINATE_MISSING_KEY_SENT");
     } else {
       emitBleTrace("TERMINATE_INTERNAL");
     }
