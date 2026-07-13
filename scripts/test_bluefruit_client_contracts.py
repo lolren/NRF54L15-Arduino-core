@@ -35,6 +35,44 @@ def main() -> int:
     header = HEADER.read_text(encoding="utf-8")
     common = COMMON.read_text(encoding="utf-8")
 
+    zephyr_hid_info_start = source.index(
+        "const uint8_t kHidZephyrInfoValue[] = {"
+    )
+    zephyr_hid_info_end = source.index("};", zephyr_hid_info_start)
+    zephyr_hid_info = source[zephyr_hid_info_start:zephyr_hid_info_end]
+    assert "0x11U, 0x01U" in zephyr_hid_info
+    assert "0x00U, 0x00U" not in zephyr_hid_info
+    print("PASS compact HID mouse advertises conformant HID version 1.11")
+
+    hid_begin = function_body(source, "err_t BLEHidAdafruit::begin()")
+    compact_branch = hid_begin[
+        hid_begin.index("if (zephyr_compatible_mouse_)") :
+        hid_begin.index("const uint8_t protocol =", hid_begin.index("if (zephyr_compatible_mouse_)"))
+    ]
+    assert compact_branch.count("SECMODE_ENC_NO_MITM") >= 5
+    assert "setReportRefDescriptorPermission(SECMODE_ENC_NO_MITM)" in compact_branch
+    hid_mouse_report = function_body(
+        source,
+        "bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, hid_mouse_report_t* report)",
+    )
+    assert "const uint8_t emptyBootMouse[3]" in hid_begin
+    assert "emptyBootMouse, sizeof(emptyBootMouse)" in hid_begin
+    assert "const uint8_t bootReport[3]" in hid_mouse_report
+    assert "boot_mouse_input_.notify(conn_hdl, bootReport, sizeof(bootReport))" in hid_mouse_report
+    print("PASS HOGP Boot Mouse characteristics and notifications use three bytes")
+
+    mouse_example = (
+        BLUEFRUIT / "examples/HID/blehid_mouse/blehid_mouse.ino"
+    ).read_text(encoding="utf-8")
+    for token in (
+        "Bluefruit.Security.setIOCaps(true, true, false)",
+        "Bluefruit.Security.setPairPasskeyCallback(passkey_callback)",
+        "blehid.setZephyrCompatibleMouse(false)",
+        "Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE)",
+    ):
+        assert token in mouse_example, f"portable HID mouse example missing: {token}"
+    print("PASS HID mouse example uses authenticated full-profile interoperability mode")
+
     client_ready = function_body(source, "bool clientReady(uint16_t connHandle)")
     retry_client = function_body(source, "bool retryClientProcedure(")
     assert "connHandle == 0U" in client_ready

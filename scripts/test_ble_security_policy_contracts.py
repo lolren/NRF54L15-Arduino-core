@@ -799,12 +799,16 @@ def validate_local_enckey_distribution_source() -> None:
         "central's timing-critical START_ENC_REQ arrives"
     )
     assert event_rx.count(
-        "BleLlEncryptionPhase::kPeripheralAwaitStartRequest"
-    ) >= 3
-    assert "BleLlEncryptionPhase::kCompatibilitySendStartRequest" not in event_rx, (
-        "peripheral must not replace the central's START_ENC_REQ with a "
-        "symmetric fallback because that desynchronizes RX CCM counter zero"
+        "BleLlEncryptionPhase::kSendStartRequest"
+    ) >= 3, (
+        "the peripheral must send START_ENC_REQ immediately after deriving "
+        "the session key"
     )
+    assert "BleLlEncryptionPhase::kSendStartRequest" not in event_tx, (
+        "a peripheral must never initiate START_ENC_REQ while waiting for the central"
+    )
+    assert "bleLlShouldUseStartRequestFallback(" not in event_tx
+    assert "LL_START_ENC_REQ_COMPAT_FALLBACK" not in event_tx
     event_tail = source(PARTS / "nrf54l15_hal_ble_peripheral_event_tail.inc")
     assert "bleLlCommitTxAttempt(" in event_tail
     assert event_rx.count("bleLlApplyAuthenticatedSequence(") >= 2, (
@@ -873,7 +877,8 @@ def validate_stale_bond_recovery_source() -> None:
     ):
         assert token in event_tx, f"missing stale-bond termination fence: {token}"
     assert "bool terminateMissingKey = false;" in event_rx
-    assert "terminateMissingKey ? kBleLlErrorPinOrKeyMissing" in event_tail
+    assert "terminateMissingKey" in event_tail
+    assert "kBleLlErrorPinOrKeyMissing" in event_tail
     clear = function_body(
         security,
         ("void BleRadio::clearConnectionSecurityState()",),
@@ -882,6 +887,41 @@ def validate_stale_bond_recovery_source() -> None:
     assert "connectionMissingKeyTerminatePending_ = false" in clear
     assert "SMP_BONDED_ENCRYPTION_COMPLETE" in event_tail
     assert "stopSmpTimer" in event_tail
+
+
+def validate_sc_phone_key_distribution_source() -> None:
+    att = source(PARTS / "nrf54l15_hal_ble_att_l2cap.inc")
+    peripheral_tx = source(PARTS / "nrf54l15_hal_ble_peripheral_event_tx.inc")
+    require(
+        r"initiatorKeyDist\s*=\s*static_cast<uint8_t>\(\s*"
+        r"smp\[5\]\s*&\s*static_cast<uint8_t>\(\s*"
+        r"kSmpKeyDistIdKeyMask\s*\|\s*kSmpKeyDistSignKeyMask\s*\)\s*\);",
+        att,
+        "SC peripheral pairing must retain central identity/signing distribution",
+        re.DOTALL,
+    )
+    require(
+        r"responderKeyDist\s*=\s*static_cast<uint8_t>\(\s*"
+        r"smp\[6\]\s*&\s*static_cast<uint8_t>\(\s*"
+        r"kSmpKeyDistIdKeyMask\s*\|\s*kSmpKeyDistSignKeyMask\s*\)\s*\);",
+        att,
+        "SC peripheral pairing must negotiate responder identity/signing keys",
+        re.DOTALL,
+    )
+    for token in (
+        "deferEncryptedSmpKeyDistributionUntilAfterAck",
+        "SMP_KEY_DIST_PROCESSED_POST_ACK",
+    ):
+        assert token in peripheral_tx, (
+            "encrypted SMP key distribution must be processed after the "
+            f"time-critical LL acknowledgement: missing {token}"
+        )
+    peripheral_rx = source(PARTS / "nrf54l15_hal_ble_peripheral_event_rx.inc")
+    for token in ("stopSmpTimer", "SMP_BONDED_ENCRYPTION_COMPLETE_FAST"):
+        assert token in peripheral_rx, (
+            "fast encrypted reconnect must retire the SMP timer: "
+            f"missing {token}"
+        )
 
 
 def run_group(name: str, check: Callable[[], None]) -> str | None:
@@ -907,6 +947,7 @@ def main() -> int:
         ("source.sc_legacy_defer_resume", validate_sc_and_legacy_defer_resume_source),
         ("source.local_enckey_distribution", validate_local_enckey_distribution_source),
         ("source.stale_bond_recovery", validate_stale_bond_recovery_source),
+        ("source.sc_phone_key_distribution", validate_sc_phone_key_distribution_source),
     )
     failures = [failure for name, check in groups if (failure := run_group(name, check))]
     if failures:

@@ -31,6 +31,12 @@ int main() {
     assert(update.freshTxAllowed);
   }
   {
+    // An LL control retransmission is acknowledged but never re-applied to
+    // procedure state. The controller call site gates processing on this bit.
+    const auto duplicate = bleLlObserveSequence(0x00, true, 0, 1);
+    assert(!duplicate.packetIsNew);
+  }
+  {
     // A failed empty ACK has no payload or CCM transaction to retain.
     const auto commit = bleLlCommitTxAttempt(false, true, 0x01, 0, false);
     assert(!commit.retainHistory);
@@ -64,7 +70,7 @@ int main() {
     flags.sessionValid = true;
     flags.startRequestTxPending = true;
     assert(bleLlEncryptionPhase(flags) ==
-           BleLlEncryptionPhase::kCompatibilitySendStartRequest);
+           BleLlEncryptionPhase::kSendStartRequest);
     flags.startRequestPending = true;
     assert(bleLlEncryptionPhase(flags) == BleLlEncryptionPhase::kInvalid);
   }
@@ -81,12 +87,20 @@ int main() {
     bool awaiting = true;
     bool enableTx = true;
     assert(bleLlSetEncryptionProcedurePhase(
-        BleLlEncryptionPhase::kCompatibilitySendStartRequest, &startPending,
+        BleLlEncryptionPhase::kSendStartRequest, &startPending,
         &startTxPending, &awaiting, &enableTx));
     assert(!startPending);
     assert(startTxPending);
     assert(!awaiting);
     assert(!enableTx);
+  }
+  {
+    // Initial synchronization must stop at the CONNECT_IND transmit-window
+    // boundary. Listening for most of the interval can overlap the next event
+    // on the previous event's channel and prevent recovery.
+    assert(bleLlInitialSyncWindowUs(1) == 1250U);
+    assert(bleLlInitialSyncWindowUs(3) == 3750U);
+    assert(bleLlInitialSyncWindowUs(8) == 10000U);
   }
   {
     // Android-style transcript: acknowledge a pairing response, miss an empty

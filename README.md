@@ -278,7 +278,7 @@ Install the stable release from the normal Boards Manager feed shown above, or
 request the exact version with Arduino CLI:
 
 ```bash
-arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.0"
+arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.1"
 ```
 
 - Controller-backed Bluetooth LE Channel Sounding Test is now available through

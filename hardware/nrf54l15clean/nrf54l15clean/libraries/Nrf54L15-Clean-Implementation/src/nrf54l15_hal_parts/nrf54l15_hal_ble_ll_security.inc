@@ -121,6 +121,7 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
           connectionPendingTimeoutUnits_ = timeout;
           connectionUpdateInstant_ = instant;
           connectionUpdatePending_ = true;
+          emitBleTrace("LL_CONN_UPDATE_PENDING");
         } else {
           return rejectMalformedRequest();
         }
@@ -281,11 +282,10 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         connectionEncSessionValid_ = true;
         connectionEncRxEnabled_ = false;
         connectionEncTxEnabled_ = false;
-        // Peripheral role sequence per Core LLCP:
-        // after LL_ENC_RSP, wait for initiator LL_START_ENC_REQ and answer with
-        // LL_START_ENC_RSP.
+        // Session-key derivation runs after LL_ENC_RSP is transmitted. The
+        // peripheral schedules LL_START_ENC_REQ as soon as derivation finishes.
         (void)bleLlSetEncryptionProcedurePhase(
-            BleLlEncryptionPhase::kPeripheralAwaitStartRequest,
+            BleLlEncryptionPhase::kAwaitStartRequest,
             &connectionEncStartReqPending_,
             &connectionEncStartReqTxPending_,
             &connectionEncAwaitingStartRsp_,
@@ -541,7 +541,7 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       primeStartEncryptionResponseCiphertext();
       connectionEncKeyDerivationPending_ = false;
       (void)bleLlSetEncryptionProcedurePhase(
-          BleLlEncryptionPhase::kCompatibilitySendStartRequest,
+          BleLlEncryptionPhase::kAwaitStartRequest,
           &connectionEncStartReqPending_,
           &connectionEncStartReqTxPending_,
           &connectionEncAwaitingStartRsp_,
@@ -2415,6 +2415,147 @@ bool BleRadio::prepareL2capTxPayload(const uint8_t* l2capPayload,
   return true;
 }
 
+bool BleRadio::pendingTxIsAttServerPushPdu() const {
+  if (!connectionPendingTxValid_ ||
+      connectionPendingTxLlid_ != kBlePduDataStartOrComplete ||
+      connectionPendingTxLength_ < 7U ||
+      readLe16(&connectionPendingTxPayload_[2]) != kBleL2capCidAtt) {
+    return false;
+  }
+  const uint8_t opcode = connectionPendingTxPayload_[4];
+  return opcode == kAttOpHandleValueNtf || opcode == kAttOpHandleValueInd;
+}
+
+bool BleRadio::canPreservePendingServerPushPdu() const {
+  if (!pendingTxIsAttServerPushPdu()) {
+    return false;
+  }
+
+  const uint8_t opcode = connectionPendingTxPayload_[4];
+  const uint16_t handle = readLe16(&connectionPendingTxPayload_[5]);
+  if (opcode == kAttOpHandleValueInd &&
+      handle == kHandleGattServiceChangedValue) {
+    return true;
+  }
+  if (opcode == kAttOpHandleValueNtf && handle == kHandleBatteryLevelValue) {
+    return true;
+  }
+
+  const BleCustomCharacteristicState* characteristic =
+      findCustomCharacteristicByValueHandle(handle);
+  if (characteristic == nullptr) {
+    return false;
+  }
+  const ptrdiff_t idx = characteristic - &customGattCharacteristics_[0];
+  return idx >= 0 &&
+         static_cast<uint8_t>(idx) < customGattCharacteristicCount_ &&
+         connectionCustomNotificationQueueCount_ <
+             kCustomGattNotificationQueueDepth;
+}
+
+bool BleRadio::preservePendingServerPushPdu() {
+  if (!canPreservePendingServerPushPdu()) {
+    return false;
+  }
+
+  const uint8_t opcode = connectionPendingTxPayload_[4];
+  const uint16_t handle = readLe16(&connectionPendingTxPayload_[5]);
+  const bool indicate = opcode == kAttOpHandleValueInd;
+  const uint8_t valueLength =
+      static_cast<uint8_t>(connectionPendingTxLength_ - 7U);
+  const uint8_t* value =
+      valueLength > 0U ? &connectionPendingTxPayload_[7] : nullptr;
+
+  if (indicate && handle == kHandleGattServiceChangedValue) {
+    connectionServiceChangedIndicationAwaitingConfirm_ = false;
+    connectionServiceChangedIndicationPending_ = true;
+    return true;
+  }
+  if (!indicate && handle == kHandleBatteryLevelValue) {
+    connectionBatteryNotificationPending_ = true;
+    return true;
+  }
+
+  BleCustomCharacteristicState* characteristic =
+      findCustomCharacteristicByValueHandle(handle);
+  if (characteristic == nullptr) {
+    return false;
+  }
+  const ptrdiff_t idx = characteristic - &customGattCharacteristics_[0];
+  if (idx < 0 || static_cast<uint8_t>(idx) >= customGattCharacteristicCount_ ||
+      connectionCustomNotificationQueueCount_ >=
+          kCustomGattNotificationQueueDepth) {
+    return false;
+  }
+
+  const uint8_t newTail =
+      connectionCustomNotificationQueueTail_ == 0U
+          ? static_cast<uint8_t>(kCustomGattNotificationQueueDepth - 1U)
+          : static_cast<uint8_t>(connectionCustomNotificationQueueTail_ - 1U);
+  BleQueuedCustomNotificationState& slot =
+      connectionCustomNotificationQueue_[newTail];
+  slot.valid = true;
+  slot.characteristicIndex = static_cast<uint8_t>(idx);
+  slot.indication = indicate;
+  slot.valueLength = valueLength;
+  memset(slot.value, 0, sizeof(slot.value));
+  if (valueLength > 0U && value != nullptr) {
+    memcpy(slot.value, value, valueLength);
+  }
+  connectionCustomNotificationQueueTail_ = newTail;
+  ++connectionCustomNotificationQueueCount_;
+  if (indicate && connectionCustomIndicationAwaitingHandle_ == handle) {
+    connectionCustomIndicationAwaitingHandle_ = 0U;
+  }
+  return true;
+}
+
+bool BleRadio::pendingTxIsOptionalLinkSetupPdu() const {
+  if (!connectionPendingTxValid_ || connectionPendingTxLength_ == 0U) {
+    return false;
+  }
+  if (connectionPendingTxLlid_ == kBlePduLlControl) {
+    const uint8_t opcode = connectionPendingTxPayload_[0];
+    return opcode == kBleLlCtrlLengthReq || opcode == kBleLlCtrlPhyReq;
+  }
+  if (connectionPendingTxLlid_ != kBlePduDataStartOrComplete ||
+      connectionPendingTxLength_ < kBleL2capHeaderLen + 1U) {
+    return false;
+  }
+  const uint16_t cid = readLe16(&connectionPendingTxPayload_[2]);
+  return (cid == kBleL2capCidAtt &&
+          connectionPendingTxPayload_[4] == kAttOpExchangeMtuReq) ||
+         (cid == kBleL2capCidLeSignaling &&
+          connectionPendingTxPayload_[4] ==
+              kL2capSigCodeConnParamUpdateReq);
+}
+
+bool BleRadio::requeuePendingOptionalLinkSetupPdu() {
+  if (!pendingTxIsOptionalLinkSetupPdu()) {
+    return false;
+  }
+  if (connectionPendingTxLlid_ == kBlePduLlControl) {
+    if (connectionPendingTxPayload_[0] == kBleLlCtrlLengthReq) {
+      connectionDataLengthUpdateInFlight_ = false;
+      connectionDataLengthUpdatePending_ = true;
+    } else {
+      connectionPhyRequestInFlight_ = false;
+      connectionPhyRequestPending_ = true;
+    }
+    return true;
+  }
+
+  const uint16_t cid = readLe16(&connectionPendingTxPayload_[2]);
+  if (cid == kBleL2capCidAtt) {
+    connectionAttMtuExchangeInFlight_ = false;
+    connectionAttMtuExchangePending_ = true;
+  } else {
+    connectionConnParamUpdateInFlight_ = false;
+    connectionConnParamUpdatePending_ = true;
+  }
+  return true;
+}
+
 bool BleRadio::buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLength,
                                      uint8_t* outPayload,
                                      uint8_t* outPayloadLength) {
@@ -2453,16 +2594,34 @@ bool BleRadio::buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLengt
 
 bool BleRadio::queuePendingSmpL2capResponse(const uint8_t* smpPayload,
                                             uint8_t smpLength) {
-  if (!connected_ || connectionPendingTxValid_) {
+  if (!connected_) {
     return false;
   }
 
+  const bool preserveServerPush = connectionPendingTxValid_ &&
+                                  pendingTxIsAttServerPushPdu();
+  const bool requeueLinkSetup = connectionPendingTxValid_ &&
+                                pendingTxIsOptionalLinkSetupPdu();
+  if (connectionPendingTxValid_ && !preserveServerPush && !requeueLinkSetup) {
+    return false;
+  }
+  if (preserveServerPush && !canPreservePendingServerPushPdu()) {
+    return false;
+  }
+
+  uint8_t pendingSmpPayload[kBleDataPduMaxPayload] = {0};
   uint8_t payloadLength = 0U;
-  if (!buildSmpL2capResponse(smpPayload, smpLength, connectionPendingTxPayload_,
+  if (!buildSmpL2capResponse(smpPayload, smpLength, pendingSmpPayload,
                              &payloadLength)) {
     return false;
   }
 
+  if ((preserveServerPush && !preservePendingServerPushPdu()) ||
+      (requeueLinkSetup && !requeuePendingOptionalLinkSetupPdu())) {
+    return false;
+  }
+
+  memcpy(connectionPendingTxPayload_, pendingSmpPayload, payloadLength);
   connectionPendingTxLlid_ = kBlePduDataStartOrComplete;
   connectionPendingTxLength_ = payloadLength;
   connectionPendingTxValid_ = true;
@@ -4301,12 +4460,26 @@ void BleRadio::resetConnectionMissedEventCount() {
 // Advance counter/timer until caught up to now (no guard) so the channel
 // selection aligns with the peripheral after a long callback stall.
 void BleRadio::catchUpConnectionEventTime() {
-  const uint32_t intervalUs = static_cast<uint32_t>(connectionIntervalUnits_) * 1250UL;
-  if (intervalUs == 0U) {
+  if (connectionIntervalUnits_ == 0U) {
     return;
   }
   const uint32_t nowUs = bleTimingUs();
   while (timeReachedUs(nowUs, connectionNextEventUs_)) {
+    if (connectionUpdatePending_ &&
+        llEventInstantReached(connectionEventCounter_,
+                              connectionUpdateInstant_)) {
+      const uint16_t skippedInstant = connectionEventCounter_;
+      const uint32_t skippedAnchorUs = connectionNextEventUs_;
+      applyPendingConnectionUpdateAtInstant(skippedInstant,
+                                            skippedAnchorUs);
+      emitBleTrace("LL_CONN_UPDATE_INSTANT_CATCHUP");
+      continue;
+    }
+    const uint32_t intervalUs =
+        static_cast<uint32_t>(connectionIntervalUnits_) * 1250UL;
+    if (intervalUs == 0U) {
+      break;
+    }
     connectionNextEventUs_ += intervalUs;
     ++connectionEventCounter_;
   }

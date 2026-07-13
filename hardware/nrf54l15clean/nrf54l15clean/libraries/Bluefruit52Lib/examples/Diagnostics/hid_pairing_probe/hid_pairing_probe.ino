@@ -2,8 +2,8 @@
  * HID pairing probe
  *
  * A minimal HOGP peripheral based on blehid_mouse. It deliberately uses
- * NoInputNoOutput Secure Connections and emits only state transitions so it
- * can diagnose phone pairing without adding serial-load noise to the link.
+ * Secure Connections and emits only state transitions so it can diagnose
+ * phone pairing without adding serial-load noise to the link.
  */
 
 #include <bluefruit.h>
@@ -18,7 +18,7 @@ BLEHidAdafruit blehid;
 static bool connected = false;
 static bool encrypted = false;
 static uint32_t lastMouseReportMs = 0U;
-static int8_t mouseDelta = 2;
+static int8_t mouseDelta = 40;
 #ifndef HID_PAIRING_PROBE_CLEAR_BONDS_ON_START
 #define HID_PAIRING_PROBE_CLEAR_BONDS_ON_START 0
 #endif
@@ -26,23 +26,27 @@ static int8_t mouseDelta = 2;
 #define HID_PAIRING_PROBE_USE_FIXED_ADDRESS 0
 #endif
 #ifndef HID_PAIRING_PROBE_ZEPHYR_MOUSE_PROFILE
-#define HID_PAIRING_PROBE_ZEPHYR_MOUSE_PROFILE 1
+#define HID_PAIRING_PROBE_ZEPHYR_MOUSE_PROFILE 0
+#endif
+#ifndef HID_PAIRING_PROBE_AUTHENTICATED_PAIRING
+#define HID_PAIRING_PROBE_AUTHENTICATED_PAIRING 1
 #endif
 
 #if HID_PAIRING_PROBE_USE_FIXED_ADDRESS
-static const ble_gap_addr_t kFixedProbeAddress = {
-    {0x54U, 0xA1U, 0x17U, 0x54U, 0x58U, 0xC3U},
+static ble_gap_addr_t kFixedProbeAddress = {
+    {0x54U, 0xA1U, 0x17U, 0x54U, 0x58U, 0xC0U},
     BLE_GAP_ADDR_TYPE_RANDOM_STATIC,
 };
 #endif
 #if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
-static constexpr uint8_t kTraceCapacity = 96U;
+static constexpr uint8_t kTraceCapacity = 192U;
 static const char* traceMessages[kTraceCapacity]{};
 static uint8_t traceWriteIndex = 0U;
 static uint8_t traceCount = 0U;
 static bool traceCaptureEnabled = false;
 static bool traceDumpPending = false;
 static bool radioDebugDumpPending = false;
+static bool advertisingRestartPending = false;
 #endif
 
 static void startAdv();
@@ -50,6 +54,10 @@ static void connectCallback(uint16_t connHandle);
 static void disconnectCallback(uint16_t connHandle, uint8_t reason);
 static void securedCallback(uint16_t connHandle);
 static void pairCompleteCallback(uint16_t connHandle, uint8_t authStatus);
+#if HID_PAIRING_PROBE_AUTHENTICATED_PAIRING
+static bool passkeyCallback(uint16_t connHandle, const uint8_t passkey[6],
+                            bool matchRequest);
+#endif
 #if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
 static void traceCallback(const char* message, void* context);
 static void clearTrace();
@@ -78,7 +86,12 @@ void setup() {
   Bluefruit.setName("X54-HID-Probe");
   Bluefruit.setAppearance(BLE_APPEARANCE_HID_MOUSE);
   Bluefruit.setTxPower(4);
+#if HID_PAIRING_PROBE_AUTHENTICATED_PAIRING
+  Bluefruit.Security.setIOCaps(true, true, false);
+  Bluefruit.Security.setPairPasskeyCallback(passkeyCallback);
+#else
   Bluefruit.Security.setIOCaps(false, false, false);
+#endif
   Bluefruit.Security.setSecuredCallback(securedCallback);
   Bluefruit.Security.setPairCompleteCallback(pairCompleteCallback);
   Bluefruit.Periph.setConnInterval(24, 40);
@@ -111,11 +124,12 @@ void loop() {
     Serial.println(encrypted ? "encrypted" : "unencrypted");
   }
   if (nowEncrypted && blehid.mouseNotifyEnabled() &&
-      (millis() - lastMouseReportMs) >= 3000U) {
+      (millis() - lastMouseReportMs) >= 500U) {
     lastMouseReportMs = millis();
     const bool sent = blehid.mouseMove(mouseDelta, 0);
     mouseDelta = static_cast<int8_t>(-mouseDelta);
-    Serial.println(sent ? "mouse report sent" : "mouse report blocked");
+    Serial.print(millis());
+    Serial.println(sent ? " ms: mouse report sent" : " ms: mouse report blocked");
   }
 #if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
   if (traceDumpPending && !nowConnected) {
@@ -128,6 +142,11 @@ void loop() {
     Bluefruit.debugPrintDisconnectDebug(Serial);
     Bluefruit.debugPrintSecureConnectionsState(Serial);
   }
+  if (advertisingRestartPending && !traceDumpPending &&
+      !radioDebugDumpPending && !nowConnected) {
+    advertisingRestartPending = false;
+    Bluefruit.Advertising.start(0);
+  }
 #endif
 }
 
@@ -137,7 +156,9 @@ static void startAdv() {
   Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE);
   Bluefruit.Advertising.addService(blehid, blebas, bledis);
   Bluefruit.ScanResponse.addName();
-  Bluefruit.Advertising.restartOnDisconnect(true);
+  // Let loop() print the completed trace before a fast phone reconnect can
+  // clear it in connectCallback().
+  Bluefruit.Advertising.restartOnDisconnect(false);
   Bluefruit.Advertising.setInterval(32, 244);
   Bluefruit.Advertising.setFastTimeout(30);
   Bluefruit.Advertising.start(0);
@@ -149,7 +170,8 @@ static void connectCallback(uint16_t connHandle) {
   clearTrace();
   traceCaptureEnabled = true;
 #endif
-  Serial.println("connect callback");
+  Serial.print(millis());
+  Serial.println(" ms: connect callback");
   Bluefruit.Security.requestPairing();
 }
 
@@ -157,28 +179,55 @@ static void disconnectCallback(uint16_t connHandle, uint8_t reason) {
   (void)connHandle;
 #if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
   traceCaptureEnabled = false;
-  traceDumpPending = true;
-  radioDebugDumpPending = true;
+  advertisingRestartPending = true;
 #endif
-  Serial.print("disconnect reason=0x");
+  Serial.print(millis());
+  Serial.print(" ms: disconnect reason=0x");
   Serial.println(reason, HEX);
+#if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
+  // The controller invokes this only after the link radio is stopped. Dump
+  // synchronously so an immediate Android reconnect cannot erase the capture.
+  dumpTrace();
+  Bluefruit.debugPrintEncryptionCounters(Serial);
+  Bluefruit.debugPrintDisconnectDebug(Serial);
+  Bluefruit.debugPrintSecureConnectionsState(Serial);
+#endif
 }
 
 static void securedCallback(uint16_t connHandle) {
   (void)connHandle;
-  Serial.println("secured callback");
+  Serial.print(millis());
+  Serial.println(" ms: secured callback");
 }
 
 static void pairCompleteCallback(uint16_t connHandle, uint8_t authStatus) {
   (void)connHandle;
-  Serial.print("pair status=0x");
+  Serial.print(millis());
+  Serial.print(" ms: pair status=0x");
   Serial.println(authStatus, HEX);
 }
+
+#if HID_PAIRING_PROBE_AUTHENTICATED_PAIRING
+static bool passkeyCallback(uint16_t connHandle, const uint8_t passkey[6],
+                            bool matchRequest) {
+  (void)connHandle;
+  Serial.print("pair passkey=");
+  for (uint8_t index = 0U; index < 6U; ++index) {
+    Serial.write(passkey[index]);
+  }
+  Serial.println(matchRequest ? " confirm on phone" : " enter on phone");
+  return true;
+}
+#endif
 
 #if defined(NRF54L15_CLEAN_BLE_TRACE) && (NRF54L15_CLEAN_BLE_TRACE == 1)
 static void traceCallback(const char* message, void* context) {
   (void)context;
   if (!traceCaptureEnabled || message == nullptr) {
+    return;
+  }
+  if (strcmp(message, "ENC_EMPTY_ACK_FAST_RETX") == 0 ||
+      strcmp(message, "ENC_CACHED_FAST_RETX") == 0) {
     return;
   }
   traceMessages[traceWriteIndex] = message;

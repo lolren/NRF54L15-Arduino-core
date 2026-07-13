@@ -344,9 +344,11 @@ def validate_ble_disconnect_reason_contracts() -> None:
     assert "bool terminateMicFailure = false;" in body
     assert body.count("terminateMicFailure = true;") == 4
     assert "terminateMicFailure\n            ? BleDisconnectReason::kMicFailure" in body
-    assert "peerTerminateIndReceived ? BleDisconnectReason::kPeerTerminate" in body
+    assert "peerTerminateIndReceived\n                   ? BleDisconnectReason::kPeerTerminate" in body
+    assert "localTerminateSent ? BleDisconnectReason::kApi" in body
     assert ": BleDisconnectReason::kInternalTerminate" in body
-    assert "terminateMicFailure ? kBleLlErrorMicFailure : peerTerminateErrorCode" in body
+    assert "localTerminateSent ? localTerminateErrorCode" in body
+    assert ": peerTerminateErrorCode" in body
     print("PASS BLE central MIC, peer, and internal disconnect classification")
 
 

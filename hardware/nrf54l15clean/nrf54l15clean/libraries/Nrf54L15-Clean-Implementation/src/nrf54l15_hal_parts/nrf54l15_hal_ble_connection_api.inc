@@ -1075,12 +1075,17 @@ void BleRadio::recordDisconnectDebug(BleDisconnectReason reason, uint8_t errorCo
   memset(&disconnectDebug_, 0, sizeof(disconnectDebug_));
   disconnectDebug_.sequence = nextSequence;
   disconnectDebug_.nextEventUs = connectionNextEventUs_;
+  disconnectDebug_.firstEventListenUs = connectionFirstEventListenUs_;
   disconnectDebug_.eventCounter = connectionEventCounter_;
   disconnectDebug_.missedEventCount = connectionMissedEventCount_;
+  disconnectDebug_.intervalUnits = connectionIntervalUnits_;
+  disconnectDebug_.connectWindowOffset = g_ble_periph_connect_win_offset;
   disconnectDebug_.valid = 1U;
   disconnectDebug_.reason = static_cast<uint8_t>(reason);
   disconnectDebug_.role = static_cast<uint8_t>(connectionRole_);
   disconnectDebug_.errorCode = errorCode;
+  disconnectDebug_.connectWindowSize = g_ble_periph_connect_win_size;
+  disconnectDebug_.syncAttemptsRemaining = connectionSyncAttemptsRemaining_;
   disconnectDebug_.expectedRxSn = connectionExpectedRxSn_;
   disconnectDebug_.txSn = connectionTxSn_;
   disconnectDebug_.freshTxAllowed = connectionFreshTxAllowed_ ? 1U : 0U;
@@ -1408,8 +1413,10 @@ void BleRadio::serviceBackgroundConnection(uint32_t spinLimit) {
         backgroundConnectionPrewarmUsForEventWake(prewarmBasisUs);
     bleDisableCompare(kBleBackgroundConnPrewarmCompareChannel, true);
 
-    if (!bleHfxoRunning() && (prewarmUs < eventWakeUs) &&
-        !timeReachedUs(nowUs, prewarmUs)) {
+    // Always stage a future prewarm compare, even when HFXO is running now.
+    // A foreground-to-background handoff powers HFXO down after this event is
+    // armed, so using the later event-wake compare would restart it too late.
+    if ((prewarmUs < eventWakeUs) && !timeReachedUs(nowUs, prewarmUs)) {
       backgroundConnectionWakeUs_ = prewarmUs;
       backgroundConnectionEventWakeArmed_ = false;
       backgroundConnectionServiceArmed_ = true;
@@ -1421,8 +1428,10 @@ void BleRadio::serviceBackgroundConnection(uint32_t spinLimit) {
       return;
     }
 
-    if (!bleHfxoRunning() && timeReachedUs(nowUs, prewarmUs)) {
-      (void)ClockControl::startHfxo(false, 0U);
+    if (timeReachedUs(nowUs, prewarmUs)) {
+      if (!bleHfxoRunning()) {
+        (void)ClockControl::startHfxo(false, 0U);
+      }
       // Match the HFXO prewarm window with the XIAO RF switch settle window.
       // Enabling RF_SW only at event wake can depress the first RSSI sample
       // even though packet timing still succeeds.
@@ -1508,6 +1517,16 @@ bool BleRadio::disconnect(uint32_t spinLimit) {
   return disconnectWithReason(BleDisconnectReason::kApi, 0U, spinLimit);
 }
 
+bool BleRadio::requestDisconnect(uint8_t errorCode) {
+  if (!initialized_ || radio_ == nullptr || !connected_) {
+    return false;
+  }
+  connectionLocalTerminateErrorCode_ = errorCode;
+  connectionLocalTerminatePending_ = true;
+  emitBleTrace("LOCAL_TERMINATE_PENDING");
+  return true;
+}
+
 void BleRadio::setCentralMissingPeerDisconnectEvents(uint16_t events) {
   centralMissingPeerDisconnectEvents_ = events;
   g_ble_central_missing_peer_threshold = events;
@@ -1528,6 +1547,8 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
   waitDisabled(spinLimit);
   connected_ = false;
+  connectionLocalTerminatePending_ = false;
+  connectionLocalTerminateErrorCode_ = 0x13U;
   flushDeferredBondStorage();
   connectionRole_ = BleConnectionRole::kNone;
   backgroundConnectionServiceEnabled_ = false;
@@ -1976,10 +1997,32 @@ void BleRadio::setBackgroundConnectionServiceEnabled(bool enabled) {
     g_bleBackgroundRadio = nullptr;
   }
   bleExitCritical(irqState);
-  if (bleHfxoRunning()) {
-    ClockControl::stopHfxo();
+
+  // Transfer ownership of the next connection event before releasing the
+  // foreground clock and RF path. Without this initial service pass, enabling
+  // background operation leaves both connection compares disabled until a
+  // later idle hook happens to run.
+  serviceBackgroundConnection(0U);
+  if (connected_ && backgroundConnectionServiceDue_) {
+    serviceBackgroundConnection(120000UL);
   }
-  releaseRfPathForBle();
+
+  // A prewarm compare can safely restore resources ahead of the anchor. When
+  // handoff occurs inside that lead window, retain the already-running HFXO/RF
+  // through this event; its service pass will release them and arm the next
+  // prewarm normally.
+  const uint32_t handoffPowerIrqState = bleEnterCritical();
+  const bool canPowerDownAfterHandoff =
+      !connected_ ||
+      (backgroundConnectionServiceArmed_ &&
+       !backgroundConnectionEventWakeArmed_);
+  if (canPowerDownAfterHandoff) {
+    if (bleHfxoRunning()) {
+      ClockControl::stopHfxo();
+    }
+    releaseRfPathForBle();
+  }
+  bleExitCritical(handoffPowerIrqState);
 }
 
 bool BleRadio::isBackgroundConnectionServiceEnabled() const {

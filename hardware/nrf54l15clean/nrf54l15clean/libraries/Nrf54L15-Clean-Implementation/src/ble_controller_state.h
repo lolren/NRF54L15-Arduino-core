@@ -8,8 +8,8 @@ namespace xiao_nrf54l15 {
 enum class BleLlEncryptionPhase : uint8_t {
   kIdle = 0,
   kKeyDerivation,
-  kPeripheralAwaitStartRequest,
-  kCompatibilitySendStartRequest,
+  kAwaitStartRequest,
+  kSendStartRequest,
   kAwaitStartResponse,
   kEnableTxOnNextEvent,
   kEncrypted,
@@ -50,12 +50,12 @@ inline BleLlEncryptionPhase bleLlEncryptionPhase(
   }
   if (flags.startRequestPending) {
     return (!flags.txEnabled)
-               ? BleLlEncryptionPhase::kPeripheralAwaitStartRequest
+               ? BleLlEncryptionPhase::kAwaitStartRequest
                : BleLlEncryptionPhase::kInvalid;
   }
   if (flags.startRequestTxPending) {
     return (!flags.rxEnabled && !flags.txEnabled)
-               ? BleLlEncryptionPhase::kCompatibilitySendStartRequest
+               ? BleLlEncryptionPhase::kSendStartRequest
                : BleLlEncryptionPhase::kInvalid;
   }
   if (flags.awaitingStartResponse) {
@@ -87,10 +87,10 @@ inline bool bleLlSetEncryptionProcedurePhase(
     case BleLlEncryptionPhase::kIdle:
     case BleLlEncryptionPhase::kEncrypted:
       return true;
-    case BleLlEncryptionPhase::kPeripheralAwaitStartRequest:
+    case BleLlEncryptionPhase::kAwaitStartRequest:
       *startRequestPending = true;
       return true;
-    case BleLlEncryptionPhase::kCompatibilitySendStartRequest:
+    case BleLlEncryptionPhase::kSendStartRequest:
       *startRequestTxPending = true;
       return true;
     case BleLlEncryptionPhase::kAwaitStartResponse:
@@ -104,6 +104,10 @@ inline bool bleLlSetEncryptionProcedurePhase(
       return false;
   }
   return false;
+}
+
+constexpr uint32_t bleLlInitialSyncWindowUs(uint8_t transmitWindowSize) {
+  return static_cast<uint32_t>(transmitWindowSize) * 1250UL;
 }
 
 struct BleLlSequenceObservation {

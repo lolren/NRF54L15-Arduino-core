@@ -430,6 +430,8 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionCustomIndicationAwaitingHandle_(0U),
       connectionSmpSecurityRequestPending_(false),
       connectionMissingKeyTerminatePending_(false),
+      connectionLocalTerminatePending_(false),
+      connectionLocalTerminateErrorCode_(0x13U),
       customGattWriteCallback_(nullptr),
       customGattWriteContext_(nullptr),
       encDebug_{},

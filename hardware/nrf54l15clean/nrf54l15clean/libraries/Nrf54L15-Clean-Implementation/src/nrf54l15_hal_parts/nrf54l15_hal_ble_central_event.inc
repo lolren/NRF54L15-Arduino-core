@@ -49,7 +49,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
                 : 1250UL;
         const uint32_t timeoutUs =
             static_cast<uint32_t>(connectionTimeoutUnits_) * 10000UL;
-        uint32_t supervisionEvents = timeoutUs / intervalUs;
+        uint32_t supervisionEvents =
+            (timeoutUs + intervalUs - 1U) / intervalUs;
         if (supervisionEvents < 1U) {
           supervisionEvents = 1U;
         }
@@ -127,40 +128,52 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       !connectionTxHistoryValid_ || connectionFreshTxAllowed_;
   uint8_t txLlid = 0x01U;
   uint8_t txLength = 0U;
+  bool localTerminateSent = false;
+  uint8_t localTerminateErrorCode = connectionLocalTerminateErrorCode_;
   if (canSendNewPayloadThisEvent) {
-    maybeQueueCentralLinkSetupRequest();
-    if (!connectionPendingTxValid_ &&
-        (channelSoundingLlControlTxCount_ > 0U)) {
-      uint8_t csLength = 0U;
-      if (dequeueChannelSoundingLlControlTx(connectionPendingTxPayload_,
-                                           &csLength)) {
-        connectionPendingTxLlid_ = kBlePduLlControl;
-        connectionPendingTxLength_ = csLength;
-        connectionPendingTxValid_ = true;
-        emitBleTrace("CS_LL_TXQ");
+    if (connectionLocalTerminatePending_) {
+      connectionLocalTerminatePending_ = false;
+      localTerminateSent = true;
+      txLlid = kBlePduLlControl;
+      txLength = 2U;
+      connectionTxPayload_[0] = kBleLlCtrlTerminateInd;
+      connectionTxPayload_[1] = localTerminateErrorCode;
+      emitBleTrace("CENTRAL_LOCAL_TERMINATE_TX");
+    } else {
+      maybeQueueCentralLinkSetupRequest();
+      if (!connectionPendingTxValid_ &&
+          (channelSoundingLlControlTxCount_ > 0U)) {
+        uint8_t csLength = 0U;
+        if (dequeueChannelSoundingLlControlTx(connectionPendingTxPayload_,
+                                             &csLength)) {
+          connectionPendingTxLlid_ = kBlePduLlControl;
+          connectionPendingTxLength_ = csLength;
+          connectionPendingTxValid_ = true;
+          emitBleTrace("CS_LL_TXQ");
+        }
       }
-    }
-    if (connectionPendingTxValid_) {
-      if (connectionPendingTxLlid_ == kBlePduLlControl &&
-          connectionPendingTxLength_ == 12U &&
-          connectionPendingTxPayload_[0] == kBleLlCtrlConnectionUpdateInd &&
-          !connectionUpdatePending_) {
-        const uint16_t instant =
-            static_cast<uint16_t>(currentEventCounter + 6U);
-        writeLe16(&connectionPendingTxPayload_[10], instant);
-        connectionUpdateInstant_ = instant;
-        connectionUpdatePending_ = true;
-        emitBleTrace("CONN_PARAM_IND_ARMED");
+      if (connectionPendingTxValid_) {
+        if (connectionPendingTxLlid_ == kBlePduLlControl &&
+            connectionPendingTxLength_ == 12U &&
+            connectionPendingTxPayload_[0] == kBleLlCtrlConnectionUpdateInd &&
+            !connectionUpdatePending_) {
+          const uint16_t instant =
+              static_cast<uint16_t>(currentEventCounter + 6U);
+          writeLe16(&connectionPendingTxPayload_[10], instant);
+          connectionUpdateInstant_ = instant;
+          connectionUpdatePending_ = true;
+          emitBleTrace("CONN_PARAM_IND_ARMED");
+        }
+        txLlid = connectionPendingTxLlid_;
+        txLength = connectionPendingTxLength_;
+        if (txLength > 0U) {
+          memcpy(connectionTxPayload_, connectionPendingTxPayload_, txLength);
+        }
+        connectionPendingTxLlid_ = 0x01U;
+        connectionPendingTxLength_ = 0U;
+        connectionPendingTxValid_ = false;
+        (void)queueNextPendingL2capTxFragment();
       }
-      txLlid = connectionPendingTxLlid_;
-      txLength = connectionPendingTxLength_;
-      if (txLength > 0U) {
-        memcpy(connectionTxPayload_, connectionPendingTxPayload_, txLength);
-      }
-      connectionPendingTxLlid_ = 0x01U;
-      connectionPendingTxLength_ = 0U;
-      connectionPendingTxValid_ = false;
-      (void)queueNextPendingL2capTxFragment();
     }
     connectionLastTxLlid_ = txLlid;
     connectionLastTxLength_ = txLength;
@@ -192,6 +205,10 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       !canSendNewPayloadThisEvent && connectionLastTxWasEncrypted_;
   const bool txIsEmptyPdu =
       (txLlid == kBlePduDataContinuation) && (txLength == 0U);
+  const bool txStartsEncryption =
+      canSendNewPayloadThisEvent && connectionEncEnableTxOnNextEvent_ &&
+      txLlid == kBlePduLlControl && txLength == 1U &&
+      connectionTxPayload_[0] == kBleLlCtrlStartEncRsp;
   uint8_t txLengthOnAir = txLength;
   uint64_t txEncryptedCounter = connectionEncTxCounter_;
   if (reuseEncryptedTx) {
@@ -200,7 +217,8 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     if (txLengthOnAir > 0U) {
       memcpy(&txPacket_[2], connectionLastTxEncryptedPayload_, txLengthOnAir);
     }
-  } else if (connectionEncSessionValid_ && connectionEncTxEnabled_ &&
+  } else if (connectionEncSessionValid_ &&
+             (connectionEncTxEnabled_ || txStartsEncryption) &&
              !txIsEmptyPdu) {
     uint8_t encryptedLen = 0U;
     if (bleCcmEncryptPayload(connectionEncSessionKey_, connectionEncIv_,
@@ -305,6 +323,11 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
       connectionEncRxEnabled_ = true;
       connectionEncEnableTxOnNextEvent_ = false;
       emitBleTrace("LL_START_ENC_REQ_TX");
+    } else if (opcode == kBleLlCtrlStartEncRsp && txStartsEncryption) {
+      connectionEncTxEnabled_ = true;
+      connectionEncEnableTxOnNextEvent_ = false;
+      connectionEncAwaitingStartRsp_ = true;
+      emitBleTrace("CENTRAL_START_ENC_RSP_TX");
     }
   }
   connectionTxHistoryValid_ = true;
@@ -557,7 +580,7 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
   if (packetIsNew) {
     connectionExpectedRxSn_ ^= 0x01U;
   }
-  bool terminateInd = false;
+  bool terminateInd = localTerminateSent;
   bool terminateMicFailure = false;
   bool peerTerminateIndReceived = false;
   uint8_t peerTerminateErrorCode = 0U;
@@ -1493,14 +1516,21 @@ bool BleRadio::pollCentralConnectionEvent(BleConnectionEvent* event,
     const BleDisconnectReason disconnectReason =
         terminateMicFailure
             ? BleDisconnectReason::kMicFailure
-            : (peerTerminateIndReceived ? BleDisconnectReason::kPeerTerminate
-                                        : BleDisconnectReason::kInternalTerminate);
+            : (peerTerminateIndReceived
+                   ? BleDisconnectReason::kPeerTerminate
+                   : (localTerminateSent ? BleDisconnectReason::kApi
+                                         : BleDisconnectReason::kInternalTerminate));
     const uint8_t disconnectErrorCode =
-        terminateMicFailure ? kBleLlErrorMicFailure : peerTerminateErrorCode;
+        terminateMicFailure
+            ? kBleLlErrorMicFailure
+            : (localTerminateSent ? localTerminateErrorCode
+                                  : peerTerminateErrorCode);
     if (terminateMicFailure) {
       emitBleTrace("CENTRAL_TERMINATE_MIC_FAILURE");
     } else if (peerTerminateIndReceived) {
       emitBleTrace("CENTRAL_PEER_TERMINATE");
+    } else if (localTerminateSent) {
+      emitBleTrace("CENTRAL_LOCAL_TERMINATE_SENT");
     } else {
       emitBleTrace("CENTRAL_TERMINATE_INTERNAL");
     }

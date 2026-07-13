@@ -2202,12 +2202,17 @@ enum class BleDisconnectReason : uint8_t {
 struct BleDisconnectDebug {
   uint32_t sequence;
   uint32_t nextEventUs;
+  uint32_t firstEventListenUs;
   uint16_t eventCounter;
   uint16_t missedEventCount;
+  uint16_t intervalUnits;
+  uint16_t connectWindowOffset;
   uint8_t valid;
   uint8_t reason;
   uint8_t role;
   uint8_t errorCode;
+  uint8_t connectWindowSize;
+  uint8_t syncAttemptsRemaining;
   uint8_t expectedRxSn;
   uint8_t txSn;
   uint8_t freshTxAllowed;
@@ -2990,6 +2995,7 @@ class BleRadio {
     endUnconnectedRadioActivity();
   }
   bool disconnect(uint32_t spinLimit = 300000UL);
+  bool requestDisconnect(uint8_t errorCode = 0x13U);
   void setCentralMissingPeerDisconnectEvents(uint16_t events);
   uint16_t centralMissingPeerDisconnectEvents() const;
   bool pollConnectionEvent(BleConnectionEvent* event = nullptr,
@@ -3389,6 +3395,11 @@ class BleRadio {
                              uint16_t l2capPayloadLength,
                              uint8_t* outPayload,
                              uint8_t* outPayloadLength);
+  bool pendingTxIsAttServerPushPdu() const;
+  bool canPreservePendingServerPushPdu() const;
+  bool preservePendingServerPushPdu();
+  bool pendingTxIsOptionalLinkSetupPdu() const;
+  bool requeuePendingOptionalLinkSetupPdu();
   bool buildSmpL2capResponse(const uint8_t* smpPayload, uint8_t smpLength,
                              uint8_t* outPayload,
                              uint8_t* outPayloadLength);
@@ -4047,6 +4058,8 @@ class BleRadio {
   uint16_t connectionCustomIndicationAwaitingHandle_;
   bool connectionSmpSecurityRequestPending_;
   bool connectionMissingKeyTerminatePending_;
+  bool connectionLocalTerminatePending_;
+  uint8_t connectionLocalTerminateErrorCode_;
   BleGattWriteCallback customGattWriteCallback_;
   void* customGattWriteContext_;
   BleEncryptionDebugCounters encDebug_;

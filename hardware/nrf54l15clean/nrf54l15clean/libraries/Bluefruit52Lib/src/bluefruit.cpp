@@ -7699,7 +7699,7 @@ const uint8_t kHidInfoValue[] = {
 };
 
 const uint8_t kHidZephyrInfoValue[] = {
-    0x00U, 0x00U,  // Zephyr peripheral_hids sample uses HID version 0.00.
+    0x11U, 0x01U,  // HID v1.11; strict hosts reject Zephyr's sample value 0.00.
     0x00U,         // country code: not localized
     0x02U,         // normally connectable
 };
@@ -7829,14 +7829,14 @@ err_t BLEHidAdafruit::begin() {
 
   if (zephyr_compatible_mouse_) {
     err_t result = beginFixedCharacteristic(
-        hid_info_, CHR_PROPS_READ, SECMODE_OPEN, SECMODE_NO_ACCESS,
+        hid_info_, CHR_PROPS_READ, SECMODE_ENC_NO_MITM, SECMODE_NO_ACCESS,
         kHidZephyrInfoValue, sizeof(kHidZephyrInfoValue));
     if (result != ERROR_NONE) {
       return result;
     }
 
     result = beginFixedCharacteristic(
-        report_map_, CHR_PROPS_READ, SECMODE_OPEN, SECMODE_NO_ACCESS,
+        report_map_, CHR_PROPS_READ, SECMODE_ENC_NO_MITM, SECMODE_NO_ACCESS,
         kHidZephyrMouseReportMap, sizeof(kHidZephyrMouseReportMap));
     if (result != ERROR_NONE) {
       return result;
@@ -7845,7 +7845,7 @@ err_t BLEHidAdafruit::begin() {
     uint8_t emptyMouse[3] = {0U, 0U, 0U};
     mouse_input_.setReportRefDescriptor(kHidZephyrMouseReportId,
                                         kHidReportTypeInput);
-    mouse_input_.setReportRefDescriptorPermission(SECMODE_OPEN);
+    mouse_input_.setReportRefDescriptorPermission(SECMODE_ENC_NO_MITM);
     result = beginFixedCharacteristic(
         mouse_input_, CHR_PROPS_READ | CHR_PROPS_NOTIFY, SECMODE_ENC_NO_MITM,
         SECMODE_NO_ACCESS, emptyMouse, sizeof(emptyMouse));
@@ -7936,9 +7936,10 @@ err_t BLEHidAdafruit::begin() {
     return result;
   }
 
+  const uint8_t emptyBootMouse[3] = {0U, 0U, 0U};
   result = beginFixedCharacteristic(boot_mouse_input_, CHR_PROPS_READ | CHR_PROPS_NOTIFY,
                                     SECMODE_ENC_NO_MITM, SECMODE_NO_ACCESS,
-                                    &emptyMouse, sizeof(emptyMouse));
+                                    emptyBootMouse, sizeof(emptyBootMouse));
   if (result != ERROR_NONE) {
     return result;
   }
@@ -8167,8 +8168,15 @@ bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, hid_mouse_report_t* report) 
     };
     return mouse_input_.notify(conn_hdl, compactReport, sizeof(compactReport));
   }
-  BLECharacteristic& reportCharacteristic = report_protocol_mode_ ? mouse_input_ : boot_mouse_input_;
-  return reportCharacteristic.notify(conn_hdl, report, sizeof(*report));
+  if (report_protocol_mode_) {
+    return mouse_input_.notify(conn_hdl, report, sizeof(*report));
+  }
+  const uint8_t bootReport[3] = {
+      static_cast<uint8_t>(report->buttons & 0x07U),
+      static_cast<uint8_t>(report->x),
+      static_cast<uint8_t>(report->y),
+  };
+  return boot_mouse_input_.notify(conn_hdl, bootReport, sizeof(bootReport));
 }
 
 bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, uint8_t buttons, int8_t x, int8_t y,
@@ -9035,7 +9043,7 @@ bool AdafruitBluefruit::disconnect(uint16_t conn_hdl) {
   if (conn_hdl != 0U || !manager().radio().isConnected()) {
     return false;
   }
-  return manager().radio().disconnect();
+  return manager().radio().requestDisconnect();
 }
 
 bool AdafruitBluefruit::getLastDisconnectReason(
@@ -9210,6 +9218,12 @@ void AdafruitBluefruit::debugPrintEncryptionCounters(Stream& out) {
   out.print(c.connFollowupRxTimeoutCount);
   out.print(" txTimeout=");
   out.print(c.connTxTimeoutCount);
+  out.print(" txLag=");
+  out.print(c.txenLagLastUs);
+  out.print(" txLagMax=");
+  out.print(c.txenLagMaxUs);
+  out.print(" txLate=");
+  out.print(c.txenLateCount);
   out.print(" encRspLag=");
   out.print(c.encRspTxenLagLastUs);
   out.print(" encRspLagMax=");
@@ -9314,6 +9328,16 @@ void AdafruitBluefruit::debugPrintDisconnectDebug(Stream& out) {
   out.print(d.eventCounter);
   out.print(" missed=");
   out.print(d.missedEventCount);
+  out.print(" int=");
+  out.print(d.intervalUnits);
+  out.print(" winSize=");
+  out.print(d.connectWindowSize);
+  out.print(" winOff=");
+  out.print(d.connectWindowOffset);
+  out.print(" firstListenUs=");
+  out.print(d.firstEventListenUs);
+  out.print(" syncLeft=");
+  out.print(d.syncAttemptsRemaining);
   out.print(" nextUs=");
   out.print(d.nextEventUs);
   out.print(" expRxSn=");

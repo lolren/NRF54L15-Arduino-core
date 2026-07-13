@@ -1942,16 +1942,12 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
   connectionEventCounter_ = 0U;
   connectionMissedEventCount_ = 0U;
   {
-    const uint32_t intervalUs =
-        static_cast<uint32_t>(connectionIntervalUnits_) * 1250UL;
-    const uint32_t winSizeUs = static_cast<uint32_t>(winSize) * 1250UL;
-    if (intervalUs > (kBleConnRxStartLeadUs + 2000UL)) {
-      const uint32_t maxSyncListenUs = intervalUs - kBleConnRxStartLeadUs - 2000UL;
-      connectionFirstEventListenUs_ =
-          (maxSyncListenUs > winSizeUs) ? maxSyncListenUs : winSizeUs;
-    } else {
-      connectionFirstEventListenUs_ = winSizeUs;
-    }
+    const uint32_t winSizeUs = bleLlInitialSyncWindowUs(winSize);
+    // A late handoff must not keep listening on event N's channel after its
+    // transmit window has closed. Extending this to almost a full interval can
+    // overlap event N+1 on the wrong channel and leave the peripheral exactly
+    // one event behind indefinitely.
+    connectionFirstEventListenUs_ = winSizeUs;
   }
   connectionSyncAttemptsRemaining_ = 8U;
   connectionCurrentTxPhy_ = kBlePhy1M;

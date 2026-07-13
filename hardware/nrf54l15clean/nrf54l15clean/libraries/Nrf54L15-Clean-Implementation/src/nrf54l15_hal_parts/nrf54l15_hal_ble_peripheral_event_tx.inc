@@ -66,6 +66,15 @@
     emitBleTrace("TERMINATE_MISSING_KEY");
   }
 
+  if (!terminateInd && connectionLocalTerminatePending_ &&
+      (!connectionTxHistoryValid_ || peerAckedLastTx)) {
+    connectionLocalTerminatePending_ = false;
+    terminateInd = true;
+    terminateLocalRequest = true;
+    terminateLocalErrorCode = connectionLocalTerminateErrorCode_;
+    emitBleTrace("LOCAL_TERMINATE_TX");
+  }
+
   if (event != nullptr) {
     event->packetIsNew = packetIsNew;
     event->peerAckedLastTx = peerAckedLastTx;
@@ -121,106 +130,16 @@
       (rxLength >= (kBleL2capHeaderLen + 1U))
           ? rxPacket_[2 + kBleL2capHeaderLen]
           : 0U;
-  auto pendingTxIsAttServerPushPdu = [&]() {
-    if (!connectionPendingTxValid_ ||
-        (connectionPendingTxLlid_ != kBlePduDataStartOrComplete) ||
-        (connectionPendingTxLength_ < 7U) ||
-        (readLe16(&connectionPendingTxPayload_[2]) != kBleL2capCidAtt)) {
-      return false;
-    }
-    const uint8_t opcode = connectionPendingTxPayload_[4];
-    return (opcode == kAttOpHandleValueNtf) ||
-           (opcode == kAttOpHandleValueInd);
-  };
-  auto canPreservePendingServerPushPdu = [&]() {
-    if (!pendingTxIsAttServerPushPdu()) {
-      return false;
-    }
-
-    const uint8_t opcode = connectionPendingTxPayload_[4];
-    const uint16_t handle = readLe16(&connectionPendingTxPayload_[5]);
-    if ((opcode == kAttOpHandleValueInd) &&
-        (handle == kHandleGattServiceChangedValue)) {
-      return true;
-    }
-    if ((opcode == kAttOpHandleValueNtf) &&
-        (handle == kHandleBatteryLevelValue)) {
-      return true;
-    }
-
-    BleCustomCharacteristicState* characteristic =
-        findCustomCharacteristicByValueHandle(handle);
-    if (characteristic == nullptr) {
-      return false;
-    }
-    const ptrdiff_t idx = (characteristic - &customGattCharacteristics_[0]);
-    if (idx < 0 ||
-        static_cast<uint8_t>(idx) >= customGattCharacteristicCount_) {
-      return false;
-    }
-    return connectionCustomNotificationQueueCount_ <
-           kCustomGattNotificationQueueDepth;
-  };
-  auto preservePendingServerPushPdu = [&]() {
-    if (!pendingTxIsAttServerPushPdu()) {
-      return false;
-    }
-
-    const uint8_t opcode = connectionPendingTxPayload_[4];
-    const uint16_t handle = readLe16(&connectionPendingTxPayload_[5]);
-    const bool indicate = (opcode == kAttOpHandleValueInd);
-    const uint8_t valueLength =
-        (connectionPendingTxLength_ >= 7U)
-            ? static_cast<uint8_t>(connectionPendingTxLength_ - 7U)
-            : 0U;
-    const uint8_t* value =
-        (valueLength > 0U) ? &connectionPendingTxPayload_[7] : nullptr;
-
-    if (indicate && (handle == kHandleGattServiceChangedValue)) {
-      connectionServiceChangedIndicationAwaitingConfirm_ = false;
-      connectionServiceChangedIndicationPending_ = true;
-      return true;
-    }
-    if (!indicate && (handle == kHandleBatteryLevelValue)) {
-      connectionBatteryNotificationPending_ = true;
-      return true;
-    }
-
-    BleCustomCharacteristicState* characteristic =
-        findCustomCharacteristicByValueHandle(handle);
-    if (characteristic == nullptr) {
-      return false;
-    }
-    const ptrdiff_t idx = (characteristic - &customGattCharacteristics_[0]);
-    if (idx < 0 ||
-        static_cast<uint8_t>(idx) >= customGattCharacteristicCount_ ||
-        connectionCustomNotificationQueueCount_ >=
-            kCustomGattNotificationQueueDepth) {
-      return false;
-    }
-
-    const uint8_t newTail =
-        (connectionCustomNotificationQueueTail_ == 0U)
-            ? static_cast<uint8_t>(kCustomGattNotificationQueueDepth - 1U)
-            : static_cast<uint8_t>(connectionCustomNotificationQueueTail_ - 1U);
-    BleQueuedCustomNotificationState& slot =
-        connectionCustomNotificationQueue_[newTail];
-    slot.valid = true;
-    slot.characteristicIndex = static_cast<uint8_t>(idx);
-    slot.indication = indicate;
-    slot.valueLength = valueLength;
-    memset(slot.value, 0, sizeof(slot.value));
-    if (valueLength > 0U && value != nullptr) {
-      memcpy(slot.value, value, valueLength);
-    }
-    connectionCustomNotificationQueueTail_ = newTail;
-    ++connectionCustomNotificationQueueCount_;
-    if (indicate &&
-        (connectionCustomIndicationAwaitingHandle_ == handle)) {
-      connectionCustomIndicationAwaitingHandle_ = 0U;
-    }
-    return true;
-  };
+  const uint8_t rxSmpOpcode =
+      (rxL2capCid == kBleL2capCidSmp &&
+       rxLength >= (kBleL2capHeaderLen + 1U))
+          ? rxPacket_[2 + kBleL2capHeaderLen]
+          : 0U;
+  const bool deferEncryptedSmpKeyDistributionUntilAfterAck =
+      packetIsNew && connectionEncRxEnabled_ && connectionEncTxEnabled_ &&
+      rxL2capCid == kBleL2capCidSmp &&
+      rxSmpOpcode >= kSmpCodeEncryptionInformation &&
+      rxSmpOpcode <= kSmpCodeSigningInformation;
   auto pendingTxIsAttWriteResponsePdu = [&]() {
     if (!connectionPendingTxValid_ ||
         (connectionPendingTxLlid_ != kBlePduDataStartOrComplete) ||
@@ -303,6 +222,7 @@
       canSendNewPayloadThisEvent &&
       !encryptionProcedureBusy &&
       !currentRxNeedsDeferredCustomWriteResponse &&
+      !deferEncryptedSmpKeyDistributionUntilAfterAck &&
       !deferEncryptedDataDecrypt) {
     l2capHandledImmediate = true;
     if (buildL2capResponse(llid, &rxPacket_[2], rxLength, packetIsNew,
@@ -395,6 +315,7 @@
       !terminateInd &&
       (llid == kBlePduDataStartOrComplete) &&
       !deferAwaitingStartRspDecrypt &&
+      !deferEncryptedSmpKeyDistributionUntilAfterAck &&
       canSendNewPayloadThisEvent &&
       (rxLength >= (kBleL2capHeaderLen + 1U)) &&
       (rxL2capCid == kBleL2capCidSmp);
@@ -432,7 +353,10 @@
                            &immediateL2capResponseLength) &&
         immediateL2capResponseLength > 0U) {
       immediateL2capResponseValid = true;
-    } else {
+    } else if (rxL2capCid != kBleL2capCidSmp) {
+      // Controller-owned SMP may legitimately defer its response after
+      // consuming the command. Do not feed the same command through the event
+      // tail a second time just because no immediate payload was produced.
       l2capHandledImmediate = false;
     }
   }
@@ -749,29 +673,37 @@
     txLength = connectionLastTxLength_;
   }
 
-  if (terminateInd && (terminateMicFailure || terminateMissingKey)) {
+  if (terminateInd &&
+      (terminateMicFailure || terminateMissingKey || terminateLocalRequest)) {
     txLlid = kBlePduLlControl;
     txLength = 2U;
     connectionTxPayload_[0] = kBleLlCtrlTerminateInd;
-    connectionTxPayload_[1] = terminateMicFailure
-                                  ? kBleLlErrorMicFailure
-                                  : kBleLlErrorPinOrKeyMissing;
+    connectionTxPayload_[1] =
+        terminateMicFailure
+            ? kBleLlErrorMicFailure
+            : (terminateMissingKey ? kBleLlErrorPinOrKeyMissing
+                                   : terminateLocalErrorCode);
     ++encDebug_.encClearCount;
     // Distinguish integrity failures from stale/missing bond recovery in dumps.
     encDebug_.encLastClearReason = terminateMicFailure ? 0x05U : 0x06U;
-    connectionEncRxEnabled_ = false;
-    connectionEncTxEnabled_ = false;
+    if (!terminateLocalRequest) {
+      connectionEncRxEnabled_ = false;
+      connectionEncTxEnabled_ = false;
+    }
     connectionLastTxLlid_ = txLlid;
     connectionLastTxLength_ = txLength;
-    connectionLastTxWasEncrypted_ = false;
-    connectionLastTxEncryptedLength_ = 0U;
+    if (!terminateLocalRequest) {
+      connectionLastTxWasEncrypted_ = false;
+      connectionLastTxEncryptedLength_ = 0U;
+    }
   }
 
   // Preserve a snapshot of the plaintext payload for retransmissions and for
   // `BleConnectionEvent::txPayload` visibility (the working buffer is reused later).
   const bool txPayloadIsNewPlain =
       txCanUseFreshPayload ||
-      (terminateInd && (terminateMicFailure || terminateMissingKey));
+      (terminateInd &&
+       (terminateMicFailure || terminateMissingKey || terminateLocalRequest));
   if (txPayloadIsNewPlain) {
     connectionLastTxPlainLlid_ = txLlid;
     connectionLastTxPlainLength_ = txLength;
@@ -1050,6 +982,21 @@
     if (txIsStartEncRspPlain) {
       connectionEncPrecomputedStartRspTxValid_ = false;
     }
+  }
+  if (deferEncryptedSmpKeyDistributionUntilAfterAck && !terminateInd) {
+    // Identity/signing key validation can touch persistent state. Keep that
+    // work out of the 150 us response window: send the LL acknowledgement
+    // first, then consume the authenticated SMP command while the radio is
+    // idle. Any generated Pairing Failed response is queued for the next
+    // connection event.
+    uint8_t deferredResponse[kBleDataPduMaxPayload] = {0};
+    uint8_t deferredResponseLength = 0U;
+    if (buildL2capResponse(llid, &rxPacket_[2], rxLength, true,
+                           deferredResponse, &deferredResponseLength) &&
+        deferredResponseLength > 0U) {
+      (void)deferL2capTxPayload(deferredResponse, deferredResponseLength);
+    }
+    emitBleTrace("SMP_KEY_DIST_PROCESSED_POST_ACK");
   }
   bool followRxAlreadyDone = false;
   if (!doPostTxRxTurnaround || !txOk) {

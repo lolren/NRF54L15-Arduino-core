@@ -548,22 +548,34 @@
   }
 
   if (terminateInd) {
+    if (terminateLocalRequest && !txOk) {
+      connectionLocalTerminatePending_ = true;
+      emitBleTrace("LOCAL_TERMINATE_RETRY");
+      clearRadioCoreEvents(radio_);
+      return true;
+    }
     const BleDisconnectReason disconnectReason =
         terminateMicFailure
             ? BleDisconnectReason::kMicFailure
-            : (peerTerminateIndReceived ? BleDisconnectReason::kPeerTerminate
-                                        : BleDisconnectReason::kInternalTerminate);
+            : (peerTerminateIndReceived
+                   ? BleDisconnectReason::kPeerTerminate
+                   : (terminateLocalRequest ? BleDisconnectReason::kApi
+                                            : BleDisconnectReason::kInternalTerminate));
     const uint8_t disconnectErrorCode =
         terminateMicFailure
             ? kBleLlErrorMicFailure
-            : (terminateMissingKey ? kBleLlErrorPinOrKeyMissing
-                                   : peerTerminateErrorCode);
+            : (terminateMissingKey
+                   ? kBleLlErrorPinOrKeyMissing
+                   : (terminateLocalRequest ? terminateLocalErrorCode
+                                            : peerTerminateErrorCode));
     if (terminateMicFailure) {
       emitBleTrace("TERMINATE_MIC_FAILURE");
     } else if (peerTerminateIndReceived) {
       emitBleTrace("PEER_TERMINATE");
     } else if (terminateMissingKey) {
       emitBleTrace("TERMINATE_MISSING_KEY_SENT");
+    } else if (terminateLocalRequest) {
+      emitBleTrace("LOCAL_TERMINATE_SENT");
     } else {
       emitBleTrace("TERMINATE_INTERNAL");
     }

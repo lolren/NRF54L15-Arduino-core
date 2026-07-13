@@ -1732,7 +1732,15 @@ void BleRadio::applyPendingConnectionUpdateAtInstant(
           static_cast<uint32_t>((connectionPendingWinSize_ > 0U)
                                     ? connectionPendingWinSize_
                                     : 1U) * 1250UL;
-      connectionNextEventUs_ = currentEventAnchorUs + winOffsetUs;
+      // `currentEventAnchorUs` is the old-cadence anchor at the instant. The
+      // first central packet may move that anchor anywhere inside the transmit
+      // window; until RX gives us its exact start time, schedule the following
+      // event from the beginning of that window. The event counter was already
+      // advanced once before this function is called, so moving from the
+      // instant window to its following event must not advance it again.
+      const uint32_t instantWindowStartUs =
+          currentEventAnchorUs + winOffsetUs;
+      connectionNextEventUs_ = instantWindowStartUs + newIntervalUs;
       if (connectionRole_ == BleConnectionRole::kPeripheral) {
         // When the peer central updates the anchor, keep RX open across the full
         // window so the peripheral can re-sync to the new cadence.
@@ -1750,6 +1758,7 @@ void BleRadio::applyPendingConnectionUpdateAtInstant(
         ++connectionEventCounter_;
         nowUsAfterUpdate = bleTimingUs();
       }
+      emitBleTrace("LL_CONN_UPDATE_APPLIED");
     }
   }
   connectionUpdatePending_ = false;

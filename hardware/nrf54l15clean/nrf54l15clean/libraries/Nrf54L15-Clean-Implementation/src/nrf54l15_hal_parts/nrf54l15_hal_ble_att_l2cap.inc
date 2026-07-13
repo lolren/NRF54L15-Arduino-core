@@ -2890,8 +2890,9 @@ bool BleRadio::buildL2capSmpResponse(const uint8_t* l2capPayload,
           smpSecurityPolicy_.secureConnectionsEnabled) {
         smpSecureConnectionsActive_ = true;
         smpPairingRsp_[3] |= kSmpAuthReqSecureConnectionsMask;
-        // LE Secure Connections derives the link key from DHKey. Identity
-        // keys remain bidirectional so either role can resolve a bonded RPA.
+        // LE Secure Connections derives the link key from DHKey. Identity and
+        // signing keys remain bidirectional so either role can resolve bonded
+        // RPAs and use authenticated signed writes after reconnecting.
         initiatorKeyDist = static_cast<uint8_t>(
             smp[5] & static_cast<uint8_t>(
                 kSmpKeyDistIdKeyMask | kSmpKeyDistSignKeyMask));
