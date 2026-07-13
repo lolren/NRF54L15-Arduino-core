@@ -284,10 +284,12 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
         // Peripheral role sequence per Core LLCP:
         // after LL_ENC_RSP, wait for initiator LL_START_ENC_REQ and answer with
         // LL_START_ENC_RSP.
-        connectionEncStartReqPending_ = true;
-        connectionEncStartReqTxPending_ = false;
-        connectionEncAwaitingStartRsp_ = false;
-        connectionEncEnableTxOnNextEvent_ = false;
+        (void)bleLlSetEncryptionProcedurePhase(
+            BleLlEncryptionPhase::kPeripheralAwaitStartRequest,
+            &connectionEncStartReqPending_,
+            &connectionEncStartReqTxPending_,
+            &connectionEncAwaitingStartRsp_,
+            &connectionEncEnableTxOnNextEvent_);
         connectionEncRxCounter_ = 0ULL;
         connectionEncTxCounter_ = 0ULL;
         connectionPendingTxValid_ = false;
@@ -327,11 +329,13 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
           !connectionEncAwaitingStartRsp_) {
         return rejectCommandDisallowed();
       }
-      connectionEncStartReqPending_ = false;
-      connectionEncStartReqTxPending_ = false;
-      connectionEncAwaitingStartRsp_ = false;
       connectionEncRxEnabled_ = true;
-      connectionEncEnableTxOnNextEvent_ = true;
+      (void)bleLlSetEncryptionProcedurePhase(
+          BleLlEncryptionPhase::kEnableTxOnNextEvent,
+          &connectionEncStartReqPending_,
+          &connectionEncStartReqTxPending_,
+          &connectionEncAwaitingStartRsp_,
+          &connectionEncEnableTxOnNextEvent_);
       outPayload[0] = kBleLlCtrlStartEncRsp;
       *outLength = 1U;
       emitBleTrace("LL_START_ENC_REQ_ACCEPTED");
@@ -536,10 +540,12 @@ bool BleRadio::buildLlControlResponse(const uint8_t* payload, uint8_t length,
       encDebug_.encLastSessionAltKeyValid = connectionEncAltKeyValid_ ? 1U : 0U;
       primeStartEncryptionResponseCiphertext();
       connectionEncKeyDerivationPending_ = false;
-      connectionEncStartReqPending_ = false;
-      connectionEncStartReqTxPending_ = true;
-      connectionEncAwaitingStartRsp_ = false;
-      connectionEncEnableTxOnNextEvent_ = false;
+      (void)bleLlSetEncryptionProcedurePhase(
+          BleLlEncryptionPhase::kCompatibilitySendStartRequest,
+          &connectionEncStartReqPending_,
+          &connectionEncStartReqTxPending_,
+          &connectionEncAwaitingStartRsp_,
+          &connectionEncEnableTxOnNextEvent_);
       emitBleTrace("LL_ENC_RSP_RX");
       return false;
 
@@ -2885,8 +2891,8 @@ void BleRadio::serviceSmpKeyDistribution() {
       !smpExpectPeerIdKey_ ||
       (smpPeerIrkValid_ && smpPeerIdentityAddressValid_);
   const bool peerSignDone = !smpExpectPeerSignKey_ || smpPeerCsrkValid_;
-  // Phase 3 is ordered by role: the Peripheral distributes first. The Central
-  // must not send its keys until all negotiated Peripheral keys have arrived.
+  // Preserve the controller's established over-the-air Phase 3 ordering: the
+  // local initiator waits for the peer distribution before sending its keys.
   if (smpLocalInitiator_ &&
       (!peerEncDone || !peerIdDone || !peerSignDone)) {
     return;

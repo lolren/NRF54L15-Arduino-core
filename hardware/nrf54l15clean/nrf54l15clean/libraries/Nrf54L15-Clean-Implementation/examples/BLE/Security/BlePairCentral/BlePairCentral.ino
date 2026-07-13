@@ -764,7 +764,7 @@ void onBleTrace(const char* message, void*) {
   if (message == nullptr) return;
   if (strcmp(message, "SMP_ID_INFO_RX") == 0) g_privacyIdInfoSeen = true;
   if (strcmp(message, "SMP_ID_ADDR_RX") == 0) g_privacyIdAddressSeen = true;
-  if (strcmp(message, "BOND_AAR_RESOLVED") == 0) g_privacyBondAarSeen = true;
+  if (strcmp(message, "BOND_DB_RPA_RESOLVED") == 0) g_privacyBondAarSeen = true;
   if (strcmp(message, "BOND_PRIMED") == 0) g_privacyBondPrimedSeen = true;
 #endif
 }
@@ -1052,6 +1052,14 @@ void setup() {
   }
 #endif
   g_ble.setCentralPreferredDataLength(251U);
+#if BLE_PAIR_USE_NUMERIC_COMPARISON || BLE_PAIR_USE_STATIC_PIN
+  BleSecurityPolicy pairingPolicy = g_ble.getSecurityPolicy();
+  pairingPolicy.mitmRequired = true;
+  if (!g_ble.setSecurityPolicy(pairingPolicy)) {
+    Serial.println("ble_pair FATAL: security policy failed");
+    return;
+  }
+#endif
 #if BLE_PAIR_USE_NUMERIC_COMPARISON
   g_ble.setSecurityFixedPasskey(nullptr);
   g_ble.setSecurityIoCapabilities(kIoCapDisplayYesNo);

@@ -588,9 +588,12 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
           encDebug_.encLastTxDir = connectionEncTxDirection_;
           primeStartEncryptionResponseCiphertext();
           if (connectionRole_ == BleConnectionRole::kPeripheral) {
-            connectionEncStartReqPending_ = true;
-            connectionEncStartReqTxPending_ = false;
-            connectionEncAwaitingStartRsp_ = false;
+            (void)bleLlSetEncryptionProcedurePhase(
+                BleLlEncryptionPhase::kPeripheralAwaitStartRequest,
+                &connectionEncStartReqPending_,
+                &connectionEncStartReqTxPending_,
+                &connectionEncAwaitingStartRsp_,
+                &connectionEncEnableTxOnNextEvent_);
             emitBleTrace("LL_START_ENC_REQ_PENDING");
           }
         }
@@ -799,23 +802,24 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
           ++encDebug_.followupCrcOk;
           const uint8_t hdrFollow = rxPacket_[0];
           const uint8_t llidFollow = hdrFollow & 0x03U;
-          const uint8_t nesnFollow = (hdrFollow >> 2U) & 0x01U;
-          const uint8_t snFollow = (hdrFollow >> 3U) & 0x01U;
           const uint8_t rxLengthFollow = rxPacket_[1];
+          const BleLlSequenceObservation sequenceFollow =
+              bleLlObserveSequence(hdrFollow, connectionTxHistoryValid_,
+                                   connectionLastTxSn_, connectionExpectedRxSn_);
           const bool peerAckedLastTxFollow =
-              connectionTxHistoryValid_ && (nesnFollow != connectionLastTxSn_);
-          const bool packetIsNewFollow = (snFollow == connectionExpectedRxSn_);
-
-          if (packetIsNewFollow) {
-            connectionExpectedRxSn_ ^= 0x01U;
-          }
+              sequenceFollow.peerAcknowledgedLastTx;
+          const bool packetIsNewFollow = sequenceFollow.packetIsNew;
           if (peerAckedLastTxFollow) {
             noteLastSmpTxAcknowledged();
-            connectionTxSn_ ^= 0x01U;
-            connectionFreshTxAllowed_ = true;
-          } else {
-            connectionFreshTxAllowed_ = !connectionTxHistoryValid_;
           }
+          const BleLlAuthenticatedSequenceUpdate sequenceUpdate =
+              bleLlApplyAuthenticatedSequence(
+                  sequenceFollow, connectionExpectedRxSn_, connectionTxSn_,
+                  connectionTxHistoryValid_);
+          connectionExpectedRxSn_ = sequenceUpdate.expectedRxSn;
+          connectionTxSn_ = sequenceUpdate.nextTxSn;
+          connectionTxHistoryValid_ = sequenceUpdate.txHistoryValid;
+          connectionFreshTxAllowed_ = sequenceUpdate.freshTxAllowed;
 
           if (llidFollow == 0x01U) {
             ++encDebug_.followupRxLlid1;
@@ -1561,9 +1565,12 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         encDebug_.encLastTxDir = connectionEncTxDirection_;
         primeStartEncryptionResponseCiphertext();
         if (connectionRole_ == BleConnectionRole::kPeripheral) {
-          connectionEncStartReqPending_ = true;
-          connectionEncStartReqTxPending_ = false;
-          connectionEncAwaitingStartRsp_ = false;
+          (void)bleLlSetEncryptionProcedurePhase(
+              BleLlEncryptionPhase::kPeripheralAwaitStartRequest,
+              &connectionEncStartReqPending_,
+              &connectionEncStartReqTxPending_,
+              &connectionEncAwaitingStartRsp_,
+              &connectionEncEnableTxOnNextEvent_);
           emitBleTrace("LL_START_ENC_REQ_PENDING");
         }
       }
@@ -1710,12 +1717,13 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     }
   }
 
-  bool peerAckedLastTx =
-      connectionTxHistoryValid_ && (nesn != connectionLastTxSn_);
-  const bool snMatchesExpected = (sn == connectionExpectedRxSn_);
+  const BleLlSequenceObservation sequenceObservation =
+      bleLlObserveSequence(hdr0, connectionTxHistoryValid_,
+                           connectionLastTxSn_, connectionExpectedRxSn_);
+  bool peerAckedLastTx = sequenceObservation.peerAcknowledgedLastTx;
   // RX payload freshness is keyed only by SN. NESN/ACK applies to our TX path
   // independently and must not block consuming valid peer packets.
-  const bool canConsumeNewPayload = snMatchesExpected;
+  const bool canConsumeNewPayload = sequenceObservation.packetIsNew;
 
   bool packetIsNew = false;
   if (canConsumeNewPayload) {
@@ -1787,9 +1795,12 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     encDebug_.encLastTxDir = connectionEncTxDirection_;
     primeStartEncryptionResponseCiphertext();
     if (connectionRole_ == BleConnectionRole::kPeripheral) {
-      connectionEncStartReqPending_ = true;
-      connectionEncStartReqTxPending_ = false;
-      connectionEncAwaitingStartRsp_ = false;
+      (void)bleLlSetEncryptionProcedurePhase(
+          BleLlEncryptionPhase::kPeripheralAwaitStartRequest,
+          &connectionEncStartReqPending_,
+          &connectionEncStartReqTxPending_,
+          &connectionEncAwaitingStartRsp_,
+          &connectionEncEnableTxOnNextEvent_);
       emitBleTrace("LL_START_ENC_REQ_PENDING");
     }
   };
@@ -2014,16 +2025,17 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
   // validated. New data intentionally deferred for the T_IFS response is
   // authenticated immediately after that response and disconnects on failure.
   if (!terminateInd) {
-    if (packetIsNew) {
-      connectionExpectedRxSn_ ^= 0x01U;
-    }
     if (peerAckedLastTx) {
       noteLastSmpTxAcknowledged();
-      connectionTxSn_ ^= 0x01U;
-      connectionFreshTxAllowed_ = true;
-    } else {
-      connectionFreshTxAllowed_ = !connectionTxHistoryValid_;
     }
+    const BleLlAuthenticatedSequenceUpdate sequenceUpdate =
+        bleLlApplyAuthenticatedSequence(
+            sequenceObservation, connectionExpectedRxSn_, connectionTxSn_,
+            connectionTxHistoryValid_);
+    connectionExpectedRxSn_ = sequenceUpdate.expectedRxSn;
+    connectionTxSn_ = sequenceUpdate.nextTxSn;
+    connectionTxHistoryValid_ = sequenceUpdate.txHistoryValid;
+    connectionFreshTxAllowed_ = sequenceUpdate.freshTxAllowed;
   } else {
     peerAckedLastTx = false;
     packetIsNew = false;

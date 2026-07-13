@@ -71,28 +71,33 @@
               radio_->SHORTS = 0U;
             }
 
-	            const bool preserveFailedFollowTx =
-	                !txFollowOk && txFollowCanUseFreshPayload;
-	            if (txFollowOk || preserveFailedFollowTx) {
+	            const BleLlTxAttemptCommit followCommit =
+	                bleLlCommitTxAttempt(
+	                    txFollowOk, txFollowCanUseFreshPayload, txFollowLlid,
+	                    txFollowLength,
+	                    txFollowEncrypted && txFollowCounterValid);
+	            if (followCommit.retainHistory) {
 	              connectionTxHistoryValid_ = true;
 	              connectionLastTxMoreData_ =
 	                  (txPacket_[0] & 0x10U) != 0U;
 	              connectionLastTxSn_ =
 	                  static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
-	              if (txFollowCanUseFreshPayload) {
-	                connectionFreshTxAllowed_ = false;
-	              }
+	              connectionFreshTxAllowed_ = followCommit.freshTxAllowed;
 	            }
-	            if ((txFollowOk || preserveFailedFollowTx) &&
-	                txFollowEncrypted && txFollowCounterValid) {
+	            if (followCommit.advanceEncryptionCounter) {
+	              connectionEncTxCounter_ =
+	                  (txFollowCounterUsed + 1ULL) & kBleEncPacketCounterMask;
+	              if (txFollowIsStartEncRspPlain) {
+	                connectionEncPrecomputedStartRspTxValid_ = false;
+	              }
 	              ++encDebug_.encTxPacketCount;
 	              if (txFollowOk && txFollowIsStartEncRspPlain) {
 	                ++encDebug_.followupStartEncRspTxOk;
 	              }
 	            }
 	            if (!txFollowOk) {
-	              if (preserveFailedFollowTx) {
-	                emitBleTrace("FOLLOW_TX_TIMEOUT_RETAINED");
+	              if (followCommit.retainHistory) {
+	                emitBleTrace("DATA_FOLLOW_TX_TIMEOUT_RETAINED");
 	              }
 	              break;
 	            }

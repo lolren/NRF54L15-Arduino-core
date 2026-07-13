@@ -20,6 +20,9 @@ PLATFORM = ROOT / "hardware/nrf54l15clean/nrf54l15clean"
 HAL = PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
 PARTS = HAL / "nrf54l15_hal_parts"
 BLUEFRUIT = PLATFORM / "libraries/Bluefruit52Lib/src"
+SECURITY_EXAMPLES = (
+    PLATFORM / "libraries/Nrf54L15-Clean-Implementation/examples/BLE/Security"
+)
 
 
 def source(path: Path) -> str:
@@ -519,6 +522,15 @@ def validate_hal_policy_and_bond_source() -> None:
         )
     assert "BleSecurityPolicy" in header
     assert "setSecurityPolicy" in header
+    for sketch_name in ("BlePairPeripheral", "BlePairCentral"):
+        sketch = source(
+            SECURITY_EXAMPLES / sketch_name / f"{sketch_name}.ino"
+        )
+        assert "pairingPolicy.mitmRequired = true" in sketch, (
+            f"{sketch_name} authenticated modes must explicitly require MITM"
+        )
+        assert "g_ble.setSecurityPolicy(pairingPolicy)" in sketch
+        assert 'strcmp(message, "BOND_DB_RPA_RESOLVED")' in sketch
     require_any(
         (
             r"BleSecurityPolicy\s+securityPolicy_",
@@ -728,6 +740,8 @@ def validate_local_enckey_distribution_source() -> None:
     header = source(HAL / "nrf54l15_hal.h")
     security = source(PARTS / "nrf54l15_hal_ble_ll_security.inc")
     att = source(PARTS / "nrf54l15_hal_ble_att_l2cap.inc")
+    event_rx = source(PARTS / "nrf54l15_hal_ble_peripheral_event_rx.inc")
+    event_tx = source(PARTS / "nrf54l15_hal_ble_peripheral_event_tx.inc")
 
     for state in (
         "smpLocalLtk_",
@@ -774,8 +788,30 @@ def validate_local_enckey_distribution_source() -> None:
     assert positions == sorted(positions), "phase-3 PDU order is not EncInfo, MasterId, IdInfo, IdAddr, SignInfo"
     assert "smpLocalEncInfoAcked_" in distribution
     assert "smpLocalMasterIdAcked_" in distribution
-    assert "smpLocalInitiator_" in distribution, (
-        "Central must wait for the Peripheral's complete distribution"
+    assert "if (smpLocalInitiator_ &&" in distribution, (
+        "SMP Phase 3 must preserve the established peer-first wire ordering"
+    )
+    fast_enc_start = event_rx.index("if (prearmFastEncRspTifs)")
+    fast_enc_end = event_rx.index("noteTxenLag(&encDebug_, txLagUs)", fast_enc_start)
+    fast_enc_window = event_rx[fast_enc_start:fast_enc_end]
+    assert "primeStartEncryptionResponseCiphertext" in fast_enc_window, (
+        "peripheral must precompute its encrypted START_ENC_RSP before the "
+        "central's timing-critical START_ENC_REQ arrives"
+    )
+    assert event_rx.count(
+        "BleLlEncryptionPhase::kPeripheralAwaitStartRequest"
+    ) >= 3
+    assert "BleLlEncryptionPhase::kCompatibilitySendStartRequest" not in event_rx, (
+        "peripheral must not replace the central's START_ENC_REQ with a "
+        "symmetric fallback because that desynchronizes RX CCM counter zero"
+    )
+    event_tail = source(PARTS / "nrf54l15_hal_ble_peripheral_event_tail.inc")
+    assert "bleLlCommitTxAttempt(" in event_tail
+    assert event_rx.count("bleLlApplyAuthenticatedSequence(") >= 2, (
+        "peripheral RX acknowledgements must use the authenticated sequence transition"
+    )
+    assert "bleLlApplyAuthenticatedSequence(" in event_tx, (
+        "same-event peripheral acknowledgements must use the authenticated transition"
     )
 
     ack = function_body(

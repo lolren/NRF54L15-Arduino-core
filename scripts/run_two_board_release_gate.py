@@ -1359,8 +1359,11 @@ class ReleaseGate:
             self.require(output, "conn=0 enc=0 auth=0 bond=1",
                          f"{reconnect_phase}/{board.role}")
             self.require(output, "encryption=ON", f"{reconnect_phase}/{board.role}")
-            if "ble_pair bond-saved" in output:
-                raise GateFailure(f"{reconnect_phase}/{board.role}: peer paired again")
+            # BOND_FLASH_FLUSHED also covers maintenance writes, including
+            # normalization from a previously stored local RPA to the stable
+            # identity. The AAR/primed evidence below distinguishes a bonded
+            # reconnect from a new SMP pairing without treating that flush as
+            # a false re-pair signal.
         reconnect_evidence = self.request_pair_evidence(
             f"{reconnect_phase}_evidence", "privacy"
         )

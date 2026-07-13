@@ -1,4 +1,5 @@
 #include "nrf54l15_hal.h"
+#include "ble_controller_state.h"
 #include "nrf54l15_hal_board_policy_internal.h"
 #include "nrf54l15_hal_support_internal.h"
 #include "nrf54l15_hal_timebase_internal.h"

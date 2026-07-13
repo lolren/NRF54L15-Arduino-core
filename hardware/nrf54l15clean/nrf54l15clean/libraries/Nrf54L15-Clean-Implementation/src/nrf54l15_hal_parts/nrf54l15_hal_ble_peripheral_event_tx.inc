@@ -112,8 +112,7 @@
        connectionEncEnableTxOnNextEvent_ ||
        connectionEncStartReqPending_);
   // If the peer has not ACKed our last TX PDU, keep retransmitting that exact
-  // packet/SN until ACKed. Zero-length LLID=01 empty PDUs remain plaintext and
-  // do not consume a CCM counter.
+  // packet/SN until ACKed.
   const bool canSendNewPayloadThisEvent =
       !connectionTxHistoryValid_ || peerAckedLastTx;
   const uint16_t rxL2capCid =
@@ -887,13 +886,6 @@
         connectionLastTxEncryptedLength_ = encryptedLength;
         txCounterUsedForCurrentTx = txCounterToUse;
         txCounterUsedValid = true;
-        if (txPayloadIsNewPlain) {
-          connectionEncTxCounter_ =
-              (txCounterToUse + 1ULL) & kBleEncPacketCounterMask;
-          if (txIsStartEncRspPlain) {
-            connectionEncPrecomputedStartRspTxValid_ = false;
-          }
-        }
       }
     } else if (txPayloadIsNewPlain) {
       connectionLastTxWasEncrypted_ = false;
@@ -1035,17 +1027,14 @@
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
     waitRadioDisabledBudgeted(radio_, kBleConnTxDisableWaitUs, spinLimit / 2U + 1U);
   }
-  const bool preserveFailedDataTx =
-      !txOk && txPayloadIsNewPlain && (txLength > 0U) &&
-      ((txLlid == kBlePduDataStartOrComplete) ||
-       (txLlid == kBlePduDataContinuation));
-  if (txOk || preserveFailedDataTx) {
+  const BleLlTxAttemptCommit txCommit =
+      bleLlCommitTxAttempt(txOk, txPayloadIsNewPlain, txLlid, txLength,
+                           txCounterUsedValid);
+  if (txCommit.retainHistory) {
     connectionTxHistoryValid_ = true;
     connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
     connectionLastTxSn_ = txSnBit;
-    if (txPayloadIsNewPlain && txLength > 0U) {
-      connectionFreshTxAllowed_ = false;
-    }
+    connectionFreshTxAllowed_ = txCommit.freshTxAllowed;
     if (txOk) {
       blePeriphTxTracePushPacket(txLlid, txLength,
                                  txPayloadIsNewPlain
@@ -1053,6 +1042,13 @@
                                      : &connectionLastTxPlainPayload_[0]);
     } else {
       emitBleTrace("DATA_TX_TIMEOUT_RETAINED");
+    }
+  }
+  if (txCommit.advanceEncryptionCounter) {
+    connectionEncTxCounter_ =
+        (txCounterUsedForCurrentTx + 1ULL) & kBleEncPacketCounterMask;
+    if (txIsStartEncRspPlain) {
+      connectionEncPrecomputedStartRspTxValid_ = false;
     }
   }
   bool followRxAlreadyDone = false;
@@ -1342,13 +1338,6 @@
 	        *txFollowCounterUsed = txCounterToUse;
 	        *txFollowCounterValid = txFollowCanUseFreshPayload;
 	        *txFollowEncrypted = true;
-	        if (txFollowCanUseFreshPayload) {
-	          connectionEncTxCounter_ =
-	              (txCounterToUse + 1ULL) & kBleEncPacketCounterMask;
-	          if (txFollowIsStartEncRspPlain) {
-	            connectionEncPrecomputedStartRspTxValid_ = false;
-	          }
-	        }
 	        txPacket_[1] = encryptedLength;
 	        memcpy(&txPacket_[2], connectionLastTxEncryptedPayload_,
 	               encryptedLength);
@@ -1422,20 +1411,28 @@
                                     spinLimit / 2U + 1U);
         }
         radio_->SHORTS = 0U;
-	        const bool preserveFailedFollowTx = !txFollowOk;
-	        if (txFollowOk || preserveFailedFollowTx) {
+	        const BleLlTxAttemptCommit followCommit =
+	            bleLlCommitTxAttempt(txFollowOk, true, txFollowLlid,
+	                                 txFollowLength,
+	                                 encryptFollowTx && followTxCounterValid);
+	        if (followCommit.retainHistory) {
 	          connectionTxHistoryValid_ = true;
 	          connectionLastTxMoreData_ = (txPacket_[0] & 0x10U) != 0U;
 	          connectionLastTxSn_ =
 	              static_cast<uint8_t>((txPacket_[0] >> 3U) & 0x01U);
-	          connectionFreshTxAllowed_ = false;
+	          connectionFreshTxAllowed_ = followCommit.freshTxAllowed;
 	          if (txFollowOk) {
 	            blePeriphTxTracePushPacket(txFollowLlid, txFollowLength,
 	                                       &connectionLastTxPlainPayload_[0]);
 	          } else {
-	            emitBleTrace("FOLLOW_TX_TIMEOUT_RETAINED");
+	            emitBleTrace("DATA_FOLLOW_TX_TIMEOUT_RETAINED");
 	          }
-	          if (encryptFollowTx && followTxCounterValid) {
+	          if (followCommit.advanceEncryptionCounter) {
+	            connectionEncTxCounter_ =
+	                (followTxCounter + 1ULL) & kBleEncPacketCounterMask;
+	            if (txFollowIsStartEncRspPlain) {
+	              connectionEncPrecomputedStartRspTxValid_ = false;
+	            }
 	            ++encDebug_.encTxPacketCount;
 	            if (txFollowOk && txFollowIsStartEncRspPlain) {
 	              ++encDebug_.followupStartEncRspTxOk;
@@ -1489,27 +1486,12 @@
         ++encDebug_.followupCrcOk;
         const uint8_t hdrFollow = rxPacket_[0];
         const uint8_t llidFollow = hdrFollow & 0x03U;
-        const uint8_t nesnFollow = (hdrFollow >> 2U) & 0x01U;
-        const uint8_t snFollow = (hdrFollow >> 3U) & 0x01U;
         const uint8_t rxLengthFollowRaw = rxPacket_[1];
-
-        const bool peerAckedLastTxFollow =
-            connectionTxHistoryValid_ && (nesnFollow != connectionLastTxSn_);
-        const bool snMatchesExpectedFollow = (snFollow == connectionExpectedRxSn_);
-        const bool canConsumeNewPayloadFollow = snMatchesExpectedFollow;
-
-        bool packetIsNewFollow = false;
-        if (canConsumeNewPayloadFollow) {
-          connectionExpectedRxSn_ ^= 0x01U;
-          packetIsNewFollow = true;
-        }
-        if (peerAckedLastTxFollow) {
-          noteLastSmpTxAcknowledged();
-          connectionTxSn_ ^= 0x01U;
-          connectionFreshTxAllowed_ = true;
-        } else {
-          connectionFreshTxAllowed_ = !connectionTxHistoryValid_;
-        }
+        const BleLlSequenceObservation sequenceFollow =
+            bleLlObserveSequence(hdrFollow, connectionTxHistoryValid_,
+                                 connectionLastTxSn_, connectionExpectedRxSn_);
+        bool peerAckedLastTxFollow = sequenceFollow.peerAcknowledgedLastTx;
+        bool packetIsNewFollow = sequenceFollow.packetIsNew;
 
         uint8_t rxLengthFollow = rxLengthFollowRaw;
         if (connectionEncSessionValid_ &&
@@ -1652,6 +1634,23 @@
               }
             }
           }
+        }
+
+        if (!terminateInd) {
+          if (peerAckedLastTxFollow) {
+            noteLastSmpTxAcknowledged();
+          }
+          const BleLlAuthenticatedSequenceUpdate sequenceUpdate =
+              bleLlApplyAuthenticatedSequence(
+                  sequenceFollow, connectionExpectedRxSn_, connectionTxSn_,
+                  connectionTxHistoryValid_);
+          connectionExpectedRxSn_ = sequenceUpdate.expectedRxSn;
+          connectionTxSn_ = sequenceUpdate.nextTxSn;
+          connectionTxHistoryValid_ = sequenceUpdate.txHistoryValid;
+          connectionFreshTxAllowed_ = sequenceUpdate.freshTxAllowed;
+        } else {
+          peerAckedLastTxFollow = false;
+          packetIsNewFollow = false;
         }
 
         if (llidFollow == 0x01U) {
