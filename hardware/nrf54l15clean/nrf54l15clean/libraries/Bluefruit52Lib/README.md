@@ -186,7 +186,8 @@ For bonded peers, CCCD subscriptions are restored automatically when the saved
 bond identity matches the reconnecting peer. This lets notify/indicate
 characteristics keep the same Bluefruit callback behavior after a bonded
 reconnect without requiring the central to rewrite every CCCD immediately.
-CCCDs, signing counters, GATT fingerprints, and pending Service Changed ranges
+CCCDs, signing counters, GATT fingerprints, Client Supported Features, and
+pending Service Changed ranges
 are isolated per peer.
 
 The built-in store exposes stable bond IDs and MRU-ordered enumeration:
@@ -347,8 +348,8 @@ if (Bluefruit.getLastDisconnectReason(&reason, &remote)) {
 The broader Bluefruit menus now ship the practical wrapper examples by role:
 
 - `Advertising`: `adv_advanced`, `beacon`, `directed_advertising`, `eddystone_url`
-- `Central`: `central_bleuart_multi`, `central_custom_hrm`, `central_gatt_discovery`, `central_hid`, `central_indication`, `central_pairing`, `central_scan_advanced`, `central_throughput`
-- `Diagnostics`: `bond_identity_probe`, `gatt_descriptor_helpers`, `gatt_edge_cases`, `throughput`, `rssi_callback`, `rssi_poll`
+- `Central`: `central_bleuart_multi`, `central_custom_hrm`, `central_gatt_discovery`, `central_hid`, `central_indication`, `central_pairing`, `central_scan_advanced`, `central_throughput`, `robust_caching_client`
+- `Diagnostics`: `bond_identity_probe`, `gatt_descriptor_helpers`, `gatt_edge_cases`, `robust_caching_server`, `throughput`, `rssi_callback`, `rssi_poll`
 - `DualRoles`: `dual_bleuart`
 - `HID`: `blehid_keyboard`, `blehid_mouse`, `blehid_gamepad`, `blehid_camerashutter`
 - `Projects`: `rssi_proximity_central`, `rssi_proximity_peripheral`

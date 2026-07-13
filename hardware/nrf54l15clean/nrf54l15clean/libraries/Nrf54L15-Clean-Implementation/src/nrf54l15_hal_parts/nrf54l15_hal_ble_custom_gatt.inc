@@ -2088,6 +2088,10 @@ void BleRadio::clearCustomGattConnectionState() {
   connectionCustomNotificationQueueTail_ = 0U;
   connectionCustomNotificationQueueCount_ = 0U;
   connectionCustomIndicationAwaitingHandle_ = 0U;
+  connectionGattClientSupportedFeatures_ = 0U;
+  connectionGattClientChangeAware_ = true;
+  connectionGattOutOfSyncSent_ = false;
+  connectionGattDatabaseHashRead_ = false;
   for (uint8_t i = 0U; i < customGattCharacteristicCount_; ++i) {
     customGattCharacteristics_[i].cccdValue = 0U;
   }

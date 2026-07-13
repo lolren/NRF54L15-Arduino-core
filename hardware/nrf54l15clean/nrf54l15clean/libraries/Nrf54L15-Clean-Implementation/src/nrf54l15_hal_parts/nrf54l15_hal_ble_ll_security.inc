@@ -3562,6 +3562,8 @@ bool BleRadio::persistActiveBondDatabaseRecord(bool includeCccdState) {
     if (connectionBatteryNotificationsEnabled_) {
       payload.peerState.fixedCccdFlags |= kBleCccdFixedBattery;
     }
+    payload.peerState.fixedCccdFlags |= static_cast<uint8_t>(
+        (connectionGattClientSupportedFeatures_ & 0x07U) << 2U);
     payload.peerState.cccdCount = 0U;
     memset(payload.peerState.cccdValues, 0,
            sizeof(payload.peerState.cccdValues));

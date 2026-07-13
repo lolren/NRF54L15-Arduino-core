@@ -194,8 +194,15 @@ struct BleCccdBondRecordV1 {
 
 constexpr uint8_t kBleCccdFixedServiceChanged = 0x01U;
 constexpr uint8_t kBleCccdFixedBattery = 0x02U;
+constexpr uint8_t kBleCccdFixedRobustCaching = 0x04U;
+constexpr uint8_t kBleCccdFixedEnhancedAtt = 0x08U;
+constexpr uint8_t kBleCccdFixedMultipleNotifications = 0x10U;
+constexpr uint8_t kBleCccdFixedClientFeaturesMask =
+    kBleCccdFixedRobustCaching | kBleCccdFixedEnhancedAtt |
+    kBleCccdFixedMultipleNotifications;
 constexpr uint8_t kBleCccdFixedMask =
-    kBleCccdFixedServiceChanged | kBleCccdFixedBattery;
+    kBleCccdFixedServiceChanged | kBleCccdFixedBattery |
+    kBleCccdFixedClientFeaturesMask;
 
 struct BleCccdBondRecord {
   uint8_t peerAddress[6];
@@ -341,9 +348,12 @@ constexpr uint8_t kAttErrPrepareQueueFull = 0x09U;
 constexpr uint8_t kAttErrInvalidAttrValueLen = 0x0DU;
 constexpr uint8_t kAttErrInsufficientEncryption = 0x0FU;
 constexpr uint8_t kAttErrUnsupportedGroupType = 0x10U;
+constexpr uint8_t kAttErrDatabaseOutOfSync = 0x12U;
+constexpr uint8_t kAttErrValueNotAllowed = 0x13U;
 constexpr uint8_t kAttErrAttributeNotFound = 0x0AU;
 
 constexpr uint16_t kUuidPrimaryService = 0x2800U;
+constexpr uint16_t kUuidInclude = 0x2802U;
 constexpr uint16_t kUuidCharacteristic = 0x2803U;
 constexpr uint16_t kUuidCharacteristicUserDescription = 0x2901U;
 constexpr uint16_t kUuidCharacteristicPresentationFormat = 0x2904U;
@@ -357,6 +367,8 @@ constexpr uint16_t kUuidAppearance = 0x2A01U;
 constexpr uint16_t kUuidPpcp = 0x2A04U;
 constexpr uint16_t kUuidServiceChanged = 0x2A05U;
 constexpr uint16_t kUuidBatteryLevel = 0x2A19U;
+constexpr uint16_t kUuidClientSupportedFeatures = 0x2B29U;
+constexpr uint16_t kUuidDatabaseHash = 0x2B2AU;
 
 constexpr uint16_t kHandleGapService = 0x0001U;
 constexpr uint16_t kHandleGapDeviceNameDecl = 0x0002U;
@@ -369,6 +381,10 @@ constexpr uint16_t kHandleGattService = 0x0008U;
 constexpr uint16_t kHandleGattServiceChangedDecl = 0x0009U;
 constexpr uint16_t kHandleGattServiceChangedValue = 0x000AU;
 constexpr uint16_t kHandleGattServiceChangedCccd = 0x000BU;
+constexpr uint16_t kHandleGattClientFeaturesDecl = 0x000CU;
+constexpr uint16_t kHandleGattClientFeaturesValue = 0x000DU;
+constexpr uint16_t kHandleGattDatabaseHashDecl = 0x000EU;
+constexpr uint16_t kHandleGattDatabaseHashValue = 0x000FU;
 constexpr uint16_t kHandleBatteryService = 0x0018U;
 constexpr uint16_t kHandleBatteryLevelDecl = 0x0019U;
 constexpr uint16_t kHandleBatteryLevelValue = 0x001AU;
@@ -464,7 +480,7 @@ uint8_t customUuidLength(uint8_t uuidLength) {
 
 constexpr BlePrimaryServiceRecord kBlePrimaryServices[] = {
     {kHandleGapService, kHandleGapPpcpValue, kUuidGapService},
-    {kHandleGattService, kHandleGattServiceChangedCccd, kUuidGattService},
+    {kHandleGattService, kHandleGattDatabaseHashValue, kUuidGattService},
     {kHandleBatteryService, kHandleBatteryLevelCccd, kUuidBatteryService},
 };
 
@@ -477,6 +493,12 @@ constexpr BleCharacteristicRecord kBleCharacteristics[] = {
      kHandleGapPpcpValue, kUuidPpcp},
     {kHandleGattServiceChangedDecl, kGattCharacteristicPropIndicate,
      kHandleGattServiceChangedValue, kUuidServiceChanged},
+    {kHandleGattClientFeaturesDecl,
+     static_cast<uint8_t>(kGattCharacteristicPropRead |
+                          kGattCharacteristicPropWrite),
+     kHandleGattClientFeaturesValue, kUuidClientSupportedFeatures},
+    {kHandleGattDatabaseHashDecl, kGattCharacteristicPropRead,
+     kHandleGattDatabaseHashValue, kUuidDatabaseHash},
     {kHandleBatteryLevelDecl, static_cast<uint8_t>(kGattCharacteristicPropRead |
                                                    kGattCharacteristicPropNotify),
      kHandleBatteryLevelValue, kUuidBatteryLevel},
@@ -494,6 +516,10 @@ constexpr BleAttributeUuidRecord kBleAttributeUuids[] = {
     {kHandleGattServiceChangedDecl, kUuidCharacteristic},
     {kHandleGattServiceChangedValue, kUuidServiceChanged},
     {kHandleGattServiceChangedCccd, kUuidClientCharacteristicConfig},
+    {kHandleGattClientFeaturesDecl, kUuidCharacteristic},
+    {kHandleGattClientFeaturesValue, kUuidClientSupportedFeatures},
+    {kHandleGattDatabaseHashDecl, kUuidCharacteristic},
+    {kHandleGattDatabaseHashValue, kUuidDatabaseHash},
     {kHandleBatteryService, kUuidPrimaryService},
     {kHandleBatteryLevelDecl, kUuidCharacteristic},
     {kHandleBatteryLevelValue, kUuidBatteryLevel},
@@ -2290,6 +2316,10 @@ void BleRadio::resetBondedServiceChangedState(uint32_t schemaFingerprint) {
   connectionServiceChangedIndicationStartHandle_ = 0U;
   connectionServiceChangedIndicationEndHandle_ = 0U;
   connectionServiceChangedIndicationGeneration_ = 0U;
+  connectionGattClientSupportedFeatures_ = 0U;
+  connectionGattClientChangeAware_ = true;
+  connectionGattOutOfSyncSent_ = false;
+  connectionGattDatabaseHashRead_ = false;
 }
 
 bool BleRadio::persistBondedCccdState(bool forceFlash) {
@@ -2305,6 +2335,8 @@ bool BleRadio::persistBondedCccdState(bool forceFlash) {
   if (connectionBatteryNotificationsEnabled_) {
     record.fixedCccdFlags |= kBleCccdFixedBattery;
   }
+  record.fixedCccdFlags |= static_cast<uint8_t>(
+      (connectionGattClientSupportedFeatures_ & 0x07U) << 2U);
   record.schemaFingerprint = bondedGattSchemaFingerprint_;
   record.serviceChangedStartHandle = bondedServiceChangedStartHandle_;
   record.serviceChangedEndHandle = bondedServiceChangedEndHandle_;
@@ -2371,6 +2403,13 @@ bool BleRadio::restoreBondedCccdState() {
       payload.peerState.serviceChangedGeneration != 0U
           ? payload.peerState.serviceChangedGeneration
           : 1U;
+  connectionGattClientSupportedFeatures_ = static_cast<uint8_t>(
+      (record.fixedCccdFlags & kBleCccdFixedClientFeaturesMask) >> 2U);
+  connectionGattClientChangeAware_ =
+      (connectionGattClientSupportedFeatures_ & 0x01U) == 0U ||
+      bondedServiceChangedStartHandle_ == 0U;
+  connectionGattOutOfSyncSent_ = false;
+  connectionGattDatabaseHashRead_ = false;
 
   bool appliedAny = false;
   connectionServiceChangedCccdRestored_ = false;
@@ -2411,8 +2450,11 @@ bool BleRadio::commitGattSchemaFingerprint(uint32_t fingerprint) {
   if (fingerprint == 0U) {
     return false;
   }
+  if (!rebuildGattDatabaseHash()) {
+    return false;
+  }
   gattSchemaFingerprint_ = fingerprint;
-  if (!gattServiceChangedEnabled_ || !bondRecordValid_) {
+  if (!bondRecordValid_) {
     return true;
   }
 
@@ -2469,7 +2511,7 @@ bool BleRadio::commitGattSchemaFingerprint(uint32_t fingerprint) {
 
 bool BleRadio::markGattServiceChanged(uint16_t startHandle,
                                       uint16_t endHandle) {
-  if (!gattServiceChangedEnabled_ || !bondRecordValid_ ||
+  if (!bondRecordValid_ ||
       !bondedGattSchemaStateLoaded_ || !connected_ ||
       !bondKeyPrimedForConnection_ || !bondIdentityMatchedForConnection_ ||
       startHandle == 0U ||
@@ -2490,6 +2532,11 @@ bool BleRadio::markGattServiceChanged(uint16_t startHandle,
   ++bondedServiceChangedGeneration_;
   if (bondedServiceChangedGeneration_ == 0U) {
     bondedServiceChangedGeneration_ = 1U;
+  }
+  if ((connectionGattClientSupportedFeatures_ & 0x01U) != 0U) {
+    connectionGattClientChangeAware_ = false;
+    connectionGattOutOfSyncSent_ = false;
+    connectionGattDatabaseHashRead_ = false;
   }
   const bool persisted = persistBondedCccdState();
   scheduleBondedServiceChangedIfReady();
@@ -2539,9 +2586,57 @@ bool BleRadio::confirmBondedServiceChanged(uint32_t confirmedGeneration) {
   if (bondedServiceChangedGeneration_ == 0U) {
     bondedServiceChangedGeneration_ = 1U;
   }
+  connectionGattClientChangeAware_ = true;
+  connectionGattOutOfSyncSent_ = false;
+  connectionGattDatabaseHashRead_ = false;
   const bool persisted = persistBondedCccdState();
   emitBleTrace("GATT_SERVICE_CHANGED_CONFIRMED");
   return persisted;
+}
+
+void BleRadio::setGattClientChangeAware(bool aware, bool clearPendingChange) {
+  connectionGattClientChangeAware_ = aware;
+  connectionGattOutOfSyncSent_ = false;
+  connectionGattDatabaseHashRead_ = false;
+  if (!aware || !clearPendingChange ||
+      bondedServiceChangedStartHandle_ == 0U) {
+    return;
+  }
+  bondedServiceChangedStartHandle_ = 0U;
+  bondedServiceChangedEndHandle_ = 0U;
+  connectionServiceChangedIndicationPending_ = false;
+  connectionServiceChangedIndicationAwaitingConfirm_ = false;
+  connectionServiceChangedIndicationStartHandle_ = 0U;
+  connectionServiceChangedIndicationEndHandle_ = 0U;
+  connectionServiceChangedIndicationGeneration_ = 0U;
+  ++bondedServiceChangedGeneration_;
+  if (bondedServiceChangedGeneration_ == 0U) {
+    bondedServiceChangedGeneration_ = 1U;
+  }
+  (void)persistBondedCccdState();
+  emitBleTrace("GATT_ROBUST_CACHE_AWARE");
+}
+
+bool BleRadio::applyGattClientSupportedFeatures(const uint8_t* value,
+                                                uint16_t valueLength,
+                                                uint8_t* outErrorCode) {
+  if (outErrorCode != nullptr) {
+    *outErrorCode = kAttErrValueNotAllowed;
+  }
+  if (value == nullptr || valueLength != 1U || (value[0] & ~0x07U) != 0U ||
+      (connectionGattClientSupportedFeatures_ & ~value[0]) != 0U) {
+    return false;
+  }
+  connectionGattClientSupportedFeatures_ = value[0];
+  if ((value[0] & 0x01U) != 0U && bondedServiceChangedStartHandle_ != 0U) {
+    connectionGattClientChangeAware_ = false;
+    connectionGattOutOfSyncSent_ = false;
+    connectionGattDatabaseHashRead_ = false;
+  }
+  if (bondRecordValid_) {
+    (void)persistBondedCccdState();
+  }
+  return true;
 }
 
 }  // namespace xiao_nrf54l15

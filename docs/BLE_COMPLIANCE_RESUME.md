@@ -199,6 +199,12 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
 - [x] Service Changed database-revision management; structural fingerprints and
       pending ranges persist with the retained bond, retry after encrypted
       reconnect, and clear only after ATT Handle Value Confirmation
+- [x] GATT Robust Caching server support: per-client Client Supported Features
+      persist for bonded peers, Database Hash is AES-CMAC over the structural
+      database, database changes make robust clients change-unaware, commands
+      and HVX are suppressed, and the single-bearer Database Out Of Sync,
+      hash-read, next-request, and Service Changed confirmation transitions are
+      enforced
 - [ ] Broader authenticated-pairing interoperability: passkey, Numeric
       Comparison, and NFC/QR OOB workflows against phone/desktop peers, plus a
       larger malformed/timeout/retry matrix
@@ -212,8 +218,6 @@ Core conformance, Bluetooth SIG qualification, or product qualification.
       backoff is connection-runtime state
 - [ ] Automatic controller-enforced resolving-list/allow-list policy and
       privacy/bond-database behavior against a broad phone/desktop matrix
-- [ ] GATT Robust Caching: Client Supported Features, Database Hash, and
-      change-aware request enforcement are not implemented yet
 - [ ] LE Credit Based Connection-Oriented Channels and extended/periodic
       advertising data paths. The periodic API is an explicit unsupported
       capability probe and does not claim to transmit periodic advertisements.

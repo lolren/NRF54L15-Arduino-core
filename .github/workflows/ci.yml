@@ -45,6 +45,10 @@ jobs:
             options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Central/central_gatt_discovery
             options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Central/robust_caching_client
+            options: clean_ble=on
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Diagnostics/robust_caching_server
+            options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Security/pairing_passkey_input
             options: clean_ble=on
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Bluefruit52Lib/examples/Advertising/directed_advertising
@@ -246,6 +250,9 @@ jobs:
 
       - name: BLE Service Changed contracts
         run: python3 ./scripts/test_service_changed_contracts.py
+
+      - name: BLE Robust Caching contracts
+        run: python3 ./scripts/test_ble_robust_caching_contracts.py
 
       - name: BLE security-policy and passkey contracts
         run: python3 ./scripts/test_ble_security_policy_contracts.py

@@ -340,6 +340,77 @@ static bool aesCmacBe(const uint8_t keyBe[16], const uint8_t* message,
   return true;
 }
 
+class AesCmacStream {
+ public:
+  bool begin(const uint8_t key[16]) {
+    if (key == nullptr) {
+      return false;
+    }
+    memcpy(key_, key, sizeof(key_));
+    memset(state_, 0, sizeof(state_));
+    memset(pending_, 0, sizeof(pending_));
+    pendingLength_ = 0U;
+    totalLength_ = 0U;
+    generateAesCmacSubkeys(key_, subkey1_, subkey2_);
+    active_ = true;
+    return true;
+  }
+
+  bool update(const uint8_t* data, size_t length) {
+    if (!active_ || (length > 0U && data == nullptr)) {
+      return false;
+    }
+    while (length > 0U) {
+      if (pendingLength_ == sizeof(pending_)) {
+        processBlock(pending_);
+        pendingLength_ = 0U;
+      }
+      const size_t available = sizeof(pending_) - pendingLength_;
+      const size_t chunk = (length < available) ? length : available;
+      memcpy(&pending_[pendingLength_], data, chunk);
+      pendingLength_ += chunk;
+      totalLength_ += chunk;
+      data += chunk;
+      length -= chunk;
+    }
+    return true;
+  }
+
+  bool finish(uint8_t out[16]) {
+    if (!active_ || out == nullptr) {
+      return false;
+    }
+    uint8_t finalBlock[16] = {0};
+    if (totalLength_ != 0U && pendingLength_ == sizeof(pending_)) {
+      xorBlock16(pending_, subkey1_, finalBlock);
+    } else {
+      padCmacFinalBlock(pending_, pendingLength_, finalBlock);
+      xorBlock16(finalBlock, subkey2_, finalBlock);
+    }
+    uint8_t input[16] = {0};
+    xorBlock16(state_, finalBlock, input);
+    aesEncryptBlockBe(key_, input, out);
+    active_ = false;
+    return true;
+  }
+
+ private:
+  void processBlock(const uint8_t block[16]) {
+    uint8_t input[16] = {0};
+    xorBlock16(state_, block, input);
+    aesEncryptBlockBe(key_, input, state_);
+  }
+
+  uint8_t key_[16] = {0};
+  uint8_t subkey1_[16] = {0};
+  uint8_t subkey2_[16] = {0};
+  uint8_t state_[16] = {0};
+  uint8_t pending_[16] = {0};
+  size_t pendingLength_ = 0U;
+  size_t totalLength_ = 0U;
+  bool active_ = false;
+};
+
 static bool bleComputeDataSignature(const uint8_t csrkLe[16],
                                     const uint8_t* message,
                                     size_t messageLen,

@@ -3866,9 +3866,12 @@ traffic, and then repeated the encrypted bonded reconnect without another PIN
 prompt.
 
 Remaining BLE work is tracked honestly in `docs/BLE_COMPLIANCE_RESUME.md`.
-Important gaps include GATT Robust Caching, LE Credit Based L2CAP Channels,
-extended/periodic advertising, persisted per-peer repeated-attempt throttling,
-and broader phone/controller interoperability and conformance testing.
+GATT Robust Caching was implemented in the 2026-07-13 follow-up with
+Client Supported Features, an AES-CMAC Database Hash, per-bond persistence,
+and change-aware request/HVX enforcement. Important remaining gaps include LE
+Credit Based L2CAP Channels, extended/periodic advertising, persisted per-peer
+repeated-attempt throttling, and broader phone/controller interoperability and
+conformance testing.
 
 ## Machine-Readable Summary
 

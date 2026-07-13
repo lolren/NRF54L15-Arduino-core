@@ -94,6 +94,7 @@ jobs:
           python3 ./scripts/test_ble_gatt_authorization_contracts.py
           python3 ./scripts/test_ble_client_indication_contracts.py
           python3 ./scripts/test_service_changed_contracts.py
+          python3 ./scripts/test_ble_robust_caching_contracts.py
           python3 ./scripts/test_ble_security_policy_contracts.py
           python3 ./scripts/test_ble_multibond_contracts.py
           python3 ./scripts/test_ble_periodic_advertising_contracts.py

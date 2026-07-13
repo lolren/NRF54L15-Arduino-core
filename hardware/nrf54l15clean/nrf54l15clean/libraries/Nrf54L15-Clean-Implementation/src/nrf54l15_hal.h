@@ -2788,6 +2788,9 @@ class BleRadio {
   bool getGattServiceChangedPending(uint16_t* outStartHandle = nullptr,
                                     uint16_t* outEndHandle = nullptr) const;
   uint32_t gattSchemaFingerprint() const;
+  bool getGattDatabaseHash(uint8_t outHash[16]) const;
+  uint8_t gattClientSupportedFeatures() const;
+  bool gattClientChangeAware() const;
   uint16_t currentDataLength() const;
   uint16_t currentAttMtu() const;
   bool dataLengthUpdateComplete() const;
@@ -3435,6 +3438,11 @@ class BleRadio {
   void resetBondedServiceChangedState(uint32_t schemaFingerprint = 0U);
   void scheduleBondedServiceChangedIfReady();
   bool confirmBondedServiceChanged(uint32_t confirmedGeneration);
+  bool rebuildGattDatabaseHash();
+  bool applyGattClientSupportedFeatures(const uint8_t* value,
+                                        uint16_t valueLength,
+                                        uint8_t* outErrorCode);
+  void setGattClientChangeAware(bool aware, bool clearPendingChange);
   void clearCustomGattConnectionState();
   bool addCustomGattServiceUuid(const uint8_t* uuidBytes, uint8_t uuidLength,
                                 uint16_t* outServiceHandle);
@@ -3748,6 +3756,12 @@ class BleRadio {
   uint16_t bondedServiceChangedEndHandle_;
   uint32_t bondedServiceChangedGeneration_;
   bool bondedGattSchemaStateLoaded_;
+  uint8_t gattDatabaseHash_[16];
+  bool gattDatabaseHashValid_;
+  uint8_t connectionGattClientSupportedFeatures_;
+  bool connectionGattClientChangeAware_;
+  bool connectionGattOutOfSyncSent_;
+  bool connectionGattDatabaseHashRead_;
   bool connectionServiceChangedIndicationsEnabled_;
   bool connectionServiceChangedCccdRestored_;
   bool connectionServiceChangedIndicationPending_;

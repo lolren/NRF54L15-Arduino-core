@@ -2149,7 +2149,7 @@ class BluefruitCompatManager {
 
   void resetGattSchemaHash() {
     static constexpr uint8_t kBuiltInGattSchemaVersion[] = {
-        'G', 'A', 'T', 'T', '-', 'S', 'C', '-', '1'};
+        'G', 'A', 'T', 'T', '-', 'R', 'C', '-', '2'};
     gatt_schema_hash_ = 2166136261UL;
     for (uint8_t value : kBuiltInGattSchemaVersion) {
       gattSchemaHashByte(value);
@@ -8741,6 +8741,18 @@ uint32_t BLEGatt::serviceChangedFingerprint() const {
   return manager().radio().gattSchemaFingerprint();
 }
 
+bool BLEGatt::databaseHash(uint8_t hash[16]) const {
+  return manager().radio().getGattDatabaseHash(hash);
+}
+
+uint8_t BLEGatt::clientSupportedFeatures() const {
+  return manager().radio().gattClientSupportedFeatures();
+}
+
+bool BLEGatt::clientChangeAware() const {
+  return manager().radio().gattClientChangeAware();
+}
+
 AdafruitBluefruit::AdafruitBluefruit()
     : Periph(),
       Central(),
@@ -8761,7 +8773,7 @@ AdafruitBluefruit::AdafruitBluefruit()
       central_requested_mtu_(23U),
       central_request_data_length_(false),
       central_request_mtu_(false),
-      service_changed_enabled_(false),
+      service_changed_enabled_(true),
       last_disconnect_reason_(BLE_HCI_STATUS_CODE_SUCCESS),
       last_disconnect_reason_valid_(false),
       last_disconnect_reason_remote_(false),

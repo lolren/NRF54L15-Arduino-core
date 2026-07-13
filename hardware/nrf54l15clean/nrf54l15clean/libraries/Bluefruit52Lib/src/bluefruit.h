@@ -565,6 +565,9 @@ class BLEGatt {
   bool serviceChangedPending(uint16_t* start_handle = nullptr,
                              uint16_t* end_handle = nullptr) const;
   uint32_t serviceChangedFingerprint() const;
+  bool databaseHash(uint8_t hash[16]) const;
+  uint8_t clientSupportedFeatures() const;
+  bool clientChangeAware() const;
 };
 
 class BLESecurity {

@@ -452,7 +452,8 @@
         const bool readPermissionSatisfied =
             customGattHvxPermissionSatisfied(&custom);
         const bool canTransmit =
-            modeEnabled && readPermissionSatisfied && payloadFitsCurrentLink &&
+            connectionGattClientChangeAware_ && modeEnabled &&
+            readPermissionSatisfied && payloadFitsCurrentLink &&
             (!queuedCustom.indication || indicationFlowReady);
         if (!modeEnabled) {
           popCustomGattNotification();
@@ -488,6 +489,7 @@
         !connectionEncStartReqTxPending_ &&
         !connectionEncAwaitingStartRsp_ &&
         !connectionEncStartReqPending_ &&
+        connectionGattClientChangeAware_ &&
         connectionBatteryNotificationsEnabled_ &&
         connectionBatteryNotificationPending_) {
       writeLe16(&connectionTxPayload_[0], 4U);

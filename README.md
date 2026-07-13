@@ -220,6 +220,10 @@ direct register access.
 - Bond storage now retains up to eight peers with power-loss-safe replicated
   records, per-peer CCCDs and Service Changed state, role-correct legacy key
   tuples, LRU replacement, indexed inspection/deletion, and RPA resolution.
+- GATT Robust Caching includes a spec-generated 128-bit Database Hash,
+  persistent per-bond Client Supported Features, Database Out Of Sync handling,
+  change-aware transitions, and notification/indication suppression while a
+  client cache is stale.
 - Bluefruit central support now includes safe service/characteristic object
   lifetimes, handle-range discovery, bulk characteristic discovery,
   `readCharByUuid()`, central indications, and bonded reconnect encryption.
