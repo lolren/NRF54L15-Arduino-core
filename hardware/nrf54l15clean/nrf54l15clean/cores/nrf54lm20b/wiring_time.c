@@ -5,6 +5,7 @@
 #include "cmsis.h"
 #include "nrf54lm20b.h"
 #include "variant.h"
+#include "../nrf54common/nrf54_systick_timebase.h"
 
 #if !defined(ARDUINO_XIAO_NRF54L15) && !defined(ARDUINO_XIAO_NRF54L15_CLEAN) && !defined(XIAO_NRF54L15_BOARD_STATE_DECLARED)
 typedef struct {
@@ -31,7 +32,8 @@ void nrf54_core_clear_reset_reason(uint32_t mask);
 extern bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit)
     __attribute__((weak));
 
-static volatile uint32_t g_millis_ticks = 0;
+static nrf54_systick_epoch_t g_systick_epoch =
+    NRF54_SYSTICK_EPOCH_INITIALIZER;
 static volatile uint32_t g_system_off_abort_magic
     __attribute__((section(".noinit")));
 static volatile uint32_t g_system_off_abort_magic_inverse
@@ -54,8 +56,14 @@ enum {
     kSystemOffAbortWakeUnknown = 9U
 };
 static volatile uint32_t* const kScbScr = (volatile uint32_t*)0xE000ED10UL;
+#if !defined(NRF54L15_CLEAN_POWER_LOW)
+static volatile uint32_t* const kScbIcsr = (volatile uint32_t*)0xE000ED04UL;
+#endif
 static const uint32_t kScbScrSleepDeep_Msk = (1UL << 2);
 static const uint32_t kScbScrSleepOnExit_Msk = (1UL << 1);
+#if !defined(NRF54L15_CLEAN_POWER_LOW)
+static const uint32_t kScbIcsrPendstset_Msk = (1UL << 26);
+#endif
 enum {
     kSystemOffWakeLeadLfclk = 255U,
     kSystemOffTimeoutLfclk = 288U,
@@ -1079,8 +1087,49 @@ static void enterSystemOffWakeReset(uint32_t delayUs)
 
 void __attribute__((weak)) SysTick_Handler(void)
 {
-    ++g_millis_ticks;
+    nrf54_systick_publish_tick(&g_systick_epoch);
 }
+
+#if !defined(NRF54L15_CLEAN_POWER_LOW)
+static uint64_t readSysTickMilliseconds64(void)
+{
+    return nrf54_systick_read_epoch(&g_systick_epoch);
+}
+
+static uint64_t readSysTickMicroseconds64(void)
+{
+    // Clear an old COUNTFLAG before taking the sample. PENDSTSET is not
+    // cleared by this read, so an unserviced tick remains observable.
+    const uint32_t initialControl = SysTick->CTRL;
+    if ((initialControl & SysTick_CTRL_ENABLE_Msk) == 0U) {
+        return readSysTickMilliseconds64() * 1000ULL;
+    }
+
+    uint64_t millisecondsBefore;
+    uint64_t millisecondsAfter;
+    uint32_t currentValue;
+    uint32_t pendingState;
+    uint32_t controlAfter;
+    do {
+        millisecondsBefore = readSysTickMilliseconds64();
+        currentValue = SysTick->VAL;
+        pendingState = *kScbIcsr;
+        controlAfter = SysTick->CTRL;
+        millisecondsAfter = readSysTickMilliseconds64();
+    } while (!nrf54_systick_sample_is_stable(
+        millisecondsBefore, millisecondsAfter,
+        (controlAfter & SysTick_CTRL_COUNTFLAG_Msk) != 0U));
+
+    uint32_t cyclesPerUs =
+        (SystemCoreClock == 0UL) ? 64UL : (SystemCoreClock / 1000000UL);
+    if (cyclesPerUs == 0UL) {
+        cyclesPerUs = 64UL;
+    }
+    return nrf54_systick_compose_time_us(
+        millisecondsBefore, currentValue, SysTick->LOAD, cyclesPerUs,
+        (pendingState & kScbIcsrPendstset_Msk) != 0U);
+}
+#endif
 
 void initSysTick(void)
 {
@@ -1104,21 +1153,7 @@ unsigned long millis(void)
 #if defined(NRF54L15_CLEAN_POWER_LOW)
     return (unsigned long)(nrf54lm20b_core_monotonic_time_us() / 1000ULL);
 #else
-    uint32_t ticks = g_millis_ticks;
-    if (ticks == 0U) {
-        /* SysTick_Handler not firing - read counter directly with wrap tracking */
-        uint32_t load = SysTick->LOAD;
-        uint32_t val = SysTick->VAL;
-        uint32_t count = load - val;
-        static uint32_t s_last = (uint32_t)-1;
-        static uint32_t s_ms = 0;
-        if (s_last != (uint32_t)-1 && count < s_last) {
-            s_ms++; /* one more ms tick */
-        }
-        s_last = count;
-        return s_ms;
-    }
-    return (unsigned long)ticks;
+    return (unsigned long)(readSysTickMicroseconds64() / 1000ULL);
 #endif
 }
 
@@ -1127,25 +1162,7 @@ unsigned long micros(void)
 #if defined(NRF54L15_CLEAN_POWER_LOW)
     return (unsigned long)nrf54lm20b_core_monotonic_time_us();
 #else
-    uint32_t ms_a;
-    uint32_t ms_b;
-    uint32_t val;
-    uint32_t load;
-
-    do {
-        ms_a = g_millis_ticks;
-        val = SysTick->VAL;
-        ms_b = g_millis_ticks;
-    } while (ms_a != ms_b);
-
-    load = SysTick->LOAD + 1UL;
-    uint32_t elapsed = load - val;
-    uint32_t cycles_per_us = (SystemCoreClock == 0UL) ? 64UL : (SystemCoreClock / 1000000UL);
-    if (cycles_per_us == 0UL) {
-        cycles_per_us = 64UL;
-    }
-
-    return (unsigned long)(ms_a * 1000UL + (elapsed / cycles_per_us));
+    return (unsigned long)readSysTickMicroseconds64();
 #endif
 }
 
@@ -1161,7 +1178,7 @@ uint64_t nrf54lm20b_core_monotonic_time_us(void)
     }
     return nowUs - g_low_power_monotonic_origin_us;
 #else
-    return (uint64_t)micros();
+    return readSysTickMicroseconds64();
 #endif
 }
 

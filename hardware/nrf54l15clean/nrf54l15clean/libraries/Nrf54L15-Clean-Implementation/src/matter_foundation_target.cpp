@@ -26,8 +26,6 @@ constexpr MatterFoundationClusterDescriptor kRootEndpointClusters[] = {
 constexpr MatterFoundationClusterDescriptor kPrimaryEndpointClusters[] = {
     {Nrf54MatterOnOffLightFoundation::kDescriptorClusterId, "Descriptor"},
     {Nrf54MatterOnOffLightFoundation::kIdentifyClusterId, "Identify"},
-    {Nrf54MatterOnOffLightFoundation::kGroupsClusterId, "Groups"},
-    {Nrf54MatterOnOffLightFoundation::kScenesClusterId, "Scenes"},
     {Nrf54MatterOnOffLightFoundation::kOnOffClusterId, "OnOff"},
 };
 

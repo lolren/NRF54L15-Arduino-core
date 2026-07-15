@@ -16,6 +16,7 @@ enum class MatterInteractionStatus : uint8_t {
   kUnsupportedCommand = 5U,
   kInvalidCommandData = 6U,
   kStorageFailure = 7U,
+  kAccessDenied = 8U,
 };
 
 enum class MatterAttributeValueType : uint8_t {
@@ -44,15 +45,28 @@ struct MatterAttributeValue {
   uint16_t uint16Value = 0U;
 };
 
+// Authenticated identity associated with a remote interaction. All three
+// identifiers are required when this context is supplied to an endpoint.
+struct MatterAccessContext {
+  const uint8_t* subjectId = nullptr;  // 8-byte authenticated subject
+  const uint8_t* fabricId = nullptr;   // 8-byte authenticated fabric
+  const uint8_t* nodeId = nullptr;     // 8-byte authenticated peer node
+
+  bool complete() const {
+    return subjectId != nullptr && fabricId != nullptr && nodeId != nullptr;
+  }
+};
+
 struct MatterCommandRequest {
   MatterCommandPath path = {};
   bool hasUint16Value = false;
   uint16_t uint16Value = 0U;
   uint8_t level = 0U;                    // For Level Control cluster
   uint16_t transitionTimeDeciseconds = 0U;  // For Level Control cluster
-  const uint8_t* subjectId = nullptr;  // 8-byte subject (nullable for local)
-  const uint8_t* fabricId = nullptr;   // 8-byte fabric (nullable for local)
-  const uint8_t* nodeId = nullptr;     // 8-byte node (nullable for local)
+  // invokeCommand() requires all three authenticated identity fields.
+  const uint8_t* subjectId = nullptr;  // 8-byte authenticated subject
+  const uint8_t* fabricId = nullptr;   // 8-byte authenticated fabric
+  const uint8_t* nodeId = nullptr;     // 8-byte authenticated peer node
 };
 
 struct MatterCommandResult {
@@ -101,11 +115,22 @@ class Nrf54MatterOnOffLightEndpoint {
   bool attached() const;
 
   bool snapshot(MatterOnOffLightDeviceState* outState) const;
+  // Trusted local read. Remote transports must use the access-context overload.
   bool readAttribute(const MatterAttributePath& path,
                      MatterAttributeValue* outValue,
                      MatterInteractionStatus* outStatus = nullptr) const;
+  bool readAttribute(const MatterAttributePath& path,
+                     const MatterAccessContext& accessContext,
+                     MatterAttributeValue* outValue,
+                     MatterInteractionStatus* outStatus = nullptr) const;
+  // Transport-facing command path. A complete authenticated identity and an
+  // attached ACL are mandatory; missing context always fails closed.
   bool invokeCommand(const MatterCommandRequest& request,
                      MatterCommandResult* outResult = nullptr);
+  // Explicit trust boundary for commands originating in the local sketch.
+  bool invokeTrustedLocalCommand(
+      const MatterCommandRequest& request,
+      MatterCommandResult* outResult = nullptr);
 
   static const char* statusName(MatterInteractionStatus status);
   static const char* clusterName(MatterClusterId clusterId);
@@ -121,6 +146,16 @@ class Nrf54MatterOnOffLightEndpoint {
                   MatterInteractionStatus status,
                   bool accepted,
                   bool stateChanged) const;
+  bool readAttributeInternal(const MatterAttributePath& path,
+                             const MatterAccessContext* accessContext,
+                             MatterAttributeValue* outValue,
+                             MatterInteractionStatus* outStatus) const;
+  bool accessAllowed(const MatterAccessContext& accessContext,
+                     MatterClusterId clusterId,
+                     MatterEndpointId endpointId,
+                     AclPrivilege requiredPrivilege) const;
+  bool invokeCommandInternal(const MatterCommandRequest& request,
+                             MatterCommandResult* outResult);
 
   Nrf54MatterOnOffLightDevice* device_ = nullptr;
   MatterAccessControl* accessControl_ = nullptr;

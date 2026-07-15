@@ -54,7 +54,7 @@ void deriveWS(uint32_t pin,const uint8_t*s,uint32_t it,uint8_t*w0,uint8_t*w1){
   if(Secp256r1::bnIsZero(w))Secp256r1::bnSetOne(&w);
   Secp256r1::bnToBytes(w,w1);
 }
-bool spCmt(bool pr,const uint8_t*w0,uint8_t out[65]){
+bool spCmt(const uint8_t*w0,uint8_t out[65]){
   Secp256r1Scalar x;Secp256r1::generateRandomScalar(&x);
   Secp256r1::BigNum256 xb,wb,sb,n=Secp256r1::orderN();
   Secp256r1::bnFromBytes(x.bytes,&xb);Secp256r1::bnFromBytes(w0,&wb);
@@ -149,8 +149,8 @@ void onUdp(void*,const uint8_t*d,uint16_t len,const otMessageInfo&info){
   // PASE handling (small messages)
   Serial.print("pase rx t=");Serial.println(t);
   if(ROLE==DemoRole::COMMISSIONER&&t==kPbReq){if(len<33)return;memcpy(g_salt,d+1,32);deriveWS(kPin,g_salt,g_iters,g_w0,g_w1);g_sid=(uint16_t)(micros()&0xFFFF)|1U;uint8_t rs[39];rs[0]=kPbRsp;memcpy(rs+1,g_salt,32);memcpy(rs+33,&g_iters,4);memcpy(rs+37,&g_sid,2);g_thread.sendUdp(info.mPeerAddr,info.mPeerPort,rs,39);Serial.println("pase pbkdf-resp");return;}
-  if(ROLE==DemoRole::COMMISSIONEE&&t==kPbRsp){if(len<39)return;memcpy(g_salt,d+1,32);memcpy(&g_iters,d+33,4);memcpy(&g_sid,d+35,2);unsigned long ta=millis();deriveWS(kPin,g_salt,g_iters,g_w0,g_w1);Serial.print("pase ws ");Serial.print(millis()-ta);Serial.println("ms");uint8_t X[65];unsigned long tb=millis();if(spCmt(true,g_w0,X)){memcpy(g_xpt,X,65);Serial.print("pase cmt ");Serial.print(millis()-tb);Serial.println("ms");uint8_t m[68];m[0]=kSp1;memcpy(m+1,X,65);memcpy(m+66,&g_sid,2);g_thread.sendUdp(info.mPeerAddr,info.mPeerPort,m,68);Serial.println("pase sp1");}return;}
-  if(ROLE==DemoRole::COMMISSIONER&&t==kSp1){if(len<68)return;uint8_t pX[65];memcpy(pX,d+1,65);uint8_t Y[65];if(!spCmt(false,g_w0,Y))return;uint8_t cn[162];memcpy(cn,pX,65);memcpy(cn+65,Y,65);memcpy(cn+130,g_w0,32);MatterPbkdf2::sha256(cn,162,g_secret);g_paseDone=true;uint8_t m[74];m[0]=kSp2;memcpy(m+1,Y,65);uint8_t cf[32];MatterPbkdf2::hmacSha256(g_secret,32,(const uint8_t*)"confirm",7,cf);memcpy(m+66,cf,8);g_thread.sendUdp(info.mPeerAddr,info.mPeerPort,m,74);Serial.println("pase DONE");return;}
+  if(ROLE==DemoRole::COMMISSIONEE&&t==kPbRsp){if(len<39)return;memcpy(g_salt,d+1,32);memcpy(&g_iters,d+33,4);memcpy(&g_sid,d+35,2);unsigned long ta=millis();deriveWS(kPin,g_salt,g_iters,g_w0,g_w1);Serial.print("pase ws ");Serial.print(millis()-ta);Serial.println("ms");uint8_t X[65];unsigned long tb=millis();if(spCmt(g_w0,X)){memcpy(g_xpt,X,65);Serial.print("pase cmt ");Serial.print(millis()-tb);Serial.println("ms");uint8_t m[68];m[0]=kSp1;memcpy(m+1,X,65);memcpy(m+66,&g_sid,2);g_thread.sendUdp(info.mPeerAddr,info.mPeerPort,m,68);Serial.println("pase sp1");}return;}
+  if(ROLE==DemoRole::COMMISSIONER&&t==kSp1){if(len<68)return;uint8_t pX[65];memcpy(pX,d+1,65);uint8_t Y[65];if(!spCmt(g_w0,Y))return;uint8_t cn[162];memcpy(cn,pX,65);memcpy(cn+65,Y,65);memcpy(cn+130,g_w0,32);MatterPbkdf2::sha256(cn,162,g_secret);g_paseDone=true;uint8_t m[74];m[0]=kSp2;memcpy(m+1,Y,65);uint8_t cf[32];MatterPbkdf2::hmacSha256(g_secret,32,(const uint8_t*)"confirm",7,cf);memcpy(m+66,cf,8);g_thread.sendUdp(info.mPeerAddr,info.mPeerPort,m,74);Serial.println("pase DONE");return;}
   if(ROLE==DemoRole::COMMISSIONEE&&t==kSp2){if(len<74)return;uint8_t pY[65];memcpy(pY,d+1,65);uint8_t cn[162];memcpy(cn,g_xpt,65);memcpy(cn+65,pY,65);memcpy(cn+130,g_w0,32);MatterPbkdf2::sha256(cn,162,g_secret);uint8_t ec[32];MatterPbkdf2::hmacSha256(g_secret,32,(const uint8_t*)"confirm",7,ec);if(memcmp(d+66,ec,8)==0){g_paseDone=true;uint8_t m[9];m[0]=kSp3;memcpy(m+1,ec+8,8);g_thread.sendUdp(info.mPeerAddr,info.mPeerPort,m,9);Serial.println("pase VERIFIED");}return;}
 }
 

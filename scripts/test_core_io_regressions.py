@@ -1019,6 +1019,130 @@ def validate_protocol_typed_reset_contracts() -> None:
     print("PASS Matter, OpenThread, and channel-sounding typed sentinel resets")
 
 
+def validate_matter_session_security_contracts() -> None:
+    source_root = PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src"
+    case_source = (source_root / "matter_case_session.cpp").read_text(
+        encoding="utf-8"
+    )
+    pase_source = (source_root / "matter_pase_commissioning.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    set_peer = function_body(
+        case_source, "bool MatterCaseSession::setPeerCertificate("
+    )
+    assert "Secp256r1::decodeUncompressed" in set_peer
+    assert "verifyCertificate(cert, publicKey)" in set_peer
+    assert set_peer.index("verifyCertificate(cert, publicKey)") < set_peer.index(
+        "peerCert_ = cert;"
+    )
+
+    for signature in (
+        "bool MatterCaseSession::processSigma2(",
+        "bool MatterCaseSession::processSigma3(",
+    ):
+        body = function_body(case_source, signature)
+        assert "parseCertificate(" in body
+        assert "verifyCertificate(receivedCertificate" in body
+        assert "certificatesEqual(receivedCertificate, peerCert_)" in body
+        assert "certLen >=" not in body
+
+    sigma2_build = function_body(
+        case_source, "bool MatterCaseSession::buildSigma2("
+    )
+    sigma2_process = function_body(
+        case_source, "bool MatterCaseSession::processSigma2("
+    )
+    sigma3_build = function_body(
+        case_source, "bool MatterCaseSession::buildSigma3("
+    )
+    sigma3_process = function_body(
+        case_source, "bool MatterCaseSession::processSigma3("
+    )
+    assert "buildTranscriptProofHash(2U" in sigma2_build
+    assert "ecdsaSign(localPrivateKey_" in sigma2_build
+    assert "outMsg->transcriptSignature" in sigma2_build
+    assert "buildTranscriptProofHash(2U" in sigma2_process
+    assert "ecdsaVerify(peerPublicKey_" in sigma2_process
+    assert "msg.transcriptSignature" in sigma2_process
+    assert "buildTranscriptProofHash(3U" in sigma3_build
+    assert "ecdsaSign(localPrivateKey_" in sigma3_build
+    assert "outMsg->transcriptSignature" in sigma3_build
+    assert "buildTranscriptProofHash(3U" in sigma3_process
+    assert "ecdsaVerify(peerPublicKey_" in sigma3_process
+    assert "msg.transcriptSignature" in sigma3_process
+    transcript_proof = function_body(
+        case_source, "bool MatterCaseSession::buildTranscriptProofHash("
+    )
+    assert "CASE-EXPERIMENTAL-SIGMA2-PROOF" in transcript_proof
+    assert "CASE-EXPERIMENTAL-SIGMA3-PROOF" in transcript_proof
+    assert "initiatorEphemeral" in transcript_proof
+    assert "responderEphemeral" in transcript_proof
+
+    encrypt = function_body(case_source, "bool MatterCaseSession::encryptMessage(")
+    decrypt = function_body(case_source, "bool MatterCaseSession::decryptMessage(")
+    assert "static uint32_t" not in encrypt
+    assert "static uint32_t" not in decrypt
+    assert "aad, aadLen" in encrypt
+    assert "aad, aadLen" in decrypt
+    assert decrypt.index("if (!aeadDecrypt(") < decrypt.index(
+        "*counter = nextCounter;"
+    )
+
+    pase_dispatch = function_body(
+        pase_source, "void MatterPaseCommissioning::handleMessage("
+    )
+    assert "messageExpected(header, source, sourcePort)" in pase_dispatch
+    assert "messagePayloadValid(header, appPayload, appLength)" in pase_dispatch
+    assert "peerMessageCounter_.accept(header.messageId)" in pase_dispatch
+    assert pase_dispatch.index(
+        "messagePayloadValid(header, appPayload, appLength)"
+    ) < pase_dispatch.index("peerMessageCounter_.accept(header.messageId)")
+    assert pase_dispatch.index(
+        "peerMessageCounter_.accept(header.messageId)"
+    ) < pase_dispatch.index("bindPeer(source, sourcePort, header.exchangeId)")
+    spake_z = function_body(
+        pase_source, "bool MatterPaseCommissioning::computeSpake2pZ("
+    )
+    assert "responderVerifier ? session_.X : session_.Y" in spake_z
+    assert "scalarMultiply(ephemeral, verifierPoint, &Vpoint)" in spake_z
+    assert "scalarMultiply(w1Scalar, peerMinusW0, &Vpoint)" in spake_z
+    confirm_a = function_body(
+        pase_source, "bool MatterPaseCommissioning::generateConfirmationA("
+    )
+    confirm_b = function_body(
+        pase_source, "bool MatterPaseCommissioning::generateConfirmationB("
+    )
+    assert "session_.kcA" in confirm_a
+    assert "session_.kcB" in confirm_b
+    assert "PASE-EXPERIMENTAL-CONFIRM-A" in pase_source
+    assert "PASE-EXPERIMENTAL-CONFIRM-B" in pase_source
+    assert "PASE-EXPERIMENTAL-KCA" in pase_source
+    assert "PASE-EXPERIMENTAL-KCB" in pase_source
+    verify_a = function_body(
+        pase_source, "bool MatterPaseCommissioning::verifyConfirmationA("
+    )
+    verify_b = function_body(
+        pase_source, "bool MatterPaseCommissioning::verifyConfirmationB("
+    )
+    assert "constantTimeEqual" in verify_a
+    assert "constantTimeEqual" in verify_b
+    assert "MatterMessageExchangeFlags::kReliable" not in pase_source
+    pase_complete = function_body(
+        pase_source, "void MatterPaseCommissioning::handleSpake2p2("
+    )
+    assert "if (!sendMessage(" in pase_complete
+    assert pase_complete.index("if (!sendMessage(") < pase_complete.index(
+        "advanceState(MatterCommissioningState::kPaseComplete);"
+    )
+    header_builder = function_body(
+        pase_source, "bool MatterPaseCommissioning::buildMessageHeader("
+    )
+    assert "requiredCapacity" in header_builder
+    assert "? 22U" in header_builder
+    print("PASS Matter CASE/PASE identity, ordering, replay, and send-state contracts")
+
+
 def validate_channel_sounding_public_examples_contracts() -> None:
     examples = (
         PLATFORM
@@ -1190,6 +1314,32 @@ def validate_system_off_wake_contracts() -> None:
     hal_arm_body = function_body(hal_source, "void armSystemOffWakeCompare(")
     assert "GRTC_CC_CCEN_ACTIVE_Enable" in hal_arm_body
     print("PASS HAL timed SYSTEMOFF compare explicit enable contract")
+
+
+def validate_systick_monotonic_contracts() -> None:
+    helper = (
+        PLATFORM / "cores/nrf54common/nrf54_systick_timebase.h"
+    ).read_text(encoding="utf-8")
+    assert "epoch->wrapCount[next & 1U] = wraps;" in helper
+    assert helper.index("epoch->wrapCount[next & 1U] = wraps;") < helper.index(
+        "epoch->generation = next;"
+    )
+    assert "generationBefore != generationAfter" in helper
+
+    for chip in CHIPS:
+        source = (PLATFORM / "cores" / chip / "wiring_time.c").read_text(
+            encoding="utf-8"
+        )
+        sample = function_body(
+            source, "static uint64_t readSysTickMicroseconds64(void)"
+        )
+        assert "nrf54_systick_publish_tick(&g_systick_epoch);" in source
+        assert "SysTick_CTRL_COUNTFLAG_Msk" in sample
+        assert "kScbIcsrPendstset_Msk" in sample
+        assert "nrf54_systick_sample_is_stable(" in sample
+        assert "nrf54_systick_compose_time_us(" in sample
+        assert "return (unsigned long)readSysTickMicroseconds64();" in source
+    print("PASS coherent COUNTFLAG/PENDSTSET-aware SysTick monotonic contracts")
 
 
 def validate_two_board_gate_parser_contracts() -> None:
@@ -2031,6 +2181,17 @@ def compile_and_run_host_tests(temp: Path) -> None:
     run([str(math_test)], env=sanitizer_env)
     print("PASS map extreme-range UBSan")
 
+    systick_test = temp / "systick_monotonic_test"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{PLATFORM / 'cores/nrf54common'}",
+        str(TESTS / "systick_monotonic_test.cpp"),
+        "-o", str(systick_test),
+    ])
+    run([str(systick_test)], env=sanitizer_env)
+    print("PASS SysTick pending-reload and torn-epoch ASan+UBSan")
+
     ancs_test = temp / "ble_ancs_response_parser_test"
     run(common + [
         "-fsanitize=address,undefined",
@@ -2041,6 +2202,103 @@ def compile_and_run_host_tests(temp: Path) -> None:
     ])
     run([str(ancs_test)], env=sanitizer_env)
     print("PASS ANCS fragmented Data Source parser ASan+UBSan")
+
+    matter_crypto = temp / "matter_pbkdf2_test"
+    matter_src = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src"
+    )
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1",
+        f"-I{matter_src}",
+        str(matter_src / "matter_pbkdf2.cpp"),
+        str(TESTS / "matter_pbkdf2_test.cpp"),
+        "-o", str(matter_crypto),
+    ])
+    run([str(matter_crypto)], env=sanitizer_env)
+    print("PASS Matter SHA-256/HMAC/PBKDF2 vectors ASan+UBSan")
+
+    matter_security = temp / "matter_session_security_test"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-no-pie",
+        "-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1",
+        f"-I{TESTS / 'matter_security_stubs'}",
+        f"-I{TESTS / 'matter_endpoint_stubs'}",
+        f"-I{matter_src}",
+        str(matter_src / "matter_pbkdf2.cpp"),
+        str(matter_src / "matter_secp256r1.cpp"),
+        str(matter_src / "matter_rng.cpp"),
+        str(matter_src / "matter_manual_pairing.cpp"),
+        str(matter_src / "matter_pase_commissioning.cpp"),
+        str(matter_src / "matter_case_session.cpp"),
+        str(TESTS / "matter_session_security_test.cpp"),
+        "-o", str(matter_security),
+    ])
+    run([str(matter_security)], env=sanitizer_env)
+    print(
+        "PASS Matter PASE/CASE roundtrip, tamper, reflection, and capacity "
+        "ASan+UBSan"
+    )
+
+    matter_ip = temp / "matter_ip_address_test"
+    matter_impl = PLATFORM / "libraries/Nrf54L15-Clean-Implementation"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{matter_impl / 'src/matter_core_stage'}",
+        f"-I{matter_impl / 'third_party/connectedhomeip/config/arduino'}",
+        f"-I{matter_impl / 'third_party/connectedhomeip/src'}",
+        str(TESTS / "matter_ip_address_test.cpp"),
+        "-o", str(matter_ip),
+    ])
+    run([str(matter_ip)], env=sanitizer_env)
+    print("PASS Matter IPv6 parsing and fabric multicast ASan+UBSan")
+
+    matter_acl = temp / "matter_access_control_test"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1",
+        f"-I{matter_src}",
+        str(matter_src / "matter_access_control.cpp"),
+        str(TESTS / "matter_access_control_test.cpp"),
+        "-o", str(matter_acl),
+    ])
+    run([str(matter_acl)], env=sanitizer_env)
+    print("PASS Matter ACL matching and null identity handling ASan+UBSan")
+
+    matter_endpoint = temp / "matter_endpoint_access_test"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-DNRF54L15_CLEAN_MATTER_CORE_ENABLE=1",
+        f"-I{TESTS / 'matter_endpoint_stubs'}",
+        f"-I{matter_src}",
+        f"-I{matter_src / 'matter_core_stage'}",
+        f"-I{matter_impl / 'third_party/connectedhomeip/config/arduino'}",
+        f"-I{matter_impl / 'third_party/connectedhomeip/src'}",
+        str(matter_src / "matter_access_control.cpp"),
+        str(matter_src / "matter_onoff_light_endpoint.cpp"),
+        str(TESTS / "matter_endpoint_access_test.cpp"),
+        "-o", str(matter_endpoint),
+    ])
+    run([str(matter_endpoint)], env=sanitizer_env)
+    print("PASS Matter endpoint read/command ACL enforcement ASan+UBSan")
+
+    matter_counter = temp / "matter_message_counter_test"
+    run(common + [
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{matter_src}",
+        str(TESTS / "matter_message_counter_test.cpp"),
+        "-o", str(matter_counter),
+    ])
+    run([str(matter_counter)], env=sanitizer_env)
+    print("PASS Matter message replay counter wrap/order ASan+UBSan")
 
     for chip, contract in CHIPS.items():
         nvic_test = temp / f"nvic_layout_{chip}"
@@ -2069,9 +2327,11 @@ def main() -> int:
     validate_parser_output_validity_contracts()
     validate_zigbee_persistence_reset_contracts()
     validate_protocol_typed_reset_contracts()
+    validate_matter_session_security_contracts()
     validate_channel_sounding_public_examples_contracts()
     validate_spi_contracts()
     validate_system_off_wake_contracts()
+    validate_systick_monotonic_contracts()
     validate_two_board_gate_parser_contracts()
     validate_xiao_low_power_board_contracts()
     validate_xiao_retention_probe_contracts()

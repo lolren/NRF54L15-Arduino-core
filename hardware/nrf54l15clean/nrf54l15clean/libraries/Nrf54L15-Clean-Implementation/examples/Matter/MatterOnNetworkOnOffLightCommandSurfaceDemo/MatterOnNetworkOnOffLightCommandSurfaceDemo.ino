@@ -603,7 +603,8 @@ void runCommand(uint32_t clusterId, uint32_t commandId,
   request.uint16Value = uint16Value;
 
   xiao_nrf54l15::MatterCommandResult result;
-  const bool ok = g_node.endpoint().invokeCommand(request, &result);
+  const bool ok =
+      g_node.endpoint().invokeTrustedLocalCommand(request, &result);
   Serial.print("matter_cmd_demo command=");
   Serial.println(xiao_nrf54l15::Nrf54MatterOnOffLightEndpoint::commandName(
       clusterId, commandId));
@@ -838,8 +839,6 @@ void pollSerial() {
 void setup() {
   Serial.begin(115200);
   Serial1.begin(115200);
-  const uint32_t waitStart = millis();
-  // Serial may not connect on nRF54L15
 
 #if defined(LED_BUILTIN)
   pinMode(LED_BUILTIN, OUTPUT);

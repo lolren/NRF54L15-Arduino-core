@@ -189,6 +189,12 @@ jobs:
             options: clean_thread=stage,clean_matter=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCryptoTest
             options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Chip/ChipPhase1SystemLayerTest
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Chip/ChipPhase3CryptoTest
+            options: clean_thread=stage,clean_matter=stage
+          - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Chip/ChipPhase5TransportTest
+            options: clean_thread=stage,clean_matter=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Peripherals/SaadcDifferentialProbe
             options: clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/VBAT/VbatReadViaAnalogRead
@@ -220,6 +226,24 @@ jobs:
           arduino-cli compile \
             --fqbn "localnrf54:nrf54l15clean:xiao_nrf54l15:${{ matrix.options }}" \
             "${GITHUB_WORKSPACE}/${{ matrix.sketch }}"
+
+  thread-matter-cross-board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
+
+      - name: Install toolchain dependency
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_nano
+
+      - name: Compile checkout-pinned Thread and Matter board matrix
+        run: python3 ./scripts/test_thread_matter_compile_matrix.py
 
   host-regressions:
     runs-on: ubuntu-latest
@@ -277,6 +301,21 @@ jobs:
 
       - name: nRF54LM20A CRACEN RNG register contracts
         run: python3 ./scripts/test_lm20a_cracen_rng_header.py
+
+      - name: Thread platform source and native contracts
+        run: python3 ./scripts/test_thread_platform_contracts.py
+
+      - name: Matter test-attestation contracts
+        run: python3 ./scripts/test_matter_attestation.py
+
+      - name: Matter System Layer contracts
+        run: python3 ./scripts/test_matter_system_layer.py
+
+      - name: Thread and Matter two-board runner parser contracts
+        run: |
+          python3 ./tests/thread_udp_soak_runner_test.py
+          python3 ./tests/thread_meshcop_runner_test.py
+          python3 ./tests/matter_inet_transport_runner_test.py
 
   audit-contract-compiles:
     runs-on: ubuntu-latest

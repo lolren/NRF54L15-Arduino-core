@@ -19,7 +19,7 @@ and direct access to the VPR RISC-V coprocessor.*
 
 ## Project Scope
 
-The `1.0.0` line focuses on a dependable Arduino, peripheral, power-management,
+The `1.0.x` line focuses on a dependable Arduino, peripheral, power-management,
 and Bluetooth LE experience on supported nRF54L boards. The core is suitable
 for real BLE prototyping and embedded applications within the documented
 single-link security/privacy scope. Release-critical feature probes are compiled
@@ -33,9 +33,13 @@ or production-ready**:
 | Area | Current boundary |
 |---|---|
 | **Zigbee** | Experimental partial stack and device demonstrations; incomplete Zigbee PRO coverage, routing, clusters, OTA, and ecosystem interoperability |
-| **Thread** | Experimental staged OpenThread FTD/MeshCoP/SRP/UDP paths; production commissioning, sleepy-device coverage, interoperability, and soak testing remain |
-| **Matter** | Experimental on-network examples and protocol/crypto bring-up; not a complete certifiable Matter device implementation |
+| **Thread** | Staged OpenThread FTD/MeshCoP/SRP/UDP with settings recovery, commissioner/joiner, sleepy-child, and mixed-board test paths; certification and broader interoperability remain |
+| **Matter** | Staged system, crypto, packet-buffer, IPv6/UDP, ACL, onboarding, and custom PASE/CASE demo work; not an upstream wire-compatible or certifiable Matter device stack |
 | **Channel Sounding** | Experimental two-board controller-backed LE CS Test; not connected-ACL Channel Sounding, calibrated ranging, cross-vendor interoperability, or a qualification claim |
+
+The Thread and Matter entries describe the current `main` branch after the
+1.0.1 release. The Boards Manager 1.0.1 archive does not contain that ongoing
+platform work.
 
 These boundaries keep the stable claims precise: unfinished protocol examples
 are useful engineering work, but they are not presented as complete standards
@@ -359,12 +363,16 @@ protocol boundary, measurements, and validation evidence.
 | **MAC / NWK / APS** | — | ✅ | ⚠️ | ⚠️ | — | — |
 | **Coordinator / Router** | — | — | ⚠️ | ⚠️ | — | — |
 | **End Device** | — | — | ⚠️ | ⚠️ | — | — |
-| **UDP Transport** | — | — | ✅ | — | ⚠️ | — |
+| **UDP Transport** | — | — | ⚠️ | — | ⚠️ | — |
 | **ZCL (OnOff / Level / Temp)** | — | — | — | ⚠️ | — | — |
-| **On/Off Light + commissioning** | — | — | — | — | ⚠️ | — |
+| **Custom On/Off + onboarding demos** | — | — | — | — | ⚠️ | — |
 
 `CS` is limited to the controller-backed, single-antenna two-board test path
 described below. It is not a general connected BLE Channel Sounding API.
+
+The Matter demo cell describes project-specific onboarding and command
+messages. It does not indicate standard Matter commissioning, Secure Channel,
+or Interaction Model interoperability.
 
 The BLE security and privacy check marks describe the implemented clean-core
 scope: single-link LE Secure Connections, Numeric Comparison user consent,
@@ -378,15 +386,15 @@ interoperability, and PTS/BQB qualification remain outside this claim.
 
 ### Crypto
 
-| | Hardware | Status |
+| | Implementation path | Status |
 |---|---|---|
-| **CRACEN RNG** | ✅ | Production |
-| **CRACEN IKG** | ⚠️ | Key derivation requires a trusted pre-provisioned KMU seed; direct seed validation and unfinished high-level PKE wrappers fail closed |
-| **AES‑CCM / AES‑ECB** | ✅ | Hardware‑accelerated |
-| **PBKDF2‑HMAC‑SHA256** | ✅ | Hardware‑accelerated |
-| **ECDSA sign** | ✅ | ~0.84 s |
-| **ECDSA verify** | ✅ | ~1.76 s |
-| **secp256r1 ECC** | ⚠️ | Software‑only (CRACEN PK engine needs Nordic microcode) |
+| **CRACEN RNG** | Hardware | Production entropy source; fails closed |
+| **CRACEN IKG** | Hardware, constrained | Key derivation requires a trusted pre-provisioned KMU seed; direct seed validation and unfinished high-level PKE wrappers fail closed |
+| **AES‑CCM / AES‑ECB** | Mixed | The BLE path uses silicon ECB/CCM; staged OpenThread/CHIP crypto uses software mbedTLS unless explicitly routed to a hardware primitive |
+| **PBKDF2‑HMAC‑SHA256** | Software | Streaming implementation with host-side boundary and vector tests |
+| **ECDSA sign** | Software P-256 | ~0.84 s |
+| **ECDSA verify** | Software P-256 | ~1.76 s |
+| **secp256r1 ECC** | Software | Nordic publishes the CRACEN PKE microcode under its five-clause license and the accompanying driver in NCS, but this core does not integrate or ship that path yet |
 
 ### Peripherals
 
@@ -645,8 +653,8 @@ Examples:
 | **Arduino Core** | ~150K | ✅ Mature | Yes — GPIO, PWM, ADC, I2C, SPI, UART, I2S, PDM, NFC |
 | **BLE** | ~80K | ✅ Validated scope | Yes within the documented single-link scope: advertising, scanning, connections, GATT, Bluefruit, LE SC security, and privacy/RPA |
 | **Zigbee** | ~40K | ⚠️ Experimental / unfinished | No — HA/Zigbee2MQTT device demos and selected ZDO/ZCL paths work, but the implementation is incomplete and has no OTA |
-| **Thread** | ~30K | ⚠️ Experimental / unfinished | No — staged OpenThread FTD/MeshCoP/SRP/UDP examples compile and have selected two-board validation paths |
-| **Matter** | ~25K | ⚠️ Experimental / unfinished | No — custom on-network On/Off/PASE/CASE demos compile, but HA/OTBR commissioning and complete Matter behavior are not validated |
+| **Thread** | ~30K | ⚠️ Experimental / unfinished | No — staged OpenThread FTD/MeshCoP/SRP/UDP, recoverable settings metadata, and mixed XIAO test paths are present, but certification and broad interoperability are not complete |
+| **Matter** | ~25K | ⚠️ Experimental / unfinished | No — platform clocks, crypto, packet buffers, IPv6/UDP, and endpoint ACLs have focused regressions, and mixed-board Inet transport is validated; the private demos are not an upstream Matter Interaction Model/Secure Channel implementation |
 | **Channel Sounding** | Nordic controller + Arduino glue | ⚠️ Experimental / unfinished | No — hardware-validated two-board LE CS Test only; no connected-ACL, cross-vendor, calibrated-ranging, or qualification claim |
 | **PMIC Driver** | ~3K | ✅ Mature | Yes for the documented nPM1300 charger, rail, telemetry, low-power, and hibernate APIs |
 
@@ -654,8 +662,8 @@ Examples:
 
 ## Known Limitations
 
-- **ECC secp256r1 is software‑only.** The CRACEN PK engine needs proprietary Nordic microcode. Thread/Matter pairing takes 2‑5 seconds of CPU‑bound crypto.
-- **Thread and Matter are staged protocol stacks.** OpenThread FTD/MeshCoP/SRP/UDP and custom Matter command-surface demos compile on all staged boards; local two-board SRP readiness is working, but production-grade HA/OTBR commissioning and long soak validation are still pending.
+- **P-256 arithmetic in the custom protocol path is software-only.** CRACEN supplies fail-closed entropy. Nordic now publishes the PKE microcode under its [five-clause license](https://github.com/nrfconnect/sdk-nrf/blob/v3.3.0/LICENSE) and the accompanying driver in NCS, but they are not integrated or shipped by this core. Pairing operations can therefore take seconds of CPU time.
+- **Thread and Matter remain staged.** Thread uses the imported OpenThread core with platform persistence/radio integration. Reported settings API failures retain the prior mapping, but the shared Preferences RRAM blob is not an atomic brownout transaction. Matter currently combines selected upstream CHIP platform units with project-specific onboarding, PASE/CASE, and command-surface code; those custom messages are not a substitute for the standard Matter Secure Channel and Interaction Model. Home Assistant/OTBR commissioning must not be claimed until it passes against an external border router and Matter controller.
 - **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).

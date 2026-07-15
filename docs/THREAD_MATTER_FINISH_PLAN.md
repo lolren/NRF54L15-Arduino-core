@@ -1,229 +1,228 @@
 # Thread and Matter Hardening Status
 
-Date: 2026-06-20
+Date: 2026-07-15
 
-This document tracks the staged Thread and Matter implementation. It replaces
-older optimistic notes that called the stack "complete". The current goal is
-production-grade support, but the honest state is staged and actively being
-hardened.
+This page records what the staged Thread and Matter options actually provide.
+It intentionally separates working platform components from standards and
+interoperability claims.
 
-## Current Status
+## Support Boundary
 
 ### Thread
 
-- OpenThread core is integrated as a staged build option.
-- FTD mode is enabled for staged Thread builds.
-- MeshCoP is enabled for staged Thread builds.
-- SRP Client is enabled for all staged Thread board profiles.
-- OpenThread UDP examples compile and include payload/reconnect/soak probes.
-- The staged board menu flags are now consistent across:
-  - `xiao_nrf54l15`
-  - `xiao_nrf54lm20b`
-  - `holyiot_25007_nrf54l15`
-  - `holyiot_25008_nrf54l15`
-  - `generic_nrf54l15_module_36pin`
-  - `nrf54l15dk_pca10156`
+The staged Thread option builds the imported OpenThread FTD core and supplies
+the nRF54 radio, alarm, entropy, settings, reset, commissioner/joiner, SRP, and
+UDP platform integration. It is suitable for development and two-board testing.
+It has not passed a Thread certification suite or broad border-router and
+sleepy-device interoperability testing.
 
 ### Matter
 
-- The custom Matter foundation is integrated as a staged build option.
-- PASE/CASE demo code compiles.
-- On-network On/Off Light command-surface demos compile.
-- Matter Thread dataset and data-model seed headers are enabled for staged
-  Matter builds.
-- The staged Matter include surface is now consistent across all supported
-  staged board profiles.
-- The on-network On/Off Light node derives the default discriminator from the
-  hardware FICR device ID, avoiding identical default `_matterc._udp`
-  identities when two boards use the stock demo settings.
-- Local two-board XIAO nRF54L15 + XIAO nRF54LM20A validation reaches
-  `discovery_ready=1`, `discovery_srp_client=1`, and
-  `discovery_register_capable=1` with the commissioning window open.
+The staged Matter option now has useful platform foundations: a monotonic
+system clock and timer layer, hardware-entropy-backed cryptography, CHIP packet
+buffers, IPv6 address handling, an OpenThread UDP adapter, ACL-aware endpoint
+operations, onboarding payloads, and project-specific PASE/CASE experiments.
 
-### Not Yet Production Complete
+It is **not a complete standard Matter stack**. The project-specific PASE,
+CASE, certificate, and command messages are not wire-compatible replacements
+for the upstream Matter Secure Channel, Interaction Model, data model, or
+Device Attestation flows. Home Assistant, Google Home, Apple Home, or Matter
+certification support must not be claimed from the local demos.
 
-- Home Assistant commissioning through a real OTBR still needs repeated
-  hardware validation.
-- SRP/DNS-SD behavior must still be verified against an external Thread Border
-  Router and Home Assistant Matter Server, not only local two-board SRP client
-  readiness.
-- Long-duration attach/reconnect/payload soak tests need pass/fail logs from
-  two real boards.
-- Matter operational certificate/fabric behavior needs validation beyond local
-  demos.
-- BLE commissioning for Matter is not complete.
-- Thread sleepy-end-device power behavior needs a dedicated current pass after
-  protocol correctness is stable.
+## Implemented Hardening
 
-## Build Verification
+### OpenThread Platform
 
-Use the local compile matrix before and after every Thread/Matter change:
+- Radio capabilities only advertise features actually provided by the driver;
+  CSMA and receive timing remain in the OpenThread software path.
+- Entropy uses CRACEN RNG and fails closed. There is no deterministic fallback.
+- Dataset updater, parent search, and child supervision are enabled in the
+  staged configuration.
+- `begin()` and `restart()` preserve settings unless an explicit wipe is
+  requested.
+- Settings operations check namespace open, index/count bounds, stored value
+  type and length, capacity, write completion, wipe completion, and reset
+  lifecycle.
+- UDP sockets support explicit idempotent close and four independently bound
+  local ports.
+- The two-board runner binds logical roles to CMSIS-DAP UIDs, supports mixed
+  FQBNs, validates both traffic directions separately, and compiles the
+  checkout under a `localnrf54` namespace so an installed package cannot
+  shadow it.
 
-```bash
-scripts/test_thread_matter_compile_matrix.py
-```
+### Matter Platform
 
-For a deeper pass:
+- System timers dispatch safely when callbacks mutate timer/work queues.
+- The staged clock uses the core's canonical 64-bit monotonic microsecond
+  source. Normal-power builds count SysTick wraps in the interrupt; low-power
+  builds read the 64-bit GRTC counter.
+- SHA-256, HKDF-SHA256, AES-CCM, P-256 ECDH/ECDSA, and DRBG entry points are
+  implemented with mbedTLS and fail-closed CRACEN entropy.
+- PBKDF2 accepts the documented 128-byte password and salt bounds, while the
+  streaming SHA/HMAC path removes the former fixed-message buffer limit;
+  boundary vectors cover both.
+- IPv6 parsing validates compression and numeric zone identifiers; fabric
+  multicast construction is available.
+- The CHIP packet-buffer pool accepts a 1280-byte IPv6 datagram plus header
+  reserve. Sixteen 1344-byte entries use less static RAM than the former 32 by
+  1024-byte pool.
+- The OpenThread UDP adapter supports queued bind, listen, receive, send,
+  endpoint close, and a bounded four-endpoint pool.
+- Remote reads and commands can carry a complete authenticated subject/fabric/
+  node context and enforce View or Operate ACL privilege. Incomplete remote
+  identity fails closed.
+- Private PASE/CASE demos have fail-closed parsing and state checks, but they
+  are not the upstream Matter Secure Channel and are not an interoperability
+  or production-security claim.
+- Development attestation metadata uses process-local test keys that are
+  regenerated at boot and whenever runtime vendor/product identity changes.
+  This is a private test format, not a standard Matter DAC chain.
 
-```bash
-scripts/test_thread_matter_compile_matrix.py --full
-```
+## Build and Host Verification
 
-The script intentionally copies the local platform under a temporary
-`localnrf54` vendor namespace. This prevents Arduino CLI from silently using an
-installed Board Manager package instead of this checkout.
-
-Default matrix currently compiles:
-
-- `xiao_nrf54l15` + `ThreadExperimentalUdpSoak`
-- `xiao_nrf54l15` + `MatterOnNetworkOnOffLightCommandSurfaceDemo`
-- `xiao_nrf54lm20b` + `ThreadExperimentalPskcUdpHello`
-- `xiao_nrf54lm20b` + `MatterOnNetworkOnOffLightNodeDemo`
-- `holyiot_25008_nrf54l15` + `ThreadExperimentalPskcUdpHello`
-- `generic_nrf54l15_module_36pin` + `MatterOnNetworkOnOffLightNodeDemo`
-- `nrf54l15dk_pca10156` + `ThreadExperimentalUdpSoak`
-
-Last local default result:
-
-```text
-PASS: compiled 7 Thread/Matter cases
-```
-
-Last local full result:
-
-```text
-PASS: compiled 12 Thread/Matter cases
-```
-
-## Runtime Test Plan
-
-### Two-Board Thread UDP Soak
-
-Use two XIAO nRF54L15-class boards with Thread staged mode enabled.
+Run the default cross-board matrix:
 
 ```bash
-python3 scripts/test_thread_udp_soak.py --help
+python3 scripts/test_thread_matter_compile_matrix.py
 ```
 
-Expected coverage:
-
-- Thread bring-up and role assignment.
-- Dataset export/import.
-- Unicast UDP payloads.
-- Downlink UDP payloads.
-- Multicast UDP payloads.
-- Fragment-sized payload attempts up to the example matrix limit.
-- Final `soak_done` and per-length result lines on serial.
-
-### Reconnect Stress
-
-Compile and run:
-
-- `File > Examples > Thread > ThreadExperimentalReconnectStress`
-
-Expected coverage:
-
-- Attach after peer loss.
-- Reattach after peer return.
-- No high-current or busy-loop plateau after link loss.
-- Stable role reporting after repeated cycles.
-
-### Reference Dataset Attach
-
-Compile and run:
-
-- `File > Examples > Thread > ThreadExperimentalReferenceDatasetAttach`
-
-Expected coverage:
-
-- Known dataset import.
-- Attach to a reference dataset.
-- Stable role and RLOC reporting.
-
-### Matter Command Surface
-
-Compile and run:
-
-- `File > Examples > Matter > MatterOnNetworkOnOffLightNodeDemo`
-- `File > Examples > Matter > MatterOnNetworkOnOffLightCommandSurfaceDemo`
-
-Expected coverage:
-
-- Thread attach before Matter command exchange.
-- On/Off/Toggle/Identify request encoding.
-- Command response parsing.
-- Serial output showing command result and endpoint state.
-- Node demo serial output showing `identity_discriminator`,
-  `commissioning_window`, `discovery_ready`, `discovery_srp_client`, and
-  `discovery_register_capable`.
-
-### Two-Board Matter SRP Probe
-
-Use one XIAO nRF54L15 and one XIAO nRF54LM20A when available:
+Compile all 17 selected recovery, system, crypto, transport, and commissioning
+matrix cases:
 
 ```bash
-scripts/test_matter_between_boards.py \
-  --ports /dev/ttyACM0 /dev/ttyACM1 \
-  --boards xiao_nrf54l15 xiao_nrf54lm20b \
-  --duration-sec 120 \
-  --settle-sec 2 \
-  --keep
+python3 scripts/test_thread_matter_compile_matrix.py --full
 ```
 
-Expected current local pass condition:
+Run a single focused case while iterating:
 
-```text
-role=child/leader
-attached=1
-ready=1
-srp=1
-matter_lines=1
-blocker=none
+```bash
+python3 scripts/test_thread_matter_compile_matrix.py \
+  --case xiao_l15_chip_inet_transport
 ```
 
-This proves local attach, commissioning-window readiness, hardware-derived
-identity separation, and SRP client queueing. It does not prove external
-Border Router DNS-SD visibility or Home Assistant commissioning.
+Host regressions:
 
-### Home Assistant / OTBR
+```bash
+python3 scripts/test_core_io_regressions.py
+python3 scripts/test_thread_platform_contracts.py
+python3 scripts/test_matter_attestation.py
+python3 scripts/test_matter_system_layer.py
+python3 tests/thread_udp_soak_runner_test.py
+python3 tests/thread_meshcop_runner_test.py
+python3 tests/matter_inet_transport_runner_test.py
+```
 
-Required external setup:
+The full matrix currently contains 17 selected cases. It covers both XIAO
+silicon targets, HOLYIOT-25007 and HOLYIOT-25008, the generic module, and the
+nRF54L15 DK staged profiles.
 
-- A working Thread Border Router.
-- Home Assistant Matter Server.
-- Dataset matching between board and OTBR.
+Compile the MeshCoP commissioner, joiner, restore, and wrong-PSKd probes for a
+mixed XIAO pair:
 
-Expected validation:
+```bash
+python3 scripts/thread_meshcop_validation.py compile \
+  --commissioner-fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15:clean_thread=stage \
+  --joiner-fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54lm20b:clean_thread=stage
+```
 
-- SRP service registration visible on the Thread network.
-- Device can be discovered by the Matter server.
-- Device can be commissioned or failure reason is captured at the PASE/CASE
-  step.
-- On/Off cluster commands from Home Assistant reach the board.
+## Two-Board Gates
 
-## Remaining Implementation Slices
+Use stable probe UIDs when `/dev/ttyACM*` ordering can change.
 
-1. Add a host-side SRP/DNS-SD validation helper that can observe expected
-   service records from OTBR tooling.
-2. Extend `test_matter_between_boards.py` to auto-detect safe dynamic ports and
-   make the two-board SRP pass condition part of the default regression suite.
-3. Add an OTBR/Home Assistant commissioning transcript parser for failed PASE,
-   CASE, fabric, or DNS-SD stages.
-4. Verify and document Thread channel/panid/dataset migration behavior.
-5. Harden reboot recovery for Matter node state, including persisted fabric
-   placeholders and dataset restore.
-6. Add a Thread sleepy-device current profile after correctness is stable.
-7. Add negative tests for wrong PSKd, stale dataset, wrong channel, and missing
-   peer.
-8. Decide whether BLE commissioning is in-scope for this bare-metal Matter
-   path or documented as unsupported until the BLE/Matter bridge is complete.
+MeshCoP fresh join, persisted-dataset restore, and wrong-PSKd rejection:
 
-## Rules For Future Changes
+```bash
+python3 scripts/thread_meshcop_validation.py all \
+  --commissioner-uid <l15-probe-uid> \
+  --joiner-uid <lm20a-probe-uid> \
+  --commissioner-fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54l15:clean_thread=stage \
+  --joiner-fqbn nrf54l15clean:nrf54l15clean:xiao_nrf54lm20b:clean_thread=stage \
+  --timeout 180 --dump-lines
+```
 
-- Do not rely on installed Board Manager packages for validation.
-- Run `scripts/test_thread_matter_compile_matrix.py` for compile safety.
-- Run two-board serial tests for runtime changes.
-- Do not claim Home Assistant support complete until an actual HA + OTBR
-  commissioning log passes.
-- Keep Thread/Matter board menu flags consistent unless a board has a documented
-  silicon or pinout limitation.
+The MeshCoP `all` gate is destructive. Before fresh commissioning it performs
+a UID-bound chip erase of the Joiner, then reflashes both boards. The
+wrong-PSKd sketch also explicitly wipes its Thread settings. The restore phase
+between them resets the already-commissioned Joiner without reflashing it, then
+verifies that the saved dataset is restored and MeshCoP is not started again.
+It validates the local OpenThread MeshCoP callbacks and persistence
+path, not Thread certification or an external commissioner's interoperability.
+
+Thread UDP, both unicast directions and multicast:
+
+```bash
+python3 scripts/test_thread_udp_soak.py \
+  --uid1 <l15-probe-uid> \
+  --fqbn1 nrf54l15clean:nrf54l15clean:xiao_nrf54l15:clean_thread=stage \
+  --uid2 <lm20a-probe-uid> \
+  --fqbn2 nrf54l15clean:nrf54l15clean:xiao_nrf54lm20b:clean_thread=stage \
+  --require-fragmentation --timeout 240
+```
+
+CHIP packet-buffer and Inet adapter over the same mixed-board Thread network:
+
+```bash
+python3 scripts/test_matter_inet_transport.py \
+  --uid1 <l15-probe-uid> --uid2 <lm20a-probe-uid> --timeout 240
+```
+
+The Inet gate is destructive: its sketch wipes Thread settings on both boards.
+It also assigns fixed roles, with XIAO nRF54L15 as leader and XIAO nRF54LM20A
+as child. It requires a common partition and distinct RLOC16 values, performs a
+small multicast discovery probe, then echoes unicast payloads of 8, 64, 512,
+960, and 1200 bytes in both directions through the CHIP endpoint callback.
+
+The Thread soak owns and checks each unicast direction plus multicast
+separately. The UDP and Inet gates validate local Thread and UDP/Inet transport;
+they do not validate PASE, CASE, ACL, SRP/DNS-SD, fabric persistence, or
+controller interoperability.
+
+### 2026-07-15 Hardware Snapshot
+
+- Mixed XIAO Thread soak: L15 leader `0x9C00`, LM20A child `0x9C01`, partition
+  `0x3B19B1F4`; 8, 16, 31, 63, 95, 127, 191, 255, and 512-byte payloads passed
+  uplink, downlink, and multicast. Logs:
+  `build/thread-udp-soak-validation/20260715-140259`.
+- CHIP Inet gate: L15 leader `0x1C00`, LM20A child `0x1C01`, partition
+  `0x546CD185`; multicast discovery and 8, 64, 512, 960, and 1200-byte
+  bidirectional unicast payloads completed with `pass=5 fail=0`. Logs:
+  `build/matter-inet-transport-validation/20260715-140506`.
+- MeshCoP gate: fresh commissioning completed with Joiner callback
+  `OT_ERROR_NONE`; a settings-preserving reset restored the dataset and the
+  LM20A reattached as child `0x5001`; a clean wrong-PSKd attempt returned
+  `OT_ERROR_SECURITY` without finalize, acceptance, or dataset persistence.
+  Logs: `build/thread-meshcop-validation/20260715-144929`.
+- Sleepy-child current, multi-hop, external border-router, standards-compliant
+  Matter controllers, and formal conformance remain in the work list below.
+
+## Remaining Work
+
+1. Integrate the upstream Matter Secure Channel, exchange/session manager,
+   Interaction Model, generated data model, and standard Device Attestation
+   provider instead of extending the private demo protocol.
+2. Connect the Inet/System/Crypto platform layers to that upstream server and
+   commission through a real OTBR plus at least two independent controllers.
+3. Validate SRP/DNS-SD records from the border-router side, including removal,
+   reboot recovery, and commissioning-window transitions.
+4. Run OpenThread conformance, multi-hop, interference, long-duration reattach,
+   broader commissioner/joiner negative and interoperability cases, and
+   sleepy-child power tests.
+5. Add a journaled or dual-bank Preferences backend and run controlled
+   brownout/power-cut recovery tests. The current OpenThread directory preserves
+   the old mapping across reported storage API failures, but the shared RRAM
+   blob is not an all-or-nothing power-loss transaction.
+6. Add production credential provisioning and multi-fabric lifecycle support;
+   generated development keys are not product credentials.
+7. Decide and implement a standards-compatible Matter BLE commissioning path.
+
+## Change Rules
+
+- Compile and flash from a distinct local vendor namespace; never trust an
+  installed Board Manager package to represent the checkout.
+- Keep destructive settings wipes explicit.
+- Require source/native regressions for platform contracts and two-board logs
+  for radio/transport behavior.
+- Do not describe local SRP readiness or private PASE/CASE demos as successful
+  Home Assistant or standard Matter commissioning.
+- Do not publish a release solely from compile success; external
+  interoperability and protocol boundaries must remain visible.

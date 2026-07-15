@@ -71,6 +71,7 @@ uint32_t gLastPrintMs = 0U;
 uint8_t gRetryCount = 0U;
 SoakTxPhase gCurrentTxPhase = SoakTxPhase::kUplink;
 bool gWaitingForAck = false;
+bool gBeginOk = false;
 bool gTestStarted = false;
 bool gUplinkDone = false;
 bool gObservedUplinkDone = false;
@@ -260,6 +261,8 @@ void printResultMatrix() {
 void printStatus(const char* reason) {
   SOAK_PRINT("soak_stat reason=");
   SOAK_PRINT(reason);
+  SOAK_PRINT(" begin_ok=");
+  SOAK_PRINT(gBeginOk ? 1 : 0);
   SOAK_PRINT(" role=");
   SOAK_PRINT(gThread.roleName());
   SOAK_PRINT(" rloc16=0x");
@@ -616,13 +619,13 @@ void setup() {
   otOperationalDataset dataset = {};
   Nrf54ThreadExperimental::buildDemoDataset(&dataset);
   gThread.setActiveDataset(dataset);
-  const bool beginOk = gThread.begin(false);
+  gBeginOk = gThread.begin(false);
   const bool udpOk = gThread.openUdp(kUdpPort, onUdp, nullptr);
 
   SOAK_PRINT("soak_boot role=");
   SOAK_PRINT(gThread.roleName());
   SOAK_PRINT(" begin_ok=");
-  SOAK_PRINT(beginOk ? 1 : 0);
+  SOAK_PRINT(gBeginOk ? 1 : 0);
   SOAK_PRINT(" udp_request=");
   SOAK_PRINTLN(udpOk ? 1 : 0);
 }

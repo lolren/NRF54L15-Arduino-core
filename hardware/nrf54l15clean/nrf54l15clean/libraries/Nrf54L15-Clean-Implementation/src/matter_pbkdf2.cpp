@@ -108,47 +108,110 @@ void sha256ProcessBlock(uint32_t state[8], const uint8_t block[64]) {
   state[7] += h;
 }
 
-}  // namespace
+struct Sha256Context {
+  uint32_t state[8];
+  uint64_t totalLength;
+  uint8_t pending[64];
+  size_t pendingLength;
+};
 
-void MatterPbkdf2::sha256(const uint8_t* data, size_t length,
-                           uint8_t outHash[kHashSize]) {
-  uint32_t state[8] = {
+void sha256Init(Sha256Context* context) {
+  static const uint32_t kInitialState[8] = {
       0x6A09E667U, 0xBB67AE85U, 0x3C6EF372U, 0xA54FF53AU,
       0x510E527FU, 0x9B05688CU, 0x1F83D9ABU, 0x5BE0CD19U,
   };
 
-  const uint64_t totalBits = static_cast<uint64_t>(length) * 8ULL;
-  size_t offset = 0U;
+  memcpy(context->state, kInitialState, sizeof(context->state));
+  context->totalLength = 0U;
+  context->pendingLength = 0U;
+  memset(context->pending, 0, sizeof(context->pending));
+}
 
-  while ((offset + 64U) <= length) {
-    sha256ProcessBlock(state, data + offset);
-    offset += 64U;
+void sha256Update(Sha256Context* context, const uint8_t* data,
+                  size_t length) {
+  if (length == 0U) {
+    return;
   }
 
-  // Final block with padding
-  uint8_t finalBlock[64] = {0};
-  const size_t remaining = length - offset;
-  memcpy(finalBlock, data + offset, remaining);
-  finalBlock[remaining] = 0x80U;
+  context->totalLength += static_cast<uint64_t>(length);
 
-  if (remaining >= 56U) {
-    // Need an extra block for the length
-    sha256ProcessBlock(state, finalBlock);
-    memset(finalBlock, 0, sizeof(finalBlock));
+  if (context->pendingLength > 0U) {
+    const size_t available = sizeof(context->pending) - context->pendingLength;
+    const size_t copyLength = length < available ? length : available;
+    memcpy(context->pending + context->pendingLength, data, copyLength);
+    context->pendingLength += copyLength;
+    data += copyLength;
+    length -= copyLength;
+
+    if (context->pendingLength == sizeof(context->pending)) {
+      sha256ProcessBlock(context->state, context->pending);
+      context->pendingLength = 0U;
+    }
   }
 
-  storeBe64(totalBits, finalBlock + 56U);
-  sha256ProcessBlock(state, finalBlock);
+  while (length >= sizeof(context->pending)) {
+    sha256ProcessBlock(context->state, data);
+    data += sizeof(context->pending);
+    length -= sizeof(context->pending);
+  }
+
+  if (length > 0U) {
+    memcpy(context->pending, data, length);
+    context->pendingLength = length;
+  }
+}
+
+void sha256Final(Sha256Context* context,
+                 uint8_t outHash[MatterPbkdf2::kHashSize]) {
+  uint8_t finalBlocks[128] = {0};
+  if (context->pendingLength > 0U) {
+    memcpy(finalBlocks, context->pending, context->pendingLength);
+  }
+  finalBlocks[context->pendingLength] = 0x80U;
+
+  const size_t finalLength = context->pendingLength < 56U ? 64U : 128U;
+  storeBe64(context->totalLength * 8ULL, finalBlocks + finalLength - 8U);
+  sha256ProcessBlock(context->state, finalBlocks);
+  if (finalLength == 128U) {
+    sha256ProcessBlock(context->state, finalBlocks + 64U);
+  }
 
   for (size_t i = 0; i < 8U; ++i) {
-    storeBe32(state[i], outHash + (i * 4U));
+    storeBe32(context->state[i], outHash + (i * 4U));
   }
+}
+
+}  // namespace
+
+void MatterPbkdf2::sha256(const uint8_t* data, size_t length,
+                           uint8_t outHash[kHashSize]) {
+  if (outHash == nullptr) {
+    return;
+  }
+  if (data == nullptr && length > 0U) {
+    memset(outHash, 0, kHashSize);
+    return;
+  }
+
+  Sha256Context context;
+  sha256Init(&context);
+  sha256Update(&context, data, length);
+  sha256Final(&context, outHash);
 }
 
 void MatterPbkdf2::hmacSha256(const uint8_t* key, size_t keyLength,
                                const uint8_t* data, size_t dataLength,
                                uint8_t outMac[kHashSize]) {
   constexpr size_t kBlockSize = 64U;
+
+  if (outMac == nullptr) {
+    return;
+  }
+  if ((key == nullptr && keyLength > 0U) ||
+      (data == nullptr && dataLength > 0U)) {
+    memset(outMac, 0, kHashSize);
+    return;
+  }
 
   uint8_t keyBlock[kBlockSize] = {0};
   if (keyLength > kBlockSize) {
@@ -164,22 +227,17 @@ void MatterPbkdf2::hmacSha256(const uint8_t* key, size_t keyLength,
     opad[i] = static_cast<uint8_t>(keyBlock[i] ^ 0x5CU);
   }
 
-  // Inner hash: H(ipad || data)
-  uint8_t innerData[kBlockSize + 256] = {0};
-  memcpy(innerData, ipad, kBlockSize);
-  if (dataLength <= 256U) {
-    memcpy(innerData + kBlockSize, data, dataLength);
-    sha256(innerData, kBlockSize + dataLength, outMac);
-  } else {
-    // For longer data, we'd need streaming - but our use case is short
-    sha256(ipad, kBlockSize, outMac);
-  }
+  uint8_t innerHash[kHashSize] = {0};
+  Sha256Context context;
+  sha256Init(&context);
+  sha256Update(&context, ipad, sizeof(ipad));
+  sha256Update(&context, data, dataLength);
+  sha256Final(&context, innerHash);
 
-  // Outer hash: H(opad || inner_hash)
-  uint8_t outerData[kBlockSize + kHashSize] = {0};
-  memcpy(outerData, opad, kBlockSize);
-  memcpy(outerData + kBlockSize, outMac, kHashSize);
-  sha256(outerData, kBlockSize + kHashSize, outMac);
+  sha256Init(&context);
+  sha256Update(&context, opad, sizeof(opad));
+  sha256Update(&context, innerHash, sizeof(innerHash));
+  sha256Final(&context, outMac);
 }
 
 bool MatterPbkdf2::deriveKey(const uint8_t* password, size_t passwordLength,

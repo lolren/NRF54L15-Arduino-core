@@ -2,8 +2,10 @@
 """Two-board staged Matter/Thread validation runner.
 
 This runner flashes a Matter example from the local checkout, captures serial
-output from both boards, and summarizes the Thread/Matter readiness keys printed
-by the examples.
+output from both boards, and summarizes the local Thread attach,
+project-specific Matter readiness, and SRP-client capability keys printed by
+the examples. A pass does not prove external DNS-SD visibility or standard
+Matter commissioning.
 
 It intentionally uses a temporary local vendor namespace, so Arduino CLI cannot
 silently compile against an installed Board Manager release.
@@ -12,6 +14,7 @@ silently compile against an installed Board Manager release.
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import shutil
@@ -69,11 +72,16 @@ class BoardCapture:
 
     @property
     def saw_srp_enabled(self) -> bool:
-        return self.value_is_one("discovery_srp_client", "discovery_publish_srp_client")
+        return self.value_is_one(
+            "discovery_srp_client", "discovery_publish_srp_client"
+        )
 
     @property
     def saw_any_matter_line(self) -> bool:
-        return any(line.startswith(("matter_node_demo ", "matter_cmd_demo ")) for line in self.lines)
+        return any(
+            line.startswith(("matter_node_demo ", "matter_cmd_demo "))
+            for line in self.lines
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,6 +89,16 @@ def parse_args() -> argparse.Namespace:
         description="Flash and monitor two staged Matter/Thread boards."
     )
     parser.add_argument("--arduino-cli", default="arduino-cli")
+    parser.add_argument(
+        "--data-dir",
+        type=pathlib.Path,
+        default=pathlib.Path(
+            os.environ.get(
+                "ARDUINO_DIRECTORIES_DATA", pathlib.Path.home() / ".arduino15"
+            )
+        ),
+        help="Arduino CLI data directory containing installed tools.",
+    )
     parser.add_argument(
         "--board",
         default="xiao_nrf54l15",
@@ -124,7 +142,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-require-ready",
         action="store_true",
-        help="Only require Thread attach, not Matter ready/discovery-ready.",
+        help=(
+            "Do not require Matter ready/discovery-ready. SRP remains required "
+            "unless --no-require-srp is also supplied."
+        ),
+    )
+    parser.add_argument(
+        "--no-require-srp",
+        action="store_true",
+        help=(
+            "Do not require the sketch to report SRP-client capability. This "
+            "reduces the result to local Thread/project-demo readiness."
+        ),
     )
     return parser.parse_args()
 
@@ -139,12 +168,16 @@ def board_for_port(args: argparse.Namespace, index: int) -> str:
     if len(args.boards) == 1:
         return args.boards[0]
     if len(args.boards) != len(args.ports):
-        raise SystemExit("--boards must contain one board ID or match --ports length")
+        raise SystemExit(
+            "--boards must contain one board ID or match --ports length"
+        )
     return args.boards[index]
 
 
 def parse_key_value(line: str) -> Optional[tuple[str, str]]:
-    match = re.search(r"matter_(?:node|cmd)_demo\s+([A-Za-z0-9_]+)=([^\s]+)", line)
+    match = re.search(
+        r"matter_(?:node|cmd)_demo\s+([A-Za-z0-9_]+)=([^\s]+)", line
+    )
     if match:
         return match.group(1), match.group(2)
     return None
@@ -172,14 +205,17 @@ def copy_platform(work_dir: pathlib.Path, vendor: str) -> None:
     )
 
 
-def write_cli_config(work_dir: pathlib.Path) -> pathlib.Path:
+def write_cli_config(
+    work_dir: pathlib.Path, data_dir: pathlib.Path
+) -> pathlib.Path:
     config_path = work_dir / "arduino-cli.yaml"
+    data_dir = data_dir.expanduser().resolve()
     config_path.write_text(
         "\n".join(
             [
                 "directories:",
-                "  data: /home/lolren/.arduino15",
-                "  downloads: /home/lolren/.arduino15/staging",
+                f"  data: {data_dir}",
+                f"  downloads: {data_dir / 'staging'}",
                 f"  user: {work_dir / 'sketchbook'}",
                 "",
             ]
@@ -298,7 +334,9 @@ def monitor_ports(
     return captures
 
 
-def summarize(captures: Dict[str, BoardCapture], require_ready: bool) -> bool:
+def summarize(
+    captures: Dict[str, BoardCapture], require_ready: bool, require_srp: bool
+) -> bool:
     print("\nsummary", flush=True)
     ok = True
     for port, capture in captures.items():
@@ -307,7 +345,10 @@ def summarize(captures: Dict[str, BoardCapture], require_ready: bool) -> bool:
         srp = capture.saw_srp_enabled
         matter_lines = capture.saw_any_matter_line
         role = capture.values.get("thread_role", "unknown")
-        blocker = capture.values.get("readiness_blocker", capture.values.get("discovery_blocker", "n/a"))
+        blocker = capture.values.get(
+            "readiness_blocker",
+            capture.values.get("discovery_blocker", "n/a"),
+        )
         print(
             f"{port}: lines={len(capture.lines)} role={role} "
             f"attached={int(attached)} ready={int(ready)} srp={int(srp)} "
@@ -317,6 +358,8 @@ def summarize(captures: Dict[str, BoardCapture], require_ready: bool) -> bool:
         if not matter_lines or not attached:
             ok = False
         if require_ready and not ready:
+            ok = False
+        if require_srp and not srp:
             ok = False
     print("PASS" if ok else "FAIL", flush=True)
     return ok
@@ -330,7 +373,7 @@ def main() -> int:
     work_dir = prepare_work_dir(args)
     try:
         copy_platform(work_dir, args.vendor)
-        config_path = write_cli_config(work_dir)
+        config_path = write_cli_config(work_dir, args.data_dir)
         monitor_ports_list = args.monitor_ports or args.ports
 
         if not args.skip_upload:
@@ -352,7 +395,11 @@ def main() -> int:
             args.duration_sec,
             work_dir,
         )
-        ok = summarize(captures, require_ready=not args.no_require_ready)
+        ok = summarize(
+            captures,
+            require_ready=not args.no_require_ready,
+            require_srp=not args.no_require_srp,
+        )
         if args.keep:
             print(f"kept work dir: {work_dir}", flush=True)
         return 0 if ok else 1

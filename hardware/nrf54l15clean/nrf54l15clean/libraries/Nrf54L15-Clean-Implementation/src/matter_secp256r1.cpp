@@ -1,7 +1,7 @@
 #include "matter_secp256r1.h"
 #include <string.h>
 
-#include "nrf54l15_hal.h"
+#include <nrf54l15_hal.h>
 
 extern "C" void nrf54l15_secp256r1_cooperate_hook(void)
     __attribute__((weak));
@@ -247,7 +247,13 @@ void Secp256r1::bnModAdd(const BigNum256& a, const BigNum256& b, BigNum256* out)
 
 void Secp256r1::bnModSub(const BigNum256& a, const BigNum256& b, BigNum256* out) {
   BigNum256 p=primeP();
-  if(bnCompare(a,b)>=0){bnSub(a,b,out);}else{BigNum256 d;bnSub(a,b,&d);bnAdd(d,p,out);}
+  if (bnCompare(a, b) >= 0) {
+    bnSub(a, b, out);
+  } else {
+    BigNum256 difference = {};
+    bnSub(b, a, &difference);
+    bnSub(p, difference, out);
+  }
 }
 
 void Secp256r1::bnModInv(const BigNum256& a, BigNum256* out) {
@@ -368,10 +374,13 @@ void Secp256r1::bnModAddN(const BigNum256& a, const BigNum256& b, BigNum256* out
   }
   acc[kBnWordCount] = static_cast<uint32_t>(carry);
 
-  if (acc[kBnWordCount] != 0U) {
+  while (acc[kBnWordCount] != 0U) {
+    // Replace the carried 2^256 term with 2^256 mod n. Keeping the high
+    // word set here would count the overflow twice.
+    acc[kBnWordCount] = 0U;
     uint32_t residueCarry = 0U;
     addWords(acc, kOrderNOverflowResidue, kBnWordCount, &residueCarry);
-    acc[kBnWordCount] += residueCarry;
+    acc[kBnWordCount] = residueCarry;
   }
 
   uint32_t orderExt[kBarrettWordCount] = {0};

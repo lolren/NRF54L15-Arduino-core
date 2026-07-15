@@ -118,6 +118,7 @@ struct OpenThreadPlatformSkeletonSnapshot {
   uint16_t cryptoKeyCount = 0;
   uint16_t cryptoLastKeyLength = 0;
   uint32_t cryptoRandomRequests = 0;
+  uint32_t cryptoRandomFailures = 0;
   uint32_t cryptoAesEncryptCount = 0;
   uint32_t cryptoUnsupportedCount = 0;
   uint32_t cryptoSupportMask = 0;
@@ -245,6 +246,7 @@ class OpenThreadPlatformSkeleton {
   static otError addSetting(uint16_t key, const uint8_t* value, uint16_t valueLength);
   static otError readSetting(uint16_t key, int index, uint8_t* value, uint16_t* valueLength);
   static otError deleteSetting(uint16_t key, int index);
+  static bool wipeSettingsChecked();
   static void wipeSettings();
 };
 

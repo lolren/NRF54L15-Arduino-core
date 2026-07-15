@@ -8,9 +8,14 @@
 
 namespace xiao_nrf54l15 {
 
-// Matter Device Attestation (DAC) Implementation
-// Implements the certificate chain: PAA -> PAI -> DAC
-// For 2-board testing: self-signed PAA, PAI signed by PAA, DAC signed by PAI
+// Test-only device-attestation model for local two-board validation.
+//
+// This is not a Matter certificate encoding or a production credential
+// provider. The process-local keys are regenerated on every boot, and the
+// simplified certificates are not suitable for Matter certification or for a
+// standards-compliant commissioner. The local chain is PAA -> PAI -> DAC: the
+// PAA is self-signed, the PAI is signed by the PAA, and the DAC is signed by
+// the PAI.
 
 constexpr size_t kAttestationHashSize = 32U;
 constexpr size_t kAttestationPubKeySize = 65U;  // Uncompressed P-256
@@ -52,8 +57,9 @@ class MatterDeviceAttestation {
  public:
   MatterDeviceAttestation() = default;
 
-  // Generate a complete certificate chain (PAA -> PAI -> DAC)
-  // For testing: all self-signed with known keys
+  // Generate an ephemeral test chain (PAA -> PAI -> DAC). A failure clears
+  // the complete chain so callers can never observe partially generated
+  // credentials.
   bool generateTestChain(uint16_t vendorId, uint16_t productId,
                          const uint8_t serialNumber[32]);
 
@@ -85,7 +91,7 @@ class MatterDeviceAttestation {
   bool getPAAPrivateKey(Secp256r1Scalar* outKey) const;
 
   // Check if attestation is available
-  bool available() const { return dacValid_; }
+  bool available() const { return paaValid_ && paiValid_ && dacValid_; }
 
   // Get certificate type name
   static const char* certTypeName(AttestationCertType type);

@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <system/SystemConfig.h>
+
 #ifndef CHECK_RETURN_VALUE
 #define CHECK_RETURN_VALUE
 #endif
@@ -375,6 +377,8 @@ public:
     {
 #if CHIP_SYSTEM_PACKETBUFFER_HAS_CHECK
         InternalCheck(buffer);
+#else
+        (void) buffer;
 #endif
     }
 

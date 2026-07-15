@@ -43,6 +43,7 @@ bool MatterAccessControl::addDefaultViewEntry() {
   AclEntry entry = {};
   entry.wildcardFabric = true;
   entry.wildcardNode = true;
+  entry.wildcardSubject = true;
   entry.wildcardCluster = true;
   entry.wildcardEndpoint = true;
   entry.privilege = AclPrivilege::kView;
@@ -60,6 +61,7 @@ bool MatterAccessControl::addNodeOperateEntry(
 
   entry.wildcardNode = (nodeId == nullptr);
   entry.wildcardFabric = (fabricId == nullptr);
+  entry.wildcardSubject = true;
   entry.wildcardCluster = true;
   entry.wildcardEndpoint = true;
   entry.privilege = AclPrivilege::kOperate;
@@ -75,7 +77,7 @@ bool MatterAccessControl::matchesEntry(
     const uint8_t subjectId[8],
     const uint8_t fabricId[8],
     const uint8_t nodeId[8],
-    uint16_t clusterId,
+    uint32_t clusterId,
     uint16_t endpointId) const {
 
   // Check fabric match
@@ -88,8 +90,8 @@ bool MatterAccessControl::matchesEntry(
     if (memcmp(entry.nodeId, nodeId, 8) != 0) return false;
   }
 
-  // Check subject match (if entry has specific subject)
-  if (entry.subjectId[0] != 0U) {
+  // Subject IDs are opaque 64-bit values; leading zero bytes are significant.
+  if (!entry.wildcardSubject) {
     if (memcmp(entry.subjectId, subjectId, 8) != 0) return false;
   }
 
@@ -110,11 +112,20 @@ bool MatterAccessControl::checkAccess(
     const uint8_t subjectId[8],
     const uint8_t fabricId[8],
     const uint8_t nodeId[8],
-    uint16_t clusterId,
+    uint32_t clusterId,
     uint16_t endpointId,
     AclPrivilege requiredPrivilege) const {
 
-  // Check each entry (first match wins)
+  if (subjectId == nullptr || fabricId == nullptr || nodeId == nullptr) {
+    return false;
+  }
+  const uint8_t required = static_cast<uint8_t>(requiredPrivilege);
+  if (required < static_cast<uint8_t>(AclPrivilege::kView) ||
+      required > static_cast<uint8_t>(AclPrivilege::kManage)) {
+    return false;
+  }
+
+  // Any matching entry with sufficient privilege authorizes the operation.
   for (uint8_t i = 0; i < entryCount_; i++) {
     const AclEntry& entry = entries_[i];
     if (!entry.valid) continue;
@@ -122,8 +133,10 @@ bool MatterAccessControl::checkAccess(
     if (matchesEntry(entry, subjectId, fabricId, nodeId,
                      clusterId, endpointId)) {
       // Check if entry's privilege meets or exceeds required
-      if (static_cast<uint8_t>(entry.privilege) >=
-             static_cast<uint8_t>(requiredPrivilege)) {
+      const uint8_t granted = static_cast<uint8_t>(entry.privilege);
+      if (granted >= static_cast<uint8_t>(AclPrivilege::kView) &&
+          granted <= static_cast<uint8_t>(AclPrivilege::kManage) &&
+          granted >= required) {
         return true;
       }
       // Privilege insufficient, continue checking other entries

@@ -104,6 +104,7 @@ struct MatterOnNetworkReadinessSummary {
   bool storageOpen = false;
   bool lightReady = false;
   bool foundationReady = false;
+  bool attestationReady = false;
   bool threadStarted = false;
   bool threadAttached = false;
   bool manualCodeReady = false;
@@ -187,6 +188,7 @@ struct MatterOnNetworkOnOffLightConfig {
 struct MatterOnNetworkOnOffLightStatus {
   bool storageOpen = false;
   bool lightReady = false;
+  bool attestationReady = false;
   bool threadStarted = false;
   bool threadAttached = false;
   bool threadDatasetConfigured = false;

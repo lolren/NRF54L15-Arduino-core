@@ -3,17 +3,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "matter_foundation_target.h"
-#include "matter_platform_stage.h"
 #include "matter_manual_pairing.h"
+#include "matter_pase_transport.h"
 #include "matter_secp256r1.h"
 #include "matter_pbkdf2.h"
 #include "matter_credentials.h"
+#include "matter_message_counter.h"
 #include "matter_rng.h"
 
 namespace xiao_nrf54l15 {
 
-// SPAKE2+ cryptographic constants for Matter PASE commissioning
+// Experimental PASE-like two-core demonstration surface. The framing and
+// transcript below are not a Matter wire-compatible SPAKE2+ implementation.
 constexpr size_t kMatterSpake2pHashSize = 32U;
 constexpr size_t kMatterSpake2pWScalarSize = 32U;    // w0, w1 are scalars
 constexpr size_t kMatterSpake2pW0Length = 32U;
@@ -22,8 +23,10 @@ constexpr size_t kMatterSpake2pPointSize = 65U;      // Uncompressed secp256r1
 constexpr size_t kMatterSpake2pConfirmationSize = 32U;
 constexpr size_t kMatterSpake2pSaltSize = 32U;
 constexpr uint32_t kMatterSpake2pPbkdf2Iterations = 2000U;
+constexpr uint32_t kMatterSpake2pMinPbkdf2Iterations = 1000U;
+constexpr uint32_t kMatterSpake2pMaxPbkdf2Iterations = 100000U;
 
-// CHIP message framing constants
+// Minimal demonstration message framing constants
 enum class MatterMessageExchangeFlags : uint8_t {
   kNone = 0x00U,
   kInitiator = 0x01U,
@@ -78,7 +81,17 @@ enum class MatterCommissioningState : uint8_t {
   kFailed = 8U,
 };
 
-// CHIP message header
+enum class MatterCommissioningError : uint32_t {
+  kNone = 0U,
+  kInvalidArgument = 1U,
+  kInvalidMessage = 2U,
+  kUnexpectedMessage = 3U,
+  kCryptoFailed = 4U,
+  kAuthenticationFailed = 5U,
+  kTransportFailed = 6U,
+};
+
+// Demonstration message header
 struct MatterMessageHeader {
   uint8_t exchangeFlags = 0U;
   uint8_t sessionType = 0U;
@@ -139,10 +152,10 @@ struct MatterPaseSessionState {
   uint32_t pbkdf2Iterations = kMatterSpake2pPbkdf2Iterations;
 
   // ECC points (uncompressed format)
-  uint8_t X[kMatterSpake2pPointSize] = {0};    // P's X = x*G + w0*G
-  uint8_t Y[kMatterSpake2pPointSize] = {0};    // V's Y = y*G + w0*G
+  uint8_t X[kMatterSpake2pPointSize] = {0};    // Prover X = x*G + w0*G
+  uint8_t Y[kMatterSpake2pPointSize] = {0};    // Verifier Y = y*G + w0*G
   uint8_t Z[kMatterSpake2pPointSize] = {0};    // Shared: Z = x*(Y-w0*G) = y*(X-w0*G)
-  uint8_t V[kMatterSpake2pPointSize] = {0};    // V = w1*(Y-w0*G) = w1*(X-w0*G)
+  uint8_t V[kMatterSpake2pPointSize] = {0};    // Shared: V = w1*(Y-w0*G) = y*L
 
   // Ephemeral scalar (x for prover, y for verifier) must be reused for Z.
   uint8_t ephemeralScalar[kMatterSpake2pWScalarSize] = {0};
@@ -150,6 +163,8 @@ struct MatterPaseSessionState {
   // Shared secret and keys
   uint8_t sharedSecret[kMatterSpake2pHashSize] = {0};
   uint8_t ke[kMatterSpake2pHashSize] = {0};     // Encryption key
+  uint8_t kcA[kMatterSpake2pHashSize] = {0};    // Prover confirmation key
+  uint8_t kcB[kMatterSpake2pHashSize] = {0};    // Verifier confirmation key
 
   // Exchange randoms
   uint8_t initiateRandom[32] = {0};
@@ -168,13 +183,13 @@ class MatterPaseCommissioning {
 
   MatterPaseCommissioning() = default;
 
-  // Commissionee (prover): the device being commissioned
-  bool beginAsCommissionee(MatterPlatform* platform,
+  // Commissionee (verifier): the device being commissioned
+  bool beginAsCommissionee(MatterPaseTransport* platform,
                            CommissioningCallback callback = nullptr,
                            void* context = nullptr);
 
-  // Commissioner (verifier): the device doing the commissioning
-  bool beginAsCommissioner(MatterPlatform* platform,
+  // Commissioner (prover): the device doing the commissioning
+  bool beginAsCommissioner(MatterPaseTransport* platform,
                            CommissioningCallback callback = nullptr,
                            void* context = nullptr);
 
@@ -188,7 +203,7 @@ class MatterPaseCommissioning {
   bool setPasscode(uint32_t passcode);
   bool setDiscriminator(uint16_t discriminator);
 
-  // Derive SPAKE2+ verifier from passcode (call on commissioner)
+  // Derive a verifier from a passcode for this experimental surface.
   static bool deriveVerifier(uint32_t passcode,
                              const uint8_t salt[kMatterSpake2pSaltSize],
                              uint32_t iterations,
@@ -212,6 +227,15 @@ class MatterPaseCommissioning {
   static const char* stateName(MatterCommissioningState state);
 
  private:
+  enum class ExpectedMessage : uint8_t {
+    kNone = 0U,
+    kPbkdfParamRequest,
+    kPbkdfParamResponse,
+    kSpake2p1,
+    kSpake2p2,
+    kSpake2p3,
+  };
+
   static void handleUdpReceive(void* context,
                                const uint8_t* payload, uint16_t length,
                                const otIp6Address& source,
@@ -230,10 +254,9 @@ class MatterPaseCommissioning {
   void handleSpake2p3(const uint8_t* payload, uint16_t length);
 
   // SPAKE2+ cryptographic operations
-  bool deriveW0W1FromPasscode();
   bool computeSpake2pX();
   bool computeSpake2pY();
-  bool computeSpake2pZ(bool prover);
+  bool computeSpake2pZ(bool responderVerifier);
   bool deriveSharedSecret();
   bool verifyConfirmationB();
   bool verifyConfirmationA();
@@ -251,13 +274,24 @@ class MatterPaseCommissioning {
                    const MatterMessageHeader& header,
                    const uint8_t* appPayload, uint16_t appPayloadLength);
 
+  bool messageExpected(const MatterMessageHeader& header,
+                       const otIp6Address& source,
+                       uint16_t sourcePort) const;
+  bool messagePayloadValid(const MatterMessageHeader& header,
+                           const uint8_t* payload,
+                           uint16_t length) const;
+  bool peerMatches(const otIp6Address& source, uint16_t sourcePort) const;
+  void bindPeer(const otIp6Address& source, uint16_t sourcePort,
+                uint16_t exchangeId);
+  void fail(MatterCommissioningError error);
+
   uint16_t nextExchangeId();
   uint16_t nextMessageId();
   bool generateRandom(uint8_t* output, size_t length);
   void advanceState(MatterCommissioningState newState,
                     uint32_t errorCode = 0U);
 
-  MatterPlatform* platform_ = nullptr;
+  MatterPaseTransport* platform_ = nullptr;
   CommissioningCallback callback_ = nullptr;
   void* callbackContext_ = nullptr;
   bool initiator_ = false;
@@ -268,6 +302,9 @@ class MatterPaseCommissioning {
   uint16_t peerMessageId_ = 0U;
   uint16_t peerPort_ = 0U;
   otIp6Address peerAddr_ = {};
+  bool peerBound_ = false;
+  MatterMessageCounter16 peerMessageCounter_;
+  ExpectedMessage expectedMessage_ = ExpectedMessage::kNone;
 
   MatterPaseSessionState session_ = {};
   uint32_t setupPinCode_ = kDefaultSetupPinCode;

@@ -12,13 +12,25 @@ void writeUint16Le(uint16_t v, uint8_t* b, size_t off) {
   b[off + 1] = (v >> 8U) & 0xFFU;
 }
 
+void writeUint32Le(uint32_t value, uint8_t* buffer, size_t offset) {
+  for (size_t i = 0U; i < 4U; ++i) {
+    buffer[offset + i] = static_cast<uint8_t>(value >> (i * 8U));
+  }
+}
+
 // Build the To-Be-Signed data for a certificate
 size_t buildTbsData(const uint8_t subjectPubKey[65],
                     uint16_t vendorId, uint16_t productId,
                     const uint8_t serialNumber[32],
+                    const uint8_t issuerPubKeyHash[32],
+                    uint32_t notBefore, uint32_t notAfter,
+                    AttestationCertType certType,
                     uint8_t* tbsData, size_t tbsMax) {
   size_t off = 0U;
-  if (tbsMax < 103U) return 0U;
+  if (subjectPubKey == nullptr || serialNumber == nullptr ||
+      issuerPubKeyHash == nullptr || tbsData == nullptr || tbsMax < 142U) {
+    return 0U;
+  }
 
   // Subject public key
   memcpy(tbsData + off, subjectPubKey, 65); off += 65;
@@ -31,6 +43,11 @@ size_t buildTbsData(const uint8_t subjectPubKey[65],
 
   // Serial number (32 bytes)
   memcpy(tbsData + off, serialNumber, 32); off += 32;
+
+  memcpy(tbsData + off, issuerPubKeyHash, 32); off += 32;
+  writeUint32Le(notBefore, tbsData, off); off += 4;
+  writeUint32Le(notAfter, tbsData, off); off += 4;
+  tbsData[off++] = static_cast<uint8_t>(certType);
 
   return off;
 }
@@ -49,14 +66,28 @@ bool MatterDeviceAttestation::generateTestChain(
     uint16_t vendorId, uint16_t productId,
     const uint8_t serialNumber[32]) {
 
+  *this = MatterDeviceAttestation{};
+  if (serialNumber == nullptr) {
+    return false;
+  }
+
   // Generate PAA key pair (root CA)
-  if (!Secp256r1::generateKeyPair(&paaPrivateKey_, &paaPublicKey_)) return false;
+  if (!Secp256r1::generateKeyPair(&paaPrivateKey_, &paaPublicKey_)) {
+    *this = MatterDeviceAttestation{};
+    return false;
+  }
 
   // Generate PAI key pair (intermediate)
-  if (!Secp256r1::generateKeyPair(&paiPrivateKey_, &paiPublicKey_)) return false;
+  if (!Secp256r1::generateKeyPair(&paiPrivateKey_, &paiPublicKey_)) {
+    *this = MatterDeviceAttestation{};
+    return false;
+  }
 
   // Generate DAC key pair (device)
-  if (!Secp256r1::generateKeyPair(&dacPrivateKey_, &dacPublicKey_)) return false;
+  if (!Secp256r1::generateKeyPair(&dacPrivateKey_, &dacPublicKey_)) {
+    *this = MatterDeviceAttestation{};
+    return false;
+  }
 
   // Create PAA certificate (self-signed root)
   {
@@ -65,9 +96,9 @@ bool MatterDeviceAttestation::generateTestChain(
                          vendorId, productId,
                          serial, &paaCert_,
                          AttestationCertType::kPAA)) {
+      *this = MatterDeviceAttestation{};
       return false;
     }
-    paaValid_ = true;
   }
 
   // Create PAI certificate (signed by PAA)
@@ -77,9 +108,9 @@ bool MatterDeviceAttestation::generateTestChain(
                          vendorId, productId,
                          serial, &paiCert_,
                          AttestationCertType::kPAI)) {
+      *this = MatterDeviceAttestation{};
       return false;
     }
-    paiValid_ = true;
   }
 
   // Create DAC certificate (signed by PAI)
@@ -87,8 +118,13 @@ bool MatterDeviceAttestation::generateTestChain(
                        vendorId, productId,
                        serialNumber, &dacCert_,
                        AttestationCertType::kDAC)) {
+    *this = MatterDeviceAttestation{};
     return false;
   }
+
+  // Publish the chain only after every key and certificate is complete.
+  paaValid_ = true;
+  paiValid_ = true;
   dacValid_ = true;
 
   return true;
@@ -103,7 +139,7 @@ bool MatterDeviceAttestation::signCertificate(
     AttestationCertificate* outCert,
     AttestationCertType certType) {
 
-  if (outCert == nullptr) return false;
+  if (serialNumber == nullptr || outCert == nullptr) return false;
 
   *outCert = AttestationCertificate{};
 
@@ -134,6 +170,9 @@ bool MatterDeviceAttestation::signCertificate(
   size_t tbsLen = buildTbsData(outCert->subjectPubKey,
                                vendorId, productId,
                                serialNumber,
+                               outCert->issuerPubKeyHash,
+                               outCert->notBefore, outCert->notAfter,
+                               outCert->type,
                                tbsData, sizeof(tbsData));
 
   if (tbsLen == 0U) return false;
@@ -197,6 +236,7 @@ bool MatterDeviceAttestation::verifyCertificate(
     const AttestationCertificate& issuer) const {
 
   if (!cert.valid || !issuer.valid) return false;
+  if (cert.notAfter <= cert.notBefore) return false;
 
   // Verify issuer public key hash
   uint8_t expectedHash[32] = {0};
@@ -210,6 +250,8 @@ bool MatterDeviceAttestation::verifyCertificate(
   size_t tbsLen = buildTbsData(cert.subjectPubKey,
                                cert.vendorId, cert.productId,
                                cert.serialNumber,
+                               cert.issuerPubKeyHash,
+                               cert.notBefore, cert.notAfter, cert.type,
                                tbsData, sizeof(tbsData));
 
   if (tbsLen == 0U) return false;
@@ -232,6 +274,14 @@ bool MatterDeviceAttestation::verifyChain(
     const AttestationCertificate& dac,
     const AttestationCertificate& pai,
     const AttestationCertificate& paa) const {
+
+  if (dac.type != AttestationCertType::kDAC ||
+      pai.type != AttestationCertType::kPAI ||
+      paa.type != AttestationCertType::kPAA ||
+      dac.vendorId != pai.vendorId || pai.vendorId != paa.vendorId ||
+      dac.productId != pai.productId || pai.productId != paa.productId) {
+    return false;
+  }
 
   // Verify DAC signed by PAI
   if (!verifyCertificate(dac, pai)) return false;

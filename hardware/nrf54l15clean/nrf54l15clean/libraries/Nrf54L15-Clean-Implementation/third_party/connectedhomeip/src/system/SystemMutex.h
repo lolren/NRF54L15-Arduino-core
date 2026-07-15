@@ -155,6 +155,7 @@ private:
 #if CHIP_SYSTEM_CONFIG_NO_LOCKING
 inline CHIP_ERROR Init(Mutex & aMutex)
 {
+    (void) aMutex;
     return CHIP_NO_ERROR;
 }
 inline void Mutex::Lock() {}

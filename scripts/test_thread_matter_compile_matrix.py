@@ -64,6 +64,12 @@ DEFAULT_CASES = (
         EXAMPLES_ROOT / "Matter" / "MatterOnNetworkOnOffLightNodeDemo",
     ),
     CompileCase(
+        "holyiot25007_thread_pskc_udp",
+        "holyiot_25007_nrf54l15",
+        "clean_thread=stage",
+        EXAMPLES_ROOT / "Thread" / "ThreadExperimentalPskcUdpHello",
+    ),
+    CompileCase(
         "holyiot25008_thread_pskc_udp",
         "holyiot_25008_nrf54l15",
         "clean_thread=stage",
@@ -85,6 +91,30 @@ DEFAULT_CASES = (
 
 
 FULL_EXTRA_CASES = (
+    CompileCase(
+        "xiao_l15_chip_system_layer",
+        "xiao_nrf54l15",
+        "clean_thread=stage,clean_matter=stage",
+        EXAMPLES_ROOT / "Chip" / "ChipPhase1SystemLayerTest",
+    ),
+    CompileCase(
+        "xiao_l15_chip_crypto",
+        "xiao_nrf54l15",
+        "clean_thread=stage,clean_matter=stage",
+        EXAMPLES_ROOT / "Chip" / "ChipPhase3CryptoTest",
+    ),
+    CompileCase(
+        "xiao_lm20b_chip_crypto",
+        "xiao_nrf54lm20b",
+        "clean_thread=stage,clean_matter=stage",
+        EXAMPLES_ROOT / "Chip" / "ChipPhase3CryptoTest",
+    ),
+    CompileCase(
+        "xiao_l15_chip_inet_transport",
+        "xiao_nrf54l15",
+        "clean_thread=stage,clean_matter=stage",
+        EXAMPLES_ROOT / "Chip" / "ChipPhase5TransportTest",
+    ),
     CompileCase(
         "xiao_l15_thread_reconnect_stress",
         "xiao_nrf54l15",
@@ -124,6 +154,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--arduino-cli", default="arduino-cli")
     parser.add_argument(
+        "--data-dir",
+        type=pathlib.Path,
+        default=pathlib.Path(
+            os.environ.get(
+                "ARDUINO_DIRECTORIES_DATA", pathlib.Path.home() / ".arduino15"
+            )
+        ),
+        help="Arduino CLI data directory containing installed tools.",
+    )
+    parser.add_argument(
         "--work-dir",
         type=pathlib.Path,
         default=None,
@@ -138,6 +178,12 @@ def parse_args() -> argparse.Namespace:
         "--full",
         action="store_true",
         help="Also compile slower stress/recovery Matter and Thread examples.",
+    )
+    parser.add_argument(
+        "--case",
+        action="append",
+        choices=[case.name for case in DEFAULT_CASES + FULL_EXTRA_CASES],
+        help="Compile only this named case. May be supplied more than once.",
     )
     parser.add_argument(
         "--keep",
@@ -171,15 +217,16 @@ def copy_platform(work_dir: pathlib.Path, vendor: str) -> pathlib.Path:
     return platform_copy
 
 
-def write_cli_config(work_dir: pathlib.Path) -> pathlib.Path:
+def write_cli_config(work_dir: pathlib.Path, data_dir: pathlib.Path) -> pathlib.Path:
     config_path = work_dir / "arduino-cli.yaml"
     sketchbook = work_dir / "sketchbook"
+    data_dir = data_dir.expanduser().resolve()
     config_path.write_text(
         "\n".join(
             [
                 "directories:",
-                "  data: /home/lolren/.arduino15",
-                "  downloads: /home/lolren/.arduino15/staging",
+                f"  data: {data_dir}",
+                f"  downloads: {data_dir / 'staging'}",
                 f"  user: {sketchbook}",
                 "",
             ]
@@ -237,6 +284,9 @@ def run_case(
     if result.returncode != 0:
         print(f"FAILED: full log at {log_path}", flush=True)
         return False
+    if "warning:" in result.stdout.lower():
+        print(f"FAILED: compiler warning in {log_path}", flush=True)
+        return False
     return True
 
 
@@ -260,8 +310,15 @@ def main() -> int:
     work_dir = prepare_work_dir(args)
     try:
         copy_platform(work_dir, args.vendor)
-        config_path = write_cli_config(work_dir)
-        cases = DEFAULT_CASES + (FULL_EXTRA_CASES if args.full else ())
+        config_path = write_cli_config(work_dir, args.data_dir)
+        if args.case:
+            selected = set(args.case)
+            cases = tuple(
+                case for case in DEFAULT_CASES + FULL_EXTRA_CASES
+                if case.name in selected
+            )
+        else:
+            cases = DEFAULT_CASES + (FULL_EXTRA_CASES if args.full else ())
         ok = run_cases(args.arduino_cli, config_path, args.vendor, work_dir, cases)
         if ok:
             print(f"PASS: compiled {len(cases)} Thread/Matter cases", flush=True)

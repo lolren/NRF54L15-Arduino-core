@@ -24,13 +24,14 @@ enum class AclPrivilege : uint8_t {
 // Matter ACL entry
 struct AclEntry {
   uint8_t fabricId[8] = {0};           // Fabric this entry applies to
-  uint8_t nodeId[8] = {0};             // Node ID (0 = any node in fabric)
+  uint8_t nodeId[8] = {0};             // Node ID; wildcard is explicit
   uint8_t subjectId[8] = {0};          // Subject (accessor) ID
-  uint16_t clusterId = 0U;             // Cluster ID (0 = all clusters)
-  uint16_t endpointId = 0U;            // Endpoint ID (0 = all endpoints)
+  uint32_t clusterId = 0U;             // Cluster ID (wildcard is explicit)
+  uint16_t endpointId = 0U;            // Endpoint ID; wildcard is explicit
   AclPrivilege privilege = AclPrivilege::kNone;
   bool wildcardFabric = false;          // Apply to all fabrics
   bool wildcardNode = false;           // Apply to all nodes in fabric
+  bool wildcardSubject = false;        // Apply to all subjects
   bool wildcardCluster = false;        // Apply to all clusters
   bool wildcardEndpoint = false;       // Apply to all endpoints
   bool valid = false;
@@ -50,7 +51,7 @@ class MatterAccessControl {
   bool checkAccess(const uint8_t subjectId[8],
                    const uint8_t fabricId[8],
                    const uint8_t nodeId[8],
-                   uint16_t clusterId,
+                   uint32_t clusterId,
                    uint16_t endpointId,
                    AclPrivilege requiredPrivilege) const;
 
@@ -81,7 +82,7 @@ class MatterAccessControl {
                     const uint8_t subjectId[8],
                     const uint8_t fabricId[8],
                     const uint8_t nodeId[8],
-                    uint16_t clusterId,
+                    uint32_t clusterId,
                     uint16_t endpointId) const;
 };
 

@@ -9,18 +9,18 @@
 
 namespace xiao_nrf54l15 {
 
-// Matter CASE (Certificate Authenticated Session Establishment)
-// Implements the Sigma protocol for establishing encrypted operational
-// sessions after PASE commissioning.
+// Experimental CASE-like session surface for two-core demonstrations. Its
+// certificate and message encodings are not Matter wire-compatible Sigma/CASE.
 
 constexpr size_t kCaseHashSize = 32U;
-constexpr size_t kCaseAesKeySize = 16U;  // AES-128-CCM
+constexpr size_t kCaseAesKeySize = 16U;  // AES-128 key
 constexpr size_t kCaseIvSize = 13U;
 constexpr size_t kCaseMicSize = 8U;
 constexpr size_t kCaseRandomSize = 32U;
 constexpr size_t kCaseEphemeralKeySize = 65U;  // Uncompressed P-256
 constexpr size_t kCaseCertificateMaxSize = 256U;
 constexpr size_t kCaseSignatureSize = 64U;  // r || s
+constexpr size_t kCaseSerializedCertificateSize = 189U;
 
 enum class CaseState : uint8_t {
   kIdle = 0U,
@@ -59,11 +59,13 @@ struct CaseSigma2 {
   uint8_t responderRandom[kCaseRandomSize] = {0};
   uint16_t responderSessionId = 0U;
   uint8_t responderEphPubKey[kCaseEphemeralKeySize] = {0};
+  uint8_t transcriptSignature[kCaseSignatureSize] = {0};
   uint8_t encryptedCert[kCaseCertificateMaxSize] = {0};
   uint16_t encryptedCertLen = 0U;
 };
 
 struct CaseSigma3 {
+  uint8_t transcriptSignature[kCaseSignatureSize] = {0};
   uint8_t encryptedCert[kCaseCertificateMaxSize] = {0};
   uint16_t encryptedCertLen = 0U;
 };
@@ -100,6 +102,8 @@ class MatterCaseSession {
   // Set the local certificate and private key
   bool setCertificate(const CaseCertificate& cert,
                       const Secp256r1Scalar& privateKey);
+  // Pins the expected peer identity. CASE will reject an encrypted Sigma
+  // certificate that does not exactly match this validated certificate.
   bool setPeerCertificate(const CaseCertificate& cert);
 
   // Generate a self-signed certificate for testing
@@ -120,14 +124,16 @@ class MatterCaseSession {
   // Get derived session keys (available after Establishment)
   bool getSessionKeys(CaseSessionKeys* outKeys) const;
 
-  // AES-CCM encrypt/decrypt for messages
+  // Authenticated encryption for this experimental session format.
   bool encryptMessage(const uint8_t* plaintext, uint16_t plaintextLen,
                       const uint8_t* aad, uint16_t aadLen,
-                      uint8_t* outCiphertext, uint16_t* outLen,
+                      uint8_t* outCiphertext, size_t outCapacity,
+                      uint16_t* outLen,
                       bool initiatorToResponder);
   bool decryptMessage(const uint8_t* ciphertext, uint16_t ciphertextLen,
                       const uint8_t* aad, uint16_t aadLen,
-                      uint8_t* outPlaintext, uint16_t* outLen,
+                      uint8_t* outPlaintext, size_t outCapacity,
+                      uint16_t* outLen,
                       bool initiatorToResponder);
 
   static const char* stateName(CaseState state);
@@ -137,14 +143,20 @@ class MatterCaseSession {
   bool encryptWithKey(const uint8_t key[16], const uint8_t* nonce, size_t nonceLen,
                       const uint8_t* plaintext, size_t plaintextLen,
                       const uint8_t* aad, size_t aadLen,
-                      uint8_t* outCiphertext, uint16_t* outLen);
+                      uint8_t* outCiphertext, size_t outCapacity,
+                      uint16_t* outLen);
   bool decryptWithKey(const uint8_t key[16], const uint8_t* nonce, size_t nonceLen,
                       const uint8_t* ciphertext, size_t ciphertextLen,
                       const uint8_t* aad, size_t aadLen,
-                      uint8_t* outPlaintext, uint16_t* outLen);
+                      uint8_t* outPlaintext, size_t outCapacity,
+                      uint16_t* outLen);
   bool verifyCertificate(const CaseCertificate& cert,
                          const Secp256r1Point& issuerPubKey);
+  bool buildTranscriptProofHash(uint8_t proofMarker,
+                                uint8_t outHash[kCaseHashSize]) const;
   bool generateRandom(uint8_t* out, size_t len);
+  void clearSessionSecrets();
+  void fail();
   void advanceState(CaseState newState);
 
   StateCallback callback_ = nullptr;
@@ -158,11 +170,13 @@ class MatterCaseSession {
   Secp256r1Scalar ephPrivateKey_;
   Secp256r1Point ephPublicKey_;
   CaseCertificate localCert_;
+  bool localCertificateConfigured_ = false;
 
   // Peer's information
   Secp256r1Point peerPublicKey_;
   Secp256r1Point peerEphPublicKey_;
   CaseCertificate peerCert_;
+  bool peerCertificateConfigured_ = false;
 
   // Session data
   uint16_t localSessionId_ = 0U;
@@ -170,6 +184,10 @@ class MatterCaseSession {
   uint8_t initiatorRandom_[kCaseRandomSize] = {0};
   uint8_t responderRandom_[kCaseRandomSize] = {0};
   CaseSessionKeys sessionKeys_;
+  uint32_t encryptI2rCounter_ = 0U;
+  uint32_t encryptR2iCounter_ = 0U;
+  uint32_t decryptI2rCounter_ = 0U;
+  uint32_t decryptR2iCounter_ = 0U;
 };
 
 }  // namespace xiao_nrf54l15

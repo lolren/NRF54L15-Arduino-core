@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "matter_foundation_target.h"
+#include "matter_pase_transport.h"
 #include "nrf54_thread_experimental.h"
 
 #if defined(NRF54L15_CLEAN_MATTER_CORE_ENABLE) && \
@@ -63,7 +64,7 @@ struct MatterPlatformState {
   char threadDatasetSourceName[20] = {0};
 };
 
-class MatterPlatform {
+class MatterPlatform : public MatterPaseTransport {
  public:
   MatterPlatform() = default;
 
@@ -81,13 +82,14 @@ class MatterPlatform {
   bool exportOpenThreadDatasetHex(char* outBuffer, size_t outBufferSize,
                                   size_t* outHexLength = nullptr) const;
   bool sendUdp(const uint8_t* payload, uint16_t length,
-               const otIp6Address& destAddr, uint16_t destPort);
+               const otIp6Address& destAddr,
+               uint16_t destPort) override;
   bool setReceiveCallback(void (*callback)(void* context,
                                            const uint8_t* payload,
                                            uint16_t length,
                                            const otIp6Address& source,
                                            uint16_t sourcePort),
-                          void* context = nullptr);
+                          void* context = nullptr) override;
   bool setFactoryData(const uint8_t* data, size_t length);
   bool getFactoryData(uint8_t* outData, size_t maxLength,
                       size_t* outLength = nullptr) const;

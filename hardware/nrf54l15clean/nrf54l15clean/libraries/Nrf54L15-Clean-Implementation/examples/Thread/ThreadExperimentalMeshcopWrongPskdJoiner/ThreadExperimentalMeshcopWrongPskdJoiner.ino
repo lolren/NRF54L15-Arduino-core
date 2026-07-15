@@ -16,6 +16,7 @@ uint32_t g_lastStatusPrintMs = 0U;
 uint32_t g_lastJoinerStartAttemptMs = 0U;
 bool g_joinerStarted = false;
 bool g_joinerCallbackSeen = false;
+otError g_joinerCallbackError = OT_ERROR_NONE;
 bool g_unexpectedSuccess = false;
 bool g_cleanDatasetChecked = false;
 bool g_blockedByPreexistingDataset = false;
@@ -55,6 +56,8 @@ void printStatus(const char* reason) {
   Serial.print(g_thread.joinerStateName());
   Serial.print(" callback_seen=");
   Serial.print(g_joinerCallbackSeen ? 1 : 0);
+  Serial.print(" callback_error=");
+  Serial.print(static_cast<int>(g_joinerCallbackError));
   Serial.print(" unexpected_success=");
   Serial.print(g_unexpectedSuccess ? 1 : 0);
   Serial.print(" active_dataset=");
@@ -67,6 +70,7 @@ void printStatus(const char* reason) {
 
 void onJoinerCallback(void*, otError error) {
   g_joinerCallbackSeen = true;
+  g_joinerCallbackError = error;
   Serial.print("thread_meshcop_wrong_pskd joiner_callback error=");
   Serial.println(static_cast<int>(error));
 

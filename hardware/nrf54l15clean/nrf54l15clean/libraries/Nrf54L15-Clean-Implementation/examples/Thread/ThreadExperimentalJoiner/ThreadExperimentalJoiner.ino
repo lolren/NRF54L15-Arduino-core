@@ -23,7 +23,7 @@ bool g_joinerStarted = false;
 bool g_joinerComplete = false;
 bool g_cleanDatasetChecked = false;
 bool g_preexistingDataset = false;
-bool g_blockedByPreexistingDataset = false;
+bool g_restoreMode = false;
 
 bool readActiveDatasetLength(uint16_t* outLength) {
   if (outLength != nullptr) {
@@ -208,6 +208,9 @@ void onStateChanged(void* context, otChangedFlags flags,
 }
 
 void printStatus(const char* reason) {
+  xiao_nrf54l15::Nrf54ThreadExperimental::DatasetRestoreDiagnostics restore = {};
+  (void)g_thread.getDatasetRestoreDiagnostics(&restore);
+
   Serial.print("thread_joiner reason=");
   Serial.println(reason);
   Serial.print("thread_joiner started=");
@@ -230,6 +233,14 @@ void printStatus(const char* reason) {
   Serial.println(g_cleanDatasetChecked ? 1 : 0);
   Serial.print("thread_joiner preexisting_dataset_before_joiner=");
   Serial.println(g_preexistingDataset ? 1 : 0);
+  Serial.print("thread_joiner reboot_restore_mode=");
+  Serial.println(g_restoreMode ? 1 : 0);
+  Serial.print("thread_joiner restore_attempted=");
+  Serial.println(restore.attempted ? 1 : 0);
+  Serial.print("thread_joiner restore_restored=");
+  Serial.println(restore.restored ? 1 : 0);
+  Serial.print("thread_joiner dataset_configured=");
+  Serial.println(g_thread.datasetConfigured() ? 1 : 0);
   printActiveDatasetStatus("status");
   printAttachDebug();
   printPlatformDebug();
@@ -246,11 +257,14 @@ void setup() {
   Serial.println("thread_joiner Joiner example starting...");
   Serial.print("thread_joiner PSKd=");
   Serial.println(kJoinerPskd);
-  Serial.println("thread_joiner wipe_requested=1");
+  Serial.println("thread_joiner wipe_requested=0");
   Serial.print("thread_joiner standard_meshcop_enabled=");
   Serial.println(g_thread.joinerSupported() ? 1 : 0);
 
-  const bool beginOk = g_thread.beginJoinerOnly(true);
+  // A normal begin lets the same image prove the commissioned dataset survives
+  // a reset. A clean upload starts without a dataset and enters Joiner mode;
+  // subsequent boots restore and attach without running MeshCoP again.
+  const bool beginOk = g_thread.begin(false);
   Serial.print("thread_joiner begin=");
   Serial.println(beginOk ? 1 : 0);
   if (!beginOk) {
@@ -277,10 +291,10 @@ void setup() {
 void loop() {
   g_thread.process();
 
-  if (g_blockedByPreexistingDataset) {
+  if (g_restoreMode) {
     if ((millis() - g_lastStatusPrintMs) >= kStatusPrintIntervalMs) {
       g_lastStatusPrintMs = millis();
-      printStatus("blocked-preexisting-dataset");
+      printStatus("restored-dataset");
     }
     return;
   }
@@ -299,9 +313,9 @@ void loop() {
       Serial.print("thread_joiner before_joiner_active_dataset_tlv_len=");
       Serial.println(datasetLength);
       if (g_preexistingDataset) {
-        g_blockedByPreexistingDataset = true;
-        Serial.println(
-            "thread_joiner FATAL preexisting_dataset_before_joiner=1");
+        g_restoreMode = true;
+        Serial.println("thread_joiner reboot_restore_ready=1");
+        printStatus("restore-detected");
         return;
       }
       Serial.println("thread_joiner clean_joiner_proof=1");

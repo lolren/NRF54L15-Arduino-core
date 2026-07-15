@@ -35,6 +35,22 @@ bool Nrf54MatterOnOffLightEndpoint::snapshot(
 bool Nrf54MatterOnOffLightEndpoint::readAttribute(
     const MatterAttributePath& path, MatterAttributeValue* outValue,
     MatterInteractionStatus* outStatus) const {
+  return readAttributeInternal(path, nullptr, outValue, outStatus);
+}
+
+bool Nrf54MatterOnOffLightEndpoint::readAttribute(
+    const MatterAttributePath& path,
+    const MatterAccessContext& accessContext,
+    MatterAttributeValue* outValue,
+    MatterInteractionStatus* outStatus) const {
+  return readAttributeInternal(path, &accessContext, outValue, outStatus);
+}
+
+bool Nrf54MatterOnOffLightEndpoint::readAttributeInternal(
+    const MatterAttributePath& path,
+    const MatterAccessContext* accessContext,
+    MatterAttributeValue* outValue,
+    MatterInteractionStatus* outStatus) const {
   if (outValue == nullptr) {
     setStatus(outStatus, MatterInteractionStatus::kInvalidState);
     return false;
@@ -47,6 +63,12 @@ bool Nrf54MatterOnOffLightEndpoint::readAttribute(
   }
   if (path.endpointId != kEndpointId) {
     setStatus(outStatus, MatterInteractionStatus::kUnsupportedEndpoint);
+    return false;
+  }
+  if (accessContext != nullptr &&
+      !accessAllowed(*accessContext, path.clusterId, path.endpointId,
+                     AclPrivilege::kView)) {
+    setStatus(outStatus, MatterInteractionStatus::kAccessDenied);
     return false;
   }
 
@@ -90,6 +112,26 @@ bool Nrf54MatterOnOffLightEndpoint::readAttribute(
 
 bool Nrf54MatterOnOffLightEndpoint::invokeCommand(
     const MatterCommandRequest& request, MatterCommandResult* outResult) {
+  MatterAccessContext accessContext = {};
+  accessContext.subjectId = request.subjectId;
+  accessContext.fabricId = request.fabricId;
+  accessContext.nodeId = request.nodeId;
+  if (!accessAllowed(accessContext, request.path.clusterId,
+                     request.path.endpointId, AclPrivilege::kOperate)) {
+    fillResult(outResult, MatterInteractionStatus::kAccessDenied, false,
+               false);
+    return false;
+  }
+  return invokeCommandInternal(request, outResult);
+}
+
+bool Nrf54MatterOnOffLightEndpoint::invokeTrustedLocalCommand(
+    const MatterCommandRequest& request, MatterCommandResult* outResult) {
+  return invokeCommandInternal(request, outResult);
+}
+
+bool Nrf54MatterOnOffLightEndpoint::invokeCommandInternal(
+    const MatterCommandRequest& request, MatterCommandResult* outResult) {
   if (device_ == nullptr) {
     fillResult(outResult, MatterInteractionStatus::kInvalidState, false, false);
     return false;
@@ -98,22 +140,6 @@ bool Nrf54MatterOnOffLightEndpoint::invokeCommand(
     fillResult(outResult, MatterInteractionStatus::kUnsupportedEndpoint, false,
                false);
     return false;
-  }
-
-  // ACL check: deny if access control is configured and subject is not authorized
-  if (accessControl_ != nullptr &&
-      (request.subjectId != nullptr || request.fabricId != nullptr)) {
-    uint8_t defaultNodeId[8] = {0};
-    const uint8_t* fabricId = request.fabricId != nullptr ? request.fabricId : defaultNodeId;
-    const uint8_t* nodeId = request.nodeId != nullptr ? request.nodeId : defaultNodeId;
-    const uint8_t* subjectId = request.subjectId != nullptr ? request.subjectId : defaultNodeId;
-    if (!accessControl_->checkAccess(subjectId, fabricId, nodeId,
-                                     request.path.clusterId,
-                                     request.path.endpointId,
-                                     AclPrivilege::kOperate)) {
-      fillResult(outResult, MatterInteractionStatus::kUnsupportedCommand, false, false);
-      return false;
-    }
   }
 
   MatterOnOffLightDeviceState before = {};
@@ -194,6 +220,8 @@ const char* Nrf54MatterOnOffLightEndpoint::statusName(
       return "invalid-command-data";
     case MatterInteractionStatus::kStorageFailure:
       return "storage-failure";
+    case MatterInteractionStatus::kAccessDenied:
+      return "access-denied";
     default:
       return "unknown";
   }
@@ -305,6 +333,22 @@ void Nrf54MatterOnOffLightEndpoint::fillResult(
   } else {
     outResult->light = MatterOnOffLightDeviceState{};
   }
+}
+
+bool Nrf54MatterOnOffLightEndpoint::accessAllowed(
+    const MatterAccessContext& accessContext,
+    MatterClusterId clusterId,
+    MatterEndpointId endpointId,
+    AclPrivilege requiredPrivilege) const {
+  if (!accessContext.complete()) {
+    return false;
+  }
+  if (accessControl_ == nullptr) {
+    return false;
+  }
+  return accessControl_->checkAccess(
+      accessContext.subjectId, accessContext.fabricId, accessContext.nodeId,
+      clusterId, endpointId, requiredPrivilege);
 }
 
 }  // namespace xiao_nrf54l15

@@ -91,7 +91,10 @@ bool Nrf54ThreadExperimental::begin(bool wipeSettings, AttachPolicy policy) {
     (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE != 0)
   otPlatSettingsInit(nullptr, nullptr, 0);
   if (wipeSettings) {
-    otPlatSettingsWipe(nullptr);
+    if (!OpenThreadPlatformSkeleton::wipeSettingsChecked()) {
+      lastError_ = OT_ERROR_NO_BUFS;
+      return false;
+    }
     settingsWiped_ = true;
   }
 #endif
@@ -225,6 +228,7 @@ bool Nrf54ThreadExperimental::restart(bool wipeSettings) {
   lastChangedFlags_ = 0U;
   pendingChangedFlags_ = 0U;
   datasetRestoreAttempted_ = false;
+  datasetRestoredFromSettings_ = false;
   datasetRestoreError_ = OT_ERROR_NONE;
   datasetRestoreTlvLength_ = 0U;
   attachPolicyConfigured_ = false;
@@ -240,9 +244,6 @@ bool Nrf54ThreadExperimental::restart(bool wipeSettings) {
   commissionerJoinerEventCount_ = 0U;
   commissionerJoinerFinalizeCount_ = 0U;
   commissionerJoinerRemovedCount_ = 0U;
-  if (wipeSettings_) {
-    datasetRestoredFromSettings_ = false;
-  }
   return true;
 #endif
 }
@@ -359,7 +360,6 @@ void Nrf54ThreadExperimental::process() {
 
   if (instance_ != nullptr && !joinerOnly && threadEnabled_) {
     (void)maybePromoteChildFirstFallback(elapsedMs);
-    (void)maybeForceLeader(elapsedMs);
     (void)maybeSwitchToSleepyMode();
   }
 
@@ -514,7 +514,22 @@ bool Nrf54ThreadExperimental::wipePersistentSettings() {
   lastError_ = OT_ERROR_INVALID_STATE;
   return false;
 #else
-  OpenThreadPlatformSkeleton::wipeSettings();
+  if (instance_ != nullptr) {
+    // OpenThread only permits persistent-info erasure while disabled. Stop
+    // first so its in-memory managers cannot immediately repersist the old
+    // dataset after the backing store is cleared.
+    if (!stop()) {
+      return false;
+    }
+    lastError_ = otInstanceErasePersistentInfo(instance_);
+    if (lastError_ != OT_ERROR_NONE) {
+      return false;
+    }
+  }
+  if (!OpenThreadPlatformSkeleton::wipeSettingsChecked()) {
+    lastError_ = OT_ERROR_NO_BUFS;
+    return false;
+  }
   settingsWiped_ = true;
   dataset_ = {};
   datasetConfigured_ = false;
@@ -872,6 +887,35 @@ bool Nrf54ThreadExperimental::openUdp(uint16_t port,
   return true;
 }
 
+bool Nrf54ThreadExperimental::closeUdp(uint16_t port) {
+  if (port == 0U) {
+    lastUdpError_ = OT_ERROR_INVALID_ARGS;
+    return false;
+  }
+
+  UdpSocketSlot* slot = findUdpSlot(port);
+  if (slot == nullptr) {
+    lastUdpError_ = OT_ERROR_NONE;
+    return true;
+  }
+
+#if defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) && \
+    (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE != 0)
+  if (slot->opened) {
+    if (instance_ == nullptr) {
+      lastUdpError_ = OT_ERROR_INVALID_STATE;
+      return false;
+    }
+    lastUdpError_ = otUdpClose(instance_, &slot->socket);
+    if (lastUdpError_ != OT_ERROR_NONE) return false;
+  }
+#endif
+
+  *slot = UdpSocketSlot{};
+  lastUdpError_ = OT_ERROR_NONE;
+  return true;
+}
+
 bool Nrf54ThreadExperimental::setStateChangedCallback(
     StateChangedCallback callback, void* callbackContext) {
   stateChangedCallback_ = callback;
@@ -910,15 +954,19 @@ bool Nrf54ThreadExperimental::sendUdpFrom(uint16_t localPort,
   UdpSocketSlot* slot = nullptr;
   if (localPort != 0U) {
     slot = findUdpSlot(localPort);
+    if (slot == nullptr || !slot->opened) {
+      lastUdpError_ = OT_ERROR_INVALID_STATE;
+      return false;
+    }
   } else {
     slot = findUdpSlot(peerPort);
-  }
-  if (slot == nullptr || !slot->opened) {
-    slot = firstUdpSlot(true);
-  }
-  if (slot == nullptr || !slot->opened) {
-    lastUdpError_ = OT_ERROR_INVALID_STATE;
-    return false;
+    if (slot == nullptr || !slot->opened) {
+      slot = firstUdpSlot(true);
+    }
+    if (slot == nullptr || !slot->opened) {
+      lastUdpError_ = OT_ERROR_INVALID_STATE;
+      return false;
+    }
   }
 
   otMessage* message = otUdpNewMessage(instance_, nullptr);
@@ -1731,59 +1779,12 @@ bool Nrf54ThreadExperimental::maybePromoteChildFirstFallback(uint32_t elapsedMs)
   routerEligible_ = true;
   childFirstFallbackUsed_ = true;
   otThreadSetRouterSelectionJitter(instance_, 1U);
-
-  otError leaderError = otThreadBecomeLeader(instance_);
-  if (leaderError == OT_ERROR_NONE || leaderError == OT_ERROR_ALREADY ||
-      leaderError == OT_ERROR_INVALID_STATE || leaderError == OT_ERROR_BUSY) {
-    lastError_ = OT_ERROR_NONE;
-    return true;
-  }
-
-  lastError_ = leaderError;
-  return false;
-#endif
-}
-
-bool Nrf54ThreadExperimental::maybeForceLeader(uint32_t elapsedMs) {
-#if !defined(NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE) || \
-    (NRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE == 0)
-  (void)elapsedMs;
-  lastError_ = OT_ERROR_INVALID_STATE;
-  return false;
-#else
-  /* Force leader formation when:
-     - Device has a configured dataset (commissioner forming its own network)
-     - Device is not already a leader
-     - Enough time has passed for beacon discovery
-     - Device is router-eligible */
-  if (attachPolicy_ != AttachPolicy::kRouterEligible || instance_ == nullptr ||
-      !datasetConfigured_ || !datasetApplied_ ||
-      elapsedMs < 3000U) {
-    return false;
-  }
-
-  // Allow force-leader even when already attached as router/child.
-  // The earlier attached() check prevented upgrade when the device
-  // attached to another network on the same channel before the 3 s
-  // beacon-discovery window elapsed.
-  otDeviceRole currentRole = otThreadGetDeviceRole(instance_);
-  if (currentRole == OT_DEVICE_ROLE_LEADER ||
-      currentRole == OT_DEVICE_ROLE_DISABLED ||
-      currentRole == OT_DEVICE_ROLE_DETACHED) {
-    // Already leader = nothing to do.
-    // Disabled / Detached = exit early so next call can retry.
-    return false;
-  }
-
-  otError leaderError = otThreadBecomeLeader(instance_);
-  if (leaderError == OT_ERROR_NONE || leaderError == OT_ERROR_ALREADY ||
-      leaderError == OT_ERROR_INVALID_STATE || leaderError == OT_ERROR_BUSY) {
-    lastError_ = OT_ERROR_NONE;
-    return true;
-  }
-
-  lastError_ = leaderError;
-  return false;
+  // Router eligibility is sufficient for a detached FTD to form a partition
+  // when no peer exists. Let MLE continue its normal attach/election flow so a
+  // late-starting peer joins the existing partition instead of being forced
+  // into a second leader partition.
+  lastError_ = OT_ERROR_NONE;
+  return true;
 #endif
 }
 
@@ -2294,10 +2295,6 @@ uint32_t Nrf54ThreadExperimental::computeChildFirstFallbackDelayMs() {
     hash ^= value;
     hash *= 16777619UL;
   }
-
-  const uint32_t now = micros();
-  hash ^= now;
-  hash *= 16777619UL;
 
   return kChildFirstFallbackBaseMs +
          (hash % (kChildFirstFallbackJitterMs + 1UL));

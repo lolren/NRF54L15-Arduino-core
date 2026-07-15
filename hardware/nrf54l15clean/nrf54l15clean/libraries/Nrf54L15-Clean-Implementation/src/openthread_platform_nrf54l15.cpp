@@ -17,6 +17,7 @@
 #include <openthread/platform/entropy.h>
 #include <openthread/platform/logging.h>
 #include <openthread/platform/memory.h>
+#include <openthread/platform/misc.h>
 #include <openthread/platform/settings.h>
 #include <openthread/platform/radio.h>
 #include <openthread/tasklet.h>
@@ -70,9 +71,6 @@ constexpr size_t kThreadRawPowerSettingMaxLength = 8U;
 constexpr uint8_t kThreadGeneratedRawPowerSettingMagic = 0x54U;
 constexpr otRadioCaps kThreadRadioCaps =
     static_cast<otRadioCaps>(OT_RADIO_CAPS_ENERGY_SCAN |
-                             OT_RADIO_CAPS_CSMA_BACKOFF |
-                             OT_RADIO_CAPS_RECEIVE_TIMING |
-                             OT_RADIO_CAPS_RX_ON_WHEN_IDLE |
                              OT_RADIO_CAPS_TRANSMIT_FRAME_POWER |
                              OT_RADIO_CAPS_ALT_SHORT_ADDR);
 constexpr uint8_t kIeee802154FrameTypeCommand = 0x03U;
@@ -578,11 +576,12 @@ void captureThreadMacFrameSummary(OpenThreadPlatformSkeletonSnapshot& snapshot,
   }
 }
 
-void ensureSettingsOpen() {
+bool ensureSettingsOpen() {
   if (!gOpenThreadPlatformState.settingsOpen) {
-    gOpenThreadPlatformState.settings.begin(kSettingsNamespace, false);
-    gOpenThreadPlatformState.settingsOpen = true;
+    gOpenThreadPlatformState.settingsOpen =
+        gOpenThreadPlatformState.settings.begin(kSettingsNamespace, false);
   }
+  return gOpenThreadPlatformState.settingsOpen;
 }
 
 void closeSettings() {
@@ -620,6 +619,110 @@ void makeDataChunkKey(uint16_t key,
 }
 
 constexpr uint16_t kSettingChunkLength = 48U;
+// Preferences has 33 entries shared by every namespace. Even zero-length
+// values require one length entry, and a non-empty key also needs its count
+// entry, so a persisted key can never contain more than 32 values.
+constexpr uint16_t kSettingMaxValueCount = 32U;
+constexpr uint8_t kSettingInvalidPhysicalIndex = UINT8_MAX;
+constexpr size_t kSettingDirectoryLength = 40U;
+static_assert(kSettingDirectoryLength <= kSettingChunkLength,
+              "settings directory must fit in one Preferences entry");
+
+// The directory replaces the legacy ushort count in the same key. Entries
+// before count are visible; later entries own retired slots until cleanup.
+// pendingIndex owns an incomplete stage across failed writes and resets.
+struct SettingDirectory {
+  uint8_t count = 0U;
+  uint8_t pendingIndex = kSettingInvalidPhysicalIndex;
+  uint16_t pendingLength = 0U;
+  uint8_t physicalIndices[kSettingMaxValueCount] = {};
+};
+
+void initializeSettingDirectory(SettingDirectory* directory) {
+  if (directory == nullptr) {
+    return;
+  }
+  directory->count = 0U;
+  directory->pendingIndex = kSettingInvalidPhysicalIndex;
+  directory->pendingLength = 0U;
+  memset(directory->physicalIndices, kSettingInvalidPhysicalIndex,
+         sizeof(directory->physicalIndices));
+}
+
+bool settingDirectoryValid(const SettingDirectory& directory) {
+  if (directory.count > kSettingMaxValueCount ||
+      (directory.pendingIndex != kSettingInvalidPhysicalIndex &&
+       directory.pendingIndex >= kSettingMaxValueCount) ||
+      (directory.pendingIndex == kSettingInvalidPhysicalIndex &&
+       directory.pendingLength != 0U)) {
+    return false;
+  }
+
+  bool used[kSettingMaxValueCount] = {};
+  for (uint16_t i = 0U; i < kSettingMaxValueCount; ++i) {
+    const uint8_t physicalIndex = directory.physicalIndices[i];
+    if (i < directory.count &&
+        physicalIndex == kSettingInvalidPhysicalIndex) {
+      return false;
+    }
+    if (physicalIndex == kSettingInvalidPhysicalIndex) {
+      continue;
+    }
+    if (physicalIndex >= kSettingMaxValueCount || used[physicalIndex]) {
+      return false;
+    }
+    used[physicalIndex] = true;
+  }
+  return directory.pendingIndex == kSettingInvalidPhysicalIndex ||
+         !used[directory.pendingIndex];
+}
+
+bool settingDirectoryEmpty(const SettingDirectory& directory) {
+  if (directory.count != 0U ||
+      directory.pendingIndex != kSettingInvalidPhysicalIndex) {
+    return false;
+  }
+  for (uint16_t i = 0U; i < kSettingMaxValueCount; ++i) {
+    if (directory.physicalIndices[i] != kSettingInvalidPhysicalIndex) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool decodeSettingDirectory(const uint8_t* bytes, size_t length,
+                            SettingDirectory* directory) {
+  if (bytes == nullptr || directory == nullptr ||
+      length != kSettingDirectoryLength || bytes[0] != 'O' ||
+      bytes[1] != 'T' || bytes[2] != 'D' || bytes[3] != '1') {
+    return false;
+  }
+
+  initializeSettingDirectory(directory);
+  directory->count = bytes[4];
+  directory->pendingIndex = bytes[5];
+  directory->pendingLength =
+      static_cast<uint16_t>(bytes[6]) |
+      static_cast<uint16_t>(static_cast<uint16_t>(bytes[7]) << 8U);
+  memcpy(directory->physicalIndices, bytes + 8U,
+         sizeof(directory->physicalIndices));
+  return settingDirectoryValid(*directory);
+}
+
+void encodeSettingDirectory(const SettingDirectory& directory,
+                            uint8_t* bytes) {
+  memset(bytes, 0, kSettingDirectoryLength);
+  bytes[0] = 'O';
+  bytes[1] = 'T';
+  bytes[2] = 'D';
+  bytes[3] = '1';
+  bytes[4] = directory.count;
+  bytes[5] = directory.pendingIndex;
+  bytes[6] = static_cast<uint8_t>(directory.pendingLength & 0xFFU);
+  bytes[7] = static_cast<uint8_t>(directory.pendingLength >> 8U);
+  memcpy(bytes + 8U, directory.physicalIndices,
+         sizeof(directory.physicalIndices));
+}
 
 uint16_t getSettingChunkCount(uint16_t valueLength) {
   if (valueLength == 0U) {
@@ -629,34 +732,136 @@ uint16_t getSettingChunkCount(uint16_t valueLength) {
                                kSettingChunkLength);
 }
 
-void removeSettingDataKeys(uint16_t key, uint16_t index,
-                           uint16_t valueLength) {
-  ensureSettingsOpen();
+bool removePreferenceKeyIfPresent(const char* preferenceKey) {
+  if (preferenceKey == nullptr || !ensureSettingsOpen()) {
+    return false;
+  }
+  return !gOpenThreadPlatformState.settings.isKey(preferenceKey) ||
+         gOpenThreadPlatformState.settings.remove(preferenceKey);
+}
 
-  char dataKey[20];
-  makeDataKey(key, index, dataKey, sizeof(dataKey));
-  gOpenThreadPlatformState.settings.remove(dataKey);
+bool removeSettingChunkKeys(uint16_t key, uint16_t index,
+                            uint16_t valueLength) {
+  if (!ensureSettingsOpen()) {
+    return false;
+  }
 
+  bool removed = true;
   const uint16_t chunkCount = getSettingChunkCount(valueLength);
   for (uint16_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex) {
     char chunkKey[20];
     makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
-    gOpenThreadPlatformState.settings.remove(chunkKey);
+    removed = removePreferenceKeyIfPresent(chunkKey) && removed;
   }
+  return removed;
 }
 
-uint16_t getSettingCount(uint16_t key) {
-  ensureSettingsOpen();
-  char countKey[16];
-  makeCountKey(key, countKey, sizeof(countKey));
-  return gOpenThreadPlatformState.settings.getUShort(countKey, 0);
+bool removeSettingDataKeys(uint16_t key, uint16_t index,
+                           uint16_t valueLength) {
+  char dataKey[20];
+  makeDataKey(key, index, dataKey, sizeof(dataKey));
+  const bool dataRemoved = removePreferenceKeyIfPresent(dataKey);
+  const bool chunksRemoved =
+      removeSettingChunkKeys(key, index, valueLength);
+  return dataRemoved && chunksRemoved;
 }
 
-bool setSettingCount(uint16_t key, uint16_t count) {
-  ensureSettingsOpen();
+bool loadSettingDirectory(uint16_t key, SettingDirectory* directory) {
+  if (directory == nullptr || !ensureSettingsOpen()) {
+    return false;
+  }
+  initializeSettingDirectory(directory);
+
   char countKey[16];
   makeCountKey(key, countKey, sizeof(countKey));
-  return gOpenThreadPlatformState.settings.putUShort(countKey, count) == sizeof(uint16_t);
+  if (!gOpenThreadPlatformState.settings.isKey(countKey)) {
+    return true;
+  }
+
+  const size_t encodedLength =
+      gOpenThreadPlatformState.settings.getBytesLength(countKey);
+  if (encodedLength != 0U) {
+    if (encodedLength != kSettingDirectoryLength) {
+      return false;
+    }
+    uint8_t encoded[kSettingDirectoryLength];
+    if (gOpenThreadPlatformState.settings.getBytes(
+            countKey, encoded, sizeof(encoded)) != sizeof(encoded)) {
+      return false;
+    }
+    return decodeSettingDirectory(encoded, sizeof(encoded), directory);
+  }
+
+  // Legacy records stored only a ushort count and used identity mapping.
+  const uint16_t legacyCount =
+      gOpenThreadPlatformState.settings.getUShort(countKey, UINT16_MAX);
+  if (legacyCount > kSettingMaxValueCount) {
+    return false;
+  }
+  directory->count = static_cast<uint8_t>(legacyCount);
+  for (uint16_t i = 0U; i < legacyCount; ++i) {
+    directory->physicalIndices[i] = static_cast<uint8_t>(i);
+  }
+  return true;
+}
+
+bool saveSettingDirectory(uint16_t key,
+                          const SettingDirectory& directory) {
+  if (!settingDirectoryValid(directory) || !ensureSettingsOpen()) {
+    return false;
+  }
+
+  char countKey[16];
+  makeCountKey(key, countKey, sizeof(countKey));
+  if (settingDirectoryEmpty(directory)) {
+    return removePreferenceKeyIfPresent(countKey);
+  }
+
+  uint8_t encoded[kSettingDirectoryLength];
+  encodeSettingDirectory(directory, encoded);
+  return gOpenThreadPlatformState.settings.putBytes(
+             countKey, encoded, sizeof(encoded)) == sizeof(encoded);
+}
+
+size_t countMissingSettingEntries(uint16_t key, uint16_t index,
+                                  uint16_t valueLength) {
+  if (!ensureSettingsOpen()) {
+    return SIZE_MAX;
+  }
+
+  size_t missing = 0U;
+  char preferenceKey[20];
+  if (valueLength == 0U) {
+    makeLengthKey(key, index, preferenceKey, sizeof(preferenceKey));
+    if (!gOpenThreadPlatformState.settings.isKey(preferenceKey)) {
+      ++missing;
+    }
+    return missing;
+  }
+  if (valueLength <= kSettingChunkLength) {
+    makeDataKey(key, index, preferenceKey, sizeof(preferenceKey));
+    return gOpenThreadPlatformState.settings.isKey(preferenceKey) ? 0U : 1U;
+  }
+
+  makeLengthKey(key, index, preferenceKey, sizeof(preferenceKey));
+  if (!gOpenThreadPlatformState.settings.isKey(preferenceKey)) {
+    ++missing;
+  }
+
+  const uint16_t chunkCount = getSettingChunkCount(valueLength);
+  for (uint16_t chunkIndex = 0U; chunkIndex < chunkCount; ++chunkIndex) {
+    makeDataChunkKey(key, index, chunkIndex, preferenceKey,
+                     sizeof(preferenceKey));
+    if (!gOpenThreadPlatformState.settings.isKey(preferenceKey)) {
+      ++missing;
+    }
+  }
+  return missing;
+}
+
+bool wipeSettingsStore() {
+  return ensureSettingsOpen() &&
+         gOpenThreadPlatformState.settings.clear();
 }
 
 bool readSettingItem(uint16_t key, uint16_t index, uint8_t* value,
@@ -665,37 +870,75 @@ bool readSettingItem(uint16_t key, uint16_t index, uint8_t* value,
     return false;
   }
 
-  ensureSettingsOpen();
-
-  char lengthKey[20];
-  makeLengthKey(key, index, lengthKey, sizeof(lengthKey));
-
-  if (!gOpenThreadPlatformState.settings.isKey(lengthKey)) {
+  if (!ensureSettingsOpen()) {
     return false;
   }
 
-  const uint16_t actualLength = gOpenThreadPlatformState.settings.getUShort(lengthKey, 0);
+  char lengthKey[20];
+  makeLengthKey(key, index, lengthKey, sizeof(lengthKey));
+  const bool hasLengthKey =
+      gOpenThreadPlatformState.settings.isKey(lengthKey);
+  uint16_t actualLength = 0U;
+  if (hasLengthKey) {
+    actualLength =
+        gOpenThreadPlatformState.settings.getUShort(lengthKey, 0U);
+  } else {
+    // Compact-format values up to one Preferences entry store no redundant
+    // length key. getBytesLength() both recovers the length and checks type.
+    char dataKey[20];
+    makeDataKey(key, index, dataKey, sizeof(dataKey));
+    const size_t directLength =
+        gOpenThreadPlatformState.settings.getBytesLength(dataKey);
+    if (directLength == 0U || directLength > kSettingChunkLength) {
+      return false;
+    }
+    actualLength = static_cast<uint16_t>(directLength);
+  }
   const uint16_t requestedLength = *valueLength;
   *valueLength = actualLength;
 
-  if (value == nullptr || actualLength == 0) {
+  if (actualLength == 0U) {
     return true;
   }
 
-  const uint16_t copyLength = (requestedLength < actualLength) ? requestedLength : actualLength;
+  const uint16_t copyLength =
+      (value == nullptr)
+          ? 0U
+          : ((requestedLength < actualLength) ? requestedLength
+                                               : actualLength);
   if (actualLength <= kSettingChunkLength) {
     char dataKey[20];
     makeDataKey(key, index, dataKey, sizeof(dataKey));
-    if (!gOpenThreadPlatformState.settings.isKey(dataKey)) {
+    if (gOpenThreadPlatformState.settings.getBytesLength(dataKey) !=
+        actualLength) {
       return false;
     }
-    gOpenThreadPlatformState.settings.getBytes(dataKey, value, copyLength);
-    return true;
+    return copyLength == 0U ||
+           gOpenThreadPlatformState.settings.getBytes(dataKey, value,
+                                                       copyLength) ==
+               copyLength;
+  }
+
+  // Validate the complete chunk set before touching the caller's buffer. A
+  // torn or wrong-type entry therefore fails without returning partial data.
+  uint16_t remaining = actualLength;
+  uint16_t chunkIndex = 0U;
+  while (remaining > 0U) {
+    const uint16_t chunkLength =
+        (remaining < kSettingChunkLength) ? remaining : kSettingChunkLength;
+    char chunkKey[20];
+    makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
+    if (gOpenThreadPlatformState.settings.getBytesLength(chunkKey) !=
+        chunkLength) {
+      return false;
+    }
+    remaining = static_cast<uint16_t>(remaining - chunkLength);
+    ++chunkIndex;
   }
 
   uint16_t offset = 0U;
-  uint16_t remaining = actualLength;
-  uint16_t chunkIndex = 0U;
+  remaining = actualLength;
+  chunkIndex = 0U;
   while (remaining > 0U) {
     const uint16_t chunkLength =
         (remaining < kSettingChunkLength) ? remaining : kSettingChunkLength;
@@ -705,13 +948,11 @@ bool readSettingItem(uint16_t key, uint16_t index, uint8_t* value,
             : 0U;
     char chunkKey[20];
     makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
-    if (!gOpenThreadPlatformState.settings.isKey(chunkKey)) {
-      return false;
-    }
     if (copyChunkLength != 0U) {
-      gOpenThreadPlatformState.settings.getBytes(chunkKey,
-                                                 value + offset,
-                                                 copyChunkLength);
+      if (gOpenThreadPlatformState.settings.getBytes(
+              chunkKey, value + offset, copyChunkLength) != copyChunkLength) {
+        return false;
+      }
       offset = static_cast<uint16_t>(offset + copyChunkLength);
     }
     remaining = static_cast<uint16_t>(remaining - chunkLength);
@@ -720,121 +961,198 @@ bool readSettingItem(uint16_t key, uint16_t index, uint8_t* value,
   return true;
 }
 
-bool writeSettingItem(uint16_t key, uint16_t index, const uint8_t* value,
-                      uint16_t valueLength) {
-  ensureSettingsOpen();
+bool removeSettingItemKeys(uint16_t key, uint16_t index,
+                           uint16_t knownLength = 0U) {
+  if (!ensureSettingsOpen()) {
+    return false;
+  }
 
   char lengthKey[20];
   makeLengthKey(key, index, lengthKey, sizeof(lengthKey));
-  const uint16_t previousLength =
-      gOpenThreadPlatformState.settings.isKey(lengthKey)
-          ? gOpenThreadPlatformState.settings.getUShort(lengthKey, 0)
-          : 0U;
+  uint16_t valueLength = knownLength;
+  if (gOpenThreadPlatformState.settings.isKey(lengthKey)) {
+    const uint16_t storedLength =
+        gOpenThreadPlatformState.settings.getUShort(lengthKey, 0U);
+    if (storedLength > valueLength) {
+      valueLength = storedLength;
+    }
+  }
+  if (valueLength == 0U) {
+    char dataKey[20];
+    makeDataKey(key, index, dataKey, sizeof(dataKey));
+    valueLength = static_cast<uint16_t>(
+        gOpenThreadPlatformState.settings.getBytesLength(dataKey));
+  }
+  const bool lengthRemoved = removePreferenceKeyIfPresent(lengthKey);
+  const bool dataRemoved = removeSettingDataKeys(key, index, valueLength);
+  return lengthRemoved && dataRemoved;
+}
 
-  if (valueLength == 0) {
-    if (gOpenThreadPlatformState.settings.putUShort(lengthKey, valueLength) !=
+bool writeSettingItem(uint16_t key, uint16_t index, const uint8_t* value,
+                      uint16_t valueLength) {
+  if (index >= kSettingMaxValueCount || !ensureSettingsOpen()) {
+    return false;
+  }
+
+  const size_t missingEntries =
+      countMissingSettingEntries(key, index, valueLength);
+  if (missingEntries == SIZE_MAX ||
+      missingEntries > gOpenThreadPlatformState.settings.freeEntries()) {
+    return false;
+  }
+
+  char lengthKey[20];
+  makeLengthKey(key, index, lengthKey, sizeof(lengthKey));
+  if (valueLength == 0U) {
+    if (gOpenThreadPlatformState.settings.putUShort(lengthKey, 0U) !=
         sizeof(uint16_t)) {
+      (void)removeSettingItemKeys(key, index, valueLength);
       return false;
     }
-    removeSettingDataKeys(key, index, previousLength);
     return true;
   }
 
   if (valueLength <= kSettingChunkLength) {
     char dataKey[20];
     makeDataKey(key, index, dataKey, sizeof(dataKey));
-    if (gOpenThreadPlatformState.settings.putBytes(dataKey, value, valueLength) !=
-        valueLength) {
+    if (gOpenThreadPlatformState.settings.putBytes(
+            dataKey, value, valueLength) != valueLength) {
+      (void)removeSettingItemKeys(key, index, valueLength);
       return false;
     }
-  } else {
-    uint16_t offset = 0U;
-    uint16_t chunkIndex = 0U;
-    while (offset < valueLength) {
-      const uint16_t chunkLength =
-          ((valueLength - offset) < kSettingChunkLength) ? (valueLength - offset)
-                                                         : kSettingChunkLength;
-      char chunkKey[20];
-      makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
-      if (gOpenThreadPlatformState.settings.putBytes(chunkKey,
-                                                     value + offset,
-                                                     chunkLength) !=
-          chunkLength) {
-        return false;
-      }
-      offset = static_cast<uint16_t>(offset + chunkLength);
-      ++chunkIndex;
-    }
+    return true;
   }
 
-  if (gOpenThreadPlatformState.settings.putUShort(lengthKey, valueLength) !=
-      sizeof(uint16_t)) {
+  uint16_t offset = 0U;
+  uint16_t chunkIndex = 0U;
+  while (offset < valueLength) {
+    const uint16_t chunkLength =
+        ((valueLength - offset) < kSettingChunkLength)
+            ? static_cast<uint16_t>(valueLength - offset)
+            : kSettingChunkLength;
+    char chunkKey[20];
+    makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
+    if (gOpenThreadPlatformState.settings.putBytes(
+            chunkKey, value + offset, chunkLength) != chunkLength) {
+      // The pending directory entry keeps this physical slot reachable even
+      // if immediate cleanup is interrupted or fails.
+      (void)removeSettingItemKeys(key, index, valueLength);
+      return false;
+    }
+    offset = static_cast<uint16_t>(offset + chunkLength);
+    ++chunkIndex;
+  }
+
+  if (gOpenThreadPlatformState.settings.putUShort(
+          lengthKey, valueLength) != sizeof(uint16_t)) {
+    (void)removeSettingItemKeys(key, index, valueLength);
     return false;
   }
-
-  if (previousLength != valueLength) {
-    if (previousLength <= kSettingChunkLength && valueLength > kSettingChunkLength) {
-      char previousDataKey[20];
-      makeDataKey(key, index, previousDataKey, sizeof(previousDataKey));
-      gOpenThreadPlatformState.settings.remove(previousDataKey);
-    } else if (previousLength > kSettingChunkLength &&
-               valueLength <= kSettingChunkLength) {
-      const uint16_t previousChunkCount = getSettingChunkCount(previousLength);
-      for (uint16_t chunkIndex = 0; chunkIndex < previousChunkCount; ++chunkIndex) {
-        char chunkKey[20];
-        makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
-        gOpenThreadPlatformState.settings.remove(chunkKey);
-      }
-    } else if (previousLength > valueLength && previousLength > kSettingChunkLength) {
-      const uint16_t previousChunkCount = getSettingChunkCount(previousLength);
-      const uint16_t currentChunkCount = getSettingChunkCount(valueLength);
-      for (uint16_t chunkIndex = currentChunkCount; chunkIndex < previousChunkCount;
-           ++chunkIndex) {
-        char chunkKey[20];
-        makeDataChunkKey(key, index, chunkIndex, chunkKey, sizeof(chunkKey));
-        gOpenThreadPlatformState.settings.remove(chunkKey);
-      }
-    }
-  }
-
   return true;
 }
 
-void removeSettingItemKeys(uint16_t key, uint16_t index) {
-  ensureSettingsOpen();
-
-  char lengthKey[20];
-  makeLengthKey(key, index, lengthKey, sizeof(lengthKey));
-  const uint16_t valueLength =
-      gOpenThreadPlatformState.settings.isKey(lengthKey)
-          ? gOpenThreadPlatformState.settings.getUShort(lengthKey, 0)
-          : 0U;
-  gOpenThreadPlatformState.settings.remove(lengthKey);
-  removeSettingDataKeys(key, index, valueLength);
-}
-
-bool shiftSettingItem(uint16_t key, uint16_t fromIndex, uint16_t toIndex) {
-  uint16_t length = 0;
-  if (!readSettingItem(key, fromIndex, nullptr, &length)) {
+bool cleanupSettingDirectoryGarbage(uint16_t key,
+                                    SettingDirectory* directory) {
+  if (directory == nullptr || !settingDirectoryValid(*directory)) {
     return false;
   }
 
-  uint8_t* buffer = nullptr;
-  if (length != 0) {
-    buffer = static_cast<uint8_t*>(malloc(length));
-    if (buffer == nullptr) {
+  if (directory->pendingIndex != kSettingInvalidPhysicalIndex) {
+    if (!removeSettingItemKeys(key, directory->pendingIndex,
+                               directory->pendingLength)) {
       return false;
     }
-    uint16_t copyLength = length;
-    if (!readSettingItem(key, fromIndex, buffer, &copyLength)) {
-      free(buffer);
+    directory->pendingIndex = kSettingInvalidPhysicalIndex;
+    directory->pendingLength = 0U;
+    if (!saveSettingDirectory(key, *directory)) {
       return false;
     }
   }
 
-  const bool ok = writeSettingItem(key, toIndex, buffer, length);
-  free(buffer);
-  return ok;
+  for (uint16_t i = directory->count; i < kSettingMaxValueCount; ++i) {
+    const uint8_t retiredIndex = directory->physicalIndices[i];
+    if (retiredIndex == kSettingInvalidPhysicalIndex) {
+      continue;
+    }
+    if (!removeSettingItemKeys(key, retiredIndex)) {
+      return false;
+    }
+    directory->physicalIndices[i] = kSettingInvalidPhysicalIndex;
+    if (!saveSettingDirectory(key, *directory)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool findFreeSettingPhysicalIndex(const SettingDirectory& directory,
+                                  uint8_t* physicalIndex) {
+  if (physicalIndex == nullptr || !settingDirectoryValid(directory)) {
+    return false;
+  }
+  bool used[kSettingMaxValueCount] = {};
+  for (uint16_t i = 0U; i < kSettingMaxValueCount; ++i) {
+    if (directory.physicalIndices[i] != kSettingInvalidPhysicalIndex) {
+      used[directory.physicalIndices[i]] = true;
+    }
+  }
+  if (directory.pendingIndex != kSettingInvalidPhysicalIndex) {
+    used[directory.pendingIndex] = true;
+  }
+  for (uint16_t i = 0U; i < kSettingMaxValueCount; ++i) {
+    if (!used[i]) {
+      *physicalIndex = static_cast<uint8_t>(i);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool abandonPendingSetting(uint16_t key, SettingDirectory* directory) {
+  if (directory == nullptr ||
+      directory->pendingIndex == kSettingInvalidPhysicalIndex) {
+    return false;
+  }
+  if (!removeSettingItemKeys(key, directory->pendingIndex,
+                             directory->pendingLength)) {
+    // Keep the persisted pending marker so a later mutation can recover it.
+    return false;
+  }
+  directory->pendingIndex = kSettingInvalidPhysicalIndex;
+  directory->pendingLength = 0U;
+  return saveSettingDirectory(key, *directory);
+}
+
+bool stageSettingItem(uint16_t key, SettingDirectory* directory,
+                      const uint8_t* value, uint16_t valueLength,
+                      uint8_t* stagedIndex) {
+  if (directory == nullptr || stagedIndex == nullptr ||
+      !cleanupSettingDirectoryGarbage(key, directory)) {
+    return false;
+  }
+
+  uint8_t physicalIndex = kSettingInvalidPhysicalIndex;
+  if (!findFreeSettingPhysicalIndex(*directory, &physicalIndex)) {
+    return false;
+  }
+
+  // Persist ownership before touching staging keys. A failed or interrupted
+  // multi-chunk write therefore remains discoverable and reclaimable.
+  directory->pendingIndex = physicalIndex;
+  directory->pendingLength = valueLength;
+  if (!saveSettingDirectory(key, *directory)) {
+    directory->pendingIndex = kSettingInvalidPhysicalIndex;
+    directory->pendingLength = 0U;
+    return false;
+  }
+
+  if (!removeSettingItemKeys(key, physicalIndex, valueLength) ||
+      !writeSettingItem(key, physicalIndex, value, valueLength)) {
+    (void)abandonPendingSetting(key, directory);
+    return false;
+  }
+  *stagedIndex = physicalIndex;
+  return true;
 }
 
 void secureZero(void* ptr, size_t length) {
@@ -1216,36 +1534,8 @@ bool threadMacReceiveFilterCallback(const uint8_t* psdu, uint8_t length,
   return match;
 }
 
-uint64_t nextEntropyWord();
-
 uint64_t threadPlatformNowUs() {
   return nrf54l15_core_monotonic_time_us();
-}
-
-void fillPseudoEntropy(uint8_t* output, uint16_t outputLength) {
-  uint16_t offset = 0;
-  while (offset < outputLength) {
-    const uint64_t word = nextEntropyWord();
-    for (uint8_t i = 0; (i < sizeof(word)) && (offset < outputLength); ++i) {
-      output[offset++] = static_cast<uint8_t>((word >> (i * 8U)) & 0xFFU);
-    }
-  }
-}
-
-uint64_t nextEntropyWord() {
-  const uint64_t uniqueId = hardwareUniqueId64();
-  const uint64_t now = threadPlatformNowUs();
-  static uint64_t counter = 0xA5C39E27D4B1826FULL;
-
-  counter ^= uniqueId + 0x9E3779B97F4A7C15ULL + (counter << 6U) + (counter >> 2U);
-  counter ^= (now << 17U) ^ (now >> 7U);
-  counter ^= (now / 1000ULL) << 32U;
-
-  uint64_t x = counter;
-  x ^= x >> 12U;
-  x ^= x << 25U;
-  x ^= x >> 27U;
-  return x * 2685821657736338717ULL;
 }
 
 void updateRadioTime() {
@@ -1569,6 +1859,7 @@ void resetCryptoState() {
   gOpenThreadPlatformState.snapshot.cryptoKeyCount = 0;
   gOpenThreadPlatformState.snapshot.cryptoLastKeyLength = 0;
   gOpenThreadPlatformState.snapshot.cryptoRandomRequests = 0;
+  gOpenThreadPlatformState.snapshot.cryptoRandomFailures = 0;
   gOpenThreadPlatformState.snapshot.cryptoAesEncryptCount = 0;
   gOpenThreadPlatformState.snapshot.cryptoUnsupportedCount = 0;
   gOpenThreadPlatformState.snapshot.cryptoSupportMask = 0;
@@ -2245,9 +2536,17 @@ bool ensureThreadRadioReady() {
 }
 
 otRadioState threadRadioIdleState() {
-  return gOpenThreadPlatformState.snapshot.radioRxOnWhenIdle
-             ? OT_RADIO_STATE_RECEIVE
-             : OT_RADIO_STATE_SLEEP;
+  const OpenThreadPlatformState& state = gOpenThreadPlatformState;
+  if ((static_cast<uint32_t>(kThreadRadioCaps) &
+       static_cast<uint32_t>(OT_RADIO_CAPS_RX_ON_WHEN_IDLE)) == 0U) {
+    // With software RX-on-when-idle, OpenThread owns every Receive/Sleep
+    // transition and does not call otPlatRadioSetRxOnWhenIdle(). Reflect the
+    // operation it requested instead of the platform-owned policy flag.
+    return state.radio.receiverArmed() ? OT_RADIO_STATE_RECEIVE
+                                       : OT_RADIO_STATE_SLEEP;
+  }
+  return state.snapshot.radioRxOnWhenIdle ? OT_RADIO_STATE_RECEIVE
+                                           : OT_RADIO_STATE_SLEEP;
 }
 
 bool threadRadioTransmitBusy() {
@@ -2602,8 +2901,10 @@ bool pollThreadRadioReceive(otInstance* instance) {
     return false;
   }
 
-  const bool useBufferedReceive =
-      state.snapshot.radioRxOnWhenIdle && !state.snapshot.radioReceiveAtActive;
+  // Ordinary OpenThread receive periods need the IRQ-buffered path so direct
+  // frames are ACKed within the IEEE 802.15.4 turnaround time. Only a bounded
+  // ReceiveAt window uses the one-shot polling receiver.
+  const bool useBufferedReceive = !state.snapshot.radioReceiveAtActive;
   if (useBufferedReceive) {
     if (!state.radio.bufferedReceiveArmed() &&
         !state.radio.beginBufferedReceive(kThreadRadioPollSpinLimit)) {
@@ -2637,10 +2938,6 @@ bool pollThreadRadioReceive(otInstance* instance) {
   state.snapshot.radioLastRxPhr = rxDebug.lastPhr;
   state.snapshot.radioLastRejectedLength = rxDebug.lastLength;
   const bool queued = captureThreadRadioReceivedFrame(instance, frame);
-  if (state.snapshot.radioRxOnWhenIdle && !state.snapshot.radioReceiveAtActive &&
-      !useBufferedReceive) {
-    (void)state.radio.beginReceive(kThreadRadioPollSpinLimit);
-  }
   if (state.snapshot.radioReceiveAtActive) {
     state.radio.cancelReceive();
     state.snapshot.radioReceiveAtActive = false;
@@ -2894,7 +3191,17 @@ otError OpenThreadPlatformSkeleton::deleteSetting(uint16_t key, int index) {
   return otPlatSettingsDelete(nullptr, key, index);
 }
 
-void OpenThreadPlatformSkeleton::wipeSettings() { otPlatSettingsWipe(nullptr); }
+bool OpenThreadPlatformSkeleton::wipeSettingsChecked() {
+  const bool wiped = wipeSettingsStore();
+  if (wiped) {
+    gOpenThreadPlatformState.snapshot.settingsKeyCount = 0U;
+  }
+  return wiped;
+}
+
+void OpenThreadPlatformSkeleton::wipeSettings() {
+  (void)wipeSettingsChecked();
+}
 
 }  // namespace xiao_nrf54l15
 
@@ -2927,7 +3234,7 @@ void otSysInit(int, char**) {
   resetDiagSnapshot(state);
 
   state.snapshot.initialized = true;
-  state.snapshot.settingsInitialized = true;
+  state.snapshot.settingsInitialized = false;
   state.snapshot.radioCaps = kThreadRadioCaps;
   state.snapshot.radioState = OT_RADIO_STATE_DISABLED;
   state.snapshot.radioBackendWrappedDirect = true;
@@ -2955,7 +3262,7 @@ void otSysInit(int, char**) {
 
   otPlatRadioGetIeeeEui64(nullptr, state.snapshot.extendedAddress.m8);
   closeSettings();
-  ensureSettingsOpen();
+  state.snapshot.settingsInitialized = ensureSettingsOpen();
 }
 
 void otSysDeinit(void) {
@@ -3156,8 +3463,25 @@ otError otPlatEntropyGet(uint8_t* output, uint16_t outputLength) {
   if ((output == nullptr) && (outputLength != 0)) {
     return OT_ERROR_INVALID_ARGS;
   }
-  xiao_nrf54l15::fillPseudoEntropy(output, outputLength);
-  return OT_ERROR_NONE;
+  if (outputLength == 0U) {
+    return OT_ERROR_NONE;
+  }
+
+  // mbedTLS seeds its CTR-DRBG through this callback. Calling the higher-level
+  // random API here would recurse into that unseeded DRBG, so raw platform
+  // entropy must come directly from the independent hardware source.
+  ++xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomRequests;
+  xiao_nrf54l15::CracenRng entropyRng;
+  if (entropyRng.fill(output, outputLength)) {
+    xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomHardware =
+        true;
+    return OT_ERROR_NONE;
+  }
+
+  memset(output, 0, outputLength);
+  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomHardware = false;
+  ++xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomFailures;
+  return OT_ERROR_FAILED;
 }
 
 void otPlatLog(otLogLevel, otLogRegion, const char* format, ...) {
@@ -3175,10 +3499,62 @@ void otPlatLogHandleLevelChanged(otLogLevel) {}
 
 void otPlatLogHandleLogLevelChanged(otInstance*, otLogLevel) {}
 
+void otPlatReset(otInstance*) {
+  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.pseudoResetRequested =
+      true;
+  xiao_nrf54l15::closeSettings();
+  softReset();
+}
+
+otError otPlatResetToBootloader(otInstance*) {
+  return OT_ERROR_NOT_CAPABLE;
+}
+
+otPlatResetReason otPlatGetResetReason(otInstance*) {
+  const uint32_t reason = nrf54ResetReason();
+  if ((reason & (RESET_RESETREAS_DOG0_Msk | RESET_RESETREAS_DOG1_Msk)) !=
+      0U) {
+    return OT_PLAT_RESET_REASON_WATCHDOG;
+  }
+  if ((reason & RESET_RESETREAS_LOCKUP_Msk) != 0U) {
+    return OT_PLAT_RESET_REASON_FAULT;
+  }
+  if ((reason & RESET_RESETREAS_SECTAMPER_Msk) != 0U) {
+    return OT_PLAT_RESET_REASON_CRASH;
+  }
+  if ((reason & RESET_RESETREAS_SREQ_Msk) != 0U) {
+    return OT_PLAT_RESET_REASON_SOFTWARE;
+  }
+  if ((reason & (RESET_RESETREAS_RESETPIN_Msk |
+                 RESET_RESETREAS_CTRLAPSOFT_Msk |
+                 RESET_RESETREAS_CTRLAPHARD_Msk |
+                 RESET_RESETREAS_CTRLAPPIN_Msk)) != 0U) {
+    return OT_PLAT_RESET_REASON_EXTERNAL;
+  }
+  if (reason == 0U ||
+      (reason & (RESET_RESETREAS_OFF_Msk | RESET_RESETREAS_GRTC_Msk)) !=
+          0U) {
+    return OT_PLAT_RESET_REASON_POWER_ON;
+  }
+  return OT_PLAT_RESET_REASON_OTHER;
+}
+
+void otPlatAssertFail(const char* filename, int lineNumber) {
+  char line[
+      xiao_nrf54l15::OpenThreadPlatformSkeletonSnapshot::kRecentLogLineLength];
+  snprintf(line, sizeof(line), "OpenThread assert %s:%d",
+           (filename != nullptr) ? filename : "?", lineNumber);
+  xiao_nrf54l15::rememberPlatformLogLine(line);
+  otPlatReset(nullptr);
+}
+
+void otPlatWakeHost(void) {}
+
 void otPlatSettingsInit(otInstance*, const uint16_t* sensitiveKeys, uint16_t sensitiveKeysLength) {
-  xiao_nrf54l15::ensureSettingsOpen();
+  const bool initialized = xiao_nrf54l15::ensureSettingsOpen();
   xiao_nrf54l15::gOpenThreadPlatformState.sensitiveKeys = sensitiveKeys;
-  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsInitialized = true;
+  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsInitialized =
+      initialized;
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.sensitiveKeyCount = sensitiveKeysLength;
 }
 
@@ -3191,15 +3567,25 @@ otError otPlatSettingsGet(otInstance*, uint16_t key, int index, uint8_t* value, 
   if ((index < 0) || (valueLength == nullptr && value != nullptr)) {
     return OT_ERROR_INVALID_ARGS;
   }
+  if (static_cast<unsigned int>(index) > UINT16_MAX) {
+    return OT_ERROR_NOT_FOUND;
+  }
 
-  const uint16_t count = xiao_nrf54l15::getSettingCount(key);
-  if (static_cast<uint16_t>(index) >= count) {
+  xiao_nrf54l15::SettingDirectory directory;
+  if (!xiao_nrf54l15::loadSettingDirectory(key, &directory)) {
+    return OT_ERROR_NOT_FOUND;
+  }
+  // Recovery never touches visible slots, so reads can opportunistically
+  // reclaim a staged or retired item without changing their result.
+  (void)xiao_nrf54l15::cleanupSettingDirectoryGarbage(key, &directory);
+  if (static_cast<uint16_t>(index) >= directory.count) {
     return OT_ERROR_NOT_FOUND;
   }
 
   uint16_t actualLength = (valueLength == nullptr) ? 0 : *valueLength;
   if (!xiao_nrf54l15::readSettingItem(
-          key, static_cast<uint16_t>(index), value, &actualLength)) {
+          key, directory.physicalIndices[static_cast<uint16_t>(index)], value,
+          &actualLength)) {
     return OT_ERROR_NOT_FOUND;
   }
 
@@ -3209,7 +3595,8 @@ otError otPlatSettingsGet(otInstance*, uint16_t key, int index, uint8_t* value, 
 
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.lastSettingsKey = key;
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.lastSettingsLength = actualLength;
-  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount = count;
+  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount =
+      directory.count;
   return OT_ERROR_NONE;
 }
 
@@ -3218,11 +3605,37 @@ otError otPlatSettingsSet(otInstance*, uint16_t key, const uint8_t* value, uint1
     return OT_ERROR_INVALID_ARGS;
   }
 
-  otPlatSettingsDelete(nullptr, key, -1);
-  if (!xiao_nrf54l15::writeSettingItem(key, 0, value, valueLength) ||
-      !xiao_nrf54l15::setSettingCount(key, 1)) {
+  xiao_nrf54l15::SettingDirectory stagedDirectory;
+  if (!xiao_nrf54l15::loadSettingDirectory(key, &stagedDirectory)) {
     return OT_ERROR_NO_BUFS;
   }
+
+  uint8_t stagedIndex = xiao_nrf54l15::kSettingInvalidPhysicalIndex;
+  if (!xiao_nrf54l15::stageSettingItem(
+          key, &stagedDirectory, value, valueLength, &stagedIndex)) {
+    return OT_ERROR_NO_BUFS;
+  }
+
+  xiao_nrf54l15::SettingDirectory committedDirectory;
+  xiao_nrf54l15::initializeSettingDirectory(&committedDirectory);
+  committedDirectory.count = 1U;
+  committedDirectory.physicalIndices[0] = stagedIndex;
+  uint16_t retiredPosition = 1U;
+  for (uint16_t i = 0U; i < stagedDirectory.count; ++i) {
+    committedDirectory.physicalIndices[retiredPosition++] =
+        stagedDirectory.physicalIndices[i];
+  }
+
+  // This single Preferences API write is the visibility commit. Until a
+  // reported API success, readers keep the complete old directory and value.
+  // Abrupt power-loss atomicity still depends on a future journaled
+  // Preferences backend; the current shared RRAM blob is not dual-banked.
+  if (!xiao_nrf54l15::saveSettingDirectory(key, committedDirectory)) {
+    (void)xiao_nrf54l15::abandonPendingSetting(key, &stagedDirectory);
+    return OT_ERROR_NO_BUFS;
+  }
+  (void)xiao_nrf54l15::cleanupSettingDirectoryGarbage(
+      key, &committedDirectory);
 
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.lastSettingsKey = key;
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.lastSettingsLength = valueLength;
@@ -3235,53 +3648,98 @@ otError otPlatSettingsAdd(otInstance*, uint16_t key, const uint8_t* value, uint1
     return OT_ERROR_INVALID_ARGS;
   }
 
-  const uint16_t count = xiao_nrf54l15::getSettingCount(key);
-  if (!xiao_nrf54l15::writeSettingItem(key, count, value, valueLength) ||
-      !xiao_nrf54l15::setSettingCount(key, count + 1U)) {
+  xiao_nrf54l15::SettingDirectory stagedDirectory;
+  if (!xiao_nrf54l15::loadSettingDirectory(key, &stagedDirectory) ||
+      stagedDirectory.count >= xiao_nrf54l15::kSettingMaxValueCount) {
+    return OT_ERROR_NO_BUFS;
+  }
+
+  uint8_t stagedIndex = xiao_nrf54l15::kSettingInvalidPhysicalIndex;
+  if (!xiao_nrf54l15::stageSettingItem(
+          key, &stagedDirectory, value, valueLength, &stagedIndex)) {
+    return OT_ERROR_NO_BUFS;
+  }
+
+  xiao_nrf54l15::SettingDirectory committedDirectory = stagedDirectory;
+  const uint8_t oldCount = committedDirectory.count;
+  committedDirectory.physicalIndices[oldCount] = stagedIndex;
+  committedDirectory.count = static_cast<uint8_t>(oldCount + 1U);
+  committedDirectory.pendingIndex =
+      xiao_nrf54l15::kSettingInvalidPhysicalIndex;
+  committedDirectory.pendingLength = 0U;
+  if (!xiao_nrf54l15::saveSettingDirectory(key, committedDirectory)) {
+    (void)xiao_nrf54l15::abandonPendingSetting(key, &stagedDirectory);
     return OT_ERROR_NO_BUFS;
   }
 
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.lastSettingsKey = key;
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.lastSettingsLength = valueLength;
-  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount = count + 1U;
+  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount =
+      committedDirectory.count;
   return OT_ERROR_NONE;
 }
 
 otError otPlatSettingsDelete(otInstance*, uint16_t key, int index) {
-  const uint16_t count = xiao_nrf54l15::getSettingCount(key);
-  if (count == 0) {
+  if (index < -1) {
+    return OT_ERROR_INVALID_ARGS;
+  }
+  xiao_nrf54l15::SettingDirectory directory;
+  if (!xiao_nrf54l15::loadSettingDirectory(key, &directory)) {
+    return OT_ERROR_NO_BUFS;
+  }
+  if (!xiao_nrf54l15::cleanupSettingDirectoryGarbage(key, &directory)) {
+    return OT_ERROR_NO_BUFS;
+  }
+  if (directory.count == 0U) {
     return OT_ERROR_NOT_FOUND;
   }
 
-  if (index < 0) {
-    for (uint16_t i = 0; i < count; ++i) {
-      xiao_nrf54l15::removeSettingItemKeys(key, i);
+  if (index == -1) {
+    xiao_nrf54l15::SettingDirectory committedDirectory = directory;
+    committedDirectory.count = 0U;
+    // The atomic directory commit hides every value while retaining each
+    // physical slot in the retired tail until cleanup succeeds.
+    if (!xiao_nrf54l15::saveSettingDirectory(key, committedDirectory)) {
+      return OT_ERROR_NO_BUFS;
     }
-    xiao_nrf54l15::setSettingCount(key, 0);
-    xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount = 0;
+    (void)xiao_nrf54l15::cleanupSettingDirectoryGarbage(
+        key, &committedDirectory);
+    xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount = 0U;
     return OT_ERROR_NONE;
   }
 
-  if (static_cast<uint16_t>(index) >= count) {
+  if (static_cast<unsigned int>(index) > UINT16_MAX) {
+    return OT_ERROR_NOT_FOUND;
+  }
+  if (static_cast<uint16_t>(index) >= directory.count) {
     return OT_ERROR_NOT_FOUND;
   }
 
-  for (uint16_t i = static_cast<uint16_t>(index); i + 1U < count; ++i) {
-    if (!xiao_nrf54l15::shiftSettingItem(key, i + 1U, i)) {
-      return OT_ERROR_NO_BUFS;
-    }
+  const uint16_t itemIndex = static_cast<uint16_t>(index);
+  xiao_nrf54l15::SettingDirectory committedDirectory = directory;
+  const uint8_t retiredPhysicalIndex =
+      committedDirectory.physicalIndices[itemIndex];
+  for (uint16_t i = itemIndex; i + 1U < committedDirectory.count; ++i) {
+    committedDirectory.physicalIndices[i] =
+        committedDirectory.physicalIndices[i + 1U];
   }
+  --committedDirectory.count;
+  committedDirectory.physicalIndices[committedDirectory.count] =
+      retiredPhysicalIndex;
 
-  xiao_nrf54l15::removeSettingItemKeys(key, count - 1U);
-  xiao_nrf54l15::setSettingCount(key, count - 1U);
-  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount = count - 1U;
+  // No item data is overwritten or moved before this count/mapping commit.
+  if (!xiao_nrf54l15::saveSettingDirectory(key, committedDirectory)) {
+    return OT_ERROR_NO_BUFS;
+  }
+  (void)xiao_nrf54l15::cleanupSettingDirectoryGarbage(
+      key, &committedDirectory);
+  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount =
+      committedDirectory.count;
   return OT_ERROR_NONE;
 }
 
 void otPlatSettingsWipe(otInstance*) {
-  xiao_nrf54l15::ensureSettingsOpen();
-  xiao_nrf54l15::gOpenThreadPlatformState.settings.clear();
-  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.settingsKeyCount = 0;
+  (void)xiao_nrf54l15::OpenThreadPlatformSkeleton::wipeSettingsChecked();
 }
 
 #if defined(OPENTHREAD_CONFIG_CRYPTO_LIB) && \
@@ -3708,10 +4166,15 @@ otError otPlatCryptoSha256Finish(otCryptoContext* context,
 
 void otPlatCryptoRandomInit(void) {
   otPlatCryptoInit();
-  xiao_nrf54l15::gOpenThreadPlatformState.cryptoRngReady =
-      xiao_nrf54l15::gOpenThreadPlatformState.cryptoRng.begin();
+  const bool ready = xiao_nrf54l15::gOpenThreadPlatformState.cryptoRng.begin();
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomHardware =
-      xiao_nrf54l15::gOpenThreadPlatformState.cryptoRngReady;
+      ready;
+  if (ready) {
+    // Do not monopolize the shared CRACEN RNG between requests. BLE and other
+    // protocol engines need to acquire the same hardware entropy source.
+    xiao_nrf54l15::gOpenThreadPlatformState.cryptoRng.end();
+  }
+  xiao_nrf54l15::gOpenThreadPlatformState.cryptoRngReady = false;
 }
 
 void otPlatCryptoRandomDeinit(void) {
@@ -3736,20 +4199,15 @@ otError otPlatCryptoRandomGet(uint8_t* buffer, uint16_t size) {
     otPlatCryptoInit();
   }
 
-  if (!xiao_nrf54l15::gOpenThreadPlatformState.cryptoRngReady) {
-    xiao_nrf54l15::gOpenThreadPlatformState.cryptoRngReady =
-        xiao_nrf54l15::gOpenThreadPlatformState.cryptoRng.begin();
-  }
-
-  if (xiao_nrf54l15::gOpenThreadPlatformState.cryptoRngReady &&
-      xiao_nrf54l15::gOpenThreadPlatformState.cryptoRng.fill(buffer, size)) {
+  if (xiao_nrf54l15::gOpenThreadPlatformState.cryptoRng.fill(buffer, size)) {
     xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomHardware = true;
     return OT_ERROR_NONE;
   }
 
+  memset(buffer, 0, size);
   xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomHardware = false;
-  xiao_nrf54l15::fillPseudoEntropy(buffer, size);
-  return OT_ERROR_NONE;
+  ++xiao_nrf54l15::gOpenThreadPlatformState.snapshot.cryptoRandomFailures;
+  return OT_ERROR_FAILED;
 }
 
 #if NRF54L15_CLEAN_OPENTHREAD_PAL_UNSUPPORTED_CRYPTO_STUBS
@@ -4162,11 +4620,11 @@ otError otPlatRadioReceive(otInstance*, uint8_t channel) {
   state.snapshot.radioState = OT_RADIO_STATE_RECEIVE;
   state.snapshot.radioLastError = OT_ERROR_NONE;
   xiao_nrf54l15::recordThreadCoexRxRequest(state);
-  const bool receiveStarted =
-      state.snapshot.radioRxOnWhenIdle
-          ? state.radio.beginBufferedReceive(
-                xiao_nrf54l15::kThreadRadioPollSpinLimit)
-          : state.radio.beginReceive(xiao_nrf54l15::kThreadRadioPollSpinLimit);
+  // RX-on-when-idle is implemented by OpenThread's software SubMac. A call to
+  // Receive still denotes an unbounded receive period and therefore uses the
+  // interrupt-backed receiver regardless of the platform policy snapshot.
+  const bool receiveStarted = state.radio.beginBufferedReceive(
+      xiao_nrf54l15::kThreadRadioPollSpinLimit);
   if (!receiveStarted) {
     state.snapshot.radioState = xiao_nrf54l15::threadRadioIdleState();
     state.snapshot.radioLastError = OT_ERROR_FAILED;
@@ -4307,7 +4765,11 @@ otError otPlatRadioTransmit(otInstance* instance, otRadioFrame* frame) {
       state.radioTxAckFrameValid = true;
     }
   }
-  if (state.snapshot.radioRxOnWhenIdle) {
+  if (state.snapshot.radioReceiveAtActive) {
+    (void)state.radio.beginReceive(xiao_nrf54l15::kThreadRadioPollSpinLimit);
+  } else {
+    // Transmit starts only from RECEIVE. Restore that explicitly; software
+    // SubMac will call Sleep after TxDone when the device should not stay on.
     (void)state.radio.beginBufferedReceive(
         xiao_nrf54l15::kThreadRadioPollSpinLimit);
   }

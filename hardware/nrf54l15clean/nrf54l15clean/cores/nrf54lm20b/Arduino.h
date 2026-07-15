@@ -34,6 +34,8 @@ extern "C" {
 
 // Forward declaration for SysTick initialization
 void initSysTick(void);
+uint64_t nrf54l15_core_monotonic_time_us(void);
+uint32_t nrf54l15_core_monotonic_time_ms(void);
 bool nrf54_core_quiesce_serial_for_system_off(uint32_t spin_limit);
 bool nrf54_core_quiesce_spi_for_system_off(uint32_t spin_limit);
 bool nrf54_core_quiesce_wire_for_system_off(uint32_t spin_limit);

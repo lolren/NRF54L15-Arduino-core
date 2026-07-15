@@ -46,10 +46,125 @@ void writeUint32Le(uint32_t value, uint8_t* out, size_t offset) {
   out[offset + 3U] = static_cast<uint8_t>((value >> 24U) & 0xFFU);
 }
 
-// SPAKE2+ context strings
+// Domain separators for this explicitly non-standard PASE-like surface.
 constexpr char kSpake2pContextProliferation[] = "SPAKE2P Key Salt";
-constexpr char kSpake2pContextAlpha[] = "SPAKE2P Key Confirmation";
-constexpr char kSpake2pContextBeta[] = "SPAKE2P Key Confirmation";
+constexpr char kSpake2pContextAlpha[] = "PASE-EXPERIMENTAL-CONFIRM-A";
+constexpr char kSpake2pContextBeta[] = "PASE-EXPERIMENTAL-CONFIRM-B";
+constexpr char kSpake2pKeyAlpha[] = "PASE-EXPERIMENTAL-KCA";
+constexpr char kSpake2pKeyBeta[] = "PASE-EXPERIMENTAL-KCB";
+constexpr size_t kPbkdfPayloadSize =
+    32U + 2U + 2U + 1U + kMatterSpake2pSaltSize + 4U;
+
+bool constantTimeEqual(const uint8_t* lhs, const uint8_t* rhs, size_t length) {
+  if ((lhs == nullptr || rhs == nullptr) && length != 0U) {
+    return false;
+  }
+  uint8_t difference = 0U;
+  for (size_t i = 0U; i < length; ++i) {
+    difference |= static_cast<uint8_t>(lhs[i] ^ rhs[i]);
+  }
+  return difference == 0U;
+}
+
+void secureZero(void* data, size_t length) {
+  volatile uint8_t* bytes = static_cast<volatile uint8_t*>(data);
+  while (length > 0U) {
+    *bytes++ = 0U;
+    --length;
+  }
+}
+
+bool allZero(const uint8_t* data, size_t length) {
+  if (data == nullptr) {
+    return true;
+  }
+  uint8_t combined = 0U;
+  for (size_t i = 0U; i < length; ++i) {
+    combined |= data[i];
+  }
+  return combined == 0U;
+}
+
+bool validPbkdfRequestPayload(const uint8_t* payload, uint16_t length) {
+  if (payload == nullptr || length != kPbkdfPayloadSize ||
+      allZero(payload, 32U)) {
+    return false;
+  }
+
+  size_t offset = 32U;
+  uint16_t sessionId = 0U;
+  uint16_t passcodeId = 0U;
+  if (!readUint16Le(payload, offset, length, &sessionId)) {
+    return false;
+  }
+  offset += 2U;
+  if (!readUint16Le(payload, offset, length, &passcodeId)) {
+    return false;
+  }
+  offset += 2U;
+  if (sessionId == 0U || passcodeId != 0U || payload[offset++] != 1U) {
+    return false;
+  }
+  offset += kMatterSpake2pSaltSize;
+  uint32_t iterations = 0U;
+  return readUint32Le(payload, offset, length, &iterations) &&
+         iterations >= kMatterSpake2pMinPbkdf2Iterations &&
+         iterations <= kMatterSpake2pMaxPbkdf2Iterations;
+}
+
+size_t buildConfirmationInput(const MatterPaseSessionState& session,
+                              bool localIsInitiator, bool confirmationA,
+                              uint8_t* output, size_t capacity) {
+  const char* domain =
+      confirmationA ? kSpake2pContextAlpha : kSpake2pContextBeta;
+  const size_t domainLength = strlen(domain);
+  const size_t required =
+      domainLength + (2U * kMatterSpake2pPointSize) + 64U + 4U;
+  if (output == nullptr || capacity < required) {
+    return 0U;
+  }
+
+  const uint16_t initiatorSessionId =
+      localIsInitiator ? session.localSessionId : session.peerSessionId;
+  const uint16_t responderSessionId =
+      localIsInitiator ? session.peerSessionId : session.localSessionId;
+  size_t offset = 0U;
+  memcpy(output + offset, domain, domainLength);
+  offset += domainLength;
+
+  if (confirmationA) {
+    memcpy(output + offset, session.X, sizeof(session.X));
+    offset += sizeof(session.X);
+    memcpy(output + offset, session.Y, sizeof(session.Y));
+    offset += sizeof(session.Y);
+    memcpy(output + offset, session.initiateRandom,
+           sizeof(session.initiateRandom));
+    offset += sizeof(session.initiateRandom);
+    memcpy(output + offset, session.respondRandom,
+           sizeof(session.respondRandom));
+    offset += sizeof(session.respondRandom);
+    writeUint16Le(initiatorSessionId, output, offset);
+    offset += 2U;
+    writeUint16Le(responderSessionId, output, offset);
+    offset += 2U;
+  } else {
+    memcpy(output + offset, session.Y, sizeof(session.Y));
+    offset += sizeof(session.Y);
+    memcpy(output + offset, session.X, sizeof(session.X));
+    offset += sizeof(session.X);
+    memcpy(output + offset, session.respondRandom,
+           sizeof(session.respondRandom));
+    offset += sizeof(session.respondRandom);
+    memcpy(output + offset, session.initiateRandom,
+           sizeof(session.initiateRandom));
+    offset += sizeof(session.initiateRandom);
+    writeUint16Le(responderSessionId, output, offset);
+    offset += 2U;
+    writeUint16Le(initiatorSessionId, output, offset);
+    offset += 2U;
+  }
+  return offset;
+}
 
 // Derive w0s, w1s from passcode using Matter's formula:
 // w0s = PBKDF2(passcode, salt || "SPAKE2P Key Salt", iterations, 32)
@@ -61,6 +176,12 @@ bool spake2pDeriveWS(
     uint32_t iterations,
     uint8_t outW0[kMatterSpake2pW0Length],
     uint8_t outW1[kMatterSpake2pW1Length]) {
+  if (!matterSetupPinValid(passcode) || salt == nullptr || outW0 == nullptr ||
+      outW1 == nullptr || iterations < kMatterSpake2pMinPbkdf2Iterations ||
+      iterations > kMatterSpake2pMaxPbkdf2Iterations) {
+    return false;
+  }
+
   // Convert passcode to byte representation
   uint8_t passcodeBytes[16] = {0};
   size_t passcodeLen = 0U;
@@ -100,14 +221,11 @@ bool spake2pDeriveWS(
   uint8_t w0Padded[32] = {0};
   memcpy(w0Padded, w0Raw, sizeof(w0Raw));
   Secp256r1::BigNum256 w0Full;
-  memcpy(w0Full.w, w0Padded, sizeof(w0Full.w));
+  Secp256r1::bnFromBytes(w0Padded, &w0Full);
   // Simple mod: the raw bytes from PBKDF2 are already < 2^256
   // We need to ensure < n. n is ~2^256 so most values are fine.
   // But let's do it properly: reduce mod n
-  Secp256r1Scalar orderN;
-  Secp256r1::getOrder(&orderN);
-  Secp256r1::BigNum256 nBn;
-  memcpy(nBn.w, orderN.bytes, sizeof(nBn.w));
+  const Secp256r1::BigNum256 nBn = Secp256r1::orderN();
 
   // If w0Full >= n, subtract n
   if (Secp256r1::bnCompare(w0Full, nBn) >= 0) {
@@ -140,7 +258,7 @@ bool spake2pDeriveWS(
   uint8_t w1Padded[32] = {0};
   memcpy(w1Padded, w1Raw, sizeof(w1Raw));
   Secp256r1::BigNum256 w1Full;
-  memcpy(w1Full.w, w1Padded, sizeof(w1Full.w));
+  Secp256r1::bnFromBytes(w1Padded, &w1Full);
   if (Secp256r1::bnCompare(w1Full, nBn) >= 0) {
     Secp256r1::bnSub(w1Full, nBn, &w1Full);
   }
@@ -159,11 +277,21 @@ bool spake2pDeriveWS(
 // ---------------------------------------------------------------------------
 
 bool MatterPaseCommissioning::beginAsCommissionee(
-    MatterPlatform* platform,
+    MatterPaseTransport* platform,
     CommissioningCallback callback, void* context) {
   if (platform == nullptr || session_.active) {
     return false;
   }
+
+  session_ = MatterPaseSessionState{};
+  verifier_ = MatterSpake2pVerifier{};
+  peerAddr_ = otIp6Address{};
+  peerPort_ = 0U;
+  peerExchangeId_ = 0U;
+  peerMessageId_ = 0U;
+  peerBound_ = false;
+  peerMessageCounter_.reset();
+  expectedMessage_ = ExpectedMessage::kPbkdfParamRequest;
 
   platform_ = platform;
   callback_ = callback;
@@ -178,16 +306,33 @@ bool MatterPaseCommissioning::beginAsCommissionee(
   session_.passcodeId = 0U;
   session_.state = MatterCommissioningState::kIdle;
 
-  platform_->setReceiveCallback(handleUdpReceive, this);
+  if (!platform_->setReceiveCallback(handleUdpReceive, this)) {
+    platform_->setReceiveCallback(nullptr, nullptr);
+    platform_ = nullptr;
+    callback_ = nullptr;
+    callbackContext_ = nullptr;
+    session_ = MatterPaseSessionState{};
+    return false;
+  }
   return true;
 }
 
 bool MatterPaseCommissioning::beginAsCommissioner(
-    MatterPlatform* platform,
+    MatterPaseTransport* platform,
     CommissioningCallback callback, void* context) {
   if (platform == nullptr || session_.active) {
     return false;
   }
+
+  session_ = MatterPaseSessionState{};
+  verifier_ = MatterSpake2pVerifier{};
+  peerAddr_ = otIp6Address{};
+  peerPort_ = 0U;
+  peerExchangeId_ = 0U;
+  peerMessageId_ = 0U;
+  peerBound_ = false;
+  peerMessageCounter_.reset();
+  expectedMessage_ = ExpectedMessage::kNone;
 
   platform_ = platform;
   callback_ = callback;
@@ -202,7 +347,14 @@ bool MatterPaseCommissioning::beginAsCommissioner(
   session_.passcodeId = 0U;
   session_.state = MatterCommissioningState::kIdle;
 
-  platform_->setReceiveCallback(handleUdpReceive, this);
+  if (!platform_->setReceiveCallback(handleUdpReceive, this)) {
+    platform_->setReceiveCallback(nullptr, nullptr);
+    platform_ = nullptr;
+    callback_ = nullptr;
+    callbackContext_ = nullptr;
+    session_ = MatterPaseSessionState{};
+    return false;
+  }
   return true;
 }
 
@@ -217,6 +369,14 @@ void MatterPaseCommissioning::end() {
   session_.active = false;
   localExchangeId_ = 0U;
   localMessageId_ = 0U;
+  peerExchangeId_ = 0U;
+  peerMessageId_ = 0U;
+  peerPort_ = 0U;
+  peerAddr_ = otIp6Address{};
+  peerBound_ = false;
+  peerMessageCounter_.reset();
+  expectedMessage_ = ExpectedMessage::kNone;
+  initiator_ = false;
   verifier_ = MatterSpake2pVerifier{};
 }
 
@@ -237,7 +397,7 @@ const char* MatterPaseCommissioning::stateName() const {
 }
 
 bool MatterPaseCommissioning::setPasscode(uint32_t passcode) {
-  if (!matterSetupPinValid(passcode)) {
+  if (session_.active || !matterSetupPinValid(passcode)) {
     return false;
   }
   setupPinCode_ = passcode;
@@ -245,7 +405,7 @@ bool MatterPaseCommissioning::setPasscode(uint32_t passcode) {
 }
 
 bool MatterPaseCommissioning::setDiscriminator(uint16_t discriminator) {
-  if (!matterDiscriminatorValid(discriminator)) {
+  if (session_.active || !matterDiscriminatorValid(discriminator)) {
     return false;
   }
   discriminator_ = discriminator;
@@ -293,7 +453,9 @@ bool MatterPaseCommissioning::deriveVerifier(
 bool MatterPaseCommissioning::sendPbkdfParamRequest(
     const otIp6Address& peerAddr, uint16_t peerPort,
     uint32_t setupPinCode) {
-  if (platform_ == nullptr || !initiator_) {
+  if (platform_ == nullptr || !session_.active || !initiator_ ||
+      session_.state != MatterCommissioningState::kIdle || peerPort == 0U ||
+      !matterSetupPinValid(setupPinCode)) {
     return false;
   }
 
@@ -304,6 +466,7 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
 
   // Generate random salt for PBKDF2.
   if (!generateRandom(session_.salt, sizeof(session_.salt))) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
   session_.pbkdf2Iterations = kMatterSpake2pPbkdf2Iterations;
@@ -312,6 +475,7 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
   if (!spake2pDeriveWS(setupPinCode, session_.salt,
                        session_.pbkdf2Iterations,
                        session_.w0, session_.w1)) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
 
@@ -320,6 +484,7 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
   memcpy(w1Scalar.bytes, session_.w1, sizeof(w1Scalar.bytes));
   Secp256r1Point Lpoint;
   if (!Secp256r1::scalarMultiplyBase(w1Scalar, &Lpoint)) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
   Secp256r1::encodeUncompressed(Lpoint, session_.L);
@@ -332,6 +497,7 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
   verifier_.valid = true;
 
   if (!generateRandom(session_.initiateRandom, sizeof(session_.initiateRandom))) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
   session_.localSessionId = static_cast<uint16_t>(
@@ -362,8 +528,7 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
 
   MatterMessageHeader header = {};
   header.exchangeFlags =
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kInitiator) |
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kReliable);
+      static_cast<uint8_t>(MatterMessageExchangeFlags::kInitiator);
   header.sessionType = 0U;
   header.messageId = nextMessageId();
   header.exchangeId = localExchangeId_;
@@ -371,21 +536,33 @@ bool MatterPaseCommissioning::sendPbkdfParamRequest(
   header.protocolOpcode =
       static_cast<uint8_t>(MatterMessageType::kPBKDFParamRequest);
 
+  bindPeer(peerAddr, peerPort, localExchangeId_);
   const bool ok = sendMessage(peerAddr, peerPort, header, payload,
                               static_cast<uint16_t>(offset));
   if (ok) {
-    session_.state = MatterCommissioningState::kPasePbkdfParamsSent;
+    expectedMessage_ = ExpectedMessage::kPbkdfParamResponse;
+    advanceState(MatterCommissioningState::kPasePbkdfParamsSent);
+  } else {
+    peerAddr_ = otIp6Address{};
+    peerPort_ = 0U;
+    peerExchangeId_ = 0U;
+    peerBound_ = false;
+    peerMessageCounter_.reset();
+    expectedMessage_ = ExpectedMessage::kNone;
   }
   return ok;
 }
 
 bool MatterPaseCommissioning::sendPbkdfParamResponse(
     const otIp6Address& peerAddr, uint16_t peerPort) {
-  if (platform_ == nullptr || initiator_) {
+  if (platform_ == nullptr || !session_.active || initiator_ ||
+      session_.state != MatterCommissioningState::kIdle || !peerBound_ ||
+      !peerMatches(peerAddr, peerPort)) {
     return false;
   }
 
   if (!generateRandom(session_.respondRandom, sizeof(session_.respondRandom))) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
   session_.localSessionId = static_cast<uint16_t>(
@@ -398,8 +575,18 @@ bool MatterPaseCommissioning::sendPbkdfParamResponse(
   if (!spake2pDeriveWS(session_.setupPinCode, session_.salt,
                        session_.pbkdf2Iterations,
                        session_.w0, session_.w1)) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
+
+  Secp256r1Scalar w1Scalar = {};
+  Secp256r1Point verifierPoint = {};
+  memcpy(w1Scalar.bytes, session_.w1, sizeof(w1Scalar.bytes));
+  if (!Secp256r1::scalarMultiplyBase(w1Scalar, &verifierPoint)) {
+    fail(MatterCommissioningError::kCryptoFailed);
+    return false;
+  }
+  Secp256r1::encodeUncompressed(verifierPoint, session_.L);
 
   // Build PBKDF param response
   uint8_t payload[128] = {0};
@@ -421,8 +608,7 @@ bool MatterPaseCommissioning::sendPbkdfParamResponse(
   offset += 4U;
 
   MatterMessageHeader header = {};
-  header.exchangeFlags =
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kReliable);
+  header.exchangeFlags = 0U;
   header.sessionType = 0U;
   header.messageId = nextMessageId();
   header.exchangeId = peerExchangeId_;
@@ -430,34 +616,42 @@ bool MatterPaseCommissioning::sendPbkdfParamResponse(
   header.protocolOpcode =
       static_cast<uint8_t>(MatterMessageType::kPBKDFParamResponse);
 
-  return sendMessage(peerAddr, peerPort, header, payload,
-                     static_cast<uint16_t>(offset));
+  if (!sendMessage(peerAddr, peerPort, header, payload,
+                   static_cast<uint16_t>(offset))) {
+    fail(MatterCommissioningError::kTransportFailed);
+    return false;
+  }
+  expectedMessage_ = ExpectedMessage::kSpake2p1;
+  advanceState(MatterCommissioningState::kPaseSpake2pInProgress);
+  return true;
 }
 
 bool MatterPaseCommissioning::initiateSpake2p(
     const otIp6Address& peerAddr, uint16_t peerPort) {
-  if (platform_ == nullptr || !initiator_) {
+  if (platform_ == nullptr || !session_.active || !initiator_ ||
+      session_.state != MatterCommissioningState::kPasePbkdfParamsSent ||
+      !peerMatches(peerAddr, peerPort)) {
     return false;
   }
 
   peerAddr_ = peerAddr;
   peerPort_ = peerPort;
 
-  // Initiator (commissioner/verifier) computes X = (y + w0)*G
-  // In Matter PASE:
+  // Initiator (commissioner/prover) computes X = (x + w0)*G.
+  // In this experimental PASE-like exchange:
   // - Initiator sends spake2p1 with X
   // - Responder sends spake2p2 with Y + cB
   // - Initiator sends spake2p3 with cA
 
   if (!computeSpake2pX()) {
+    fail(MatterCommissioningError::kCryptoFailed);
     return false;
   }
 
   // Build spake2p1 message containing X
   MatterMessageHeader header = {};
   header.exchangeFlags =
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kInitiator) |
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kReliable);
+      static_cast<uint8_t>(MatterMessageExchangeFlags::kInitiator);
   header.sessionType = 0U;
   header.messageId = nextMessageId();
   header.exchangeId = localExchangeId_;
@@ -468,7 +662,10 @@ bool MatterPaseCommissioning::initiateSpake2p(
   const bool ok = sendMessage(peerAddr, peerPort, header,
                               session_.X, sizeof(session_.X));
   if (ok) {
-    session_.state = MatterCommissioningState::kPaseSpake2pInProgress;
+    expectedMessage_ = ExpectedMessage::kSpake2p2;
+    advanceState(MatterCommissioningState::kPaseSpake2pInProgress);
+  } else {
+    fail(MatterCommissioningError::kTransportFailed);
   }
   return ok;
 }
@@ -487,32 +684,17 @@ bool MatterPaseCommissioning::getSharedSecret(
 // SPAKE2+ cryptographic operations
 // ---------------------------------------------------------------------------
 
-bool MatterPaseCommissioning::deriveW0W1FromPasscode() {
-  return spake2pDeriveWS(session_.setupPinCode, session_.salt,
-                         session_.pbkdf2Iterations,
-                         session_.w0, session_.w1);
-}
-
 bool MatterPaseCommissioning::computeSpake2pX() {
-  // Prover (commissionee) computes:
+  // Initiator/commissioner (prover) computes:
   // X = x*G + w0*G = (x + w0)*G
   Secp256r1Scalar xScalar;
   if (!Secp256r1::generateRandomScalar(&xScalar)) return false;
 
-  // y + w0 (mod n)
+  // x + w0 (mod n)
   Secp256r1::BigNum256 xBn, w0Bn, sumBn;
-  memcpy(xBn.w, xScalar.bytes, sizeof(xBn.w));
-  memcpy(w0Bn.w, session_.w0, sizeof(w0Bn.w));
-  Secp256r1::bnAdd(xBn, w0Bn, &sumBn);
-
-  // Reduce mod n
-  Secp256r1Scalar orderN;
-  Secp256r1::getOrder(&orderN);
-  Secp256r1::BigNum256 nBn;
-  memcpy(nBn.w, orderN.bytes, sizeof(nBn.w));
-  if (Secp256r1::bnCompare(sumBn, nBn) >= 0) {
-    Secp256r1::bnSub(sumBn, nBn, &sumBn);
-  }
+  Secp256r1::bnFromBytes(xScalar.bytes, &xBn);
+  Secp256r1::bnFromBytes(session_.w0, &w0Bn);
+  Secp256r1::bnModAddN(xBn, w0Bn, &sumBn);
 
   Secp256r1Scalar scalarXW0;
   Secp256r1::bnToBytes(sumBn, scalarXW0.bytes);
@@ -530,24 +712,16 @@ bool MatterPaseCommissioning::computeSpake2pX() {
 }
 
 bool MatterPaseCommissioning::computeSpake2pY() {
-  // Responder (commissionee/prover) computes:
-  // Y = (x + w0)*G
+  // Responder/commissionee (verifier) computes:
+  // Y = (y + w0)*G
   Secp256r1Scalar yScalar;
   if (!Secp256r1::generateRandomScalar(&yScalar)) return false;
 
-  // x + w0 (mod n)
+  // y + w0 (mod n)
   Secp256r1::BigNum256 yBn, w0Bn, sumBn;
-  memcpy(yBn.w, yScalar.bytes, sizeof(yBn.w));
-  memcpy(w0Bn.w, session_.w0, sizeof(w0Bn.w));
-  Secp256r1::bnAdd(yBn, w0Bn, &sumBn);
-
-  Secp256r1Scalar orderN;
-  Secp256r1::getOrder(&orderN);
-  Secp256r1::BigNum256 nBn;
-  memcpy(nBn.w, orderN.bytes, sizeof(nBn.w));
-  if (Secp256r1::bnCompare(sumBn, nBn) >= 0) {
-    Secp256r1::bnSub(sumBn, nBn, &sumBn);
-  }
+  Secp256r1::bnFromBytes(yScalar.bytes, &yBn);
+  Secp256r1::bnFromBytes(session_.w0, &w0Bn);
+  Secp256r1::bnModAddN(yBn, w0Bn, &sumBn);
 
   Secp256r1Scalar scalarYW0;
   Secp256r1::bnToBytes(sumBn, scalarYW0.bytes);
@@ -564,17 +738,18 @@ bool MatterPaseCommissioning::computeSpake2pY() {
   return true;
 }
 
-bool MatterPaseCommissioning::computeSpake2pZ(bool prover) {
+bool MatterPaseCommissioning::computeSpake2pZ(bool responderVerifier) {
   // Both sides compute:
-  // Z = x * (X - w0*G)  (prover: x is prover's ephemeral, X is initiator's point)
-  // Z = y * (Y - w0*G)  (verifier: y is verifier's ephemeral, Y is responder's point)
-  // Since X = (y+w0)*G and Y = (x+w0)*G:
+  // Z = x * (Y - w0*G)  (prover uses the responder's Y)
+  // Z = y * (X - w0*G)  (verifier uses the initiator's X)
+  // Since X = (x+w0)*G and Y = (y+w0)*G:
   //   Z = x*y*G = y*x*G (same for both!)
   //
-  // V = w1 * (peerPoint - w0*G)
+  // V = w1*(Y-w0*G) for the prover and y*L for the verifier.
 
   // Decode peer's point
-  const uint8_t* peerPoint = prover ? session_.X : session_.Y;
+  const uint8_t* peerPoint =
+      responderVerifier ? session_.X : session_.Y;
   Secp256r1Point peerP;
   if (!Secp256r1::decodeUncompressed(peerPoint, &peerP)) {
     return false;
@@ -594,7 +769,7 @@ bool MatterPaseCommissioning::computeSpake2pZ(bool prover) {
   memcpy(negW0G.x, w0G.x, sizeof(negW0G.x));
   Secp256r1::BigNum256 pVal = Secp256r1::primeP();
   Secp256r1::BigNum256 yNeg;
-  memcpy(yNeg.w, w0G.y, sizeof(yNeg.w));
+  Secp256r1::bnFromBytes(w0G.y, &yNeg);
   Secp256r1::bnSub(pVal, yNeg, &yNeg);
   Secp256r1::bnToBytes(yNeg, negW0G.y);
 
@@ -614,13 +789,21 @@ bool MatterPaseCommissioning::computeSpake2pZ(bool prover) {
   }
   Secp256r1::encodeUncompressed(Zpoint, session_.Z);
 
-  // V = w1 * peerMinusW0 (same computation for both sides)
-  Secp256r1Scalar w1Scalar;
-  memcpy(w1Scalar.bytes, session_.w1, sizeof(w1Scalar.bytes));
-
-  Secp256r1Point Vpoint;
-  if (!Secp256r1::scalarMultiply(w1Scalar, peerMinusW0, &Vpoint)) {
-    return false;
+  Secp256r1Point Vpoint = {};
+  if (responderVerifier) {
+    // The verifier has y and L = w1*G, so V = y*L.
+    Secp256r1Point verifierPoint = {};
+    if (!Secp256r1::decodeUncompressed(session_.L, &verifierPoint) ||
+        !Secp256r1::scalarMultiply(ephemeral, verifierPoint, &Vpoint)) {
+      return false;
+    }
+  } else {
+    // The prover knows w1, so V = w1*(Y-w0*G).
+    Secp256r1Scalar w1Scalar = {};
+    memcpy(w1Scalar.bytes, session_.w1, sizeof(w1Scalar.bytes));
+    if (!Secp256r1::scalarMultiply(w1Scalar, peerMinusW0, &Vpoint)) {
+      return false;
+    }
   }
   Secp256r1::encodeUncompressed(Vpoint, session_.V);
 
@@ -640,56 +823,47 @@ bool MatterPaseCommissioning::deriveSharedSecret() {
 
   MatterPbkdf2::sha256(concat, offset, session_.sharedSecret);
 
-  // Derive session key ke = HMAC(sharedSecret, "Session Keys")
-  const char* sessionKeysContext = "Session Keys";
+  // Derive independent session and confirmation keys.
+  const char* sessionKeysContext = "PASE-EXPERIMENTAL-SESSION";
   MatterPbkdf2::hmacSha256(
       session_.sharedSecret, sizeof(session_.sharedSecret),
       reinterpret_cast<const uint8_t*>(sessionKeysContext),
       strlen(sessionKeysContext),
       session_.ke);
+  MatterPbkdf2::hmacSha256(
+      session_.sharedSecret, sizeof(session_.sharedSecret),
+      reinterpret_cast<const uint8_t*>(kSpake2pKeyAlpha),
+      strlen(kSpake2pKeyAlpha), session_.kcA);
+  MatterPbkdf2::hmacSha256(
+      session_.sharedSecret, sizeof(session_.sharedSecret),
+      reinterpret_cast<const uint8_t*>(kSpake2pKeyBeta),
+      strlen(kSpake2pKeyBeta), session_.kcB);
 
   return true;
 }
 
 bool MatterPaseCommissioning::generateConfirmationA() {
-  // cA = HMAC(ke, "SPAKE2P Key Confirmation" || X || Y)
-  const char* context = kSpake2pContextAlpha;
-  size_t contextLen = strlen(context);
-
-  uint8_t message[kMatterSpake2pPointSize * 2] = {0};
-  // Always: X (initiator's point) || Y (responder's point)
-  memcpy(message, session_.X, sizeof(session_.X));
-  memcpy(message + sizeof(session_.X), session_.Y, sizeof(session_.Y));
-
-  // Full cA = HMAC(ke, context || message)
-  uint8_t fullMsg[kMatterSpake2pPointSize * 2 + 32] = {0};
-  memcpy(fullMsg, context, contextLen);
-  memcpy(fullMsg + contextLen, message, sizeof(message));
-
-  MatterPbkdf2::hmacSha256(session_.ke, sizeof(session_.ke),
-                            fullMsg, contextLen + sizeof(message),
-                            session_.cA);
+  uint8_t input[256] = {0};
+  const size_t inputLength =
+      buildConfirmationInput(session_, initiator_, true, input, sizeof(input));
+  if (inputLength == 0U) {
+    return false;
+  }
+  MatterPbkdf2::hmacSha256(session_.kcA, sizeof(session_.kcA),
+                           input, inputLength, session_.cA);
 
   return true;
 }
 
 bool MatterPaseCommissioning::generateConfirmationB() {
-  // cB = HMAC(ke, "SPAKE2P Key Confirmation" || X || Y)
-  const char* context = kSpake2pContextBeta;
-  size_t contextLen = strlen(context);
-
-  uint8_t message[kMatterSpake2pPointSize * 2] = {0};
-  // Always: X (initiator's point) || Y (responder's point)
-  memcpy(message, session_.X, sizeof(session_.X));
-  memcpy(message + sizeof(session_.X), session_.Y, sizeof(session_.Y));
-
-  uint8_t fullMsg[kMatterSpake2pPointSize * 2 + 32] = {0};
-  memcpy(fullMsg, context, contextLen);
-  memcpy(fullMsg + contextLen, message, sizeof(message));
-
-  MatterPbkdf2::hmacSha256(session_.ke, sizeof(session_.ke),
-                            fullMsg, contextLen + sizeof(message),
-                            session_.cB);
+  uint8_t input[256] = {0};
+  const size_t inputLength =
+      buildConfirmationInput(session_, initiator_, false, input, sizeof(input));
+  if (inputLength == 0U) {
+    return false;
+  }
+  MatterPbkdf2::hmacSha256(session_.kcB, sizeof(session_.kcB),
+                           input, inputLength, session_.cB);
 
   return true;
 }
@@ -710,7 +884,7 @@ bool MatterPaseCommissioning::verifyConfirmationB() {
   // Restore received cB
   memcpy(session_.cB, receivedCB, sizeof(receivedCB));
 
-  return memcmp(computedCB, receivedCB, sizeof(computedCB)) == 0;
+  return constantTimeEqual(computedCB, receivedCB, sizeof(computedCB));
 }
 
 bool MatterPaseCommissioning::verifyConfirmationA() {
@@ -726,7 +900,7 @@ bool MatterPaseCommissioning::verifyConfirmationA() {
 
   memcpy(session_.cA, receivedCA, sizeof(session_.cA));
 
-  return memcmp(computedCA, receivedCA, sizeof(computedCA)) == 0;
+  return constantTimeEqual(computedCA, receivedCA, sizeof(computedCA));
 }
 
 // ---------------------------------------------------------------------------
@@ -746,7 +920,9 @@ void MatterPaseCommissioning::handleUdpReceive(
 void MatterPaseCommissioning::handleMessage(
     const uint8_t* payload, uint16_t length,
     const otIp6Address& source, uint16_t sourcePort) {
-  if (!session_.active) {
+  if (!session_.active ||
+      session_.state == MatterCommissioningState::kFailed ||
+      session_.state == MatterCommissioningState::kPaseComplete) {
     return;
   }
 
@@ -756,12 +932,7 @@ void MatterPaseCommissioning::handleMessage(
     return;
   }
 
-  peerAddr_ = source;
-  peerPort_ = sourcePort;
-  peerExchangeId_ = header.exchangeId;
-  peerMessageId_ = header.messageId;
-
-  if (header.protocolId != kProtocolSecureChannel) {
+  if (!messageExpected(header, source, sourcePort)) {
     return;
   }
 
@@ -770,6 +941,17 @@ void MatterPaseCommissioning::handleMessage(
                                                     : 0U);
   const uint8_t* appPayload =
       appLength > 0U ? &payload[payloadOffset] : nullptr;
+  if (!messagePayloadValid(header, appPayload, appLength) ||
+      !peerMessageCounter_.accept(header.messageId)) {
+    return;
+  }
+
+  // Commit the peer only after the complete first request is structurally
+  // valid. A malformed unauthenticated datagram must not claim the window.
+  if (!peerBound_) {
+    bindPeer(source, sourcePort, header.exchangeId);
+  }
+  peerMessageId_ = header.messageId;
 
   switch (static_cast<MatterMessageType>(header.protocolOpcode)) {
     case MatterMessageType::kPBKDFParamRequest:
@@ -795,16 +977,14 @@ void MatterPaseCommissioning::handleMessage(
 void MatterPaseCommissioning::handlePbkdfParamRequest(
     const uint8_t* payload, uint16_t length,
     const otIp6Address& source, uint16_t sourcePort) {
-  if (payload == nullptr || initiator_) {
+  if (payload == nullptr || initiator_ || length != kPbkdfPayloadSize) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
-  if (length < 36U) {
-    return;
-  }
-
-  // Parse initiator random
-  memcpy(session_.initiateRandom, payload, sizeof(session_.initiateRandom));
+  uint8_t initiateRandom[sizeof(session_.initiateRandom)] = {0};
+  uint8_t salt[sizeof(session_.salt)] = {0};
+  memcpy(initiateRandom, payload, sizeof(initiateRandom));
   size_t offset = sizeof(session_.initiateRandom);
 
   // Parse initiator session ID
@@ -812,7 +992,6 @@ void MatterPaseCommissioning::handlePbkdfParamRequest(
   if (!readUint16Le(payload, offset, length, &initiatorSessionId)) {
     return;
   }
-  session_.peerSessionId = initiatorSessionId;
   offset += 2U;
 
   // Parse passcode ID
@@ -820,45 +999,43 @@ void MatterPaseCommissioning::handlePbkdfParamRequest(
   if (!readUint16Le(payload, offset, length, &passcodeId)) {
     return;
   }
-  session_.passcodeId = passcodeId;
   offset += 2U;
 
-  // Parse SPAKE2+ parameters if present
-  if (offset < length && payload[offset] != 0U) {
-    offset++;  // hasPbkdfParameters
-    if ((offset + kMatterSpake2pSaltSize + 4U) <= length) {
-      memcpy(session_.salt, &payload[offset], sizeof(session_.salt));
-      offset += sizeof(session_.salt);
-      uint32_t iterations = 0U;
-      if (readUint32Le(payload, offset, length, &iterations)) {
-        session_.pbkdf2Iterations = iterations;
-      }
-    }
-  }
-
-  // Derive keys from passcode
-  if (!deriveW0W1FromPasscode()) {
-    advanceState(MatterCommissioningState::kFailed);
+  if (initiatorSessionId == 0U || passcodeId != 0U || payload[offset++] != 1U) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
+  memcpy(salt, &payload[offset], sizeof(salt));
+  offset += sizeof(salt);
+  uint32_t iterations = 0U;
+  if (!readUint32Le(payload, offset, length, &iterations) ||
+      iterations < kMatterSpake2pMinPbkdf2Iterations ||
+      iterations > kMatterSpake2pMaxPbkdf2Iterations) {
+    fail(MatterCommissioningError::kInvalidMessage);
+    return;
+  }
+
+  memcpy(session_.initiateRandom, initiateRandom, sizeof(initiateRandom));
+  memcpy(session_.salt, salt, sizeof(salt));
+  session_.peerSessionId = initiatorSessionId;
+  session_.passcodeId = passcodeId;
+  session_.pbkdf2Iterations = iterations;
+
   // Send PBKDF param response
-  sendPbkdfParamResponse(source, sourcePort);
+  (void)sendPbkdfParamResponse(source, sourcePort);
 }
 
 void MatterPaseCommissioning::handlePbkdfParamResponse(
     const uint8_t* payload, uint16_t length,
     const otIp6Address& source, uint16_t sourcePort) {
-  if (payload == nullptr || !initiator_) {
+  if (payload == nullptr || !initiator_ || length != kPbkdfPayloadSize) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
-  if (length < 36U) {
-    return;
-  }
-
-  // Parse responder random
-  memcpy(session_.respondRandom, payload, sizeof(session_.respondRandom));
+  uint8_t respondRandom[sizeof(session_.respondRandom)] = {0};
+  memcpy(respondRandom, payload, sizeof(respondRandom));
   size_t offset = sizeof(session_.respondRandom);
 
   // Parse responder session ID
@@ -866,45 +1043,72 @@ void MatterPaseCommissioning::handlePbkdfParamResponse(
   if (!readUint16Le(payload, offset, length, &responderSessionId)) {
     return;
   }
-  session_.peerSessionId = responderSessionId;
+  offset += 2U;
 
-  // PASE key exchange — now initiate SPAKE2+
-  session_.state = MatterCommissioningState::kPaseSpake2pInProgress;
-  initiateSpake2p(source, sourcePort);
+  uint16_t passcodeId = 0U;
+  if (!readUint16Le(payload, offset, length, &passcodeId)) {
+    fail(MatterCommissioningError::kInvalidMessage);
+    return;
+  }
+  offset += 2U;
+
+  if (responderSessionId == 0U || passcodeId != session_.passcodeId ||
+      payload[offset++] != 1U ||
+      !constantTimeEqual(&payload[offset], session_.salt,
+                         sizeof(session_.salt))) {
+    fail(MatterCommissioningError::kInvalidMessage);
+    return;
+  }
+  offset += sizeof(session_.salt);
+
+  uint32_t iterations = 0U;
+  if (!readUint32Le(payload, offset, length, &iterations) ||
+      iterations != session_.pbkdf2Iterations) {
+    fail(MatterCommissioningError::kInvalidMessage);
+    return;
+  }
+
+  memcpy(session_.respondRandom, respondRandom, sizeof(respondRandom));
+  session_.peerSessionId = responderSessionId;
+  (void)initiateSpake2p(source, sourcePort);
 }
 
 void MatterPaseCommissioning::handleSpake2p1(
     const uint8_t* payload, uint16_t length,
     const otIp6Address& source, uint16_t sourcePort) {
-  if (payload == nullptr || initiator_) {
+  if (payload == nullptr || initiator_ ||
+      length != kMatterSpake2pPointSize) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
-  // Store peer's X point (commissioner sent X in spake2p1)
-  if (length >= kMatterSpake2pPointSize) {
-    memcpy(session_.X, payload, kMatterSpake2pPointSize);
+  Secp256r1Point peerPoint = {};
+  if (!Secp256r1::decodeUncompressed(payload, &peerPoint)) {
+    fail(MatterCommissioningError::kAuthenticationFailed);
+    return;
   }
+  memcpy(session_.X, payload, kMatterSpake2pPointSize);
 
-  // Commissionee (prover): compute Y and Z
+  // Commissionee (verifier): compute Y and Z.
   if (!computeSpake2pY()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
-  if (!computeSpake2pZ(true)) {  // true = prover
-    advanceState(MatterCommissioningState::kFailed);
+  if (!computeSpake2pZ(true)) {  // responder is the verifier
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
   // Z and V are already computed in computeSpake2pZ()
 
   if (!deriveSharedSecret()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
   if (!generateConfirmationB()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
@@ -916,8 +1120,7 @@ void MatterPaseCommissioning::handleSpake2p1(
          sizeof(session_.cB));
 
   MatterMessageHeader header = {};
-  header.exchangeFlags =
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kReliable);
+  header.exchangeFlags = 0U;
   header.sessionType = 0U;
   header.messageId = nextMessageId();
   header.exchangeId = peerExchangeId_;
@@ -925,20 +1128,32 @@ void MatterPaseCommissioning::handleSpake2p1(
   header.protocolOpcode =
       static_cast<uint8_t>(MatterMessageType::kPaseSpake2p2);
 
-  sendMessage(source, sourcePort, header, spake2p2Payload,
-              sizeof(spake2p2Payload));
+  if (!sendMessage(source, sourcePort, header, spake2p2Payload,
+                   sizeof(spake2p2Payload))) {
+    fail(MatterCommissioningError::kTransportFailed);
+    return;
+  }
+  expectedMessage_ = ExpectedMessage::kSpake2p3;
 }
 
 void MatterPaseCommissioning::handleSpake2p2(
     const uint8_t* payload, uint16_t length,
     const otIp6Address& source, uint16_t sourcePort) {
   if (payload == nullptr || !initiator_) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
   const size_t spake2p2Size =
       kMatterSpake2pPointSize + kMatterSpake2pConfirmationSize;
-  if (length < spake2p2Size) {
+  if (length != spake2p2Size) {
+    fail(MatterCommissioningError::kInvalidMessage);
+    return;
+  }
+
+  Secp256r1Point peerPoint = {};
+  if (!Secp256r1::decodeUncompressed(payload, &peerPoint)) {
+    fail(MatterCommissioningError::kAuthenticationFailed);
     return;
   }
 
@@ -946,32 +1161,31 @@ void MatterPaseCommissioning::handleSpake2p2(
   memcpy(session_.Y, payload, sizeof(session_.Y));
   memcpy(session_.cB, payload + sizeof(session_.Y), sizeof(session_.cB));
 
-  // Verifier (commissioner): compute Z
-  if (!computeSpake2pZ(false)) {  // false = verifier
-    advanceState(MatterCommissioningState::kFailed);
+  // Commissioner (prover): compute Z.
+  if (!computeSpake2pZ(false)) {  // initiator is the prover
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
   if (!deriveSharedSecret()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
   // Verify cB
   if (!verifyConfirmationB()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kAuthenticationFailed);
     return;
   }
 
   if (!generateConfirmationA()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kCryptoFailed);
     return;
   }
 
   // Send spake2p3: cA
   MatterMessageHeader header = {};
-  header.exchangeFlags =
-      static_cast<uint8_t>(MatterMessageExchangeFlags::kReliable);
+  header.exchangeFlags = 0U;
   header.sessionType = 0U;
   header.messageId = nextMessageId();
   header.exchangeId = peerExchangeId_;
@@ -979,20 +1193,25 @@ void MatterPaseCommissioning::handleSpake2p2(
   header.protocolOpcode =
       static_cast<uint8_t>(MatterMessageType::kPaseSpake2p3);
 
-  sendMessage(source, sourcePort, header, session_.cA,
-              sizeof(session_.cA));
+  if (!sendMessage(source, sourcePort, header, session_.cA,
+                   sizeof(session_.cA))) {
+    fail(MatterCommissioningError::kTransportFailed);
+    return;
+  }
 
-  session_.state = MatterCommissioningState::kPaseComplete;
+  expectedMessage_ = ExpectedMessage::kNone;
   advanceState(MatterCommissioningState::kPaseComplete);
 }
 
 void MatterPaseCommissioning::handleSpake2p3(
     const uint8_t* payload, uint16_t length) {
   if (payload == nullptr || initiator_) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
-  if (length < sizeof(session_.cA)) {
+  if (length != sizeof(session_.cA)) {
+    fail(MatterCommissioningError::kInvalidMessage);
     return;
   }
 
@@ -1001,12 +1220,12 @@ void MatterPaseCommissioning::handleSpake2p3(
 
   // Verify cA
   if (!verifyConfirmationA()) {
-    advanceState(MatterCommissioningState::kFailed);
+    fail(MatterCommissioningError::kAuthenticationFailed);
     return;
   }
 
   // PASE handshake complete!
-  session_.state = MatterCommissioningState::kPaseComplete;
+  expectedMessage_ = ExpectedMessage::kNone;
   advanceState(MatterCommissioningState::kPaseComplete);
 }
 
@@ -1049,9 +1268,11 @@ bool MatterPaseCommissioning::parseMessageHeader(
 
   // Optional acked message ID
   if ((outHeader->exchangeFlags &
-       static_cast<uint8_t>(MatterMessageExchangeFlags::kAck)) != 0U &&
-      (offset + 2U) <= length) {
-    readUint16Le(payload, offset, length, &outHeader->ackedMessageId);
+       static_cast<uint8_t>(MatterMessageExchangeFlags::kAck)) != 0U) {
+    if (!readUint16Le(payload, offset, length,
+                      &outHeader->ackedMessageId)) {
+      return false;
+    }
     offset += 2U;
   }
 
@@ -1065,7 +1286,12 @@ bool MatterPaseCommissioning::buildMessageHeader(
     const MatterMessageHeader& header,
     uint8_t* outBuffer, size_t outCapacity,
     size_t* outLength) const {
-  if (outBuffer == nullptr || outCapacity < 20U) {
+  const size_t requiredCapacity =
+      (header.exchangeFlags &
+       static_cast<uint8_t>(MatterMessageExchangeFlags::kAck)) != 0U
+          ? 22U
+          : 20U;
+  if (outBuffer == nullptr || outCapacity < requiredCapacity) {
     if (outLength != nullptr) {
       *outLength = 0U;
     }
@@ -1110,7 +1336,8 @@ bool MatterPaseCommissioning::sendMessage(
     const otIp6Address& peerAddr, uint16_t peerPort,
     const MatterMessageHeader& header,
     const uint8_t* appPayload, uint16_t appPayloadLength) {
-  if (platform_ == nullptr) {
+  if (platform_ == nullptr || peerPort == 0U ||
+      (appPayload == nullptr && appPayloadLength != 0U)) {
     return false;
   }
 
@@ -1137,6 +1364,166 @@ bool MatterPaseCommissioning::sendMessage(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+bool MatterPaseCommissioning::messageExpected(
+    const MatterMessageHeader& header, const otIp6Address& source,
+    uint16_t sourcePort) const {
+  if (sourcePort == 0U || header.sessionType != 0U ||
+      header.securityFlags != 0U || header.messageId == 0U ||
+      header.protocolId != kProtocolSecureChannel ||
+      expectedMessage_ == ExpectedMessage::kNone) {
+    return false;
+  }
+
+  uint8_t expectedOpcode = 0U;
+  bool expectInitiatorFlag = false;
+  bool roleMatches = false;
+  switch (expectedMessage_) {
+    case ExpectedMessage::kPbkdfParamRequest:
+      expectedOpcode =
+          static_cast<uint8_t>(MatterMessageType::kPBKDFParamRequest);
+      expectInitiatorFlag = true;
+      roleMatches = !initiator_;
+      break;
+    case ExpectedMessage::kPbkdfParamResponse:
+      expectedOpcode =
+          static_cast<uint8_t>(MatterMessageType::kPBKDFParamResponse);
+      roleMatches = initiator_;
+      break;
+    case ExpectedMessage::kSpake2p1:
+      expectedOpcode = static_cast<uint8_t>(MatterMessageType::kPaseSpake2p1);
+      expectInitiatorFlag = true;
+      roleMatches = !initiator_;
+      break;
+    case ExpectedMessage::kSpake2p2:
+      expectedOpcode = static_cast<uint8_t>(MatterMessageType::kPaseSpake2p2);
+      roleMatches = initiator_;
+      break;
+    case ExpectedMessage::kSpake2p3:
+      expectedOpcode = static_cast<uint8_t>(MatterMessageType::kPaseSpake2p3);
+      roleMatches = !initiator_;
+      break;
+    case ExpectedMessage::kNone:
+    default:
+      return false;
+  }
+
+  const uint8_t expectedFlags =
+      expectInitiatorFlag
+          ? static_cast<uint8_t>(MatterMessageExchangeFlags::kInitiator)
+          : 0U;
+  if (!roleMatches || header.protocolOpcode != expectedOpcode ||
+      header.exchangeFlags != expectedFlags) {
+    return false;
+  }
+
+  if (peerBound_) {
+    return peerMatches(source, sourcePort) &&
+           header.exchangeId == peerExchangeId_;
+  }
+  return !initiator_ && expectedMessage_ == ExpectedMessage::kPbkdfParamRequest &&
+         header.exchangeId != 0U;
+}
+
+bool MatterPaseCommissioning::messagePayloadValid(
+    const MatterMessageHeader& header, const uint8_t* payload,
+    uint16_t length) const {
+  switch (static_cast<MatterMessageType>(header.protocolOpcode)) {
+    case MatterMessageType::kPBKDFParamRequest:
+      return !initiator_ && validPbkdfRequestPayload(payload, length);
+
+    case MatterMessageType::kPBKDFParamResponse: {
+      if (!initiator_ || payload == nullptr || length != kPbkdfPayloadSize ||
+          allZero(payload, 32U)) {
+        return false;
+      }
+      size_t offset = 32U;
+      uint16_t sessionId = 0U;
+      uint16_t passcodeId = 0U;
+      if (!readUint16Le(payload, offset, length, &sessionId)) {
+        return false;
+      }
+      offset += 2U;
+      if (!readUint16Le(payload, offset, length, &passcodeId)) {
+        return false;
+      }
+      offset += 2U;
+      if (sessionId == 0U || passcodeId != session_.passcodeId ||
+          payload[offset++] != 1U ||
+          !constantTimeEqual(payload + offset, session_.salt,
+                             sizeof(session_.salt))) {
+        return false;
+      }
+      offset += sizeof(session_.salt);
+      uint32_t iterations = 0U;
+      return readUint32Le(payload, offset, length, &iterations) &&
+             iterations == session_.pbkdf2Iterations;
+    }
+
+    case MatterMessageType::kPaseSpake2p1: {
+      Secp256r1Point point = {};
+      return !initiator_ && payload != nullptr &&
+             length == kMatterSpake2pPointSize &&
+             Secp256r1::decodeUncompressed(payload, &point);
+    }
+
+    case MatterMessageType::kPaseSpake2p2: {
+      Secp256r1Point point = {};
+      return initiator_ && payload != nullptr &&
+             length == (kMatterSpake2pPointSize +
+                        kMatterSpake2pConfirmationSize) &&
+             Secp256r1::decodeUncompressed(payload, &point);
+    }
+
+    case MatterMessageType::kPaseSpake2p3:
+      return !initiator_ && payload != nullptr &&
+             length == kMatterSpake2pConfirmationSize;
+
+    default:
+      return false;
+  }
+}
+
+bool MatterPaseCommissioning::peerMatches(
+    const otIp6Address& source, uint16_t sourcePort) const {
+  return peerBound_ && sourcePort == peerPort_ &&
+         memcmp(source.mFields.m8, peerAddr_.mFields.m8,
+                sizeof(peerAddr_.mFields.m8)) == 0;
+}
+
+void MatterPaseCommissioning::bindPeer(
+    const otIp6Address& source, uint16_t sourcePort, uint16_t exchangeId) {
+  peerAddr_ = source;
+  peerPort_ = sourcePort;
+  peerExchangeId_ = exchangeId;
+  peerBound_ = true;
+}
+
+void MatterPaseCommissioning::fail(MatterCommissioningError error) {
+  if (session_.state == MatterCommissioningState::kFailed) {
+    return;
+  }
+  secureZero(session_.w0, sizeof(session_.w0));
+  secureZero(session_.w1, sizeof(session_.w1));
+  secureZero(session_.ws, sizeof(session_.ws));
+  secureZero(session_.L, sizeof(session_.L));
+  secureZero(session_.X, sizeof(session_.X));
+  secureZero(session_.Y, sizeof(session_.Y));
+  secureZero(session_.Z, sizeof(session_.Z));
+  secureZero(session_.V, sizeof(session_.V));
+  secureZero(session_.ephemeralScalar, sizeof(session_.ephemeralScalar));
+  secureZero(session_.sharedSecret, sizeof(session_.sharedSecret));
+  secureZero(session_.ke, sizeof(session_.ke));
+  secureZero(session_.kcA, sizeof(session_.kcA));
+  secureZero(session_.kcB, sizeof(session_.kcB));
+  secureZero(session_.cA, sizeof(session_.cA));
+  secureZero(session_.cB, sizeof(session_.cB));
+  secureZero(&session_.setupPinCode, sizeof(session_.setupPinCode));
+  secureZero(&verifier_, sizeof(verifier_));
+  expectedMessage_ = ExpectedMessage::kNone;
+  advanceState(MatterCommissioningState::kFailed,
+               static_cast<uint32_t>(error));
+}
 
 uint16_t MatterPaseCommissioning::nextExchangeId() {
   static uint16_t exchangeId = 0x5A3CU;

@@ -273,13 +273,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
   buildDefaultIdentity(&identity_);
   const MatterOnNetworkIdentity hardwareDefaultIdentity = identity_;
 
-  // Initialize DAC attestation chain
-  uint8_t serialNumber[32] = {0};
-  buildDefaultSerialNumber(serialNumber);
-  attestationReady_ = attestation_.generateTestChain(
-      identity_.vendorId, identity_.productId, serialNumber);
-
-  // Initialize ACL with default view access
+  accessControl_.clear();
   accessControlReady_ = accessControl_.addDefaultViewEntry();
 
   if (identityValid(effectiveConfig.identity) &&
@@ -298,6 +292,20 @@ bool Nrf54MatterOnNetworkOnOffLightNode::begin(
       }
     }
   }
+
+  // The test DAC must describe the final configured or restored identity.
+  uint8_t serialNumber[32] = {0};
+  buildDefaultSerialNumber(serialNumber);
+  attestationReady_ = attestation_.generateTestChain(
+      identity_.vendorId, identity_.productId, serialNumber);
+  if (!attestationReady_) {
+    end();
+    setFixedText(beginFailureName_, sizeof(beginFailureName_),
+                 "test_attestation_init_failed");
+    resetDiscoveryPublication(beginFailureName_);
+    return false;
+  }
+
   if (!savePersistentIdentity()) {
     end();
     setFixedText(beginFailureName_, sizeof(beginFailureName_),
@@ -407,6 +415,10 @@ void Nrf54MatterOnNetworkOnOffLightNode::end() {
   datasetSource_ = MatterOnNetworkDatasetSource::kNone;
   resetDiscoveryPublication("node_stopped");
   endpoint_.detach();
+  accessControl_.clear();
+  accessControlReady_ = false;
+  attestation_ = MatterDeviceAttestation{};
+  attestationReady_ = false;
 }
 
 void Nrf54MatterOnNetworkOnOffLightNode::process() {
@@ -455,6 +467,7 @@ bool Nrf54MatterOnNetworkOnOffLightNode::snapshot(
   *outStatus = MatterOnNetworkOnOffLightStatus{};
   outStatus->storageOpen = storageOpen_;
   outStatus->lightReady = lightReady_;
+  outStatus->attestationReady = attestationReady_ && attestation_.available();
   outStatus->threadStarted = thread_.started();
   outStatus->threadAttached = thread_.attached();
   outStatus->threadDatasetConfigured = thread_.datasetConfigured();
@@ -493,8 +506,38 @@ bool Nrf54MatterOnNetworkOnOffLightNode::setIdentity(
     return false;
   }
 
+  MatterDeviceAttestation replacementAttestation;
+  uint8_t serialNumber[32] = {0};
+  buildDefaultSerialNumber(serialNumber);
+  if (!replacementAttestation.generateTestChain(
+          identity.vendorId, identity.productId, serialNumber)) {
+    return false;
+  }
+
+  const bool discoveryPublished =
+      discoveryPublicationActive_ || discoverySrpServiceQueued_ ||
+      discoverySrpHostRegistered_ || discoverySrpServiceRegistered_ ||
+      discoverySrpRemovePending_;
+  if (discoveryPublished && !requestSrpDiscoveryUnpublish(true)) {
+    return false;
+  }
+
+  const MatterOnNetworkIdentity previousIdentity = identity_;
   identity_ = identity;
-  return !persist || savePersistentIdentity();
+  if (persist && !savePersistentIdentity()) {
+    identity_ = previousIdentity;
+    if (storageOpen_) {
+      (void)updateDiscoveryPublication();
+    }
+    return false;
+  }
+
+  attestation_ = replacementAttestation;
+  attestationReady_ = attestation_.available();
+  if (storageOpen_) {
+    (void)updateDiscoveryPublication();
+  }
+  return true;
 }
 
 const MatterOnNetworkIdentity& Nrf54MatterOnNetworkOnOffLightNode::identity()
@@ -681,6 +724,8 @@ bool Nrf54MatterOnNetworkOnOffLightNode::readinessSummary(
   outSummary->storageOpen = storageOpen_;
   outSummary->lightReady = lightReady_;
   outSummary->foundationReady = foundation_.mechanicalPathPossible();
+  outSummary->attestationReady =
+      attestationReady_ && attestation_.available();
   outSummary->threadStarted = thread_.started();
   outSummary->threadAttached = thread_.attached();
   outSummary->manualCodeReady = manualPairingCode(nullptr, 0U);
@@ -693,7 +738,8 @@ bool Nrf54MatterOnNetworkOnOffLightNode::readinessSummary(
                sizeof(outSummary->beginFailureName), beginFailureName_);
   outSummary->ready =
       outSummary->storageOpen && outSummary->lightReady &&
-      outSummary->foundationReady && outSummary->threadStarted &&
+      outSummary->foundationReady && outSummary->attestationReady &&
+      outSummary->threadStarted &&
       outSummary->threadAttached && outSummary->manualCodeReady &&
       outSummary->qrCodeReady && outSummary->threadDatasetExportable;
 
@@ -712,6 +758,11 @@ bool Nrf54MatterOnNetworkOnOffLightNode::readinessSummary(
                  "foundation");
     setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
                  "mechanical_path_unavailable");
+  } else if (!outSummary->attestationReady) {
+    setFixedText(outSummary->phaseName, sizeof(outSummary->phaseName),
+                 "attestation");
+    setFixedText(outSummary->blockerName, sizeof(outSummary->blockerName),
+                 "test_attestation_not_ready");
   } else if (!outSummary->threadStarted) {
     setFixedText(outSummary->phaseName, sizeof(outSummary->phaseName),
                  "thread");

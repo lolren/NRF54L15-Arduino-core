@@ -127,12 +127,12 @@ class Nrf54ThreadExperimental {
 
   Nrf54ThreadExperimental() = default;
 
-  bool begin(bool wipeSettings = true);
-  bool beginAsChild(bool wipeSettings = true);
-  bool beginAsRouter(bool wipeSettings = true);
-  bool beginChildFirst(bool wipeSettings = true);
-  bool beginJoinerOnly(bool wipeSettings = true);
-  bool beginAsSleepyChild(bool wipeSettings = true);
+  bool begin(bool wipeSettings = false);
+  bool beginAsChild(bool wipeSettings = false);
+  bool beginAsRouter(bool wipeSettings = false);
+  bool beginChildFirst(bool wipeSettings = false);
+  bool beginJoinerOnly(bool wipeSettings = false);
+  bool beginAsSleepyChild(bool wipeSettings = false);
   bool stop();
   bool restart(bool wipeSettings = false);
   void process();
@@ -173,6 +173,7 @@ class Nrf54ThreadExperimental {
   bool openUdp(uint16_t port,
                UdpReceiveCallback callback,
                void* callbackContext = nullptr);
+  bool closeUdp(uint16_t port);
   bool setStateChangedCallback(StateChangedCallback callback,
                                void* callbackContext = nullptr);
   bool sendUdp(const otIp6Address& peerAddr,
@@ -270,7 +271,6 @@ class Nrf54ThreadExperimental {
   bool restoreDatasetFromSettings();
   bool configureAttachPolicy();
   bool maybePromoteChildFirstFallback(uint32_t elapsedMs);
-  bool maybeForceLeader(uint32_t elapsedMs);
   bool maybeSwitchToSleepyMode();
 
   struct UdpSocketSlot {
@@ -349,7 +349,7 @@ class Nrf54ThreadExperimental {
   bool linkConfigured_ = false;
   bool ip6Enabled_ = false;
   bool threadEnabled_ = false;
-  bool wipeSettings_ = true;
+  bool wipeSettings_ = false;
   bool stateChangedCallbackRegistered_ = false;
   bool commissionerStarted_ = false;
   bool joinerStarted_ = false;

@@ -456,6 +456,7 @@ void printAclStatus() {
       Serial.print(entry.clusterId, HEX);
       if (entry.wildcardFabric) Serial.print(" wild-fabric");
       if (entry.wildcardNode) Serial.print(" wild-node");
+      if (entry.wildcardSubject) Serial.print(" wild-subject");
       if (entry.wildcardCluster) Serial.print(" wild-cluster");
       if (entry.wildcardEndpoint) Serial.print(" wild-ep");
     }

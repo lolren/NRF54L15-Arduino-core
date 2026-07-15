@@ -2,7 +2,7 @@
 #include "matter_rng.h"
 
 #include <string.h>
-#include "nrf54l15_hal.h"
+#include <nrf54l15_hal.h>
 
 namespace xiao_nrf54l15 {
 

@@ -1,6 +1,8 @@
 #pragma once
 
-// Minimal Matter core-stage shim for staged upstream support units that call
-// ChipLogProgress() but do not need the full CHIP logging framework yet.
-
-#define ChipLogProgress(MOD, MSG, ...) ((void)0)
+// The staged Arduino target has no CHIP logging backend yet. Keep logging
+// calls compile-time silent while preserving all checks and return paths.
+#define ChipLogError(module, format, ...) ((void)0)
+#define ChipLogProgress(module, format, ...) ((void)0)
+#define ChipLogDetail(module, format, ...) ((void)0)
+#define ChipLogAutomation(module, format, ...) ((void)0)
