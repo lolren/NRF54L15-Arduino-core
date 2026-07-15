@@ -40,17 +40,18 @@ def main() -> int:
     )
     zephyr_hid_info_end = source.index("};", zephyr_hid_info_start)
     zephyr_hid_info = source[zephyr_hid_info_start:zephyr_hid_info_end]
-    assert "0x11U, 0x01U" in zephyr_hid_info
-    assert "0x00U, 0x00U" not in zephyr_hid_info
-    print("PASS compact HID mouse advertises conformant HID version 1.11")
+    assert "0x00U, 0x00U" in zephyr_hid_info
+    print("PASS compact HID mouse preserves Zephyr/Sony HID metadata")
 
     hid_begin = function_body(source, "err_t BLEHidAdafruit::begin()")
     compact_branch = hid_begin[
         hid_begin.index("if (zephyr_compatible_mouse_)") :
         hid_begin.index("const uint8_t protocol =", hid_begin.index("if (zephyr_compatible_mouse_)"))
     ]
-    assert compact_branch.count("SECMODE_ENC_NO_MITM") >= 5
-    assert "setReportRefDescriptorPermission(SECMODE_ENC_NO_MITM)" in compact_branch
+    assert compact_branch.count("SECMODE_ENC_NO_MITM") >= 2
+    assert "setReportRefDescriptorPermission(SECMODE_OPEN)" in compact_branch
+    assert "hid_info_, CHR_PROPS_READ, SECMODE_OPEN" in compact_branch
+    assert "report_map_, CHR_PROPS_READ, SECMODE_OPEN" in compact_branch
     hid_mouse_report = function_body(
         source,
         "bool BLEHidAdafruit::mouseReport(uint16_t conn_hdl, hid_mouse_report_t* report)",
@@ -67,6 +68,7 @@ def main() -> int:
     for token in (
         "Bluefruit.Security.setIOCaps(false, false, false)",
         "blehid.setZephyrCompatibleMouse(true)",
+        "Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE)",
     ):
         assert token in mouse_example, f"portable HID mouse example missing: {token}"
     print("PASS HID mouse example uses broad-host compact-profile interoperability mode")

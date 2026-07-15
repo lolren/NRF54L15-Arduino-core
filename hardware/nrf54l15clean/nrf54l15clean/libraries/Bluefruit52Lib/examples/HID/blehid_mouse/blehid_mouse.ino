@@ -78,6 +78,9 @@ void startAdv(void)
 {  
   // Advertising packet
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+  // Sony's HID host filters input devices using the Appearance AD field.
+  // Keep it in the packet as well as in the GAP database.
+  Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE);
   
   // Zephyr peripheral_hids advertises HIDS + BAS UUIDs and puts the name in
   // scan response. Keep this shape for strict Android host comparisons.

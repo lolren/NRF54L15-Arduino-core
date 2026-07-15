@@ -7699,7 +7699,7 @@ const uint8_t kHidInfoValue[] = {
 };
 
 const uint8_t kHidZephyrInfoValue[] = {
-    0x11U, 0x01U,  // HID v1.11; strict hosts reject Zephyr's sample value 0.00.
+    0x00U, 0x00U,  // Match Zephyr peripheral_hids and legacy Sony hosts.
     0x00U,         // country code: not localized
     0x02U,         // normally connectable
 };
@@ -7828,15 +7828,18 @@ err_t BLEHidAdafruit::begin() {
   keyboard_led_state_ = 0U;
 
   if (zephyr_compatible_mouse_) {
+    // HID metadata is intentionally readable before pairing. Sony's host
+    // discovers the report map before starting SMP and does not retry a
+    // security-blocked read after encryption. Report values remain encrypted.
     err_t result = beginFixedCharacteristic(
-        hid_info_, CHR_PROPS_READ, SECMODE_ENC_NO_MITM, SECMODE_NO_ACCESS,
+        hid_info_, CHR_PROPS_READ, SECMODE_OPEN, SECMODE_NO_ACCESS,
         kHidZephyrInfoValue, sizeof(kHidZephyrInfoValue));
     if (result != ERROR_NONE) {
       return result;
     }
 
     result = beginFixedCharacteristic(
-        report_map_, CHR_PROPS_READ, SECMODE_ENC_NO_MITM, SECMODE_NO_ACCESS,
+        report_map_, CHR_PROPS_READ, SECMODE_OPEN, SECMODE_NO_ACCESS,
         kHidZephyrMouseReportMap, sizeof(kHidZephyrMouseReportMap));
     if (result != ERROR_NONE) {
       return result;
@@ -7845,7 +7848,7 @@ err_t BLEHidAdafruit::begin() {
     uint8_t emptyMouse[3] = {0U, 0U, 0U};
     mouse_input_.setReportRefDescriptor(kHidZephyrMouseReportId,
                                         kHidReportTypeInput);
-    mouse_input_.setReportRefDescriptorPermission(SECMODE_ENC_NO_MITM);
+    mouse_input_.setReportRefDescriptorPermission(SECMODE_OPEN);
     result = beginFixedCharacteristic(
         mouse_input_, CHR_PROPS_READ | CHR_PROPS_NOTIFY, SECMODE_ENC_NO_MITM,
         SECMODE_NO_ACCESS, emptyMouse, sizeof(emptyMouse));
