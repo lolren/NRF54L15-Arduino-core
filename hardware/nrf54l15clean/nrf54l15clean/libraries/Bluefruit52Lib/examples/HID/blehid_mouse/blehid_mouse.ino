@@ -21,9 +21,6 @@ BLEHidAdafruit blehid;
 #define IDLE_REPORT_INTERVAL_MS 100UL
 
 void connect_callback(uint16_t conn_handle);
-bool passkey_callback(uint16_t conn_handle, const uint8_t passkey[6],
-                      bool match_request);
-void pair_complete_callback(uint16_t conn_handle, uint8_t auth_status);
 
 void setup() 
 {
@@ -45,12 +42,10 @@ void setup()
 
   Bluefruit.begin();
   Bluefruit.setAppearance(BLE_APPEARANCE_HID_MOUSE);
-  // DisplayYesNo Numeric Comparison satisfies hosts which require MITM for an
-  // input device. The number is printed over USB serial and confirmed locally;
-  // the user still confirms the matching number on the phone or computer.
-  Bluefruit.Security.setIOCaps(true, true, false);
-  Bluefruit.Security.setPairPasskeyCallback(passkey_callback);
-  Bluefruit.Security.setPairCompleteCallback(pair_complete_callback);
+  // A mouse has no trustworthy display or keyboard. Advertise the matching
+  // NoInputNoOutput capability so hosts select LE Secure Connections Just
+  // Works instead of a passkey interaction the device cannot confirm.
+  Bluefruit.Security.setIOCaps(false, false, false);
 #if defined(ARDUINO_NRF54LM20A) || defined(ARDUINO_NRF54LM20B)
   // LM20A needs extra event budget for software P-256 during secure pairing.
   Bluefruit.Periph.setConnInterval(24, 40); // 30-50 ms
@@ -69,9 +64,10 @@ void setup()
   blebas.begin();
   blebas.write(100);
 
-  // Full HOGP profile provides Report and Boot Mouse protocols and preserves
-  // reliable bonded reconnect behavior across Android, iOS, and desktop hosts.
-  blehid.setZephyrCompatibleMouse(false);
+  // Match the compact Zephyr peripheral_hids profile used by Android and
+  // Sony HID hosts. Applications needing the complete HOGP profile can opt in
+  // with setZephyrCompatibleMouse(false).
+  blehid.setZephyrCompatibleMouse(true);
   blehid.begin();
 
   // Set up and start advertising
@@ -82,7 +78,6 @@ void startAdv(void)
 {  
   // Advertising packet
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-  Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE);
   
   // Zephyr peripheral_hids advertises HIDS + BAS UUIDs and puts the name in
   // scan response. Keep this shape for strict Android host comparisons.
@@ -188,26 +183,6 @@ void connect_callback(uint16_t conn_handle)
 {
   (void) conn_handle;
   Bluefruit.Security.requestPairing();
-}
-
-bool passkey_callback(uint16_t conn_handle, const uint8_t passkey[6],
-                      bool match_request)
-{
-  (void) conn_handle;
-  Serial.print("Pairing number: ");
-  for (uint8_t index = 0; index < 6; ++index)
-  {
-    Serial.write(passkey[index]);
-  }
-  Serial.println(match_request ? " (confirm on host)" : " (enter on host)");
-  return true;
-}
-
-void pair_complete_callback(uint16_t conn_handle, uint8_t auth_status)
-{
-  (void) conn_handle;
-  Serial.print("Pairing status: 0x");
-  Serial.println(auth_status, HEX);
 }
 
 void set_protocol_mode(uint16_t conn_handle, uint8_t mode)

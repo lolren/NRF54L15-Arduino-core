@@ -65,13 +65,11 @@ def main() -> int:
         BLUEFRUIT / "examples/HID/blehid_mouse/blehid_mouse.ino"
     ).read_text(encoding="utf-8")
     for token in (
-        "Bluefruit.Security.setIOCaps(true, true, false)",
-        "Bluefruit.Security.setPairPasskeyCallback(passkey_callback)",
-        "blehid.setZephyrCompatibleMouse(false)",
-        "Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_MOUSE)",
+        "Bluefruit.Security.setIOCaps(false, false, false)",
+        "blehid.setZephyrCompatibleMouse(true)",
     ):
         assert token in mouse_example, f"portable HID mouse example missing: {token}"
-    print("PASS HID mouse example uses authenticated full-profile interoperability mode")
+    print("PASS HID mouse example uses broad-host compact-profile interoperability mode")
 
     client_ready = function_body(source, "bool clientReady(uint16_t connHandle)")
     retry_client = function_body(source, "bool retryClientProcedure(")
