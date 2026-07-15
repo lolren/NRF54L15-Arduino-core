@@ -7819,6 +7819,11 @@ void BLEHidAdafruit::setZephyrCompatibleMouse(bool enabled) {
 }
 
 err_t BLEHidAdafruit::begin() {
+  if (!_begun &&
+      (!manager().begin(1U, 0U) ||
+       !manager().radio().setGattClientFeaturesPreEncryptionVisible(false))) {
+    return ERROR_INVALID_STATE;
+  }
   const err_t status = BLEService::begin();
   if (status != ERROR_NONE) {
     return status;

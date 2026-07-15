@@ -2789,6 +2789,7 @@ class BleRadio {
       uint16_t offset, const uint8_t* value, uint16_t valueLength);
   bool customGattAuthorizationPending() const;
   void setGattServiceChangedEnabled(bool enabled);
+  bool setGattClientFeaturesPreEncryptionVisible(bool visible);
   bool commitGattSchemaFingerprint(uint32_t fingerprint);
   bool markGattServiceChanged(uint16_t startHandle = 0x0001U,
                               uint16_t endHandle = 0xFFFFU);
@@ -3763,6 +3764,7 @@ class BleRadio {
   uint8_t connectionPendingChannelMap_[5];
   uint8_t connectionPendingChannelCount_;
   bool gattServiceChangedEnabled_;
+  bool gattClientFeaturesPreEncryptionVisible_;
   uint32_t gattSchemaFingerprint_;
   uint32_t bondedGattSchemaFingerprint_;
   uint16_t bondedServiceChangedStartHandle_;

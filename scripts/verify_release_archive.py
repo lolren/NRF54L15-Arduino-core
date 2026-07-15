@@ -16,6 +16,10 @@ from pathlib import Path
 FEATURE_BUILDS = (
     (
         "xiao_nrf54l15",
+        "libraries/Bluefruit52Lib/examples/HID/blehid_mouse",
+    ),
+    (
+        "xiao_nrf54l15",
         "libraries/Bluefruit52Lib/examples/Services/ancs",
     ),
     (

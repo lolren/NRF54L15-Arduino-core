@@ -2446,6 +2446,14 @@ void BleRadio::setGattServiceChangedEnabled(bool enabled) {
   }
 }
 
+bool BleRadio::setGattClientFeaturesPreEncryptionVisible(bool visible) {
+  if (connected_) {
+    return false;
+  }
+  gattClientFeaturesPreEncryptionVisible_ = visible;
+  return true;
+}
+
 bool BleRadio::commitGattSchemaFingerprint(uint32_t fingerprint) {
   if (fingerprint == 0U) {
     return false;

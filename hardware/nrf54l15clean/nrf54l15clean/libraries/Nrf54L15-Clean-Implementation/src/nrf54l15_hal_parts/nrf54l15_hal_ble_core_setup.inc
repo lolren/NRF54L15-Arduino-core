@@ -138,6 +138,7 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       connectionPendingChannelMap_{0},
       connectionPendingChannelCount_(0U),
       gattServiceChangedEnabled_(true),
+      gattClientFeaturesPreEncryptionVisible_(true),
       gattSchemaFingerprint_(0U),
       bondedGattSchemaFingerprint_(0U),
       bondedServiceChangedStartHandle_(0U),

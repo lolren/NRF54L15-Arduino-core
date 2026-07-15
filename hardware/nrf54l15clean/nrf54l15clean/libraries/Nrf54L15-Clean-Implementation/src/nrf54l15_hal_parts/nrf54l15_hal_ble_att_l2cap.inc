@@ -1797,7 +1797,13 @@ bool BleRadio::buildAttResponse(const uint8_t* attRequest, uint16_t requestLengt
           handles[handleCount++] = kHandleGattServiceChangedValue;
         } else if (typeLength == kBleUuidLength16 &&
                    type16 == kUuidClientSupportedFeatures) {
-          handles[handleCount++] = kHandleGattClientFeaturesValue;
+          // Some Android HID hosts probe 0x2B29 before service discovery and
+          // stall if it is returned before pairing. Suppress only that direct
+          // bootstrap lookup; normal discovery and encrypted access remain.
+          if (gattClientFeaturesPreEncryptionVisible_ ||
+              isConnectionEncrypted()) {
+            handles[handleCount++] = kHandleGattClientFeaturesValue;
+          }
         } else if (typeLength == kBleUuidLength16 &&
                    type16 == kUuidDatabaseHash) {
           handles[handleCount++] = kHandleGattDatabaseHashValue;

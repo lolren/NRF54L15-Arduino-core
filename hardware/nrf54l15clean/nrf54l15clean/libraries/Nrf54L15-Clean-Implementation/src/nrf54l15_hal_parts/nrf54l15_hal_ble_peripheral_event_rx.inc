@@ -643,13 +643,20 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     const bool encryptedPacket =
         connectionEncSessionValid_ && connectionEncRxEnabled_ &&
         connectionEncTxEnabled_;
+    // The Core spec permits an empty LL data PDU to remain unencrypted while
+    // link-layer encryption is active. It has no MIC and consumes no CCM
+    // packet counter, but still needs a response inside T_IFS.
+    const bool encryptedEmptyPdu =
+        encryptedPacket && llidEarly == kBlePduDataContinuation &&
+        rxLengthEarly == 0U;
     const bool plainVersionInd =
         !encryptedPacket && llidEarly == kBlePduLlControl &&
         rxLengthEarly == 6U && rxPacket_[2] == kBleLlCtrlVersionInd;
     if ((!encryptedPacket && !plainVersionInd) ||
         (llidEarly != kBlePduDataStartOrComplete &&
-         llidEarly != kBlePduLlControl) ||
-        (encryptedPacket && rxLengthEarly < (1U + kBleMicLen))) {
+         llidEarly != kBlePduLlControl && !encryptedEmptyPdu) ||
+        (encryptedPacket && !encryptedEmptyPdu &&
+         rxLengthEarly < (1U + kBleMicLen))) {
       return false;
     }
     // Once a controller response is ready, the next central poll must drain it.
@@ -763,10 +770,12 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
         plainVersionInd
             ? (memcpy(plaintext, &rxPacket_[2], rxLengthEarly),
                plaintextLength = rxLengthEarly, true)
-            : bleCcmDecryptPayload(
-                  connectionEncSessionKey_, connectionEncIv_, rxCounter,
-                  connectionEncRxDirection_, hdr0Early, &rxPacket_[2],
-                  rxLengthEarly, plaintext, &plaintextLength);
+            : (encryptedEmptyPdu
+                   ? true
+                   : bleCcmDecryptPayload(
+                         connectionEncSessionKey_, connectionEncIv_, rxCounter,
+                         connectionEncRxDirection_, hdr0Early, &rxPacket_[2],
+                         rxLengthEarly, plaintext, &plaintextLength));
     if (!payloadAuthenticated) {
       ++encDebug_.encRxMicFailCount;
       emitBleTrace("ENC_RX_MIC_FAIL_FAST_SMP_ACK");
@@ -793,7 +802,7 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     connectionLastTxMoreData_ = false;
     connectionLastTxSn_ = txSnAfter;
     connectionFreshTxAllowed_ = false;
-    if (encryptedPacket && packetIsNewEarly) {
+    if (encryptedPacket && !encryptedEmptyPdu && packetIsNewEarly) {
       connectionEncRxCounter_ =
           (rxCounter + 1ULL) & kBleEncPacketCounterMask;
     }

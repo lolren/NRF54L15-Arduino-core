@@ -37,9 +37,9 @@ or production-ready**:
 | **Matter** | Staged system, crypto, packet-buffer, IPv6/UDP, ACL, onboarding, and custom PASE/CASE demo work; not an upstream wire-compatible or certifiable Matter device stack |
 | **Channel Sounding** | Experimental two-board controller-backed LE CS Test; not connected-ACL Channel Sounding, calibrated ranging, cross-vendor interoperability, or a qualification claim |
 
-The Thread and Matter entries describe the current `main` branch after the
-1.0.1 release. The Boards Manager 1.0.1 archive does not contain that ongoing
-platform work.
+The Thread and Matter entries describe the experimental platform work included
+in `1.0.2`; those menu targets remain explicitly outside the stable feature
+claim.
 
 These boundaries keep the stable claims precise: unfinished protocol examples
 are useful engineering work, but they are not presented as complete standards
@@ -282,7 +282,7 @@ Install the stable release from the normal Boards Manager feed shown above, or
 request the exact version with Arduino CLI:
 
 ```bash
-arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.1"
+arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.2"
 ```
 
 - Controller-backed Bluetooth LE Channel Sounding Test is now available through

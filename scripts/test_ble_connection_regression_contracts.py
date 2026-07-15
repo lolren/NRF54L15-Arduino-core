@@ -694,6 +694,20 @@ def validate_fast_connection_paths() -> None:
             f"encrypted fast path lost lifecycle handling: {lifecycle_token}"
         )
 
+    # Empty LLID1 PDUs are not encrypted even while link encryption is active.
+    # They carry no MIC and consume no CCM receive counter.
+    for empty_rx_token in (
+        "const bool encryptedEmptyPdu =",
+        "llidEarly == kBlePduDataContinuation",
+        "rxLengthEarly == 0U",
+        "!encryptedEmptyPdu &&",
+        "encryptedEmptyPdu\n                   ? true",
+        "encryptedPacket && !encryptedEmptyPdu && packetIsNewEarly",
+    ):
+        assert empty_rx_token in fast_ack, (
+            f"encrypted-session empty RX PDU contract missing: {empty_rx_token}"
+        )
+
     fast_dhkey = function_body(
         event_rx,
         "auto tryFastPlaintextDhKeyCheckRetransmission = [&]() -> bool",

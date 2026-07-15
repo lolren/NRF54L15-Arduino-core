@@ -140,6 +140,40 @@ def validate_public_contracts() -> None:
     print("PASS HAL and Bluefruit Robust Caching diagnostics")
 
 
+def validate_hid_pre_encryption_compatibility() -> None:
+    hal = HAL.read_text()
+    bond = (PARTS / "nrf54l15_hal_internal_gatt_bond.inc").read_text()
+    att = (PARTS / "nrf54l15_hal_ble_att_l2cap.inc").read_text()
+    bluefruit_cpp = BLUEFRUIT_CPP.read_text()
+    require(
+        hal,
+        (
+            "setGattClientFeaturesPreEncryptionVisible(bool visible)",
+            "gattClientFeaturesPreEncryptionVisible_",
+        ),
+        "HID client-features compatibility state",
+    )
+    require(
+        bond,
+        (
+            "if (connected_)",
+            "gattClientFeaturesPreEncryptionVisible_ = visible",
+        ),
+        "client-features visibility configuration",
+    )
+    require(
+        att,
+        (
+            "type16 == kUuidClientSupportedFeatures",
+            "gattClientFeaturesPreEncryptionVisible_ ||",
+            "isConnectionEncrypted()",
+        ),
+        "pre-encryption client-features discovery gate",
+    )
+    assert "setGattClientFeaturesPreEncryptionVisible(false)" in bluefruit_cpp
+    print("PASS HID pre-encryption Client Supported Features compatibility")
+
+
 def validate_model() -> None:
     features = 0
     aware = True
@@ -174,6 +208,7 @@ def main() -> int:
     validate_fixed_database_and_cmac_source()
     validate_persistence_and_state_machine()
     validate_public_contracts()
+    validate_hid_pre_encryption_compatibility()
     validate_model()
     print("PASS all GATT Robust Caching contracts")
     return 0
