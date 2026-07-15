@@ -337,7 +337,7 @@ protocol boundary, measurements, and validation evidence.
 | **Compiler** | GCC | GCC + Zephyr build system |
 | **Peripheral access** | Direct register writes | Vendor HAL + DTS |
 | **BLE stack** | Custom register-level; bundled Nordic SDC/MPSL for Channel Sounding | SoftDevice / Zephyr BLE |
-| **RISC‑V coprocessor** | Fully usable | Limited Arduino access |
+| **RISC‑V coprocessor** | Direct boot/control and offload access; general runtime remains partial | Limited Arduino access |
 | **Learning curve** | Datasheet + Arduino API | Zephyr + DTS + Kconfig |
 
 **This core is for developers who want full hardware control with Arduino convenience.**
@@ -346,89 +346,253 @@ protocol boundary, measurements, and validation evidence.
 
 ## Feature Matrix
 
-### Wireless
+This matrix describes the current `main` branch. The Boards Manager release can
+lag behind it. A feature is not marked complete merely because a header,
+constant, codec, or demonstration exists. The tables enumerate public protocol
+families and major user-facing capabilities; related optional specification
+procedures are grouped instead of pretending that every standards clause is a
+separate feature.
 
-| | BLE | 802.15.4 | Thread | Zigbee | Matter | CS |
-|---|---|---|---|---|---|---|
-| **Advertising** | ✅ | — | — | — | — | — |
-| **Scanning** | ✅ | — | — | — | — | — |
-| **1M / 2M / Coded PHY** | ✅ | — | — | — | — | — |
-| **GATT Server + Client** | ✅ | — | — | — | — | — |
-| **Bluefruit API** | ✅ | — | — | — | — | — |
-| **LE Secure Connections** | ✅ | — | — | — | — | — |
-| **OOB + Numeric Comparison** | ✅ | — | — | — | — | — |
-| **Privacy / RPA** | ✅ | — | — | — | — | — |
-| **CSRK / authenticated signed writes** | ✅ | — | — | — | — | — |
-| **Controller LE CS Test (Mode 2 / PBR)** | — | — | — | — | — | ⚠️ |
-| **MAC / NWK / APS** | — | ✅ | ⚠️ | ⚠️ | — | — |
-| **Coordinator / Router** | — | — | ⚠️ | ⚠️ | — | — |
-| **End Device** | — | — | ⚠️ | ⚠️ | — | — |
-| **UDP Transport** | — | — | ⚠️ | — | ⚠️ | — |
-| **ZCL (OnOff / Level / Temp)** | — | — | — | ⚠️ | — | — |
-| **Custom On/Off + onboarding demos** | — | — | — | — | ⚠️ | — |
+| Status | Meaning |
+|---|---|
+| **Implemented** | Available through a supported API and exercised within the boundary stated in the row. This does not imply standards certification. |
+| **Partial** | A useful subset works, but important behavior, roles, or interoperability are missing. |
+| **Experimental** | Evaluation code and examples exist; APIs or behavior may change and production use is not claimed. |
+| **Missing** | No supported standards-compatible implementation is provided. A stub or private test protocol may still exist. |
+| **Hardware boundary** | The nRF54L device or supported board does not expose the required hardware. |
 
-`CS` is limited to the controller-backed, single-antenna two-board test path
-described below. It is not a general connected BLE Channel Sounding API.
+### Protocol Inventory
 
-The Matter demo cell describes project-specific onboarding and command
-messages. It does not indicate standard Matter commissioning, Secure Channel,
-or Interaction Model interoperability.
-
-The BLE security and privacy check marks describe the implemented clean-core
-scope: single-link LE Secure Connections, Numeric Comparison user consent,
-mutual and one-way OOB, a stable identity with rotating local RPAs, SMP identity
-key/address distribution, hardware AAR resolution, retained bonded reconnects,
-and CSRK-signed ATT Signed Write Commands with persisted anti-replay
-counters. They do not assert complete Bluetooth Core conformance or Bluetooth
-SIG qualification. A multi-bond privacy policy, locally generated legacy
-bond-key distribution, controller-enforced allow-list policy, broader host
-interoperability, and PTS/BQB qualification remain outside this claim.
-
-### Crypto
-
-| | Implementation path | Status |
+| Protocol or interface | Status | What users get |
 |---|---|---|
-| **CRACEN RNG** | Hardware | Production entropy source; fails closed |
-| **CRACEN IKG** | Hardware, constrained | Key derivation requires a trusted pre-provisioned KMU seed; direct seed validation and unfinished high-level PKE wrappers fail closed |
-| **AES‑CCM / AES‑ECB** | Mixed | The BLE path uses silicon ECB/CCM; staged OpenThread/CHIP crypto uses software mbedTLS unless explicitly routed to a hardware primitive |
-| **PBKDF2‑HMAC‑SHA256** | Software | Streaming implementation with host-side boundary and vector tests |
-| **ECDSA sign** | Software P-256 | ~0.84 s |
-| **ECDSA verify** | Software P-256 | ~1.76 s |
-| **secp256r1 ECC** | Software | Nordic publishes the CRACEN PKE microcode under its five-clause license and the accompanying driver in NCS, but this core does not integrate or ship that path yet |
+| **Bluetooth Low Energy** | **Implemented** | Practical single-active-link central/peripheral operation, GAP, ATT/GATT, common services, security, bonding, privacy, HID, NUS, PHY/DLE/MTU control, and Bluefruit-compatible APIs. It is not a qualified complete Bluetooth controller. |
+| **Bluetooth LE extended advertising/scanning** | **Partial** | Local extended payload transmission and scanner reassembly through 995 bytes; broad cross-vendor and connectable-extended interoperability remain open. |
+| **Bluetooth LE Channel Sounding** | **Experimental** | Standalone two-board, single-antenna controller-backed LE CS Test. No connected-ACL ranging or cross-vendor claim. |
+| **Bluetooth Mesh** | **Missing** | No Bluetooth Mesh provisioning, bearer, transport, model or relay stack is shipped. |
+| **IEEE 802.15.4** | **Partial** | 2.4 GHz PHY, TX/RX, CCA/ED, filtering, ACK and frame-pending primitives. A complete reusable MAC transaction engine is missing. |
+| **Proprietary raw 2.4 GHz radio** | **Implemented** | Raw packet TX/RX and acknowledgement examples for direct radio experimentation. |
+| **Zigbee** | **Experimental** | Direct-device examples, secure join/rejoin pieces, selected ZDO/ZCL paths, sleepy examples, and Zigbee2MQTT integration. It is not a complete Zigbee PRO stack. |
+| **Thread** | **Experimental** | A real imported OpenThread FTD core with an nRF54 platform port, local two-board UDP and MeshCoP validation, and staged SRP/sleepy-device paths. |
+| **Matter over Thread** | **Experimental** | CHIP system, crypto, packet-buffer and Inet foundations plus private onboarding/session demos. There is no standards-compatible Matter device runtime yet. |
+| **NFC-A tag** | **Partial** | NFCT sense, activation, frame and EasyDMA APIs plus a tag setup example; antenna and phone interoperability depend on the board design and remain lightly validated. |
+| **UART/UARTE** | **Implemented** | `Serial`, `Serial1`, routing options, buffered I/O, and lower-level UARTE access. |
+| **I2C/TWI** | **Partial** | `Wire`, `Wire1`, repeated starts and controller mode are established; TWIS target APIs exist with narrower multi-instance validation. |
+| **SPI** | **Partial** | Arduino `SPI`, lower-level SPIM, board-specific high-speed paths, and SPIS target examples. |
+| **I2S, TDM, and PDM audio** | **Partial** | I2S TX/RX/duplex on nRF54L15 and PDM capture on supported Sense boards. nRF54LM20A uses TDM instead of I2S, and no TDM wrapper is exposed yet. |
+| **External QSPI flash** | **Implemented** | LM20A onboard PY25Q64 access through `SPI_HS`, Adafruit SPIFlash compatibility, and explicit deep-power-down support. |
+| **VPR IPC/RPC** | **Partial** | RISC-V boot/control, shared transport and selected offload/service probes; not a general production softperipheral runtime. |
+| **CMSIS-DAP/SWD upload transport** | **Implemented** | Packaged native nRF OCD upload with pyOCD recovery and UID-bound two-board validation tooling. |
+| **Native USB device / TinyUSB** | **Hardware boundary** | The XIAO boards use an external SAMD11 USB bridge. TinyUSB headers are compile-compatibility stubs and report unsupported at runtime. |
+| **Wi-Fi / Wi-Fi scanning** | **Hardware boundary** | No Wi-Fi PHY or MAC is present; the 2.4 GHz radio cannot decode or associate with 802.11 networks. |
+| **Bluetooth Classic** | **Hardware boundary** | The radio supports Bluetooth LE, not BR/EDR. |
+| **ANT and Nordic ESB** | **Missing** | Raw proprietary-radio examples exist, but no supported ANT or Enhanced ShockBurst protocol stack is shipped. |
+| **Ethernet and CAN** | **Missing** | No native stack or controller API is shipped. External devices can be driven by user libraries over SPI or UART. |
+| **Wireless OTA / secure DFU** | **Missing** | No production BLE DFU, Zigbee OTA, Matter OTA Requestor/BDX, or generic wireless boot-update path is provided. |
 
-### Peripherals
+### Bluetooth Low Energy
 
-| | Status |
-|---|---|
-| **GPIO, PWM, ADC, I2C, SPI, UART** | ✅ |
-| **HS-SPI 32 MHz** (`SPI_HS`) | ✅ |
-| **I2S, PDM Microphone** | ✅ |
-| **QDEC** (rotary encoder) | ✅ |
-| **NFC‑A Tag** | ✅ |
-| **Temperature Sensor** | ✅ |
-| **Comparator, LPCOMP** | ✅ |
-| **Watchdog Timer** | ✅ |
-| **Deep Sleep / System OFF** | ✅ |
-| **DPPI** (hardware event system) | ✅ |
-| **Tamper Detection** | ✅ |
-| **KMU** (key management) | ✅ |
+Implemented BLE rows refer to the documented single-active-link scope. They do
+not assert complete Bluetooth Core conformance, complete Bluefruit parity, or
+Bluetooth SIG qualification.
 
-### System
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| Legacy advertising and scan response | **Implemented** | Connectable, scannable, non-connectable, background, and directed advertising with bounded high-duty timeout. | Continue broad phone and long-duration regression testing. |
+| Active/passive scanning | **Implemented** | Filters, callbacks, scan responses, and central connection initiation. | Cross-platform stress coverage remains narrower than controller qualification. |
+| Central and peripheral roles | **Implemented** | Both roles and dual-role examples are available. | The supported claim is one active connection; requested Bluefruit link counts do not create a production multi-link controller. |
+| PHY, DLE, and ATT MTU | **Implemented** | LE 1M, 2M, Coded S2/S8, DLE through 251 bytes, and MTU through 247 bytes when requested. | Broader fallback and hostile-procedure timing tests remain. |
+| Connection control | **Partial** | Parameter updates, reason reporting, reset recovery, and malformed `CONNECT_IND` validation. | Interleaved LL control-procedure collisions and multi-link stress are not complete. |
+| Extended advertising/scanning | **Partial** | Non-connectable payload chains and local scanner reassembly through 995 bytes. | Extended-connectable, cross-vendor and extended scan-response coverage is incomplete. |
+| Periodic advertising | **Missing** | The capability probe fails closed. | No periodic advertising scheduler or synchronization path. |
+| GATT server and client | **Implemented** | 16/128-bit UUIDs, discovery, reads/writes, CCCDs, notifications, and confirmed indications. | Formal ATT/GATT qualification is not complete. |
+| Long values and descriptors | **Implemented** | Read Blob, Prepare/Execute Write, fixed/maximum lengths, and `0x2901`, `0x2904`, `0x2908` descriptors. | Broader phone/desktop edge-case interoperability remains. |
+| Permissions and authorization | **Implemented** | Open, encrypted, authenticated/MITM and signed permissions plus deferred sketch-context authorization. | Host negative-test coverage remains incomplete. |
+| Service Changed | **Implemented** | Per-bond database fingerprint, pending ranges, reconnect retry, and confirmation handling. | Not PTS-qualified. |
+| GATT Robust Caching | **Implemented** | Database Hash, Client Supported Features, change-awareness and Database Out Of Sync behavior on the single ATT bearer. | EATT/multiple-bearer behavior is unavailable. |
+| LE Secure Connections | **Implemented** | Just Works, fixed passkey, passkey input, Numeric Comparison, and mutual/one-way OOB. | A broader Android/iOS/desktop malformed, timeout and OOB matrix remains. |
+| Bond database and key distribution | **Implemented** | Eight peers, LRU replacement, LTK/IRK/CSRK state, CCCDs, identity data, signing counters, enumeration and deletion. | Product provisioning and Bluetooth qualification remain separate. |
+| Privacy and RPA | **Partial** | Stable identity, IRK exchange, rotating RPAs, hardware AAR, privacy-aware reconnects, and an application-managed resolving list. | No automatic controller-enforced resolving-list/allow-list policy. |
+| Authenticated signed writes | **Implemented** | CSRK distribution, AES-CMAC, durable monotonic counters and replay rejection. | Broad phone/desktop signed-write interoperability is not established. |
+| BLE UART / Nordic UART Service | **Implemented** | Peripheral/client APIs, buffered MTU-aware TX, notification/write and bridge examples. | Web/device bridge behavior remains in the regression matrix. |
+| HID over GATT | **Implemented** | Keyboard, mouse, consumer control, gamepad, Report/Boot modes, Report Reference and keyboard LEDs. | Broad OS report parsing, gamepad and boot-mode testing remain. |
+| Other bundled services | **Implemented** | Device Information, Battery, Current Time, ANCS parsing, beacons and custom services. | This is not every adopted Bluetooth profile or service. |
+| Bluefruit52 compatibility | **Partial** | Common advertising, scanning, GATT, central/client, security, HID and service APIs compile and run. | Complete nRF52 Bluefruit API and behavioral parity is not claimed. |
+| LE Credit-Based CoC and EATT | **Missing** | Fixed ATT/SMP/signaling L2CAP channels only. | No LE CoC or enhanced ATT bearers. |
+| ISO, LE Audio, PAwR, AoA/AoD | **Missing** | No supported CIS/BIS, BIG, LE Audio, PAwR, direction-finding or mesh implementation. | These are outside the current practical BLE scope. |
+| Nordic secure DFU | **Missing** | `BLEDfu::begin()` returns `ERROR_NOT_SUPPORTED`. | No non-working DFU service is advertised. |
+| Phone/desktop interoperability | **Partial** | Multiple Android/iOS HID sessions and Linux diagnostic workflows have been exercised. | Repeatable Android, iOS, Windows, macOS and Linux coverage is not yet a release gate. |
+| Bluetooth qualification | **Missing** | Repository tests and the two-board gate provide regression evidence. | No PTS/BQB, RF-PHY, controller, host, profile or end-product qualification claim. |
 
-| | Status |
-|---|---|
-| **VPR RISC‑V Coprocessor** | ✅ |
-| **SoftPeripheral SDK + sQSPI** | ✅ |
-| **nPM1300 PMIC Driver** | ✅ |
-| **LM20A QSPI Flash + Sleep** | ✅ |
-| **GPIO Bit‑Bang I²C** (zero residual) | ✅ |
-| **Buck Hysteretic Mode** (µA sleep) | ✅ |
-| **LM20A IMU** (LSM6DS3TR‑C) | ✅ |
-| **LM20A PDM Mic** (MSM261DGT006) | ✅ |
+See [BLE implementation and qualification status](docs/BLE_COMPLIANCE_RESUME.md)
+and the [two-board release gate](docs/TWO_BOARD_RELEASE_GATE.md).
 
----
+### IEEE 802.15.4
 
-> **Legend:** ✅ Production &nbsp; ⚠️ Experimental / Partial &nbsp; 🚧 In Development
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| 2.4 GHz PHY | **Implemented** | 250 kbit/s radio setup, 127-byte frames, CRC, channel/TX power, RSSI, CCA and energy detection. | Regulatory and RF-PHY qualification are product responsibilities. |
+| ACK, filtering and receive queue | **Implemented** | TX ACK wait, automatic ACK, frame-pending callback, application/PAL filter callback, and buffered IRQ receive. | Hardware address matching is disabled; filtering policy is supplied by the caller. OpenThread installs one, while bundled Zigbee examples do not. |
+| MAC frame/control primitives | **Partial** | Data, beacon, ACK, association, orphan, realignment and data-request helpers. | No complete reusable MAC service/PIB runtime. |
+| CSMA-CA and retry engine | **Missing** | The radio API exposes one optional CCA check, but bundled Zigbee example transmissions currently disable it and perform one TX/ACK attempt. | No randomized BE backoff, retry queue or general duplicate table. OpenThread supplies its own software MAC behavior. |
+| Raw-radio diagnostics | **Implemented** | Packet TX/RX, ACK, source-match and OpenThread PAL diagnostic examples. | These tests do not establish Zigbee or Thread conformance. |
+
+### Zigbee
+
+All Zigbee support remains experimental. An implemented primitive below does
+not make the overall stack Zigbee PRO compliant.
+
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| Stack runtime architecture | **Experimental** | Shared codecs, security, persistence and commissioning helpers are used by bundled sketches. | Protocol behavior remains split across example-owned loops; there is no single event-driven coordinator/router/end-device runtime. |
+| Direct NWK framing and security | **Partial** | Direct unicast codecs and AES-CCM* secured NWK frames. | Source-route and multicast frames are rejected by the generic codec. |
+| NWK command set | **Partial** | Rejoin and End Device Timeout request/response commands. | Route Request/Reply/Record, Link/Network Status and Network Report/Update are absent. |
+| Mesh routing and repair | **Missing** | Neighbor/routing table structures and management responses can expose sketch-owned entries. | No route discovery, aging, repair, many-to-one/source routing or production multi-hop forwarding. |
+| APS group addressing and membership | **Partial** | APS group codecs and local group membership. | Fan-out is example-specific and not integrated with routing. |
+| NWK broadcast/multicast forwarding | **Missing** | None. | No broadcast transaction table, rebroadcast jitter, multicast forwarding or general duplicate suppression. |
+| Sleepy-child indirect delivery | **Experimental** | Frame-pending ACKs, polling, End Device Timeout negotiation and example-owned pending payloads. | No shared persistent child/indirect queue manager or long-duration parent test. |
+| APS data/command/ACK codecs | **Partial** | Direct data/group/command frames, APS ACK, and Trust Center key commands. | Extended APS headers are not supported. |
+| APS reliability | **Experimental** | A small retry/ACK mechanism exists in the HA coordinator example. | No reusable transaction manager, delivery backpressure or stack-wide retry policy. |
+| APS fragmentation/reassembly | **Missing** | None. | Large application payload fragmentation is unavailable. |
+| Binding, Groups and Scenes | **Partial** | Eight-entry binding tables, group codecs and local Groups/Scenes state. | Fan-out is example-specific and not integrated with production routing. |
+| Scanning, association and rejoin | **Partial** | End-device steering, association, secure rejoin, leave handling and timeout negotiation helpers. | Full Zigbee Base Device Behavior and all-role commissioning policy are missing. |
+| Cryptographic primitives | **Implemented** | AES-CCM*, NWK/APS security headers, ZigbeeAlliance09 key and install-code CRC/key derivation. | Primitive coverage does not establish a secure product lifecycle. |
+| Keys and Trust Center lifecycle | **Partial** | Active/alternate network-key transport and switch paths. | No production device/link-key table, full authorization policy or distributed-security runtime. |
+| Replay counters and persistence | **Partial** | Network identity, keys, counters, reporting and bindings can persist. | Incoming counters are not per-neighbor and storage is not proven brownout-atomic. |
+| ZDO | **Partial** | Address/descriptor discovery, match, bind/unbind, leave and management table responses. | No general transaction timeout/retry/concurrency or Network Update manager. |
+| ZCL foundation | **Partial** | Read/write/discover/reporting/default-response helpers for a limited type set. | Structured and manufacturer-specific data plus general endpoint stores are incomplete. |
+| ZCL clusters | **Partial** | Selected Basic, Power, Identify, Groups, Scenes, On/Off, Level, Color, Temperature and Humidity server paths. | Complete client/server commands and broad cluster coverage are not present. |
+| End-device and sleepy examples | **Experimental** | Joinable lights, sensors and buttons, including 15/60-second sleepy examples. | Behavior is sketch-specific and unqualified. |
+| Router role | **Experimental** | Rx-on router-capable examples can join. | Without route discovery/relay/repair this is not a production Zigbee PRO router. |
+| Coordinator / Trust Center | **Experimental** | The HA coordinator can form a network and admit/interview bundled examples. | Fixed small RAM tables and sketch-owned policy are not restart-safe production Trust Center behavior. |
+| Zigbee OTA Upgrade | **Missing** | Only the cluster identifier is present. | No client/server, image verification, resume or boot handoff. |
+| Green Power Proxy Basic | **Missing** | None. | Required for a Zigbee 3.0 routing-capable certification claim. |
+| Touchlink, Zigbee Direct, WWAH, NCP/RCP | **Missing** | None. | Outside the current implementation. |
+| Zigbee2MQTT / Home Assistant | **Experimental** | Documented join/interview/state tests and an external converter for bundled models. | The converter is not upstream and coverage is not a broad ecosystem matrix. |
+| Example and host regression coverage | **Partial** | Thirty bundled Zigbee sketches and local serial/MQTT validation scripts exist. | Main CI compiles five Zigbee sketches, and no native Zigbee codec/security test suite exists under `tests/`. |
+| Multi-hop, soak and certification | **Missing** | Two-board and coordinator integration scripts exist. | No three-node route/repair gate, mixed-vendor soak, ZUTH result or compliant-platform certification. |
+
+See the [Zigbee full-support handoff](docs/ZIGBEE_FULL_SUPPORT_HANDOFF.md)
+and [Zigbee2MQTT integration guide](docs/ZIGBEE2MQTT_INTEGRATION.md).
+
+### Thread
+
+Thread uses a real imported OpenThread FTD core. The experimental status refers
+to this nRF54 platform port and its validation, not to the quality or
+certification status of upstream OpenThread.
+
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| Imported OpenThread FTD core | **Implemented** | Pinned upstream source is compiled when the experimental Thread stage is selected. | This nRF54 platform port is not a certified OpenThread platform. |
+| nRF54 radio/platform layer | **Experimental** | Radio, alarm, entropy, reset and settings PAL plus cooperative processing. | Cooperative polling and incomplete power/interoperability evidence remain. |
+| Formation and FTD roles | **Experimental** | Dataset setup and Leader, Router and Child paths; mixed L15/LM20A Leader/Child hardware validation. | No production multi-hop/router topology matrix. |
+| IPv6, 6LoWPAN and mesh | **Experimental** | Upstream OpenThread networking exercised on a local two-board network. | No external OTBR, cross-vendor, interference or long-duration route test. |
+| UDP, multicast and fragmentation | **Implemented** | Four sockets, explicit close, both unicast directions, multicast and payloads through 512 bytes. | This is local mixed-board transport evidence, not general interoperability. |
+| Application CoAP / Secure CoAP APIs | **Missing** | MeshCoP internally uses CoAP/DTLS components. | `OPENTHREAD_CONFIG_COAP_API_ENABLE` and `OPENTHREAD_CONFIG_COAP_SECURE_API_ENABLE` remain disabled; no supported application API or interoperability gate is shipped. |
+| MeshCoP Commissioner and Joiner | **Experimental** | Fresh PSKd join, reset-only dataset restore and exact wrong-PSKd rejection pass on two boards. | External Commissioner/Border Agent interoperability and broader negatives are missing. |
+| Operational Dataset persistence | **Partial** | Normal restart preserves settings and reported storage failures retain the prior mapping. | Shared Preferences storage is not journaled/dual-bank or proven under controlled brownout. |
+| SRP client; DNS client with Matter stage | **Partial** | SRP client and auto-start are built into Thread stage; the DNS client is enabled only when Matter stage also enables DNS-SD. | No external OTBR/SRP registration, removal, reboot or DNS-SD visibility gate. mDNS/server paths are disabled. |
+| Thread security and entropy | **Experimental** | Upstream mbedTLS plus fail-closed CRACEN entropy; correct/wrong PSKd paths pass locally. | No Thread security conformance or fault/attack campaign. |
+| Sleepy End Device | **Experimental** | Sleepy-child attach and poll APIs/examples; software CSL parameters are recorded. | The polling PAL has no hardware-timed CSL wakeups; sleep current, missed-poll recovery, parent interoperability and long soaks remain. |
+| Border Router / Border Agent / Backbone Router | **Missing** | None in the shipped profile. | Use an external OTBR; no onboard NAT64, infrastructure routing or Border Agent. |
+| Advanced optional services | **Missing** | TCP, channel manager/monitor, jam detection, history, network time and the full link-metrics manager are disabled; upstream CLI, POSIX, NCP/RCP and spinel transport were omitted from the import. | Upstream header presence does not make these available. |
+| External interoperability | **Missing** | Repo-owned two-board gates only. | No completed OTBR, cross-vendor, three-node, RF-loss or long-duration matrix. |
+| Thread certification | **Missing** | None. | No Thread conformance harness or product certification has passed. |
+
+See [Thread and Matter hardening status](docs/THREAD_MATTER_FINISH_PLAN.md).
+
+### Matter
+
+The Matter entries rate standards-compatible behavior. Private PASE-like,
+CASE-like, certificate and command demos are useful tests but are not marked as
+standard Matter features.
+
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| Upstream connectedhomeip foundation intake | **Partial** | Selected support, System Layer, PacketBuffer, error/key/time and Thread-dataset units are imported. | There is no complete upstream Matter server/runtime. |
+| System clock, timers and work queue | **Implemented** | Monotonic clock and mutation-safe cooperative timer/work dispatch with host regressions. | A platform foundation is not a Matter device stack. |
+| Crypto foundations | **Implemented** | SHA-256, HKDF, PBKDF2, AES-CCM, P-256 ECDH/ECDSA and DRBG entry points with fail-closed entropy. | P-256 is software and these primitives are not connected to an upstream Secure Channel. |
+| CHIP PacketBuffer, IPv6 and UDP Inet | **Experimental** | Four queued endpoints, 1280-byte IPv6 datagrams, a private multicast transport probe and bidirectional payloads through 1200 bytes on two boards. | Transport validation only. |
+| Setup payload helpers | **Experimental** | Manual/QR payload and setup identity helpers. | They do not prove successful standard commissioning. |
+| DNS-SD / SRP discovery | **Partial** | Demo commissionable records can be built, queued and removed through OpenThread SRP. | No external OTBR/controller has verified publication or discovery. |
+| Standard PASE / SPAKE2+ | **Missing** | A fail-closed private PASE-like experiment exists. | Its framing/transcript is not Matter wire-compatible and cannot commission with a standard controller. |
+| BLE commissioning rendezvous | **Missing** | None; the current profile is on-network only. | No standard Matter BLE commissioning service or transport. |
+| Standard CASE sessions | **Missing** | A private Sigma-style tamper/replay experiment exists. | Private certificates, encodings and key schedule are not wire-compatible CASE. |
+| Exchange Manager and reliable messaging | **Missing** | None from the upstream runtime. | Local message headers/counters do not replace Matter exchanges and retransmission. |
+| Interaction Model and generated data model | **Missing** | Project-specific On/Off, Level, Identify and Scenes objects exist. | No upstream IM engine, subscription/reporting engine or generated endpoint model. |
+| Group communication and key management | **Missing** | None from the upstream runtime. | No Group Data Provider, group sessions/key sets, secured multicast commands or standard Groups-cluster integration. |
+| Access control | **Experimental** | Local ACL checks fail closed unless complete subject/fabric/node context is supplied. | Not connected to standard fabrics, CASE subjects or Access Control cluster persistence. |
+| Fabric and operational credentials | **Missing** | A small in-memory demo fabric table exists. | No standard NOC/RCAC/ICAC provisioning, persisted multi-fabric lifecycle, keystore or fail-safe transaction. |
+| Device Attestation | **Missing** | Test-only PAA/PAI/DAC-like objects and regressions. | Keys are regenerated and encodings are private; no standard DAC chain or Certification Declaration. |
+| Persistence | **Partial** | Demo setup identity, Thread dataset, factory data and light state use Preferences. | Standard fabrics, ACLs, credentials, sessions and counters are not durably managed or brownout-proven. |
+| OTA Requestor and BDX | **Missing** | Excluded from the staged upstream intake. | No Matter OTA runtime. |
+| ICD / low-power Matter device | **Missing** | Thread has a separate experimental sleepy-child path. | No upstream ICD server, check-in protocol or Matter-aware sleepy lifecycle. |
+| Ecosystem interoperability | **Missing** | Private two-board demos only. | No successful commissioning/control with `chip-tool`, Home Assistant, Google Home, Apple Home or SmartThings. |
+| Matter certification | **Missing** | None. | No CSA test harness, production credentials or ecosystem certification. |
+
+See [Thread and Matter hardening status](docs/THREAD_MATTER_FINISH_PLAN.md).
+
+### Bluetooth LE Channel Sounding
+
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| Controller-backed LE CS Test | **Experimental** | Nordic SDC/MPSL runs the controller procedure on two supported boards. | This is a test procedure, not a complete connected BLE Channel Sounding product path. |
+| Initiator and reflector examples | **Implemented** | Two public examples with a CRC-protected session/result exchange. | Both sides must use this core's private transport. |
+| Mode and antenna support | **Experimental** | Single-antenna Mode 2/Submode 1 with AA-only RTT. | No multi-antenna, AoA/AoD or full mode matrix. |
+| Connected-ACL Channel Sounding | **Missing** | None. | No standards-complete LL control workflow attached to a normal BLE ACL. |
+| Calibrated distance estimation | **Missing** | Raw/test results and diagnostics only. | No production calibration, accuracy or environmental model. |
+| Cross-vendor interoperability and qualification | **Missing** | Local two-board hardware validation only. | No Bluetooth qualification or cross-vendor controller evidence. |
+
+See [Channel Sounding current status](docs/CHANNEL_SOUNDING_CURRENT_STATUS.md).
+
+### Arduino APIs, Buses, Storage, and Board Hardware
+
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| Startup, `millis`, `micros`, `delay` | **Implemented** | Arduino sketch lifecycle and a shared monotonic timebase across supported MCU variants. | Continue long-duration drift and mixed-radio regression testing. |
+| GPIO | **Implemented** | `pinMode`, `digitalRead`, `digitalWrite` and lower-level port access. | Board pin routing still applies. |
+| External interrupts | **Partial** | GPIOTE-backed rising/falling/change on interrupt-capable ports. | Port P2 has no interrupt or wake capability in hardware. |
+| ADC / SAADC | **Implemented** | `analogRead`, resolution control, internal-supply helpers, gain and oversampling APIs. | Board-specific calibration affects absolute accuracy. |
+| PWM | **Implemented** | `analogWrite`, global/per-pin frequency paths and hardware/timer/software allocation. | Frequencies and channels share finite PWM/timer resources. |
+| UART/UARTE | **Implemented** | `Serial`, `Serial1`, compatible extra routes and lower-level UARTE APIs. | The XIAO USB serial path is an external bridge, not native USB CDC. |
+| I2C controller (`Wire`) | **Implemented** | `Wire`, `Wire1`, repeated starts and lower-level TWIM access. | Pin mux and serial-fabric ownership are board-specific. |
+| I2C target (TWIS) | **Partial** | Target callbacks and TWIS21/TWIS30 examples. | Multi-instance and stress validation are narrower than controller mode. |
+| SPI controller | **Implemented** | Arduino `SPI`, lower-level SPIM and selected multi-instance examples. | Maximum usable speed depends on instance, pins and board routing. |
+| SPI target (SPIS) | **Partial** | SPIS wrapper and target echo example. | Broad multi-instance/high-speed validation is incomplete. |
+| `SPI_HS` / external QSPI pads | **Implemented** | LM20A onboard flash and deliberate high-speed/QSPI-pad access. | `SPI_HS` is not the normal XIAO header `SPI` bus. |
+| I2S (nRF54L15 only) | **Implemented** | TX, RX and duplex wrappers with interrupt examples. | nRF54LM20A has TDM rather than I2S; this core does not expose a TDM API. |
+| TDM (nRF54LM20A) | **Missing** | None. | The LM20A TDM peripheral is not wrapped by this core. |
+| PDM | **Implemented** | PDM20/PDM21 capture and board microphone examples. | Pin/base selection and microphone wiring differ by board. |
+| QDEC | **Implemented** | QDEC20/QDEC21 wrapper and encoder example. | External encoder hardware is required. |
+| NFC-A / NFCT | **Partial** | Low-level NFCT and tag setup path. | Most supported XIAO boards do not provide a ready-to-use NFC antenna. |
+| Comparator / LPCOMP | **Implemented** | Threshold, window and wake examples. | Analog routing and threshold accuracy are board-dependent. |
+| Watchdog | **Implemented** | WDT wrapper and examples. | Multi-instance product policy remains application-owned. |
+| GRTC / low-frequency PWM | **Partial** | Timekeeping, compare, wake and fixed-pin GRTC PWM examples. | Continuous waveform validation is limited by board pin conflicts. |
+| DPPI / EGU | **Implemented** | Hardware event/task routing wrappers and examples. | Domain and channel ownership must be coordinated by the sketch. |
+| EEPROM / Preferences | **Implemented** | RRAM-backed Arduino-style persistence used by bonds and staged protocol state. | Shared storage is capacity-limited and not a journaled brownout-atomic database. |
+| LM20A external flash | **Implemented** | PY25Q64 JEDEC/read/write/erase and deep-power-down paths plus SPIFlash examples. | LM20A-specific; other boards may use different or no external flash. |
+| VPR RISC-V control | **Partial** | Boot/reset, shared memory, RPC transport, ticker and checksum/offload probes. | No stable general-purpose coprocessor framework or resource scheduler. |
+| VPR SoftPeripheral / sQSPI | **Experimental** | Host wrappers, RPC definitions, firmware scaffolding and a flash probe exist. | The complete firmware pair and low-power restoration are not established across supported boards. |
+| nPM1300 PMIC | **Implemented** | Charger, VBUS limit, rails, telemetry, hibernate and battery-current examples. | Not present on the L15 XIAO. |
+| System ON/OFF power APIs | **Implemented** | Low-power idle, timed System OFF, reset-cause APIs, RF-switch and board-specific shutdown helpers. | Measured current depends on debugger, LEDs, sensors, USB and board configuration. |
+| Sense IMU and microphone | **Implemented** | LSM6DS3TR-C IMU and board-specific PDM microphone examples for supported Sense variants. | Selecting a non-Sense board does not add the sensors. |
+| TinyUSB / native USB device | **Missing** | Compile-compatibility headers return unsupported. | Upload and serial use the board's external CMSIS-DAP/SAMD11 bridge. |
+| I3C | **Hardware boundary** | None. | nRF54L exposes I2C controller/target blocks rather than I3C. |
+
+See the [board reference](docs/board-reference.md) for pin, peripheral-instance,
+sensor and routing details.
+
+### Crypto, Keys, and Tamper
+
+| Capability | Status | Available now | Important boundary |
+|---|---|---|---|
+| CRACEN entropy/RNG | **Implemented** | Hardware entropy source used fail-closed by BLE and staged Thread/Matter paths. | Product health monitoring and formal validation remain product concerns. |
+| Hardware AAR, ECB and CCM | **Implemented** | Address resolution and BLE AES operations. | This does not automatically accelerate all Thread/Matter crypto. |
+| Software hashes, HMAC, HKDF, PBKDF2 and AES-CCM | **Implemented** | mbedTLS-backed CHIP primitives plus the local streaming SHA-256/HMAC/PBKDF2 helper, with host vectors. | Full protocol conformance depends on the surrounding standard stack. |
+| Software secp256r1 | **Implemented** | P-256 key generation/ECDH for BLE Secure Connections and ECDH/ECDSA for private Matter experiments. | Software arithmetic is comparatively slow; the Matter path is not connected to a standard upstream Secure Channel. |
+| CRACEN PKE acceleration | **Missing** | Nordic publishes Nordic-IC-only PKE microcode and an accompanying NCS driver for CRACEN Base devices such as nRF54L15. | This core does not ship/load that path; nRF54LM20A uses CRACEN Lite and is not a target for this PKE microcode. |
+| KMU | **Partial** | Low-level slot metadata/task APIs and constrained IKG paths. | No complete product provisioning, rotation and protocol-consumer lifecycle. |
+| Tamper/glitch detection | **Partial** | TAMPC/control wrappers and diagnostic examples. | External tamper, reset behavior and secure product policy need hardware characterization. |
+| Production credentials | **Missing** | Development/test credentials exist in experimental paths. | No manufacturing provisioning system for Matter DACs, Zigbee Trust Center identity, or comparable product secrets. |
 
 ---
 
@@ -648,23 +812,26 @@ Examples:
 
 ## Stack Maturity
 
-| Stack | Lines | Maturity | Production Ready? |
+| Area | Current user-facing status | Standards complete? | Formally qualified? |
 |---|---|---|---|
-| **Arduino Core** | ~150K | ✅ Mature | Yes — GPIO, PWM, ADC, I2C, SPI, UART, I2S, PDM, NFC |
-| **BLE** | ~80K | ✅ Validated scope | Yes within the documented single-link scope: advertising, scanning, connections, GATT, Bluefruit, LE SC security, and privacy/RPA |
-| **Zigbee** | ~40K | ⚠️ Experimental / unfinished | No — HA/Zigbee2MQTT device demos and selected ZDO/ZCL paths work, but the implementation is incomplete and has no OTA |
-| **Thread** | ~30K | ⚠️ Experimental / unfinished | No — staged OpenThread FTD/MeshCoP/SRP/UDP, recoverable settings metadata, and mixed XIAO test paths are present, but certification and broad interoperability are not complete |
-| **Matter** | ~25K | ⚠️ Experimental / unfinished | No — platform clocks, crypto, packet buffers, IPv6/UDP, and endpoint ACLs have focused regressions, and mixed-board Inet transport is validated; the private demos are not an upstream Matter Interaction Model/Secure Channel implementation |
-| **Channel Sounding** | Nordic controller + Arduino glue | ⚠️ Experimental / unfinished | No — hardware-validated two-board LE CS Test only; no connected-ACL, cross-vendor, calibrated-ranging, or qualification claim |
-| **PMIC Driver** | ~3K | ✅ Mature | Yes for the documented nPM1300 charger, rail, telemetry, low-power, and hibernate APIs |
+| **Arduino core and common peripherals** | Supported on the listed boards within the board-specific limits above | Not applicable | Not applicable |
+| **Bluetooth LE** | Supported for the documented practical single-active-link scope | **No**; optional controller features and broad conformance remain | **No** Bluetooth SIG qualification |
+| **IEEE 802.15.4 radio/MAC primitives** | Useful for raw radio, OpenThread PAL work and experimental Zigbee | **No** complete reusable MAC service | **No** RF/MAC platform qualification |
+| **Zigbee** | Experimental device and coordinator demonstrations | **No** Zigbee PRO runtime | **No** compliant-platform or product certification |
+| **Thread** | Experimental OpenThread platform port with local two-board gates | **No** external/multi-hop/conformance completion | **No** Thread certification |
+| **Matter** | Experimental platform foundations and private protocol demos | **No** standard device runtime or commissioning | **No** CSA Matter certification |
+| **Bluetooth LE Channel Sounding** | Experimental standalone two-board CS Test | **No** connected product path | **No** Bluetooth qualification |
+| **NFC-A** | Partial low-level tag path; board antenna dependent | **No** broad reader/tag interoperability claim | **No** NFC Forum certification |
+| **VPR RISC-V / SoftPeripheral** | Partial boot, IPC and offload path; sQSPI remains experimental | Not applicable | Not applicable |
+| **nPM1300 and board power integration** | Supported on LM20A for the documented charger, telemetry and hibernate APIs | Not applicable | Not applicable |
 
 ---
 
 ## Known Limitations
 
-- **P-256 arithmetic in the custom protocol path is software-only.** CRACEN supplies fail-closed entropy. Nordic now publishes the PKE microcode under its [five-clause license](https://github.com/nrfconnect/sdk-nrf/blob/v3.3.0/LICENSE) and the accompanying driver in NCS, but they are not integrated or shipped by this core. Pairing operations can therefore take seconds of CPU time.
+- **P-256 arithmetic is software-only for BLE Secure Connections and the staged Matter paths.** CRACEN supplies fail-closed entropy. Nordic publishes PKE microcode and its NCS driver for CRACEN Base devices under the [Nordic five-clause license](https://github.com/nrfconnect/sdk-nrf/blob/v3.3.0/LICENSE), but this core does not integrate them. BLE Secure Connections key generation and private Matter session operations can therefore consume substantial CPU time.
 - **Thread and Matter remain staged.** Thread uses the imported OpenThread core with platform persistence/radio integration. Reported settings API failures retain the prior mapping, but the shared Preferences RRAM blob is not an atomic brownout transaction. Matter currently combines selected upstream CHIP platform units with project-specific onboarding, PASE/CASE, and command-surface code; those custom messages are not a substitute for the standard Matter Secure Channel and Interaction Model. Home Assistant/OTBR commissioning must not be claimed until it passes against an external border router and Matter controller.
-- **Zigbee is functional but incomplete** — many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
+- **Selected Zigbee examples are functional within the documented direct-device paths, but the stack is incomplete.** Many ZCL clusters, OTA, and automatic route maintenance / production multi‑hop routing are still missing. ZDO neighbor/routing management responses are available and can expose sketch-configured table entries. A Zigbee2MQTT external converter for the bundled CleanCore HA examples is in `extras/zigbee2mqtt/`.
 - **LM20A has two SPI paths:** `SPI` stays on the XIAO header pins; `SPI_HS` is the onboard QSPI flash bus and is only for deliberate HS-SPI/QSPI-pad use.
 - **P2 GPIO port has no interrupt/wake capability** (hardware limitation).
 - **Channel Sounding has one supported experimental path:** the
