@@ -1,10 +1,10 @@
 # Zigbee Completion Implementation Plan
 
-Status: implementation handoff  
-Repository baseline: `f22307d7fb12` (`main`, 2026-07-16)  
-Primary targets: nRF54L15 and nRF54LM20A/LM20B CleanCore boards  
+Status: implementation handoff
+Repository code baseline: `25e65916a642` (v1.0.4-based, 2026-07-16)
+Primary targets: nRF54L15 and nRF54LM20A/LM20B CleanCore boards
 Initial certification baseline: Zigbee 3.0, Zigbee Core R22.1, BDB 3.0.1,
-ZCL R8, and the exact role/device PICS selected in Phase Z0  
+ZCL R8, and the exact role/device PICS selected in Phase Z0
 Later compatibility track: Zigbee Core R23.2, BDB 3.1, and the applicable
 Zigbee 4.0 Device Type Library/PICS
 

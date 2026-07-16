@@ -6,7 +6,7 @@ This document hands the current nRF54 Arduino Core Zigbee work to an
 implementing engineer or AI. It is deliberately stricter than a feature list.
 It records:
 
-- the exact dirty working-tree baseline that must be preserved;
+- the exact pushed preparation baseline that must be preserved;
 - preparation already implemented and what that preparation does not prove;
 - the required nRF54L15/nRF54LM20 hardware contracts;
 - all remaining MAC, NWK, APS, security, persistence, BDB, ZDO, ZCL, OTA, test,
@@ -29,8 +29,10 @@ Before modifying code:
 
 1. Read this handover completely.
 2. Read `docs/ZIGBEE_COMPLETION_IMPLEMENTATION_PLAN.md` completely.
-3. Read the current diff with `git diff` and `git diff --stat`.
-4. Read all new/untracked Zigbee files and tests.
+3. Verify the branch, baseline ancestry, and clean status using the commands in
+   Section 3.
+4. Read all current Zigbee files, tests, CI gates, and the complete preparation
+   delta from `v1.0.4`.
 5. Read the nRF54L15 and nRF54LM20 product specifications in
    `/home/lolren/Desktop/eport_nrf54/datasheets`.
 6. Read the relevant Nordic errata for the exact silicon variants.
@@ -47,45 +49,35 @@ reference only after its exact revision and license are recorded.
 
 ## 3. Current Git Snapshot
 
-Snapshot taken 2026-07-16 13:56 Europe/London:
+Code baseline finalized 2026-07-16 Europe/London:
 
 ```text
-repository: /home/lolren/Desktop/eport_nrf54/nrf54-arduino-core
-branch:     main
-HEAD:       f22307d7fb12
-tag at HEAD: v1.0.3
-status entries: 79
-tracked diff: 65 files changed, 9771 insertions, 2537 deletions
+canonical repository: /home/lolren/Desktop/eport_nrf54/nrf54-arduino-core
+next-AI worktree:     /home/lolren/Desktop/eport_nrf54/nrf54-zigbee-full-implementation
+published branch:     main
+next-AI branch:       zigbee/full-implementation
+code baseline:        25e65916a6424cbc23c8540d79e0267e75d67324
+release ancestor:     4a552cdc03d0448b3b385ac72d33975cbe93f13d (v1.0.4)
+preparation delta:    81 files, +20042/-2551 relative to v1.0.4
 ```
 
-The working tree is intentionally dirty and contains crucial uncommitted work.
-It is not equivalent to tag `v1.0.3`. Do not run `git reset --hard`,
-`git checkout --`, broad `git restore`, or otherwise return to the tag. Do not
-replace this tree with a fresh clone. Preserve all unrelated user changes.
+The preparation is committed and pushed to `origin/main`.
+The next AI must work in the dedicated `zigbee/full-implementation` worktree,
+not directly on the canonical `main` checkout. At preflight, require:
 
-Important untracked preparation includes:
-
-```text
-docs/ZIGBEE_COMPLETION_IMPLEMENTATION_PLAN.md
-.../src/zigbee_feature.h
-.../src/zigbee_frame_counter.h
-.../src/zigbee_frame_counter.cpp
-scripts/test_exclusive_radio_arbiter_contracts.py
-scripts/test_zigbee_codec_capacity_contracts.py
-scripts/test_zigbee_codec_security_regressions.py
-scripts/test_zigbee_coordinator_security_contracts.py
-scripts/test_zigbee_feature_gate.py
-scripts/test_zigbee_persistence_journal.py
-scripts/test_zigbee_radio_hardware_contracts.py
-scripts/test_zigbee_security_hardening.py
-scripts/test_zigbee_validation_contracts.py
-scripts/zigbee_validation_common.py
+```bash
+cd /home/lolren/Desktop/eport_nrf54/nrf54-zigbee-full-implementation
+test "$(git branch --show-current)" = "zigbee/full-implementation"
+git merge-base --is-ancestor 25e65916a642 HEAD
+git status --short
 ```
 
-The next implementer must re-run `git status --short`; concurrent work may have
-advanced this snapshot. Generated `.uf2`, build directories, logs, captures,
-keys, and local measurements must not be committed unless a reviewed fixture is
-explicitly intended for the repository.
+`git status --short` must initially be empty. Create bounded local commits on
+that branch. Do not push or merge into `main`, tag, bump a version, or publish a
+release unless the user explicitly requests it after reviewing the evidence.
+Never run destructive resets/restores over user work. Generated `.uf2`, build
+directories, logs, captures, keys, and local measurements must not be committed
+unless a reviewed public fixture is explicitly intended for the repository.
 
 ## 4. Normative Baseline And Claim Boundary
 
@@ -190,8 +182,8 @@ time.
 
 ## 6. Implemented Preparation: Accurate Status
 
-This section describes code present in the dirty tree. It does not imply full
-protocol conformance or release readiness.
+This section describes code present in the pushed preparation baseline. It does
+not imply full protocol conformance or release readiness.
 
 ### 6.1 Feature gating
 
@@ -351,6 +343,10 @@ Implemented:
 
 Not implemented and safety-critical:
 
+- no built-in stored PAN/short/EUI-64 receive filter is configured by the 29
+  radio-using Zigbee examples; because ACK responses fail closed without an
+  address-aware filter, inbound automatic MAC ACKs are currently disabled in
+  those examples;
 - staged BCC/BCMATCH parsing while bytes arrive;
 - a bounded internal-only prefix parser;
 - precomputed PAN/address acceptance and indirect-frame-pending lookup;
@@ -363,6 +359,10 @@ Not implemented and safety-critical:
 The current scheduler is CRC-qualified and late-safe, but it is not yet
 deadline-deterministic because full-frame filter and frame-pending callbacks run
 inside `serviceBufferedReceiveIrq()` before the DPPI TX path is armed.
+The first MAC work unit must add a bounded internal PAN/short/EUI-64 filter,
+wire it to commissioning address changes and all radio examples, and prove that
+only exact local unicast frames are ACKed. Broadcast, foreign-PAN, malformed,
+bad-CRC, and queue-full frames must never be ACKed.
 
 ### 6.8 Strict DMA cleanup
 
@@ -1007,7 +1007,7 @@ baseline is stable.
 
 ### Phase 0: freeze and preserve
 
-- Snapshot dirty state and run all existing tests/compiles.
+- Verify the clean pushed baseline and run all existing tests/compiles.
 - Pin specs/hashes and create PICS/requirement ledger.
 - Capture existing direct-link behavior and packet fixtures.
 - Repair documentation statements that contradict current source.
@@ -1360,4 +1360,3 @@ Additionally:
 
 Do not tag, publish a package index, create a GitHub release, or call the core a
 new release unless the user explicitly requests release work after these gates.
-

@@ -1,9 +1,9 @@
 # Direct Implementation Prompt: Finish Zigbee Correctly
 
-You are taking over an existing, dirty nRF54 Arduino Core working tree at:
+You are taking over a dedicated local nRF54 Arduino Core worktree at:
 
 ```text
-/home/lolren/Desktop/eport_nrf54/nrf54-arduino-core
+/home/lolren/Desktop/eport_nrf54/nrf54-zigbee-full-implementation
 ```
 
 Your objective is to implement the missing production Zigbee stack work for
@@ -17,8 +17,10 @@ Before editing any source:
 
 1. Read `docs/ZIGBEE_FULL_IMPLEMENTATION_HANDOVER.md` completely.
 2. Read `docs/ZIGBEE_COMPLETION_IMPLEMENTATION_PLAN.md` completely.
-3. Read `git status --short`, `git diff --stat`, and the complete current diff.
-4. Read all current Zigbee sources, new untracked Zigbee files, CI, and tests.
+3. Verify that the current branch is `zigbee/full-implementation`, that
+   `25e65916a642` is an ancestor, and that `git status --short` is empty.
+4. Read all current Zigbee sources, the full `v1.0.4..HEAD` preparation delta,
+   CI, and tests.
 5. Read the shared BLE/OpenThread/Channel Sounding RADIO, CLOCK, POWER, TIMER,
    DPPI, IRQ, RRAM, and System OFF paths before changing shared hardware.
 6. Read the local Nordic product specifications/schematics in
@@ -29,9 +31,11 @@ Before editing any source:
 8. Run all existing Zigbee host contracts and representative L15/LM20, BLE,
    OpenThread, and Channel Sounding compiles to establish a baseline.
 
-The current working tree, not tag `v1.0.3`, is the authoritative starting point.
-It contains many uncommitted changes. Never run `git reset --hard`, broad
-`git restore`, or checkout/reclone over it. Preserve unrelated user changes.
+The pushed `origin/main` preparation, not tag `v1.0.4` alone, is the
+authoritative starting point. Code baseline `25e65916a642` contains the reviewed
+hardware and Zigbee preparation; the later documentation commit contains this
+prompt. Work only on the dedicated branch. Never run destructive reset/restore
+commands over user work, and preserve unrelated changes.
 
 ## Non-Negotiable Rules
 
@@ -63,7 +67,7 @@ It contains many uncommitted changes. Never run `git reset --hard`, broad
 
 ## Preserve And Build On Existing Preparation
 
-The dirty tree already includes preparation that must not regress:
+The pushed baseline already includes preparation that must not regress:
 
 - compile-time default-off Zigbee feature gate on all boards;
 - capacity-bearing/atomic current codecs and sanitizer tests;
@@ -80,6 +84,13 @@ The dirty tree already includes preparation that must not regress:
 - CSPRNG coordinator key generation and explicit unsupported key rotation.
 
 Treat these as tested foundations, not as full-stack completion.
+
+Immediate first functional gap: the 29 radio-using Zigbee examples do not yet
+configure a built-in PAN/short/EUI-64 receive filter, so automatic inbound MAC
+ACK responses remain fail-closed/off. Implement the bounded internal filter,
+commissioning synchronization, example wiring, and exact local-unicast ACK
+tests before building higher MAC behavior. Do not solve this by enabling
+promiscuous ACKs or by leaving arbitrary application callbacks in the IRQ path.
 
 ## Required Implementation Order
 
@@ -261,10 +272,9 @@ For every bounded work unit:
 10. Commit one logical unit with a precise message.
 
 Do not batch an architectural move, wire change, timing change, and example
-rewrite in one commit. Do not overwrite or revert unrelated dirty changes. If
-the initial dirty preparation has not yet been committed, verify and group it
-into coherent preparation commits without dropping any part or pretending you
-authored unverified behavior.
+rewrite in one commit. Do not overwrite or revert unrelated changes. Keep all
+work as bounded local commits on `zigbee/full-implementation`; do not push or
+merge to `main` unless the user explicitly requests it after reviewing results.
 
 ## Completion Reporting
 
@@ -287,4 +297,3 @@ normative access, or a true external dependency blocks a gate, record the exact
 blocker, do not weaken the gate, and proceed with independent work. Do not
 publish a release unless the user explicitly requests it after reviewing the
 final evidence.
-
