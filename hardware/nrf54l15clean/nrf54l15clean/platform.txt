@@ -1,5 +1,5 @@
 name=nRF54L15 Boards
-version=1.0.2
+version=1.0.3
 category=Arduino
 
 # Python launcher for upload helper.
@@ -31,9 +31,9 @@ compiler.c.elf.flags=-Wl,--gc-sections -Wl,-Map,{build.path}/{build.project_name
 compiler.ar.flags=rcs
 compiler.ldflags=-T{runtime.platform.path}/cores/{build.core}/{build.ldscript} --specs=nano.specs --specs=nosys.specs
 
-compiler.c.extra_flags=-include "{runtime.platform.path}/cores/{build.core}/CoreVersionGenerated.h"
-compiler.cpp.extra_flags=-include "{runtime.platform.path}/cores/{build.core}/CoreVersionGenerated.h"
-compiler.S.extra_flags=-include "{runtime.platform.path}/cores/{build.core}/CoreVersionGenerated.h"
+compiler.c.extra_flags=-include "{runtime.platform.path}/cores/{build.core}/CoreVersionGenerated.h" -include "{runtime.platform.path}/cores/{build.core}/BuildTargetGuard.h"
+compiler.cpp.extra_flags=-include "{runtime.platform.path}/cores/{build.core}/CoreVersionGenerated.h" -include "{runtime.platform.path}/cores/{build.core}/BuildTargetGuard.h"
+compiler.S.extra_flags=-include "{runtime.platform.path}/cores/{build.core}/CoreVersionGenerated.h" -include "{runtime.platform.path}/cores/{build.core}/BuildTargetGuard.h"
 compiler.ar.extra_flags=
 compiler.c.elf.extra_flags=
 build.nordic_sdc_arch=nrf54l
@@ -63,6 +63,8 @@ build.matter_seam_flags=
 recipe.c.o.pattern="{compiler.path}{compiler.c.cmd}" {compiler.c.flags} -DF_CPU={build.f_cpu} -DARDUINO={runtime.ide.version} -DARDUINO_{build.board} -DARDUINO_ARCH_NRF54L15CLEAN {compiler.c.extra_flags} {build.extra_flags} {includes} "{source_file}" -o "{object_file}"
 recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" {compiler.cpp.flags} -DF_CPU={build.f_cpu} -DARDUINO={runtime.ide.version} -DARDUINO_{build.board} -DARDUINO_ARCH_NRF54L15CLEAN {compiler.cpp.extra_flags} {build.extra_flags} {includes} "{source_file}" -o "{object_file}"
 recipe.S.o.pattern="{compiler.path}{compiler.S.cmd}" {compiler.S.flags} -DF_CPU={build.f_cpu} -DARDUINO={runtime.ide.version} -DARDUINO_{build.board} -DARDUINO_ARCH_NRF54L15CLEAN {compiler.S.extra_flags} {build.extra_flags} {includes} "{source_file}" -o "{object_file}"
+recipe.hooks.prebuild.1.pattern="{tools.python3.cmd}" {tools.python3.args} "{runtime.platform.path}/tools/build_cache_guard.py" --build-path "{build.path}" --target "{build.core}" --platform-path "{runtime.platform.path}"
+recipe.hooks.prebuild.1.pattern.windows=powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{runtime.platform.path}/tools/build_cache_guard.ps1" -BuildPath "{build.path}" -Target "{build.core}" -PlatformPath "{runtime.platform.path}"
 recipe.ar.pattern="{compiler.path}{compiler.ar.cmd}" {compiler.ar.flags} {compiler.ar.extra_flags} "{archive_file_path}" "{object_file}"
 recipe.c.combine.pattern="{compiler.path}{compiler.c.cmd}" {compiler.c.elf.flags} {compiler.c.elf.extra_flags} {compiler.ldflags} -o "{build.path}/{build.project_name}.elf" {object_files} -Wl,--start-group "{archive_file_path}" {compiler.libraries.ldflags} -lm -Wl,--end-group
 recipe.objcopy.hex.pattern="{compiler.path}{compiler.objcopy.cmd}" -O ihex "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.hex"

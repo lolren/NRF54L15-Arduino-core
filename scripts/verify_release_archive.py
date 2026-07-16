@@ -238,6 +238,10 @@ def main() -> int:
             platform / "libraries/Nrf54L15-Clean-Implementation/src/openthread-NOTICE.txt",
             platform / "libraries/Nrf54L15-Clean-Implementation/src/openthread_core_stage",
             platform / "libraries/Nrf54L15-Clean-Implementation/src/openthread_core_stage_bridge.cpp",
+            platform / "cores/nrf54l15/BuildTargetGuard.h",
+            platform / "cores/nrf54lm20b/BuildTargetGuard.h",
+            platform / "tools/build_cache_guard.py",
+            platform / "tools/build_cache_guard.ps1",
             platform / "tools/nrf_ocd-compliance/nrf_ocd-MIT.txt",
             platform / "tools/nrf_ocd-compliance/nrf_ocd-THIRD_PARTY_NOTICES.md",
             platform / "tools/nrf_ocd-compliance/README.md",
@@ -518,6 +522,7 @@ def main() -> int:
 
         for index, (board_options, sketch) in enumerate(FEATURE_BUILDS):
             fqbn = f"{LOCAL_PACKAGER}:nrf54l15clean:{board_options}"
+            build_path = temp / f"build-{index}"
             cmd = [
                 "arduino-cli",
                 "compile",
@@ -528,13 +533,43 @@ def main() -> int:
                 "--build-property",
                 f"compiler.path={compiler}{os.sep}",
                 "--build-path",
-                str(temp / f"build-{index}"),
+                str(build_path),
                 str(platform / sketch),
             ]
             completed = subprocess.run(cmd, capture_output=True, text=True, timeout=args.timeout)
             if completed.returncode != 0:
                 output = completed.stdout + completed.stderr
                 raise SystemExit(f"archive feature compile failed for {fqbn}:\n{output[-12000:]}")
+
+            elf_files = tuple(build_path.glob("*.elf"))
+            if len(elf_files) != 1:
+                raise SystemExit(
+                    f"archive feature compile produced {len(elf_files)} ELF files for {fqbn}"
+                )
+            nm_name = "arm-none-eabi-nm.exe" if os.name == "nt" else "arm-none-eabi-nm"
+            nm = subprocess.run(
+                [str(compiler / nm_name), str(elf_files[0])],
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+            )
+            if nm.returncode != 0:
+                raise SystemExit(f"could not inspect target identity for {fqbn}: {nm.stderr}")
+            lm20 = board_options.split(":", 1)[0] == "xiao_nrf54lm20b"
+            expected = (
+                "__nrf54_core_target_nrf54lm20"
+                if lm20
+                else "__nrf54_core_target_nrf54l15"
+            )
+            forbidden = (
+                "__nrf54_core_target_nrf54l15"
+                if lm20
+                else "__nrf54_core_target_nrf54lm20"
+            )
+            if expected not in nm.stdout or forbidden in nm.stdout:
+                raise SystemExit(
+                    f"archive feature compile has mixed or missing SoC identity for {fqbn}"
+                )
             print(f"archive feature compile OK: {fqbn} {sketch}")
     return 0
 

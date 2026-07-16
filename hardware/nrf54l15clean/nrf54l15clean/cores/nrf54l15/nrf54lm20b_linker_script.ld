@@ -26,6 +26,9 @@ MEMORY
 
 __stack_size__ = 4K;
 
+/* Only nRF54LM20-compiled objects may satisfy this link. */
+PROVIDE(__nrf54_core_target_nrf54lm20 = 0x4C4D3230);
+
 SECTIONS
 {
     .isr_vector :
@@ -82,6 +85,7 @@ SECTIONS
     .rodata :
     {
         . = ALIGN(4);
+        KEEP(*(.gnu.linkonce.r.nrf54_core_target_guard.*))
         *(.rodata)
         *(.rodata*)
         . = ALIGN(4);

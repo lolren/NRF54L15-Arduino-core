@@ -38,7 +38,7 @@ or production-ready**:
 | **Channel Sounding** | Experimental two-board controller-backed LE CS Test; not connected-ACL Channel Sounding, calibrated ranging, cross-vendor interoperability, or a qualification claim |
 
 The Thread and Matter entries describe the experimental platform work included
-in `1.0.2`; those menu targets remain explicitly outside the stable feature
+in `1.0.3`; those menu targets remain explicitly outside the stable feature
 claim.
 
 These boundaries keep the stable claims precise: unfinished protocol examples
@@ -56,6 +56,7 @@ implementations.
 | **Low-power board integration** | System ON idle, timed System OFF, reset-cause APIs, XIAO RF-switch control, LM20A external-flash power-down, and nPM1300 hibernate support |
 | **Dual-core access** | Use the 128 MHz Cortex-M33 application CPU and the VPR RISC-V coprocessor without adopting a vendor RTOS |
 | **Observable validation** | Public diagnostics, regression scripts, release-archive compilation, and a repeatable two-board hardware gate document what was actually tested |
+| **Cross-board build isolation** | L15 and LM20A objects carry linker-checked SoC identities, and Arduino automatically clears stale objects when the selected board or installed platform changes |
 
 This core is a good fit when Arduino productivity and close control over timing,
 memory, radio behavior, or power matter more than adopting the full nRF Connect
@@ -282,7 +283,7 @@ Install the stable release from the normal Boards Manager feed shown above, or
 request the exact version with Arduino CLI:
 
 ```bash
-arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.2"
+arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.3"
 ```
 
 - Controller-backed Bluetooth LE Channel Sounding Test is now available through

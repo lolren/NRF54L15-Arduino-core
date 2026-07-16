@@ -36,6 +36,9 @@ MEMORY
  * the end of static sections (.bss, .noinit) and the bottom of the stack. */
 __stack_size__ = 4K;
 
+/* Only nRF54L15-compiled objects may satisfy this link. */
+PROVIDE(__nrf54_core_target_nrf54l15 = 0x4C313500);
+
 /* Section Definitions */
 SECTIONS
 {
@@ -108,6 +111,7 @@ SECTIONS
     .rodata :
     {
         . = ALIGN(4);
+        KEEP(*(.gnu.linkonce.r.nrf54_core_target_guard.*))
         *(.rodata)               /* .rodata sections (constants, strings, etc.) */
         *(.rodata*)              /* .rodata* sections */
         . = ALIGN(4);
