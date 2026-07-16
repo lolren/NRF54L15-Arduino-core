@@ -427,9 +427,25 @@ def test_strict_teardown_and_timeout_retention() -> None:
         raw_cs_active,
         "waitForRadioDisabled",
         "if (disabled)",
+        "stopAndDisableAuxDataDma",
         "detachRawRadioAutomation",
         "clearEvents()",
         "releaseRawCsRadioOwnershipIfDisabled",
+    )
+    raw_cs_receive = function_body(
+        raw_cs, "bool BleChannelSoundingRadio::receiveFrame("
+    )
+    phy_timeout = raw_cs_receive[
+        raw_cs_receive.index("if (!waitForRadioPhyEnd") :
+        raw_cs_receive.index("if (config_.enableRawDfeCapture")
+    ]
+    assert_order(
+        phy_timeout,
+        "radio_->TASKS_DISABLE",
+        "waitForRadioDisabled",
+        "if (captureRtt &&",
+        "stopAndDisableAuxDataDma",
+        "clearEvents()",
     )
 
     assert_order(

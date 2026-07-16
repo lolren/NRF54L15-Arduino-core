@@ -15,6 +15,9 @@ COORDINATORS = (
     EXAMPLES / "Coordinator/ZigbeeHaCoordinatorJoinDemo/ZigbeeHaCoordinatorJoinDemo.ino",
     EXAMPLES / "ZigbeeHaCoordinatorJoinDemo/ZigbeeHaCoordinatorJoinDemo.ino",
 )
+RGB_MOOD_LIGHT = EXAMPLES / (
+    "Lights/ZigbeeHaRgbMoodLight/ZigbeeHaRgbMoodLight.ino"
+)
 
 
 def function_body(source: str, signature: str) -> str:
@@ -104,6 +107,19 @@ def validate_coordinator(path: pathlib.Path) -> None:
 def main() -> None:
     for path in COORDINATORS:
         validate_coordinator(path)
+    rgb_source = RGB_MOOD_LIGHT.read_text(encoding="utf-8")
+    for macro in (
+        "NRF54L15_CLEAN_ZIGBEE_LOCAL_SHORT",
+        "NRF54L15_CLEAN_ZIGBEE_LOCAL_IEEE",
+        "NRF54L15_CLEAN_ZIGBEE_INSTALL_CODE_BYTES",
+    ):
+        assert rgb_source.count(f"#ifndef {macro}") == 1, macro
+        assert rgb_source.count(f"#define {macro}") == 1, macro
+    assert "#define NRF54L15_CLEAN_ZIGBEE_LOCAL_SHORT 0x7E21U" in rgb_source
+    assert (
+        "#define NRF54L15_CLEAN_ZIGBEE_LOCAL_IEEE 0xA4B1000000000021ULL"
+        in rgb_source
+    )
     print("PASS all Zigbee Trust Center fail-closed security contracts")
 
 

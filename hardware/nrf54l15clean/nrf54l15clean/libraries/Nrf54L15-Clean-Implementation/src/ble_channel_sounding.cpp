@@ -2048,6 +2048,9 @@ void BleChannelSoundingRadio::end() {
   const bool disabled = waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
   initialized_ = false;
   if (disabled) {
+    if (!stopAndDisableAuxDataDma(radio_, kAuxDataBudgetUs)) {
+      return;
+    }
     detachRawRadioAutomation(radio_);
     clearEvents();
     power_.setLatencyMode(PowerLatencyMode::kLowPower);
@@ -10002,6 +10005,12 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
     if (!waitForRadioPhyEnd(radio_, kRadioEndBudgetUs)) {
       radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
       if (!waitForRadioDisabled(radio_, kRadioDisableBudgetUs)) {
+        radio_->SHORTS = 0U;
+        initialized_ = false;
+        return false;
+      }
+      if (captureRtt &&
+          !stopAndDisableAuxDataDma(radio_, kAuxDataBudgetUs)) {
         radio_->SHORTS = 0U;
         initialized_ = false;
         return false;
