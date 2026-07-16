@@ -64,6 +64,8 @@ static constexpr uint32_t T_ENABLE_TWIS        = 9UL;
 static constexpr uint32_t T_TWIM_ERRORSRC_ALL  = 0x7UL;
 static constexpr uint32_t T_TWIM_ERRORSRC_ANACK = (1UL << 1U);
 static constexpr uint32_t T_TWIM_ERRORSRC_DNACK = (1UL << 2U);
+static constexpr uint32_t T_TWIM_SHORT_LASTTX_STOP = (1UL << 9U);
+static constexpr uint32_t T_TWIM_SHORT_LASTRX_STOP = (1UL << 12U);
 
 static constexpr uint32_t T_TWIS_ERRORSRC_OVERFLOW = (1UL << 0U);
 static constexpr uint32_t T_TWIS_ERRORSRC_DNACK    = (1UL << 2U);
@@ -540,6 +542,62 @@ uint8_t TwoWire::endTransmission(bool sendStop) {
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_twim);
 
+    if (_txBufferLength == 0U) {
+        // nRF54L TWIM DMA.TX.MAXCNT is defined only for 1..0xFFFF. Starting a
+        // zero-byte TX can complete EasyDMA locally without placing an address
+        // on the bus, which makes every address look present to I2C scanners.
+        // A one-byte read emits a real address phase without writing to the
+        // target. LASTRX is raised after the address ACK when MAXCNT is one.
+        if (!sendStop) {
+            bool stopped = true;
+            if (_pendingRepeatedStart) {
+                reg32(base + T_EVENTS_STOPPED) = 0U;
+                reg32(base + T_TASKS_STOP) = 1U;
+                stopped = wait_event(base, T_EVENTS_STOPPED, 300000UL);
+            }
+            _pendingRepeatedStart = !stopped;
+            _lastActivityUs = micros();
+            return 4U;
+        }
+
+        // The instance TX buffer stays valid if a broken bus prevents STOPPED,
+        // and keeps concurrent Wire/Wire1 probes on distinct DMA storage.
+        reg32(base + T_EVENTS_STOPPED) = 0U;
+        reg32(base + T_EVENTS_ERROR) = 0U;
+        reg32(base + T_EVENTS_LASTRX) = 0U;
+        reg32(base + T_EVENTS_DMA_RX_END) = 0U;
+        reg32(base + T_TWIM_ERRORSRC) = T_TWIM_ERRORSRC_ALL;
+        reg32(base + T_ADDRESS) = _txAddress;
+        reg32(base + T_DMA_RX_PTR) =
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(_txBuffer));
+        reg32(base + T_DMA_RX_MAXCNT) = 1U;
+        reg32(base + T_SHORTS) = T_TWIM_SHORT_LASTRX_STOP;
+        reg32(base + T_TASKS_DMA_RX_START) = 1U;
+
+        const bool addressAcked =
+            wait_event_or_error(base, T_EVENTS_LASTRX, 300000UL);
+        if (!addressAcked) {
+            reg32(base + T_TASKS_STOP) = 1U;
+        }
+        const bool stopOk = wait_event(base, T_EVENTS_STOPPED, 300000UL);
+        reg32(base + T_SHORTS) = 0U;
+        const uint32_t errorsrc =
+            reg32(base + T_TWIM_ERRORSRC) & T_TWIM_ERRORSRC_ALL;
+        const bool errorEvent = reg32(base + T_EVENTS_ERROR) != 0U;
+
+        // STOPPED proves EasyDMA no longer references the probe byte.
+        if (stopOk) {
+            reg32(base + T_DMA_RX_PTR) = 0U;
+            reg32(base + T_DMA_RX_MAXCNT) = 0U;
+            __DSB();
+        }
+        reg32(base + T_TWIM_ERRORSRC) = T_TWIM_ERRORSRC_ALL;
+        _pendingRepeatedStart = false;
+        _txBufferLength = 0U;
+        _lastActivityUs = micros();
+        return end_tx_error_code(addressAcked && !errorEvent, stopOk, errorsrc);
+    }
+
     reg32(base + T_EVENTS_STOPPED) = 0U;
     reg32(base + T_EVENTS_ERROR) = 0U;
     reg32(base + T_EVENTS_LASTTX) = 0U;
@@ -549,18 +607,27 @@ uint8_t TwoWire::endTransmission(bool sendStop) {
     reg32(base + T_ADDRESS) = _txAddress;
     reg32(base + T_DMA_TX_PTR) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(_txBuffer));
     reg32(base + T_DMA_TX_MAXCNT) = _txBufferLength;
+    reg32(base + T_SHORTS) = sendStop ? T_TWIM_SHORT_LASTTX_STOP : 0U;
 
     reg32(base + T_TASKS_DMA_TX_START) = 1U;
 
     const uint32_t doneEvent = (_txBufferLength > 0U) ? T_EVENTS_LASTTX : T_EVENTS_DMA_TX_END;
     const bool writeOk = wait_event_or_error(base, doneEvent, 300000UL);
-    const uint32_t errorsrc = reg32(base + T_TWIM_ERRORSRC) & T_TWIM_ERRORSRC_ALL;
-    const bool hadError = (reg32(base + T_EVENTS_ERROR) != 0U) || (errorsrc != 0U);
+    uint32_t errorsrc = reg32(base + T_TWIM_ERRORSRC) & T_TWIM_ERRORSRC_ALL;
+    bool errorEvent = reg32(base + T_EVENTS_ERROR) != 0U;
+    const bool hadError = errorEvent || (errorsrc != 0U);
 
     bool stopOk = true;
     if (sendStop || !writeOk || hadError) {
-        reg32(base + T_TASKS_STOP) = 1U;
+        if (!sendStop || !writeOk || hadError) {
+            reg32(base + T_TASKS_STOP) = 1U;
+        }
         stopOk = wait_event(base, T_EVENTS_STOPPED, 300000UL);
+        // LASTTX is raised when transmission of the final byte starts. Its
+        // ACK/NACK is not final until the STOP/STOPPED interval completes.
+        errorsrc |= reg32(base + T_TWIM_ERRORSRC) & T_TWIM_ERRORSRC_ALL;
+        errorEvent = errorEvent || (reg32(base + T_EVENTS_ERROR) != 0U);
+        reg32(base + T_SHORTS) = 0U;
         _pendingRepeatedStart = false;
     } else {
         _pendingRepeatedStart = true;
@@ -570,7 +637,7 @@ uint8_t TwoWire::endTransmission(bool sendStop) {
 
     _txBufferLength = 0;
     _lastActivityUs = micros();
-    return end_tx_error_code(writeOk, stopOk, errorsrc);
+    return end_tx_error_code(writeOk && !errorEvent, stopOk, errorsrc);
 }
 
 uint8_t TwoWire::requestFrom(uint8_t address, uint8_t quantity, uint8_t sendStop) {
