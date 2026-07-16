@@ -943,10 +943,15 @@ static bool stopHfxoForSystemOff(void)
         (NRF_CLOCK->XO.STAT & CLOCK_XO_STAT_STATE_Msk) >>
         CLOCK_XO_STAT_STATE_Pos;
     if (state == CLOCK_XO_STAT_STATE_NotRunning) {
+        NRF_CLOCK->TASKS_PLLSTOP =
+            CLOCK_TASKS_PLLSTOP_TASKS_PLLSTOP_Trigger;
+        __asm volatile("dsb 0xF" ::: "memory");
         return true;
     }
 
     NRF_CLOCK->TASKS_XOSTOP = CLOCK_TASKS_XOSTOP_TASKS_XOSTOP_Trigger;
+    __asm volatile("dsb 0xF" ::: "memory");
+    NRF_CLOCK->TASKS_PLLSTOP = CLOCK_TASKS_PLLSTOP_TASKS_PLLSTOP_Trigger;
     __asm volatile("dsb 0xF" ::: "memory");
     uint32_t spinLimit = kSystemOffHfxoStopSpinLimit;
     while (spinLimit-- > 0U) {
@@ -994,10 +999,9 @@ static void enterSystemOffInternal(bool disableRamRetention,
 
 static void enterSystemOffInternal(bool disableRamRetention,
                                    bool timedWake,
-                                   uint32_t delayUs)
+    uint32_t delayUs)
 {
     clearSystemOffAbortDiagnostic();
-    NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
     __asm volatile("cpsid i" ::: "memory");
 
     if (!nrf54l15_core_prepare_system_off()) {
@@ -1027,6 +1031,7 @@ static void enterSystemOffInternal(bool disableRamRetention,
     if (timedWake && anyGrtcCompareEvent(NRF_GRTC)) {
         abortSystemOffWithReset(kSystemOffAbortPreEntryCompare);
     }
+    NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
 
     *kScbScr = (*kScbScr | kScbScrSleepDeep_Msk) & ~kScbScrSleepOnExit_Msk;
     __asm volatile("dsb 0xF" ::: "memory");

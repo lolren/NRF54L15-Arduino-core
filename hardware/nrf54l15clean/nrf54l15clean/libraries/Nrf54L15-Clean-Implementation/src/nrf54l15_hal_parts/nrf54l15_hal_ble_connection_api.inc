@@ -1219,12 +1219,19 @@ bool BleRadio::configureBackgroundConnectionHardware(bool enable) {
     return false;
   }
 
-  ppib30->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
-  ppib22->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
-  ppib21->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
-  ppib11->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+  if (enable) {
+    ppib30->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+    ppib22->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+    ppib21->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+    ppib11->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+  }
 
   if (!enable) {
+    // Disable the final RADIO sink before dismantling upstream bridge routes.
+    (void)radioDomain.disconnectSubscribe(&radio_->SUBSCRIBE_RXEN);
+    (void)radioDomain.enableChannel(kBleBackgroundConnRadioRxDppiChannel,
+                                    false);
+    __DSB();
     (void)lpDomain.disconnectPublish(
         &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundConnRxCompareChannel]);
     (void)lpDomain.disconnectSubscribe(
@@ -1241,6 +1248,11 @@ bool BleRadio::configureBackgroundConnectionHardware(bool enable) {
         &ppib11->PUBLISH_RECEIVE[kBleBackgroundConnRxBridgeIndex]);
     (void)radioDomain.disconnectSubscribe(&radio_->SUBSCRIBE_RXEN);
     (void)radioDomain.enableChannel(kBleBackgroundConnRadioRxDppiChannel, false);
+    __DSB();
+    ppib30->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+    ppib22->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+    ppib21->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
+    ppib11->EVENTS_RECEIVE[kBleBackgroundConnRxBridgeIndex] = 0U;
     return true;
   }
 
@@ -1343,13 +1355,26 @@ bool BleRadio::prepareBackgroundConnectionReceiveWindow(uint32_t rxStartUs) {
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&rxPacket_[0]));
   radio_->SHORTS = bleRadioShortsRxListen();
 
-  if (!configureBackgroundConnectionHardware(true)) {
+  // Build the compare while the RADIO bridge is closed. Only CLOCK's
+  // XOTUNED proof may open the final GRTC-to-RXEN route.
+  if (!configureBackgroundConnectionHardware(false)) {
     return false;
   }
 
   bleProgramCompare(kBleBackgroundConnRxCompareChannel, rxStartUs, false);
   backgroundConnectionRxPrepared_ = true;
   backgroundConnectionPreparedDataChannel_ = dataChannel;
+  g_bleBackgroundRadio = this;
+  if (bleHfxoReadyForRadio()) {
+    if (!configureBackgroundConnectionHardware(true)) {
+      backgroundConnectionRxPrepared_ = false;
+      bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+      return false;
+    }
+    bleBackgroundEnableClockQualityInterrupts();
+  } else {
+    bleBackgroundEnableClockTuneInterrupts();
+  }
   ++encDebug_.connBgRxHardwareArmCount;
   return true;
 }
@@ -1432,6 +1457,19 @@ void BleRadio::serviceBackgroundConnection(uint32_t spinLimit) {
       if (!bleHfxoRunning()) {
         (void)ClockControl::startHfxo(false, 0U);
       }
+      if (backgroundConnectionRxPrepared_) {
+        if (bleHfxoReadyForRadio()) {
+          if (configureBackgroundConnectionHardware(true)) {
+            bleBackgroundEnableClockQualityInterrupts();
+          } else {
+            backgroundConnectionRxPrepared_ = false;
+            bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+          }
+        } else {
+          (void)configureBackgroundConnectionHardware(false);
+          bleBackgroundEnableClockTuneInterrupts();
+        }
+      }
       // Match the HFXO prewarm window with the XIAO RF switch settle window.
       // Enabling RF_SW only at event wake can depress the first RSSI sample
       // even though packet timing still succeeds.
@@ -1474,7 +1512,30 @@ void BleRadio::serviceBackgroundConnection(uint32_t spinLimit) {
   }
   if (manageConnectionHfxo && !ClockControl::startHfxo(
                                   true, (spinLimit == 0U) ? 1500000UL : spinLimit)) {
-    releaseRfPathForBle();
+    bleBackgroundDisableClockIrq();
+    const uint32_t irqState = bleEnterCritical();
+    bleDisableCompare(kBleBackgroundConnPrewarmCompareChannel, true);
+    bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+    (void)configureBackgroundConnectionHardware(false);
+    backgroundConnectionRxPrepared_ = false;
+    backgroundConnectionPreparedDataChannel_ = 0U;
+    g_bleBackgroundPendSvPending = 0U;
+    blePendSvClearPending();
+    bleExitCritical(irqState);
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
+    radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    const bool radioDisabled = waitRadioStateDisabledBudgeted(
+        radio_, 3000U, (spinLimit == 0U) ? 120000UL : spinLimit);
+    if (radioDisabled) {
+      releaseRfPathForBle();
+    } else {
+      initialized_ = false;
+      backgroundConnectionServiceEnabled_ = false;
+      backgroundConnectionServiceArmed_ = false;
+      backgroundConnectionServiceDue_ = false;
+      backgroundConnectionEventWakeArmed_ = false;
+    }
     return;
   }
 
@@ -1493,6 +1554,27 @@ void BleRadio::serviceBackgroundConnection(uint32_t spinLimit) {
   }
   backgroundConnectionServiceInProgress_ = false;
   connectionServiceBusy_ = false;
+  bool radioDisabled =
+      ((radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos) ==
+      RADIO_STATE_STATE_Disabled;
+  if (!radioDisabled) {
+    bleDisableCompare(kBleBackgroundConnPrewarmCompareChannel, true);
+    bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+    (void)configureBackgroundConnectionHardware(false);
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
+    radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    radioDisabled = waitRadioStateDisabledBudgeted(
+        radio_, 3000U, (spinLimit == 0U) ? 120000UL : spinLimit);
+  }
+  if (!radioDisabled) {
+    initialized_ = false;
+    backgroundConnectionServiceEnabled_ = false;
+    backgroundConnectionServiceArmed_ = false;
+    backgroundConnectionServiceDue_ = false;
+    backgroundConnectionEventWakeArmed_ = false;
+    return;
+  }
   if (manageConnectionHfxo && bleHfxoRunning()) {
     ClockControl::stopHfxo();
   }
@@ -1543,9 +1625,28 @@ bool BleRadio::disconnectWithReason(BleDisconnectReason reason, uint8_t errorCod
   }
 
   recordDisconnectDebug(reason, errorCode);
-  radio_->SHORTS = 0U;
+  bleBackgroundDisableClockIrq();
+  const uint32_t teardownIrqState = bleEnterCritical();
+  backgroundConnectionServiceEnabled_ = false;
+  backgroundConnectionServiceArmed_ = false;
+  backgroundConnectionServiceInProgress_ = false;
+  backgroundConnectionServiceDue_ = false;
+  backgroundConnectionEventWakeArmed_ = false;
+  bleDisableCompare(kBleBackgroundConnPrewarmCompareChannel, true);
+  bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+  (void)configureBackgroundConnectionHardware(false);
+  g_bleBackgroundPendSvPending = 0U;
+  blePendSvClearPending();
+  bleExitCritical(teardownIrqState);
+  bleDetachRadioRestartAutomation(radio_);
+  radio_->EVENTS_DISABLED = 0U;
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-  waitDisabled(spinLimit);
+  if (!waitRadioStateDisabledBudgeted(
+          radio_, 3000U, (spinLimit == 0U) ? 120000UL : spinLimit)) {
+    // Preserve the live link and all clock/RF ownership so the caller can
+    // retry teardown. Resetting registers under an active RADIO is unsafe.
+    return false;
+  }
   connected_ = false;
   connectionLocalTerminatePending_ = false;
   connectionLocalTerminateErrorCode_ = 0x13U;
@@ -2015,7 +2116,8 @@ void BleRadio::setBackgroundConnectionServiceEnabled(bool enabled) {
   const bool canPowerDownAfterHandoff =
       !connected_ ||
       (backgroundConnectionServiceArmed_ &&
-       !backgroundConnectionEventWakeArmed_);
+       !backgroundConnectionEventWakeArmed_ &&
+       !backgroundConnectionRxPrepared_);
   if (canPowerDownAfterHandoff) {
     if (bleHfxoRunning()) {
       ClockControl::stopHfxo();
@@ -2040,6 +2142,19 @@ void BleRadio::serviceBackgroundConnectionFromIrq() {
 
   if (!backgroundConnectionEventWakeArmed_) {
     (void)ClockControl::startHfxo(false, 0U);
+    if (backgroundConnectionRxPrepared_) {
+      if (bleHfxoReadyForRadio()) {
+        if (configureBackgroundConnectionHardware(true)) {
+          bleBackgroundEnableClockQualityInterrupts();
+        } else {
+          backgroundConnectionRxPrepared_ = false;
+          bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+        }
+      } else {
+        (void)configureBackgroundConnectionHardware(false);
+        bleBackgroundEnableClockTuneInterrupts();
+      }
+    }
     // Keep RF_SW on only for the radio prewarm/event window. This avoids the
     // idle-current regression from holding the switch through delay(), but
     // gives the antenna path time to settle before RSSI is sampled.
@@ -2108,5 +2223,20 @@ void BleRadio::stopBackgroundConnectionService() {
     g_bleBackgroundRadio = nullptr;
   }
   bleExitCritical(irqState);
-  releaseRfPathForBle();
+  bool radioDisabled =
+      radio_ == nullptr ||
+      (((radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos) ==
+       RADIO_STATE_STATE_Disabled);
+  if (!radioDisabled && radio_ != nullptr) {
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
+    radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    radioDisabled =
+        waitRadioStateDisabledBudgeted(radio_, 3000U, 120000UL);
+  }
+  if (radioDisabled) {
+    releaseRfPathForBle();
+  } else {
+    initialized_ = false;
+  }
 }

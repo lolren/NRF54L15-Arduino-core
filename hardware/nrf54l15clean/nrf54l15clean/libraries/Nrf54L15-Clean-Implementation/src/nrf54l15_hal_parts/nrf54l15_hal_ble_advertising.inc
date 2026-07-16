@@ -59,13 +59,19 @@ bool BleRadio::transmitPreparedPacketOnCurrentChannel(const uint8_t* packet,
     }
   }
 
-  if (!disabledSeen) {
+  const bool stateDisabled = rawRadioDisabled(radio_);
+  if (!disabledSeen || !stateDisabled) {
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-    waitDisabled(spinLimit / 2U + 1U);
+    disabledSeen = waitRadioStateDisabledBudgeted(
+        radio_, 3000U, spinLimit / 2U + 1U);
   }
 
-  radio_->SHORTS = 0U;
-  clearRadioCoreEvents(radio_);
+  if (disabledSeen) {
+    radio_->SHORTS = 0U;
+    clearRadioCoreEvents(radio_);
+  }
   return disabledSeen;
 }
 
@@ -136,8 +142,7 @@ bool BleRadio::advertiseOnce(BleAdvertisingChannel channel, uint32_t spinLimit) 
   }
 
   const bool ok = advertiseOncePrepared(channel, spinLimit);
-  endUnconnectedRadioActivity();
-  return ok;
+  return endUnconnectedRadioActivity() && ok;
 }
 
 bool BleRadio::advertiseEvent(uint32_t interChannelDelayUs, uint32_t spinLimit,
@@ -155,7 +160,7 @@ bool BleRadio::advertiseEvent(uint32_t interChannelDelayUs, uint32_t spinLimit,
   }
 
   if (!advertiseOncePrepared(BleAdvertisingChannel::k37, spinLimit)) {
-    endUnconnectedRadioActivity();
+    (void)endUnconnectedRadioActivity();
     return false;
   }
   if (interChannelDelayUs > 0U) {
@@ -163,7 +168,7 @@ bool BleRadio::advertiseEvent(uint32_t interChannelDelayUs, uint32_t spinLimit,
   }
 
   if (!advertiseOncePrepared(BleAdvertisingChannel::k38, spinLimit)) {
-    endUnconnectedRadioActivity();
+    (void)endUnconnectedRadioActivity();
     return false;
   }
   if (interChannelDelayUs > 0U) {
@@ -171,8 +176,7 @@ bool BleRadio::advertiseEvent(uint32_t interChannelDelayUs, uint32_t spinLimit,
   }
 
   const bool ok = advertiseOncePrepared(BleAdvertisingChannel::k39, spinLimit);
-  endUnconnectedRadioActivity();
-  return ok;
+  return endUnconnectedRadioActivity() && ok;
 }
 
 bool BleRadio::prepareBackgroundAdvertisingEvent() {
@@ -225,16 +229,29 @@ bool BleRadio::configureBackgroundAdvertisingHardware(bool enable) {
     return false;
   }
 
-  ppib30->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
-  ppib22->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
-  ppib21->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
-  ppib11->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
-  *reinterpret_cast<volatile uint32_t*>(reinterpret_cast<uintptr_t>(ppib30) + 0x400U) =
-      0U;
-  *reinterpret_cast<volatile uint32_t*>(reinterpret_cast<uintptr_t>(ppib21) + 0x400U) =
-      0U;
+  if (enable) {
+    ppib30->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    ppib22->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    ppib21->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    ppib11->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    *reinterpret_cast<volatile uint32_t*>(
+        reinterpret_cast<uintptr_t>(ppib30) + 0x400U) = 0U;
+    *reinterpret_cast<volatile uint32_t*>(
+        reinterpret_cast<uintptr_t>(ppib21) + 0x400U) = 0U;
+  }
 
   if (!enable) {
+    // Disable the final RADIO/CLOCK sinks before dismantling upstream bridges.
+    (void)radioDomain.disconnectSubscribe(&radio_->SUBSCRIBE_PLLEN);
+    (void)radioDomain.disconnectSubscribe(&radio_->SUBSCRIBE_TXEN);
+    (void)radioDomain.enableChannel(kBleBackgroundAdvRadioPllenDppiChannel,
+                                    false);
+    (void)radioDomain.enableChannel(kBleBackgroundAdvRadioTxDppiChannel,
+                                    false);
+    (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_PLLSTART);
+    (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_XOSTART);
+    (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_XOSTOP);
+    __DSB();
     (void)lpDomain.disconnectPublish(&NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvPrewarmCompareChannel]);
     (void)lpDomain.disconnectPublish(&NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvTxCompareChannel]);
     (void)lpDomain.disconnectPublish(
@@ -245,25 +262,20 @@ bool BleRadio::configureBackgroundAdvertisingHardware(bool enable) {
         &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvCleanupCompareChannel]);
     (void)lpDomain.disconnectPublish(
         &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvFinalCleanupCompareChannel]);
+    (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_PLLSTART);
     (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_XOSTART);
     (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_XOSTOP);
     (void)lpDomain.disconnectSubscribe(
         &ppib30->SUBSCRIBE_SEND[kBleBackgroundAdvLpToPeriBridgeIndex]);
-    (void)lpDomain.disconnectSubscribe(
-        &ppib30->SUBSCRIBE_SEND[kBleBackgroundAdvLatencyBridgeIndex]);
     (void)lpDomain.enableChannel(kBleBackgroundAdvLpPrewarmDppiChannel, false);
     (void)lpDomain.enableChannel(kBleBackgroundAdvLpTxDppiChannel, false);
     (void)lpDomain.enableChannel(kBleBackgroundAdvLpStopDppiChannel, false);
 
     (void)periDomain.disconnectPublish(
         &ppib22->PUBLISH_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex]);
-    (void)periDomain.disconnectPublish(
-        &ppib22->PUBLISH_RECEIVE[kBleBackgroundAdvLatencyBridgeIndex]);
-    (void)periDomain.disconnectSubscribe(&NRF_POWER->SUBSCRIBE_CONSTLAT);
     (void)periDomain.disconnectSubscribe(
         &ppib21->SUBSCRIBE_SEND[kBleBackgroundAdvLpToPeriBridgeIndex]);
     (void)periDomain.enableChannel(kBleBackgroundAdvPeriTxDppiChannel, false);
-    (void)periDomain.enableChannel(kBleBackgroundAdvPeriLatencyDppiChannel, false);
 
     (void)radioDomain.disconnectPublish(
         &ppib11->PUBLISH_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex]);
@@ -272,26 +284,27 @@ bool BleRadio::configureBackgroundAdvertisingHardware(bool enable) {
     (void)radioDomain.disconnectSubscribe(&radio_->SUBSCRIBE_TXEN);
     (void)radioDomain.enableChannel(kBleBackgroundAdvRadioPllenDppiChannel, false);
     (void)radioDomain.enableChannel(kBleBackgroundAdvRadioTxDppiChannel, false);
+    __DSB();
+    ppib30->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    ppib22->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    ppib21->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    ppib11->EVENTS_RECEIVE[kBleBackgroundAdvLpToPeriBridgeIndex] = 0U;
+    *reinterpret_cast<volatile uint32_t*>(
+        reinterpret_cast<uintptr_t>(ppib30) + 0x400U) = 0U;
+    *reinterpret_cast<volatile uint32_t*>(
+        reinterpret_cast<uintptr_t>(ppib21) + 0x400U) = 0U;
     return true;
   }
 
-  if (!lpDomain.connect(&NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvPrewarmCompareChannel],
-                        &NRF_CLOCK->SUBSCRIBE_XOSTART,
-                        kBleBackgroundAdvLpPrewarmDppiChannel)) {
-    return false;
-  }
-  if (backgroundAdvertisingManageLatency_ &&
-      (!lpDomain.configureSubscribe(
-           &ppib30->SUBSCRIBE_SEND[kBleBackgroundAdvLatencyBridgeIndex],
-           kBleBackgroundAdvLpPrewarmDppiChannel, true) ||
-       !periDomain.configurePublish(
-           &ppib22->PUBLISH_RECEIVE[kBleBackgroundAdvLatencyBridgeIndex],
-           kBleBackgroundAdvPeriLatencyDppiChannel, true) ||
-       !periDomain.configureSubscribe(&NRF_POWER->SUBSCRIBE_CONSTLAT,
-                                      kBleBackgroundAdvPeriLatencyDppiChannel,
-                                      true) ||
-       !periDomain.enableChannel(kBleBackgroundAdvPeriLatencyDppiChannel,
-                                 true))) {
+  // MLTPAN-39 requires PLLSTART to precede XOSTART. CLOCK has no
+  // PUBLISH_PLLSTARTED register, so the compare event starts only PLL in
+  // hardware; its mandatory IRQ handler then issues the ordered XOSTART via
+  // ClockControl. Subscribing both tasks here would leave their order undefined.
+  NRF_CLOCK->EVENTS_PLLSTARTED = 0U;
+  if (!lpDomain.connect(
+          &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvPrewarmCompareChannel],
+          &NRF_CLOCK->SUBSCRIBE_PLLSTART,
+          kBleBackgroundAdvLpPrewarmDppiChannel)) {
     return false;
   }
   if (!backgroundAdvertisingUseIrqTxKick_) {
@@ -307,21 +320,18 @@ bool BleRadio::configureBackgroundAdvertisingHardware(bool enable) {
         !lpDomain.configureSubscribe(
             &ppib30->SUBSCRIBE_SEND[kBleBackgroundAdvLpToPeriBridgeIndex],
             kBleBackgroundAdvLpTxDppiChannel, true) ||
-        !lpDomain.enableChannel(kBleBackgroundAdvLpTxDppiChannel, true)) {
+        !lpDomain.enableChannel(kBleBackgroundAdvLpTxDppiChannel, false)) {
       return false;
     }
   }
-  if (!lpDomain.configurePublish(
-          &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvCleanupCompareChannel],
-          kBleBackgroundAdvLpStopDppiChannel, true) ||
-      !lpDomain.configurePublish(
-          &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvFinalCleanupCompareChannel],
-          kBleBackgroundAdvLpStopDppiChannel, true) ||
-      !lpDomain.configureSubscribe(&NRF_CLOCK->SUBSCRIBE_XOSTOP,
-                                   kBleBackgroundAdvLpStopDppiChannel, true) ||
-      !lpDomain.enableChannel(kBleBackgroundAdvLpStopDppiChannel, true)) {
-    return false;
-  }
+  // Cleanup compares wake software; only a strict RADIO Disabled observation
+  // may stop XO. An estimated compare must never drive XOSTOP directly.
+  (void)lpDomain.disconnectPublish(
+      &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvCleanupCompareChannel]);
+  (void)lpDomain.disconnectPublish(
+      &NRF_GRTC->PUBLISH_COMPARE[kBleBackgroundAdvFinalCleanupCompareChannel]);
+  (void)lpDomain.disconnectSubscribe(&NRF_CLOCK->SUBSCRIBE_XOSTOP);
+  (void)lpDomain.enableChannel(kBleBackgroundAdvLpStopDppiChannel, false);
 
   if (!backgroundAdvertisingUseIrqTxKick_) {
     if (!periDomain.configurePublish(
@@ -367,12 +377,17 @@ bool BleRadio::armBackgroundAdvertising(uint32_t targetTxUs, bool prewarmHfxo,
     payloadLength = kBleLegacyRawPayloadMaxLength;
   }
   const uint32_t txWindowUs = bleBackgroundAdvertisingPacketWindowUs(payloadLength);
-  const bool prewarmInterrupt =
-      (backgroundAdvertisingManageLatency_ &&
-       !backgroundAdvertisingConstlatHardwareVerified_) ||
-      backgroundAdvertisingManageRfPath_ ||
-      backgroundAdvertisingUseIrqTxKick_;
+  // The prewarm IRQ is part of anomaly-39 sequencing: DPPI asserts PLLSTART,
+  // then this handler calls ClockControl to issue XOSTART in program order.
+  const bool prewarmInterrupt = true;
   const bool txInterrupt = backgroundAdvertisingUseIrqTxKick_;
+
+  // Direct TX DPPI remains gated until CLOCK proves XOTUNED. The clock IRQ
+  // opens this channel; IRQ-kick mode has no hardware TX subscription to gate.
+  if (!backgroundAdvertisingUseIrqTxKick_ &&
+      !bleBackgroundAdvertisingSetTxPathEnabled(false)) {
+    return false;
+  }
 
   ensureGrtcReady(NRF_GRTC);
   bleBackgroundEnableIrq();
@@ -416,7 +431,7 @@ bool BleRadio::armBackgroundAdvertising(uint32_t targetTxUs, bool prewarmHfxo,
     backgroundAdvertisingArmed_ = true;
     backgroundAdvertisingNextTxUs_ = targetTxUs;
     backgroundAdvertisingServiceUs_ = stage1ServiceUs;
-    backgroundAdvertisingAwaitingHfxoTuned_ = !bleHfxoRunning();
+    backgroundAdvertisingAwaitingHfxoTuned_ = !bleHfxoReadyForRadio();
     backgroundAdvertisingPendingTxCompareChannel_ = kBleBackgroundInvalidCompareChannel;
     backgroundAdvertisingPendingServiceCompareChannel_ =
         kBleBackgroundInvalidCompareChannel;
@@ -459,7 +474,8 @@ bool BleRadio::armBackgroundAdvertising(uint32_t targetTxUs, bool prewarmHfxo,
   backgroundAdvertisingArmed_ = true;
   backgroundAdvertisingNextTxUs_ = targetTxUs;
   backgroundAdvertisingServiceUs_ = serviceUs;
-  backgroundAdvertisingAwaitingHfxoTuned_ = prewarmHfxo && !bleHfxoRunning();
+  backgroundAdvertisingAwaitingHfxoTuned_ =
+      prewarmHfxo && !bleHfxoReadyForRadio();
   backgroundAdvertisingPendingTxCompareChannel_ = kBleBackgroundInvalidCompareChannel;
   backgroundAdvertisingPendingServiceCompareChannel_ =
       kBleBackgroundInvalidCompareChannel;
@@ -474,6 +490,16 @@ bool BleRadio::armBackgroundAdvertising(uint32_t targetTxUs, bool prewarmHfxo,
 }
 
 bool BleRadio::handleBackgroundAdvertisingPrewarmEvent() {
+  bool alreadyActive = false;
+  bool acquiredLatencyLease = false;
+  if (backgroundAdvertisingManageLatency_ &&
+      !backgroundAdvertisingLatencyLeaseOwned_) {
+    if (!bleBackgroundAdvertisingAssertManagedLatency(true, &alreadyActive)) {
+      return false;
+    }
+    backgroundAdvertisingLatencyLeaseOwned_ = true;
+    acquiredLatencyLease = true;
+  }
   if (!ClockControl::startHfxo(false, 0U)) {
     return false;
   }
@@ -486,9 +512,7 @@ bool BleRadio::handleBackgroundAdvertisingPrewarmEvent() {
     ++backgroundAdvertisingDebug_.rfPathPrewarmRestoreCount;
   }
 
-  bool alreadyActive = false;
-  if (bleBackgroundAdvertisingAssertManagedLatency(
-          backgroundAdvertisingManageLatency_, &alreadyActive)) {
+  if (acquiredLatencyLease) {
     backgroundAdvertisingDebug_.constlatActive = 1U;
     if (alreadyActive) {
       backgroundAdvertisingConstlatHardwareVerified_ = true;
@@ -500,15 +524,177 @@ bool BleRadio::handleBackgroundAdvertisingPrewarmEvent() {
 
   backgroundAdvertisingDebug_.rfPathActive =
       BoardControl::rfSwitchPowerEnabled() ? 1U : 0U;
-  const bool awaitingTune = !bleHfxoRunning();
+  const bool awaitingTune = !bleHfxoReadyForRadio();
+  if (!backgroundAdvertisingUseIrqTxKick_) {
+    if (!bleBackgroundAdvertisingSetTxPathEnabled(!awaitingTune)) {
+      return false;
+    }
+    if (awaitingTune) {
+      // CLOCK has no XOTUNED publisher. Its IRQ is the only hardware-proof
+      // point at which the direct TX DPPI channel may be opened.
+      bleBackgroundEnableClockTuneInterrupts();
+    } else {
+      bleBackgroundDisableClockIrq();
+    }
+  }
   const uint32_t irqState = bleEnterCritical();
   backgroundAdvertisingAwaitingHfxoTuned_ = awaitingTune;
   bleExitCritical(irqState);
-  // The default background-advertising flow uses the TX compare IRQ to retry
-  // until HFXO is genuinely running, so keep the CLOCK IRQ path out of the
-  // steady-state schedule here.
-  bleBackgroundDisableClockIrq();
+  if (backgroundAdvertisingUseIrqTxKick_) {
+    // The IRQ-kick flow retries from the TX compare until the HFXO is ready;
+    // it does not need the direct-DPPI path's CLOCK completion interrupt.
+    bleBackgroundDisableClockIrq();
+  }
   return true;
+}
+
+extern "C" void nrf54l15_ble_clock_irq_service(void) {
+  const bool tuneError = NRF_CLOCK->EVENTS_XOTUNEERROR != 0U;
+  const bool tuneFailed = NRF_CLOCK->EVENTS_XOTUNEFAILED != 0U;
+  const bool tuned = bleHfxoReadyForRadio();
+  NRF_CLOCK->INTENCLR = bleBackgroundClockTuneInterruptMask();
+
+  BleRadio* const owner = g_bleBackgroundRadio;
+  if (owner == nullptr) {
+    return;
+  }
+
+  if (owner->connected_ && owner->backgroundConnectionServiceEnabled_ &&
+      owner->backgroundConnectionRxPrepared_) {
+    if (!tuned) {
+      (void)owner->configureBackgroundConnectionHardware(false);
+      if (tuneError && !tuneFailed && ClockControl::startHfxo(false, 0U)) {
+        bleBackgroundEnableClockTuneInterrupts();
+      }
+      return;
+    }
+    if (!owner->configureBackgroundConnectionHardware(true)) {
+      owner->backgroundConnectionRxPrepared_ = false;
+      bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+      return;
+    }
+    if (bleCompareEventPending(kBleBackgroundConnRxCompareChannel)) {
+      // XOTUNED can arrive after the compare pulse while its DPPI route was
+      // deliberately closed. If hardware did not already consume that pulse,
+      // start RX immediately; the +16 us service compare remains the final
+      // software fallback for a window that is already too late.
+      const uint32_t radioState =
+          (owner->radio_->STATE & RADIO_STATE_STATE_Msk) >>
+          RADIO_STATE_STATE_Pos;
+      if (radioState == RADIO_STATE_STATE_Disabled) {
+        owner->radio_->TASKS_RXEN = RADIO_TASKS_RXEN_TASKS_RXEN_Trigger;
+      }
+      bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+    }
+    bleBackgroundEnableClockQualityInterrupts();
+    return;
+  }
+
+  if (!owner->backgroundAdvertisingEnabled_ || owner->connected_ ||
+      owner->backgroundAdvertisingUseIrqTxKick_) {
+    return;
+  }
+
+  owner->backgroundAdvertisingAwaitingHfxoTuned_ = !tuned;
+  if (!tuned) {
+    (void)bleBackgroundAdvertisingSetTxPathEnabled(false);
+    // XOTUNEERROR means the running XO has lost radio-grade quality. Retune
+    // only while RADIO is disabled; startHfxo() enforces that requirement.
+    // A failed tune remains gated instead of retrying indefinitely in IRQ.
+    if (tuneError && !tuneFailed && ClockControl::startHfxo(false, 0U)) {
+      bleBackgroundEnableClockTuneInterrupts();
+    }
+    return;
+  }
+
+  if (!bleBackgroundAdvertisingSetTxPathEnabled(true)) {
+    owner->backgroundAdvertisingAwaitingHfxoTuned_ = true;
+    return;
+  }
+  const uint8_t txCompareChannels[] = {
+      kBleBackgroundAdvTxCompareChannel,
+      kBleBackgroundAdvStage1TxCompareChannel,
+      kBleBackgroundAdvStage2TxCompareChannel,
+  };
+  for (const uint8_t compareChannel : txCompareChannels) {
+    if (!bleCompareEventPending(compareChannel)) {
+      continue;
+    }
+    if (owner->backgroundAdvertisingTxKickRetryCountCurrent_ >=
+        kBleBackgroundAdvTxKickRetryLimit) {
+      owner->backgroundAdvertisingAwaitingHfxoTuned_ = true;
+      return;
+    }
+    // A compare pulse that occurred while the direct path was gated is not
+    // replayed when DPPI is enabled. Move both TX and its cleanup/service
+    // timeline into the future; replaying PLLEN against the old cleanup could
+    // let XOSTOP remove the clock during the delayed packet.
+    uint8_t payloadLength = static_cast<uint8_t>(owner->txPacket_[1] & 0x3FU);
+    if (payloadLength > kBleLegacyRawPayloadMaxLength) {
+      payloadLength = kBleLegacyRawPayloadMaxLength;
+    }
+    const uint32_t txWindowUs =
+        bleBackgroundAdvertisingPacketWindowUs(payloadLength);
+    const uint32_t retryTxUs =
+        bleTimingUs() + kBleBackgroundAdvTxKickRetryUs;
+    const uint32_t serviceLeadUs = bleBackgroundAdvertisingServiceLeadUs(
+        owner->backgroundAdvertisingInterChannelDelayUs_);
+    bleProgramCompare(compareChannel, retryTxUs, false);
+
+    if (!owner->backgroundAdvertisingThreeChannel_) {
+      const uint32_t cleanupUs = retryTxUs + txWindowUs;
+      bleProgramCompare(kBleBackgroundAdvCleanupCompareChannel, cleanupUs, true);
+      owner->backgroundAdvertisingServiceUs_ = cleanupUs;
+      owner->backgroundAdvertisingEventStartTxUs_ = retryTxUs;
+    } else if (compareChannel == kBleBackgroundAdvTxCompareChannel) {
+      const uint32_t stage1TxUs =
+          retryTxUs + txWindowUs +
+          owner->backgroundAdvertisingInterChannelDelayUs_;
+      const uint32_t stage2TxUs =
+          stage1TxUs + txWindowUs +
+          owner->backgroundAdvertisingInterChannelDelayUs_;
+      const uint32_t stage1ServiceUs = stage1TxUs - serviceLeadUs;
+      const uint32_t stage2ServiceUs = stage2TxUs - serviceLeadUs;
+      const uint32_t finalCleanupUs = stage2TxUs + txWindowUs;
+      bleProgramCompare(kBleBackgroundAdvStage1ServiceCompareChannel,
+                        stage1ServiceUs, true);
+      bleProgramCompare(kBleBackgroundAdvStage1TxCompareChannel, stage1TxUs,
+                        false);
+      bleProgramCompare(kBleBackgroundAdvStage2ServiceCompareChannel,
+                        stage2ServiceUs, true);
+      bleProgramCompare(kBleBackgroundAdvStage2TxCompareChannel, stage2TxUs,
+                        false);
+      bleProgramCompare(kBleBackgroundAdvFinalCleanupCompareChannel,
+                        finalCleanupUs, true);
+      owner->backgroundAdvertisingEventStartTxUs_ = retryTxUs;
+      owner->backgroundAdvertisingServiceUs_ = stage1ServiceUs;
+    } else if (compareChannel == kBleBackgroundAdvStage1TxCompareChannel) {
+      const uint32_t stage2TxUs =
+          retryTxUs + txWindowUs +
+          owner->backgroundAdvertisingInterChannelDelayUs_;
+      const uint32_t stage2ServiceUs = stage2TxUs - serviceLeadUs;
+      const uint32_t finalCleanupUs = stage2TxUs + txWindowUs;
+      bleProgramCompare(kBleBackgroundAdvStage2ServiceCompareChannel,
+                        stage2ServiceUs, true);
+      bleProgramCompare(kBleBackgroundAdvStage2TxCompareChannel, stage2TxUs,
+                        false);
+      bleProgramCompare(kBleBackgroundAdvFinalCleanupCompareChannel,
+                        finalCleanupUs, true);
+      owner->backgroundAdvertisingServiceUs_ = stage2ServiceUs;
+    } else {
+      const uint32_t finalCleanupUs = retryTxUs + txWindowUs;
+      bleProgramCompare(kBleBackgroundAdvFinalCleanupCompareChannel,
+                        finalCleanupUs, true);
+      owner->backgroundAdvertisingServiceUs_ = finalCleanupUs;
+    }
+    owner->backgroundAdvertisingNextTxUs_ = retryTxUs;
+    ++owner->backgroundAdvertisingTxKickRetryCountCurrent_;
+    ++owner->backgroundAdvertisingDebug_.txKickRetryCount;
+    break;
+  }
+  // XOTUNEERROR can occur after XOTUNED. Keep only that quality interrupt
+  // armed until TX/cleanup so it can close the direct path before retuning.
+  bleBackgroundEnableClockQualityInterrupts();
 }
 
 bool BleRadio::rescheduleBackgroundAdvertisingTxCompare(uint8_t compareChannel) {
@@ -672,6 +858,9 @@ bool BleRadio::beginBackgroundAdvertising(uint32_t intervalMs,
 
   stopBackgroundConnectionService();
   stopBackgroundAdvertising();
+  if (!initialized_) {
+    return false;
+  }
   snapshotBackgroundAdvertisingRfPathRestoreState();
   if (!ensureRfPathActiveForBle()) {
     backgroundAdvertisingRestoreRfPathValid_ = false;
@@ -785,6 +974,9 @@ bool BleRadio::beginBackgroundAdvertising3Channel(uint32_t intervalMs,
 
   stopBackgroundConnectionService();
   stopBackgroundAdvertising();
+  if (!initialized_) {
+    return false;
+  }
   snapshotBackgroundAdvertisingRfPathRestoreState();
   if (!ensureRfPathActiveForBle()) {
     backgroundAdvertisingRestoreRfPathValid_ = false;
@@ -860,8 +1052,7 @@ bool BleRadio::beginBackgroundAdvertising3Channel(uint32_t intervalMs,
   return true;
 }
 
-void BleRadio::quiesceBackgroundAdvertisingForConnectionHandoff() {
-  const bool managedLatency = backgroundAdvertisingManageLatency_;
+bool BleRadio::quiesceBackgroundAdvertisingForConnectionHandoff() {
   if (backgroundAdvertisingEnabled_ &&
       backgroundAdvertisingLastStopReason_ == kBleBackgroundAdvStopReasonNone) {
     backgroundAdvertisingLastStopReason_ = kBleBackgroundAdvStopReasonExplicit;
@@ -872,6 +1063,28 @@ void BleRadio::quiesceBackgroundAdvertisingForConnectionHandoff() {
   NRF_CLOCK->EVENTS_XOTUNEERROR = 0U;
   NRF_CLOCK->EVENTS_XOTUNEFAILED = 0U;
   bleBackgroundAdvertisingConfigureRandomSource(false);
+  bleDisableCompare(kBleBackgroundAdvPrewarmCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvTxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvCleanupCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage1ServiceCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage1TxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage2ServiceCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage2TxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvFinalCleanupCompareChannel, true);
+  (void)configureBackgroundAdvertisingHardware(false);
+  bool radioDisabled = (radio_ == nullptr);
+  if (radio_ != nullptr) {
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
+    radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    radioDisabled =
+        waitRadioStateDisabledBudgeted(radio_, 3000U, 120000UL);
+    if (radioDisabled) {
+      clearRadioCoreEvents(radio_);
+    } else {
+      initialized_ = false;
+    }
+  }
   const uint32_t irqState = bleEnterCritical();
   bleDisableCompare(kBleBackgroundAdvPrewarmCompareChannel, true);
   bleDisableCompare(kBleBackgroundAdvTxCompareChannel, false);
@@ -934,16 +1147,17 @@ void BleRadio::quiesceBackgroundAdvertisingForConnectionHandoff() {
   bleExitCritical(irqState);
 
   backgroundAdvertisingRestoreRfPathValid_ = false;
-  (void)bleBackgroundAdvertisingReleaseManagedLatency(managedLatency);
+  if (radioDisabled && backgroundAdvertisingLatencyLeaseOwned_) {
+    (void)bleBackgroundAdvertisingReleaseManagedLatency(true);
+    backgroundAdvertisingLatencyLeaseOwned_ = false;
+  }
+  return radioDisabled;
 }
 
 void BleRadio::stopBackgroundAdvertising() {
   if (backgroundAdvertisingEnabled_ &&
       backgroundAdvertisingLastStopReason_ == kBleBackgroundAdvStopReasonNone) {
     backgroundAdvertisingLastStopReason_ = kBleBackgroundAdvStopReasonExplicit;
-  }
-  if (backgroundAdvertisingManageLatency_) {
-    (void)bleBackgroundAdvertisingReleaseManagedLatency(true);
   }
   bleBackgroundDisableClockIrq();
   NRF_CLOCK->EVENTS_XOTUNED = 0U;
@@ -960,13 +1174,26 @@ void BleRadio::stopBackgroundAdvertising() {
   bleDisableCompare(kBleBackgroundAdvFinalCleanupCompareChannel, true);
   (void)configureBackgroundAdvertisingHardware(false);
 
+  bool radioDisabled = (radio_ == nullptr);
   if (radio_ != nullptr) {
-    radio_->SHORTS = 0U;
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-    waitDisabled(120000UL);
-    clearRadioCoreEvents(radio_);
+    radioDisabled =
+        waitRadioStateDisabledBudgeted(radio_, 3000U, 120000UL);
+    if (radioDisabled) {
+      clearRadioCoreEvents(radio_);
+    } else {
+      initialized_ = false;
+    }
   }
-  NRF_CLOCK->TASKS_XOSTOP = CLOCK_TASKS_XOSTOP_TASKS_XOSTOP_Trigger;
+  if (radioDisabled) {
+    ClockControl::stopHfxo();
+    if (backgroundAdvertisingLatencyLeaseOwned_) {
+      (void)bleBackgroundAdvertisingReleaseManagedLatency(true);
+      backgroundAdvertisingLatencyLeaseOwned_ = false;
+    }
+  }
 
   const uint32_t irqState = bleEnterCritical();
   backgroundAdvertisingEnabled_ = false;
@@ -1016,8 +1243,10 @@ void BleRadio::stopBackgroundAdvertising() {
   }
   bleExitCritical(irqState);
 
-  restoreBackgroundAdvertisingRfPathRestoreState();
-  releaseRfPathForBle();
+  if (radioDisabled) {
+    restoreBackgroundAdvertisingRfPathRestoreState();
+    releaseRfPathForBle();
+  }
 }
 
 bool BleRadio::isBackgroundAdvertisingEnabled() const {
@@ -1163,7 +1392,7 @@ void BleRadio::serviceBackgroundAdvertisingFromIrq() {
     bleDisableCompare(kBleBackgroundAdvFinalCleanupCompareChannel, true);
   };
   if (connected_) {
-    quiesceBackgroundAdvertisingForConnectionHandoff();
+    (void)quiesceBackgroundAdvertisingForConnectionHandoff();
     clearStaleAdvertisingCompares();
     return;
   }
@@ -1213,7 +1442,8 @@ void BleRadio::serviceBackgroundAdvertisingFromIrq() {
     serviceCompareChannel = bleBackgroundAdvertisingServiceCompareChannelForTxCompare(
         backgroundAdvertisingThreeChannel_, txCompareChannel);
     if (backgroundAdvertisingUseIrqTxKick_) {
-      if (backgroundAdvertisingAwaitingHfxoTuned_ && !bleHfxoRunning()) {
+      if (!bleHfxoReadyForRadio()) {
+        backgroundAdvertisingAwaitingHfxoTuned_ = true;
         retryTx = true;
         if (serviceCompareChannel != kBleBackgroundInvalidCompareChannel) {
           rearmService = true;
@@ -1315,7 +1545,7 @@ bool BleRadio::serviceBackgroundAdvertising() {
   if (!backgroundAdvertisingEnabled_ || radio_ == nullptr || connected_) {
     bleExitCritical(irqState);
     if (connected_) {
-      quiesceBackgroundAdvertisingForConnectionHandoff();
+      (void)quiesceBackgroundAdvertisingForConnectionHandoff();
       return false;
     }
     backgroundAdvertisingLastStopReason_ = kBleBackgroundAdvStopReasonInvalidState;
@@ -1444,9 +1674,22 @@ bool BleRadio::serviceBackgroundAdvertising() {
     ++backgroundAdvertisingDebug_.eventCompleteCount;
     backgroundAdvertisingDebug_.lastCompletedEventStartUs =
         backgroundAdvertisingEventStartTxUs_;
-    if (bleHfxoRunning()) {
-      ClockControl::stopHfxo();
+    const bool radioDisabled =
+        ((radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos) ==
+        RADIO_STATE_STATE_Disabled;
+    if (!radioDisabled) {
+      const uint32_t exitIrqState = bleEnterCritical();
+      backgroundAdvertisingInProgress_ = false;
+      bleExitCritical(exitIrqState);
+      backgroundAdvertisingLastStopReason_ =
+          kBleBackgroundAdvStopReasonSettleTimeout;
+      stopBackgroundAdvertising();
+      return false;
     }
+    // The cleanup compare was disabled on IRQ entry. Release PLL only after its
+    // hardware XOSTOP, and do not arm the next prewarm compare until below.
+    // This prevents a new XOSTART from interleaving with anomaly-39 shutdown.
+    ClockControl::stopHfxo();
     uint32_t nextEventStartUs =
         backgroundAdvertisingEventStartTxUs_ + backgroundAdvertisingIntervalUs_;
     if (backgroundAdvertisingRandomDelay_) {
@@ -1474,8 +1717,9 @@ bool BleRadio::serviceBackgroundAdvertising() {
     if (prepared) {
       armed = armBackgroundAdvertising(nextEventStartUs, true,
                                        !backgroundAdvertisingThreeChannel_);
-      if (armed && bleBackgroundAdvertisingReleaseManagedLatency(
-                       backgroundAdvertisingManageLatency_)) {
+      if (armed && radioDisabled && backgroundAdvertisingLatencyLeaseOwned_ &&
+          bleBackgroundAdvertisingReleaseManagedLatency(true)) {
+        backgroundAdvertisingLatencyLeaseOwned_ = false;
         ++backgroundAdvertisingDebug_.lowPowerReleaseCount;
       }
       if (armed) {

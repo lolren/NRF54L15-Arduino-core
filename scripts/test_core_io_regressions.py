@@ -1167,36 +1167,46 @@ def validate_channel_sounding_public_examples_contracts() -> None:
         assert "listenAndReflectOnce(" not in sketch
         assert "protocol=physical_pbr" not in sketch
 
-    tracked = subprocess.run(
-        ["git", "ls-files", "--", "*.uf2"],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if tracked.returncode == 0:
-        tracked_uf2 = [
-            path
-            for line in tracked.stdout.splitlines()
-            if (path := ROOT / line).is_file()
-        ]
-    else:
-        tracked_uf2 = list(ROOT.rglob("*.uf2"))
-    assert not tracked_uf2, f"tracked UF2 artifacts are not allowed: {tracked_uf2}"
-    public_uf2 = list(examples.rglob("*.uf2"))
-    assert not public_uf2, (
-        f"UF2 build artifacts are not allowed in public CS examples: {public_uf2}"
-    )
     pair_gate = (ROOT / "scripts/test_cs_controller_pair.sh").read_text(
         encoding="utf-8"
     )
     assert "silent-peer: fatal/drop/reject marker" in pair_gate
     assert "reason=session_sync .*bytes=0" in pair_gate
     print(
-        "PASS exactly two controller-backed public Channel Sounding examples "
-        "and no UF2 artifacts"
+        "PASS exactly two controller-backed public Channel Sounding examples"
     )
+
+
+def validate_no_generated_uf2_artifacts() -> None:
+    # Ignore deliberately retained build/measurement outputs covered by
+    # .gitignore. Only files Git could include in a commit belong to this
+    # repository-cleanliness contract.
+    generated_uf2: set[Path] = set()
+    for arguments in (
+        ("ls-files", "-z", "--", "*.uf2"),
+        ("ls-files", "-z", "--others", "--exclude-standard", "--", "*.uf2"),
+    ):
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+        )
+        generated_uf2.update(
+            ROOT / os.fsdecode(record)
+            for record in result.stdout.split(b"\0")
+            if record
+        )
+    generated_uf2_sorted = sorted(generated_uf2)
+    generated_preview = [
+        str(path.relative_to(ROOT)) for path in generated_uf2_sorted[:20]
+    ]
+    assert not generated_uf2_sorted, (
+        "tracked or unignored UF2 build artifacts are not allowed in the "
+        f"repository: found {len(generated_uf2_sorted)}; "
+        f"first paths: {generated_preview}"
+    )
+    print("PASS repository contains no tracked or unignored UF2 artifacts")
 
 
 def validate_spi_contracts() -> None:
@@ -2314,6 +2324,7 @@ def compile_and_run_host_tests(temp: Path) -> None:
 
 
 def main() -> int:
+    validate_no_generated_uf2_artifacts()
     validate_vectors()
     validate_cmsis_priority_contracts()
     validate_hardware_serial_contracts()

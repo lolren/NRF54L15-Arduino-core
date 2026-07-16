@@ -2062,7 +2062,9 @@ bool BleRadio::startConnectionFromConnectInd(const uint8_t* payload, uint8_t len
       1250UL + (static_cast<uint32_t>(winOffset) * 1250UL);
   connectionNextEventUs_ = nowUs + ((offsetUs > 0U) ? offsetUs : kBleConnFirstEventFallbackUs);
 
-  quiesceBackgroundAdvertisingForConnectionHandoff();
+  if (!quiesceBackgroundAdvertisingForConnectionHandoff()) {
+    return false;
+  }
   connected_ = true;
   endUnconnectedRadioActivity();
   if (customGattHasSecureHidService() && !bondKeyPrimedForConnection_) {
@@ -2214,7 +2216,9 @@ bool BleRadio::startCentralConnection(const uint8_t peerAddress[6],
   const uint32_t nowUs =
       (connectIndEndUs != 0U) ? connectIndEndUs : bleTimingUs();
   connectionNextEventUs_ = nowUs + 1250UL;
-  quiesceBackgroundAdvertisingForConnectionHandoff();
+  if (!quiesceBackgroundAdvertisingForConnectionHandoff()) {
+    return false;
+  }
   connected_ = true;
   endUnconnectedRadioActivity();
   maybeQueueCentralLinkSetupRequest();

@@ -1,5 +1,6 @@
-#if (defined(NRF54L15_CLEAN_ZIGBEE_ENABLE) && NRF54L15_CLEAN_ZIGBEE_ENABLE) || \
-    (defined(NRF54L15_CLEAN_ZIGBEE_ENABLED) && NRF54L15_CLEAN_ZIGBEE_ENABLED)
+#include "zigbee_feature.h"
+
+#if NRF54L15_CLEAN_ZIGBEE_AVAILABLE
 #include "zigbee_commissioning.h"
 
 #include <Arduino.h>
@@ -790,7 +791,8 @@ bool parseRecognizedTrustCenterCommand(const uint8_t* frame, uint8_t length,
   if (haveInstallCodeKey && installCodeKey != nullptr &&
       ZigbeeSecurity::parseSecuredApsCommandFrame(frame, length, installCodeKey,
                                                   outCommand, &apsSecurity,
-                                                  payload, &payloadLength)) {
+                                                  payload, sizeof(payload),
+                                                  &payloadLength)) {
     return outCommand->valid;
   }
 
@@ -799,6 +801,7 @@ bool parseRecognizedTrustCenterCommand(const uint8_t* frame, uint8_t length,
       ZigbeeSecurity::parseSecuredApsCommandFrame(frame, length,
                                                   wellKnownLinkKey, outCommand,
                                                   &apsSecurity, payload,
+                                                  sizeof(payload),
                                                   &payloadLength)) {
     return outCommand->valid;
   }
@@ -920,7 +923,8 @@ bool waitForNwkRejoinResponse(ZigbeeRadio& radio, uint16_t panId,
     uint8_t decryptedPayloadLength = 0U;
     if (!ZigbeeSecurity::parseSecuredNwkFrame(
             macData.payload, macData.payloadLength, networkKey, &nwk, &security,
-            decryptedPayload, &decryptedPayloadLength, expectedParentIeee) ||
+            decryptedPayload, sizeof(decryptedPayload),
+            &decryptedPayloadLength, expectedParentIeee) ||
         !nwk.valid || !security.valid ||
         nwk.frameType != ZigbeeNwkFrameType::kCommand ||
         nwk.destinationShort != localShort ||
@@ -947,8 +951,10 @@ bool waitForNwkRejoinResponse(ZigbeeRadio& radio, uint16_t panId,
 
 bool attemptNwkRejoin(ZigbeeRadio& radio, uint8_t* ioMacSequence,
                       uint64_t localIeee, uint8_t capabilityInformation,
-                      ZigbeeEndDeviceCommonState* state) {
+                      ZigbeeEndDeviceCommonState* state,
+                      uint32_t frameCounter) {
   if (ioMacSequence == nullptr || state == nullptr || !state->haveActiveNetworkKey ||
+      frameCounter == 0U || frameCounter == UINT32_MAX ||
       !radio.setChannel(state->channel)) {
     return false;
   }
@@ -972,7 +978,7 @@ bool attemptNwkRejoin(ZigbeeRadio& radio, uint8_t* ioMacSequence,
   ZigbeeNwkSecurityHeader security{};
   security.valid = true;
   security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-  security.frameCounter = state->nwkSecurityFrameCounter++;
+  security.frameCounter = frameCounter;
   security.sourceIeee = localIeee;
   security.keySequence = state->activeNetworkKeySequence;
 
@@ -980,7 +986,7 @@ bool attemptNwkRejoin(ZigbeeRadio& radio, uint8_t* ioMacSequence,
   uint8_t nwkLength = 0U;
   if (!ZigbeeSecurity::buildSecuredNwkFrame(
           nwk, security, state->activeNetworkKey, commandPayload, commandLength,
-          nwkFrame, &nwkLength)) {
+          nwkFrame, sizeof(nwkFrame), &nwkLength)) {
     return false;
   }
 
@@ -1962,6 +1968,17 @@ bool ZigbeeCommissioning::performJoin(ZigbeeRadio& radio,
 bool ZigbeeCommissioning::performSecureRejoin(
     ZigbeeRadio& radio, uint8_t* ioMacSequence, uint64_t localIeee,
     uint8_t capabilityInformation, ZigbeeEndDeviceCommonState* state) {
+  // Legacy callers do not provide proof of a precommitted counter range. Keep
+  // orphan/association recovery available, but never emit a secured NWK frame
+  // with an unreserved counter.
+  return performSecureRejoin(radio, ioMacSequence, localIeee,
+                             capabilityInformation, state, UINT32_MAX);
+}
+
+bool ZigbeeCommissioning::performSecureRejoin(
+    ZigbeeRadio& radio, uint8_t* ioMacSequence, uint64_t localIeee,
+    uint8_t capabilityInformation, ZigbeeEndDeviceCommonState* state,
+    uint32_t frameCounter) {
   if (ioMacSequence == nullptr || state == nullptr) {
     return false;
   }
@@ -1985,8 +2002,9 @@ bool ZigbeeCommissioning::performSecureRejoin(
     return true;
   }
 
-  if (attemptNwkRejoin(radio, ioMacSequence, localIeee, capabilityInformation,
-                       state)) {
+  if (frameCounter != UINT32_MAX &&
+      attemptNwkRejoin(radio, ioMacSequence, localIeee,
+                       capabilityInformation, state, frameCounter)) {
     return true;
   }
 
@@ -2530,4 +2548,4 @@ const char* ZigbeeCommissioning::failureName(
 }
 
 }  // namespace xiao_nrf54l15
-#endif  // NRF54L15_CLEAN_ZIGBEE_ENABLE || NRF54L15_CLEAN_ZIGBEE_ENABLED
+#endif  // NRF54L15_CLEAN_ZIGBEE_AVAILABLE

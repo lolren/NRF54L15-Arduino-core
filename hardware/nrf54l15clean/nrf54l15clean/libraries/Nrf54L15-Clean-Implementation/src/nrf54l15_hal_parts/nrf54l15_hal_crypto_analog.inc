@@ -1748,14 +1748,34 @@ PowerManager::PowerManager(uint32_t powerBase, uint32_t resetBase,
     : power_(reinterpret_cast<NRF_POWER_Type*>(static_cast<uintptr_t>(powerBase))),
       reset_(reinterpret_cast<NRF_RESET_Type*>(static_cast<uintptr_t>(resetBase))),
       regulators_(reinterpret_cast<NRF_REGULATORS_Type*>(
-          static_cast<uintptr_t>(regulatorsBase))) {}
+          static_cast<uintptr_t>(regulatorsBase))),
+      constantLatencyOwned_(false) {}
 
-void PowerManager::setLatencyMode(PowerLatencyMode mode) {
-  if (mode == PowerLatencyMode::kConstantLatency) {
-    power_->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
-  } else {
-    power_->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+PowerManager::~PowerManager() {
+  if (constantLatencyOwned_) {
+    nrf54l15_constlat_release();
+    constantLatencyOwned_ = false;
   }
+}
+
+void PowerManager::quarantineConstantLatencyLease() {
+  constantLatencyOwned_ = false;
+}
+
+bool PowerManager::setLatencyMode(PowerLatencyMode mode) {
+  if (mode == PowerLatencyMode::kConstantLatency) {
+    if (constantLatencyOwned_) {
+      return true;
+    }
+    if (nrf54l15_constlat_acquire() == 0U) {
+      return false;
+    }
+    constantLatencyOwned_ = true;
+  } else if (constantLatencyOwned_) {
+    nrf54l15_constlat_release();
+    constantLatencyOwned_ = false;
+  }
+  return true;
 }
 
 bool PowerManager::isConstantLatency() const {
@@ -1802,7 +1822,15 @@ bool PowerManager::prepareLowPowerIdle(bool collapseBoardLoads,
   }
 
   if (stopHfxoIfIdle) {
-    ClockControl::stopHfxo();
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (nrf54l15_exclusive_radio_owner() ==
+        Nrf54ExclusiveRadioOwner::kNone) {
+      ClockControl::stopHfxo();
+    } else {
+      ok = false;
+    }
+    __set_PRIMASK(primask);
   }
 
   if (collapseBoardLoads) {
@@ -1812,7 +1840,15 @@ bool PowerManager::prepareLowPowerIdle(bool collapseBoardLoads,
     if (BoardControl::hasImuMicPowerGate()) {
       ok = BoardControl::setImuMicEnabled(false) && ok;
     }
-    ok = BoardControl::collapseRfPathIdle() && ok;
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (nrf54l15_exclusive_radio_owner() ==
+        Nrf54ExclusiveRadioOwner::kNone) {
+      ok = BoardControl::collapseRfPathIdle() && ok;
+    } else {
+      ok = false;
+    }
+    __set_PRIMASK(primask);
   }
 
   return ok;

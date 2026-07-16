@@ -1598,6 +1598,35 @@ bool waitRadioDisabledBudgeted(NRF_RADIO_Type* radio, uint32_t budgetUs, uint32_
   return (state == RADIO_STATE_STATE_Disabled);
 }
 
+bool waitRadioStateDisabledBudgeted(NRF_RADIO_Type* radio, uint32_t budgetUs,
+                                    uint32_t spinLimit) {
+  if (radio == nullptr || (spinLimit == 0U && budgetUs == 0U)) {
+    return false;
+  }
+  const uint32_t startUs = bleTimingUs();
+  uint8_t divider = kBleConnMicrosPollDivider;
+  while (true) {
+    const uint32_t state =
+        (radio->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
+    if (state == RADIO_STATE_STATE_Disabled) {
+      return true;
+    }
+    if (--divider == 0U) {
+      divider = kBleConnMicrosPollDivider;
+      if (budgetUs > 0U &&
+          static_cast<uint32_t>(bleTimingUs() - startUs) >= budgetUs) {
+        return false;
+      }
+      if (spinLimit == 0U) {
+        return false;
+      }
+    }
+    if (spinLimit > 0U) {
+      --spinLimit;
+    }
+  }
+}
+
 [[maybe_unused]] bool waitRadioDisabledBudgetedSleep(NRF_RADIO_Type* radio,
                                                      uint32_t budgetUs) {
   if (radio == nullptr) {
@@ -1694,14 +1723,18 @@ bool waitRadioRxDoneBudgeted(NRF_RADIO_Type* radio, uint32_t budgetUs, uint32_t 
   return doneSeen;
 }
 
-void forceRadioDisabled(NRF_RADIO_Type* radio, uint32_t spinLimit) {
+bool forceRadioDisabled(NRF_RADIO_Type* radio, uint32_t spinLimit) {
   if (radio == nullptr) {
-    return;
+    return false;
   }
 
   radio->SHORTS = 0U;
   radio->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-  (void)waitRadioDisabledBudgeted(radio, 3000U, spinLimit);
+  if (!waitRadioStateDisabledBudgeted(radio, 3000U, spinLimit)) {
+    // Anomaly 20 requires CONSTLAT to remain asserted while RADIO is not
+    // proven Disabled. Leave events intact for post-failure diagnosis.
+    return false;
+  }
   radio->EVENTS_READY = 0U;
   radio->EVENTS_TXREADY = 0U;
   radio->EVENTS_RXREADY = 0U;
@@ -1718,6 +1751,7 @@ void forceRadioDisabled(NRF_RADIO_Type* radio, uint32_t spinLimit) {
   radio->EVENTS_DEVMISS = 0U;
   radio->EVENTS_MHRMATCH = 0U;
   radio->EVENTS_SYNC = 0U;
+  return true;
 }
 
 uint8_t ieee802154MacPayloadLengthFromPhr(uint8_t phrLength) {

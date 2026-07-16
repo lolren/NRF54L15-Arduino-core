@@ -3,9 +3,12 @@ bool BleRadio::configureBlePhy(uint8_t phy) {
     return false;
   }
 
-  radio_->SHORTS = 0U;
+  bleDetachRadioRestartAutomation(radio_);
+  radio_->EVENTS_DISABLED = 0U;
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-  waitDisabled(120000UL);
+  if (!waitRadioStateDisabledBudgeted(radio_, 0U, 120000UL)) {
+    return false;
+  }
   radio_->TASKS_SOFTRESET = RADIO_TASKS_SOFTRESET_TASKS_SOFTRESET_Trigger;
 
   const uint8_t selectedPhy = selectPreferredBlePhy(phy);
@@ -130,7 +133,9 @@ bool BleRadio::waitForEnd(uint32_t spinLimit) {
 }
 
 bool BleRadio::setAdvertisingChannel(BleAdvertisingChannel channel) {
-  if (radio_ == nullptr) {
+  if (radio_ == nullptr ||
+      !nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_)) {
     return false;
   }
 

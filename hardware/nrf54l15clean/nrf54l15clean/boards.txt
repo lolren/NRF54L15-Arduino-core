@@ -19,7 +19,7 @@ xiao_nrf54l15.upload_port.0.pid=0x0066
 xiao_nrf54l15.upload.tool=nrf54ocd
 xiao_nrf54l15.upload.tool.serial=nrf54ocd
 xiao_nrf54l15.upload.protocol=cmsis-dap
-xiao_nrf54l15.upload.maximum_size=1552384
+xiao_nrf54l15.upload.maximum_size=1548288
 xiao_nrf54l15.upload.maximum_data_size=155648
 xiao_nrf54l15.upload.wait_for_upload_port=false
 xiao_nrf54l15.upload.use_1200bps_touch=false
@@ -54,7 +54,7 @@ xiao_nrf54l15.build.ble_tx_flags=
 xiao_nrf54l15.build.ble_timing_flags=
 xiao_nrf54l15.build.ble_trace_flags=
 xiao_nrf54l15.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=1
-xiao_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+xiao_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
 xiao_nrf54l15.build.zigbee_channel_flags=
 xiao_nrf54l15.build.zigbee_pan_flags=
 xiao_nrf54l15.build.antenna_flags=
@@ -91,11 +91,11 @@ xiao_nrf54l15.menu.clean_vpr.off.build.ldscript=nrf54l15_linker_script_no_vpr.ld
 xiao_nrf54l15.menu.clean_vpr.off.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0 -DNRF54L15_CLEAN_VPR_DISABLED
 xiao_nrf54l15.menu.clean_vpr.off.upload.maximum_data_size=261632
 
-xiao_nrf54l15.menu.clean_zigbee.on=Enabled (Default)
-xiao_nrf54l15.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
-
-xiao_nrf54l15.menu.clean_zigbee.off=Disabled
+xiao_nrf54l15.menu.clean_zigbee.off=Disabled (Default)
 xiao_nrf54l15.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+xiao_nrf54l15.menu.clean_zigbee.on=Enabled (Experimental)
+xiao_nrf54l15.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 
 xiao_nrf54l15.menu.clean_thread.off=Disabled (Default)
 xiao_nrf54l15.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
@@ -170,7 +170,7 @@ xiao_nrf54lm20b.upload_port.0.pid=0x0068
 xiao_nrf54lm20b.upload.tool=nrf54ocd
 xiao_nrf54lm20b.upload.tool.serial=nrf54ocd
 xiao_nrf54lm20b.upload.protocol=cmsis-dap
-xiao_nrf54lm20b.upload.maximum_size=2076672
+xiao_nrf54lm20b.upload.maximum_size=2072576
 xiao_nrf54lm20b.upload.maximum_data_size=523584
 xiao_nrf54lm20b.upload.wait_for_upload_port=false
 xiao_nrf54lm20b.upload.use_1200bps_touch=false
@@ -205,7 +205,7 @@ xiao_nrf54lm20b.build.ble_tx_flags=
 xiao_nrf54lm20b.build.ble_timing_flags=
 xiao_nrf54lm20b.build.ble_trace_flags=
 xiao_nrf54lm20b.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0
-xiao_nrf54lm20b.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+xiao_nrf54lm20b.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
 xiao_nrf54lm20b.build.zigbee_channel_flags=
 xiao_nrf54lm20b.build.zigbee_pan_flags=
 xiao_nrf54lm20b.build.antenna_flags=
@@ -232,11 +232,11 @@ xiao_nrf54lm20b.menu.clean_ble_trace.off.build.ble_trace_flags=
 xiao_nrf54lm20b.menu.clean_ble_trace.on=Enabled
 xiao_nrf54lm20b.menu.clean_ble_trace.on.build.ble_trace_flags=-DNRF54L15_CLEAN_BLE_TRACE=1
 
-xiao_nrf54lm20b.menu.clean_zigbee.on=Enabled (Default)
-xiao_nrf54lm20b.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
-
-xiao_nrf54lm20b.menu.clean_zigbee.off=Disabled
+xiao_nrf54lm20b.menu.clean_zigbee.off=Disabled (Default)
 xiao_nrf54lm20b.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+xiao_nrf54lm20b.menu.clean_zigbee.on=Enabled (Experimental)
+xiao_nrf54lm20b.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 
 xiao_nrf54lm20b.menu.clean_thread.off=Disabled (Default)
 xiao_nrf54lm20b.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
@@ -283,7 +283,7 @@ holyiot_25007_nrf54l15.name=HOLYIOT-25007 nRF54L15 Module
 holyiot_25007_nrf54l15.upload.tool=nrf54ocd
 holyiot_25007_nrf54l15.upload.tool.serial=nrf54ocd
 holyiot_25007_nrf54l15.upload.protocol=cmsis-dap
-holyiot_25007_nrf54l15.upload.maximum_size=1552384
+holyiot_25007_nrf54l15.upload.maximum_size=1548288
 holyiot_25007_nrf54l15.upload.maximum_data_size=155648
 holyiot_25007_nrf54l15.upload.wait_for_upload_port=false
 holyiot_25007_nrf54l15.upload.use_1200bps_touch=false
@@ -316,7 +316,7 @@ holyiot_25007_nrf54l15.build.ble_tx_flags=
 holyiot_25007_nrf54l15.build.ble_timing_flags=
 holyiot_25007_nrf54l15.build.ble_trace_flags=
 holyiot_25007_nrf54l15.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=1
-holyiot_25007_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+holyiot_25007_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
 holyiot_25007_nrf54l15.build.zigbee_channel_flags=
 holyiot_25007_nrf54l15.build.zigbee_pan_flags=
 holyiot_25007_nrf54l15.build.antenna_flags=
@@ -353,11 +353,11 @@ holyiot_25007_nrf54l15.menu.clean_vpr.off.build.ldscript=nrf54l15_linker_script_
 holyiot_25007_nrf54l15.menu.clean_vpr.off.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0 -DNRF54L15_CLEAN_VPR_DISABLED
 holyiot_25007_nrf54l15.menu.clean_vpr.off.upload.maximum_data_size=261632
 
-holyiot_25007_nrf54l15.menu.clean_zigbee.on=Enabled (Default)
-holyiot_25007_nrf54l15.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
-
-holyiot_25007_nrf54l15.menu.clean_zigbee.off=Disabled
+holyiot_25007_nrf54l15.menu.clean_zigbee.off=Disabled (Default)
 holyiot_25007_nrf54l15.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+holyiot_25007_nrf54l15.menu.clean_zigbee.on=Enabled (Experimental)
+holyiot_25007_nrf54l15.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 
 holyiot_25007_nrf54l15.menu.clean_thread.off=Disabled (Default)
 holyiot_25007_nrf54l15.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
@@ -417,7 +417,7 @@ holyiot_25008_nrf54l15.name=HOLYIOT-25008 nRF54L15 Module
 holyiot_25008_nrf54l15.upload.tool=nrf54ocd
 holyiot_25008_nrf54l15.upload.tool.serial=nrf54ocd
 holyiot_25008_nrf54l15.upload.protocol=cmsis-dap
-holyiot_25008_nrf54l15.upload.maximum_size=1552384
+holyiot_25008_nrf54l15.upload.maximum_size=1548288
 holyiot_25008_nrf54l15.upload.maximum_data_size=155648
 holyiot_25008_nrf54l15.upload.wait_for_upload_port=false
 holyiot_25008_nrf54l15.upload.use_1200bps_touch=false
@@ -450,7 +450,7 @@ holyiot_25008_nrf54l15.build.ble_tx_flags=
 holyiot_25008_nrf54l15.build.ble_timing_flags=
 holyiot_25008_nrf54l15.build.ble_trace_flags=
 holyiot_25008_nrf54l15.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=1
-holyiot_25008_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+holyiot_25008_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
 holyiot_25008_nrf54l15.build.zigbee_channel_flags=
 holyiot_25008_nrf54l15.build.zigbee_pan_flags=
 holyiot_25008_nrf54l15.build.antenna_flags=
@@ -487,11 +487,11 @@ holyiot_25008_nrf54l15.menu.clean_vpr.off.build.ldscript=nrf54l15_linker_script_
 holyiot_25008_nrf54l15.menu.clean_vpr.off.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0 -DNRF54L15_CLEAN_VPR_DISABLED
 holyiot_25008_nrf54l15.menu.clean_vpr.off.upload.maximum_data_size=261632
 
-holyiot_25008_nrf54l15.menu.clean_zigbee.on=Enabled (Default)
-holyiot_25008_nrf54l15.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
-
-holyiot_25008_nrf54l15.menu.clean_zigbee.off=Disabled
+holyiot_25008_nrf54l15.menu.clean_zigbee.off=Disabled (Default)
 holyiot_25008_nrf54l15.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+holyiot_25008_nrf54l15.menu.clean_zigbee.on=Enabled (Experimental)
+holyiot_25008_nrf54l15.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 
 holyiot_25008_nrf54l15.menu.clean_thread.off=Disabled (Default)
 holyiot_25008_nrf54l15.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
@@ -557,7 +557,7 @@ generic_nrf54l15_module_36pin.name=Generic nRF54L15 Module (36-pad)
 generic_nrf54l15_module_36pin.upload.tool=nrf54ocd
 generic_nrf54l15_module_36pin.upload.tool.serial=nrf54ocd
 generic_nrf54l15_module_36pin.upload.protocol=cmsis-dap
-generic_nrf54l15_module_36pin.upload.maximum_size=1552384
+generic_nrf54l15_module_36pin.upload.maximum_size=1548288
 generic_nrf54l15_module_36pin.upload.maximum_data_size=155648
 generic_nrf54l15_module_36pin.upload.wait_for_upload_port=false
 generic_nrf54l15_module_36pin.upload.use_1200bps_touch=false
@@ -590,7 +590,7 @@ generic_nrf54l15_module_36pin.build.ble_tx_flags=
 generic_nrf54l15_module_36pin.build.ble_timing_flags=
 generic_nrf54l15_module_36pin.build.ble_trace_flags=
 generic_nrf54l15_module_36pin.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=1
-generic_nrf54l15_module_36pin.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+generic_nrf54l15_module_36pin.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
 generic_nrf54l15_module_36pin.build.zigbee_channel_flags=
 generic_nrf54l15_module_36pin.build.zigbee_pan_flags=
 generic_nrf54l15_module_36pin.build.antenna_flags=
@@ -627,11 +627,11 @@ generic_nrf54l15_module_36pin.menu.clean_vpr.off.build.ldscript=nrf54l15_linker_
 generic_nrf54l15_module_36pin.menu.clean_vpr.off.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0 -DNRF54L15_CLEAN_VPR_DISABLED
 generic_nrf54l15_module_36pin.menu.clean_vpr.off.upload.maximum_data_size=261632
 
-generic_nrf54l15_module_36pin.menu.clean_zigbee.on=Enabled (Default)
-generic_nrf54l15_module_36pin.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
-
-generic_nrf54l15_module_36pin.menu.clean_zigbee.off=Disabled
+generic_nrf54l15_module_36pin.menu.clean_zigbee.off=Disabled (Default)
 generic_nrf54l15_module_36pin.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+generic_nrf54l15_module_36pin.menu.clean_zigbee.on=Enabled (Experimental)
+generic_nrf54l15_module_36pin.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 
 generic_nrf54l15_module_36pin.menu.clean_thread.off=Disabled (Default)
 generic_nrf54l15_module_36pin.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0
@@ -691,7 +691,7 @@ nrf54l15dk_pca10156.name=Nordic PCA10156 nRF54L15 DK
 nrf54l15dk_pca10156.upload.tool=nrf54ocd
 nrf54l15dk_pca10156.upload.tool.serial=nrf54ocd
 nrf54l15dk_pca10156.upload.protocol=cmsis-dap
-nrf54l15dk_pca10156.upload.maximum_size=1552384
+nrf54l15dk_pca10156.upload.maximum_size=1548288
 nrf54l15dk_pca10156.upload.maximum_data_size=155648
 nrf54l15dk_pca10156.upload.wait_for_upload_port=false
 nrf54l15dk_pca10156.upload.use_1200bps_touch=false
@@ -724,7 +724,7 @@ nrf54l15dk_pca10156.build.ble_tx_flags=
 nrf54l15dk_pca10156.build.ble_timing_flags=
 nrf54l15dk_pca10156.build.ble_trace_flags=
 nrf54l15dk_pca10156.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=1
-nrf54l15dk_pca10156.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
+nrf54l15dk_pca10156.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
 nrf54l15dk_pca10156.build.zigbee_channel_flags=
 nrf54l15dk_pca10156.build.zigbee_pan_flags=
 nrf54l15dk_pca10156.build.antenna_flags=
@@ -753,11 +753,11 @@ nrf54l15dk_pca10156.menu.clean_vpr.off.build.ldscript=nrf54l15_linker_script_no_
 nrf54l15dk_pca10156.menu.clean_vpr.off.build.vpr_flags=-DNRF54L15_CLEAN_VPR_ENABLED=0 -DNRF54L15_CLEAN_VPR_DISABLED
 nrf54l15dk_pca10156.menu.clean_vpr.off.upload.maximum_data_size=261632
 
-nrf54l15dk_pca10156.menu.clean_zigbee.on=Enabled (Default)
-nrf54l15dk_pca10156.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
-
-nrf54l15dk_pca10156.menu.clean_zigbee.off=Disabled
+nrf54l15dk_pca10156.menu.clean_zigbee.off=Disabled (Default)
 nrf54l15dk_pca10156.menu.clean_zigbee.off.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CLEAN_ZIGBEE_DISABLED
+
+nrf54l15dk_pca10156.menu.clean_zigbee.on=Enabled (Experimental)
+nrf54l15dk_pca10156.menu.clean_zigbee.on.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1
 
 nrf54l15dk_pca10156.menu.clean_thread.off=Disabled (Default)
 nrf54l15dk_pca10156.menu.clean_thread.off.build.thread_flags=-DNRF54L15_CLEAN_OPENTHREAD_CORE_ENABLE=0 -DOPENTHREAD_FTD=1 -DOPENTHREAD_MTD=0 -DOPENTHREAD_RADIO=0

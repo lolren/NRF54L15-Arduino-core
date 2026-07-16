@@ -25,6 +25,35 @@ extern "C" void nrf54l15_ble_idle_wake_cancel(void);
 extern "C" uint8_t nrf54l15_ble_idle_wake_consume(void);
 extern "C" void nrf54l15_grtc_irq_observer(void);
 extern "C" bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit);
+extern "C" uint8_t nrf54l15_constlat_acquire(void);
+extern "C" void nrf54l15_constlat_release(void);
+extern "C" uint8_t nrf54l15_constlat_users_active(void);
+
+enum class Nrf54ExclusiveRadioOwner : uint8_t {
+  kNone = 0U,
+  kBle = 1U,
+  kZigbee802154 = 2U,
+  kProprietary = 3U,
+  kRawChannelSounding = 4U,
+  kMpslChannelSounding = 5U,
+};
+
+// A nonzero token is a generation-qualified exclusive lease for RADIO and
+// the protocol timing resources coupled to it. A quarantined lease remains
+// held until reset because the previous owner did not prove hardware idle.
+uint32_t nrf54l15_acquire_exclusive_radio(Nrf54ExclusiveRadioOwner owner);
+bool nrf54l15_release_exclusive_radio(Nrf54ExclusiveRadioOwner owner,
+                                      uint32_t token);
+bool nrf54l15_quarantine_exclusive_radio(Nrf54ExclusiveRadioOwner owner,
+                                         uint32_t token);
+bool nrf54l15_exclusive_radio_is_owned_by(Nrf54ExclusiveRadioOwner owner,
+                                          uint32_t token);
+Nrf54ExclusiveRadioOwner nrf54l15_exclusive_radio_owner();
+bool nrf54l15_scrub_owned_radio_dma(Nrf54ExclusiveRadioOwner owner,
+                                    uint32_t token, NRF_RADIO_Type* radio);
+bool nrf54l15_quiesce_owned_radio(Nrf54ExclusiveRadioOwner owner,
+                                  uint32_t token, uint32_t spinLimit);
+[[noreturn]] void nrf54l15_exclusive_radio_fail_stop();
 
 namespace xiao_nrf54l15 {
 
@@ -1203,8 +1232,18 @@ class PowerManager {
   explicit PowerManager(uint32_t powerBase = nrf54l15::POWER_BASE,
                         uint32_t resetBase = nrf54l15::RESET_BASE,
                         uint32_t regulatorsBase = nrf54l15::REGULATORS_BASE);
+  ~PowerManager();
+  PowerManager(const PowerManager&) = delete;
+  PowerManager& operator=(const PowerManager&) = delete;
+  PowerManager(PowerManager&&) = delete;
+  PowerManager& operator=(PowerManager&&) = delete;
 
-  void setLatencyMode(PowerLatencyMode mode);
+  // Returns false only when a constant-latency lease cannot be acquired.
+  // Existing callers may ignore the result; timing-critical drivers must not.
+  bool setLatencyMode(PowerLatencyMode mode);
+  // A last-resort hardware-fault path: forget local ownership without issuing
+  // LOWPWR, intentionally leaving the shared count asserted for safety.
+  void quarantineConstantLatencyLease();
   bool isConstantLatency() const;
 
   bool setRetention(uint8_t index, uint8_t value);
@@ -1242,6 +1281,7 @@ class PowerManager {
   NRF_POWER_Type* power_;
   NRF_RESET_Type* reset_;
   NRF_REGULATORS_Type* regulators_;
+  bool constantLatencyOwned_;
 };
 
 enum class GrtcClockSource : uint8_t {
@@ -1745,6 +1785,11 @@ class ZigbeeRadio {
                                                  void* context);
 
   explicit ZigbeeRadio(uint32_t radioBase = nrf54l15::RADIO_BASE);
+  ~ZigbeeRadio();
+  ZigbeeRadio(const ZigbeeRadio&) = delete;
+  ZigbeeRadio& operator=(const ZigbeeRadio&) = delete;
+  ZigbeeRadio(ZigbeeRadio&&) = delete;
+  ZigbeeRadio& operator=(ZigbeeRadio&&) = delete;
 
   bool begin(uint8_t channel = 15U, int8_t txPowerDbm = 0);
   void end();
@@ -1752,6 +1797,8 @@ class ZigbeeRadio {
   bool setChannel(uint8_t channel);
   uint8_t channel() const;
   bool setTxPowerDbm(int8_t dbm);
+  bool setCcaEnergyDetectThresholdDbm(int8_t dbm);
+  int8_t ccaEnergyDetectThresholdDbm() const;
 
   bool transmit(const uint8_t* psdu, uint8_t length, bool performCca = false,
                 uint32_t spinLimit = 1400000UL);
@@ -1771,12 +1818,22 @@ class ZigbeeRadio {
   bool serviceBufferedReceiveIrq();
   bool receive(ZigbeeFrame* frame, uint32_t listenWindowUs = 7000U,
                uint32_t spinLimit = 1400000UL);
+  // Returns the native RADIO EDSAMPLE value (0..127). Existing callers use
+  // the nRF54 conversion dBm = -92 + raw; IEEE 802.15.4 ED is
+  // min(4 * raw, 255). The raw compatibility contract is intentional.
   bool sampleEnergyDetect(uint8_t* outEdLevel, uint32_t spinLimit = 300000UL);
+  bool beginEnergyDetectScan(uint16_t durationMs,
+                             uint32_t spinLimit = 300000UL);
+  bool pollEnergyDetectScan(uint8_t* outEdLevel, bool* outComplete,
+                            uint32_t spinLimit = 300000UL);
   ZigbeeTransmitDebug lastTransmitDebug() const;
   ZigbeeReceiveDebug lastReceiveDebug() const;
   void setMacAcknowledgementRequestMode(
       ZigbeeMacAcknowledgementRequestMode mode);
   ZigbeeMacAcknowledgementRequestMode macAcknowledgementRequestMode() const;
+  // ACK responses are fail-closed: enabling them has an effect only while an
+  // address-aware receive filter callback is installed. This prevents a raw
+  // promiscuous receiver from acknowledging another node's unicast frame.
   void setMacAcknowledgementResponseEnabled(bool enabled);
   bool macAcknowledgementResponseEnabled() const;
   void setMacDataRequestPendingCallback(MacDataRequestPendingCallback callback,
@@ -1810,7 +1867,10 @@ class ZigbeeRadio {
 
  private:
   bool configureIeee802154();
-  bool performCcaCheck(uint32_t spinLimit);
+  bool acquireRadioConstantLatency();
+  void releaseRadioConstantLatency();
+  bool transmitPreparedPacket(bool performCca, uint32_t spinLimit,
+                              uint32_t* outEndTimestampUs = nullptr);
   bool waitForMacAcknowledgement(uint8_t sequence,
                                  bool* outFramePending,
                                  uint32_t spinLimit);
@@ -1824,6 +1884,7 @@ class ZigbeeRadio {
   void clearBufferedRxMacAcknowledgementState();
   bool shouldAcceptReceivedMacFrame(const uint8_t* psdu,
                                     uint8_t length) const;
+  bool shouldRespondWithMacAcknowledgement() const;
   bool shouldSetMacAckFramePending(const uint8_t* psdu, uint8_t length) const;
   static bool frameRequestsMacAcknowledgement(const uint8_t* psdu,
                                               uint8_t length,
@@ -1837,13 +1898,16 @@ class ZigbeeRadio {
 
   static constexpr uint8_t kBufferedRxPacketCount = 4U;
   static constexpr uint8_t kBufferedRxFrameQueueDepth = 8U;
-  // PHR + FCF + sequence + short destination + short source + command ID.
-  static constexpr uint8_t kBufferedRxAckBccBytes = 11U;
 
   NRF_RADIO_Type* radio_;
+  uint32_t radioOwnershipToken_;
   bool initialized_;
   bool rfPathOwnedByZigbee_;
+  bool hfxoOwnedByZigbee_;
+  uint16_t constantLatencyDepth_;
+  bool constantLatencyOwnedByZigbee_;
   bool receiverArmed_;
+  bool energyDetectArmed_;
   volatile bool bufferedReceiveArmed_;
   volatile uint8_t bufferedRxPacketIndex_;
   volatile uint8_t bufferedRxQueueHead_;
@@ -1853,9 +1917,14 @@ class ZigbeeRadio {
   volatile bool bufferedRxAckPrepared_;
   volatile uint8_t bufferedRxAckSequence_;
   volatile bool bufferedRxAckFramePending_;
+  volatile bool bufferedRxAckTxArmed_;
+  volatile bool bufferedRxAckQueueEntryValid_;
+  volatile uint8_t bufferedRxAckQueueEntryIndex_;
+  bool bufferedRxAckTimerConfigured_;
   ZigbeeMacAcknowledgementRequestMode macAckRequestMode_;
   bool macAckResponseEnabled_;
   uint8_t channel_;
+  int8_t ccaThresholdDbm_;
   alignas(4) uint8_t txPacket_[1 + 127];
   alignas(4) uint8_t rxPacket_[1 + 127];
   alignas(4) uint8_t bufferedRxAckPacket_[1 + 3];
@@ -1897,6 +1966,11 @@ enum class RawRadioReceiveStatus : uint8_t {
 class RawRadioLink {
  public:
   explicit RawRadioLink(uint32_t radioBase = nrf54l15::RADIO_BASE);
+  ~RawRadioLink();
+  RawRadioLink(const RawRadioLink&) = delete;
+  RawRadioLink& operator=(const RawRadioLink&) = delete;
+  RawRadioLink(RawRadioLink&&) = delete;
+  RawRadioLink& operator=(RawRadioLink&&) = delete;
 
   bool begin(const RawRadioConfig& config = RawRadioConfig());
   void end();
@@ -1926,10 +2000,12 @@ class RawRadioLink {
                                       bool timedOut);
 
   NRF_RADIO_Type* radio_;
+  uint32_t radioOwnershipToken_;
   PowerManager power_;
   RawRadioConfig config_;
   bool initialized_;
   bool receiverArmed_;
+  bool hfxoOwnedByRawRadio_;
   alignas(4) uint8_t txPacket_[1U + 255U];
   alignas(4) uint8_t rxPacket_[1U + 255U];
 };
@@ -2663,6 +2739,12 @@ class BleRadio {
 
   explicit BleRadio(uint32_t radioBase = nrf54l15::RADIO_BASE,
                     uint32_t ficrBase = nrf54l15::FICR_BASE);
+  ~BleRadio();
+
+  BleRadio(const BleRadio&) = delete;
+  BleRadio& operator=(const BleRadio&) = delete;
+  BleRadio(BleRadio&&) = delete;
+  BleRadio& operator=(BleRadio&&) = delete;
 
   bool begin(int8_t txPowerDbm = NRF54L15_CLEAN_BLE_DEFAULT_TX_DBM);
   void end();
@@ -2993,7 +3075,7 @@ class BleRadio {
     return beginUnconnectedRadioActivity(spinLimit);
   }
   void endForegroundUnconnectedRadioActivity() {
-    endUnconnectedRadioActivity();
+    (void)endUnconnectedRadioActivity();
   }
   bool disconnect(uint32_t spinLimit = 300000UL);
   bool requestDisconnect(uint8_t errorCode = 0x13U);
@@ -3168,7 +3250,7 @@ class BleRadio {
   bool configureBle1M();
   bool configureBlePhy(uint8_t phy);
   bool beginUnconnectedRadioActivity(uint32_t spinLimit = 1500000UL);
-  void endUnconnectedRadioActivity();
+  bool endUnconnectedRadioActivity();
   bool ensureRfPathActiveForBle();
   void releaseRfPathForBle();
   void captureLegacyAdvertisingConfigSnapshot(
@@ -3181,7 +3263,7 @@ class BleRadio {
       const BleBackgroundAdvertisingRestartState& state);
   void snapshotBackgroundAdvertisingRfPathRestoreState();
   void restoreBackgroundAdvertisingRfPathRestoreState();
-  void quiesceBackgroundAdvertisingForConnectionHandoff();
+  bool quiesceBackgroundAdvertisingForConnectionHandoff();
   bool buildExtendedAdvertisingPackets(uint32_t auxOffsetUs,
                                        uint32_t* actualAuxOffsetUs = nullptr);
   bool buildExtendedScannableAdvertisingPackets(
@@ -3619,6 +3701,7 @@ class BleRadio {
 
   NRF_RADIO_Type* radio_;
   NRF_FICR_Type* ficr_;
+  uint32_t radioOwnershipToken_;
   bool initialized_;
   BleAddressType addressType_;
   bool localIdentityAddressValid_;
@@ -3810,6 +3893,7 @@ class BleRadio {
   bool backgroundAdvertisingRfPathCollapsed_;
   bool backgroundAdvertisingUseIrqTxKick_;
   bool backgroundAdvertisingManageLatency_;
+  bool backgroundAdvertisingLatencyLeaseOwned_;
   bool backgroundAdvertisingConstlatHardwareVerified_;
   bool backgroundAdvertisingAwaitingHfxoTuned_;
   BleAdvertisingChannel backgroundAdvertisingChannel_;

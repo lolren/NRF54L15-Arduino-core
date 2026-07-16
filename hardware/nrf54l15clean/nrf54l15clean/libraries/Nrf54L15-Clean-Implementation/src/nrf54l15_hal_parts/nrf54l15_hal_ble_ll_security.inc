@@ -4557,7 +4557,9 @@ uint8_t BleRadio::selectNextDataChannel(bool useCurrentEventCounter) {
 }
 
 bool BleRadio::setDataChannel(uint8_t dataChannel) {
-  if (radio_ == nullptr || dataChannel > 36U) {
+  if (radio_ == nullptr || dataChannel > 36U ||
+      !nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_)) {
     return false;
   }
 
@@ -4580,7 +4582,9 @@ bool BleRadio::setDataChannel(uint8_t dataChannel) {
 }
 
 void BleRadio::restoreAdvertisingLinkDefaults() {
-  if (radio_ == nullptr) {
+  if (radio_ == nullptr ||
+      !nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_)) {
     return;
   }
 

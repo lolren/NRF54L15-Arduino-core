@@ -2518,6 +2518,14 @@ bool ensureThreadRadioReady() {
     setLastLogLine("thread-radio-begin-failed");
     return false;
   }
+  if (!state.radio.setCcaEnergyDetectThresholdDbm(
+          state.snapshot.ccaThresholdDbm)) {
+    state.radio.end();
+    state.snapshot.radioBackendReady = false;
+    state.snapshot.radioLastError = OT_ERROR_FAILED;
+    setLastLogLine("thread-radio-cca-threshold-failed");
+    return false;
+  }
 
   // OpenThread owns MAC header policy. The PAL preserves Ack Request bits on
   // TX and responds to received direct frames that require a MAC ACK.
@@ -2972,12 +2980,38 @@ bool finishThreadRadioEnergyScan(otInstance* instance) {
   state.snapshot.radioEnergyScanPending = false;
   state.snapshot.radioEnergyScanCount++;
   state.snapshot.lastRssiDbm = state.radioEnergyScanDoneDbm;
-  state.snapshot.radioLastError = OT_ERROR_NONE;
+  if (state.radioEnergyScanDoneDbm != OT_RADIO_RSSI_INVALID) {
+    state.snapshot.radioLastError = OT_ERROR_NONE;
+  }
   notifyRadioEnergyScanDone(instance, state.radioEnergyScanDoneDbm);
   if (instance != nullptr) {
     otPlatRadioEnergyScanDone(instance, state.radioEnergyScanDoneDbm);
   }
   applyThreadRadioIdleState();
+  return true;
+}
+
+bool serviceThreadRadioEnergyScan() {
+  OpenThreadPlatformState& state = gOpenThreadPlatformState;
+  if (!state.snapshot.radioEnergyScanPending ||
+      state.radioEnergyScanDonePending) {
+    return false;
+  }
+  uint8_t edLevel = 0U;
+  bool complete = false;
+  if (!state.radio.pollEnergyDetectScan(&edLevel, &complete,
+                                        kThreadRadioPollSpinLimit)) {
+    state.snapshot.radioLastError = OT_ERROR_FAILED;
+    state.radioEnergyScanDoneDbm = OT_RADIO_RSSI_INVALID;
+    state.radioEnergyScanDonePending = true;
+    return true;
+  }
+  if (!complete) {
+    return false;
+  }
+  state.snapshot.radioLastEdLevel = edLevel;
+  state.radioEnergyScanDoneDbm = convertThreadEnergyScanToDbm(edLevel);
+  state.radioEnergyScanDonePending = true;
   return true;
 }
 
@@ -3361,6 +3395,7 @@ void otSysProcessDrivers(otInstance* instance) {
     updateRadioTime();
     serviceThreadRadioReceiveAt(state.radioCallbackInstance);
     madeProgress |= finishThreadRadioTx(state.radioCallbackInstance);
+    madeProgress |= serviceThreadRadioEnergyScan();
     madeProgress |= finishThreadRadioEnergyScan(state.radioCallbackInstance);
 
     for (uint8_t rxPass = 0U; rxPass < kThreadRadioServiceRxPasses; ++rxPass) {
@@ -4494,7 +4529,16 @@ otError otPlatRadioGetCcaEnergyDetectThreshold(otInstance*, int8_t* threshold) {
 }
 
 otError otPlatRadioSetCcaEnergyDetectThreshold(otInstance*, int8_t threshold) {
-  xiao_nrf54l15::gOpenThreadPlatformState.snapshot.ccaThresholdDbm = threshold;
+  if (threshold < -92 || threshold > 35) {
+    return OT_ERROR_INVALID_ARGS;
+  }
+  xiao_nrf54l15::OpenThreadPlatformState& state =
+      xiao_nrf54l15::gOpenThreadPlatformState;
+  if (state.snapshot.radioBackendReady &&
+      !state.radio.setCcaEnergyDetectThresholdDbm(threshold)) {
+    return OT_ERROR_FAILED;
+  }
+  state.snapshot.ccaThresholdDbm = threshold;
   return OT_ERROR_NONE;
 }
 
@@ -4795,7 +4839,8 @@ int8_t otPlatRadioGetRssi(otInstance*) {
   return state.snapshot.lastRssiDbm;
 }
 
-otError otPlatRadioEnergyScan(otInstance*, uint8_t channel, uint16_t) {
+otError otPlatRadioEnergyScan(otInstance*, uint8_t channel,
+                              uint16_t scanDurationMs) {
   using namespace xiao_nrf54l15;
 
   OpenThreadPlatformState& state = gOpenThreadPlatformState;
@@ -4818,18 +4863,15 @@ otError otPlatRadioEnergyScan(otInstance*, uint8_t channel, uint16_t) {
     return OT_ERROR_INVALID_ARGS;
   }
 
-  uint8_t edLevel = 0U;
-  if (!state.radio.sampleEnergyDetect(&edLevel, kThreadRadioPollSpinLimit)) {
+  if (!state.radio.beginEnergyDetectScan(scanDurationMs,
+                                         kThreadRadioPollSpinLimit)) {
     state.snapshot.radioLastError = OT_ERROR_FAILED;
     state.snapshot.radioEnergyScanPending = false;
     return OT_ERROR_FAILED;
   }
 
   state.snapshot.radioChannel = channel;
-  state.snapshot.radioLastEdLevel = edLevel;
   state.snapshot.radioEnergyScanPending = true;
-  state.radioEnergyScanDoneDbm = convertThreadEnergyScanToDbm(edLevel);
-  state.radioEnergyScanDonePending = true;
   return OT_ERROR_NONE;
 }
 

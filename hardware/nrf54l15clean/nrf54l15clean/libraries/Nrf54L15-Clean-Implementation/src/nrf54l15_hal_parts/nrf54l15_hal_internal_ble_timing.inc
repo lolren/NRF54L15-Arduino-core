@@ -31,6 +31,9 @@ xiao_nrf54l15::I2sTx* g_activeI2sTx = nullptr;
 xiao_nrf54l15::I2sRx* g_activeI2sRx = nullptr;
 xiao_nrf54l15::I2sDuplex* g_activeI2sDuplex = nullptr;
 xiao_nrf54l15::BleRadio* g_activeBleRadio = nullptr;
+// Set only when a BleRadio owner is destroyed without observing RADIO Disabled.
+// The hardware and its shared power leases remain quarantined until reset.
+volatile uint8_t g_bleRadioHardwareQuarantined = 0U;
 volatile uint32_t __attribute__((used)) g_ble_central_connect_debug_stage = 0U;
 volatile uint8_t __attribute__((used)) g_ble_central_connect_debug_header = 0U;
 volatile uint8_t __attribute__((used)) g_ble_central_connect_debug_length = 0U;
@@ -142,7 +145,6 @@ static constexpr uint8_t kBleBackgroundAdvPeriTxDppiChannel =
     static_cast<uint8_t>(NRF54L15_CLEAN_BLE_BACKGROUND_PERI_TX_DPPI_CHANNEL);
 static constexpr uint8_t kBleBackgroundAdvPeriStopDppiChannel = 1U;
 static constexpr uint8_t kBleBackgroundAdvPeriStopEnableDppiChannel = 2U;
-static constexpr uint8_t kBleBackgroundAdvPeriLatencyDppiChannel = 3U;
 static constexpr uint8_t kBleBackgroundConnPeriRxDppiChannel = 4U;
 static constexpr uint8_t kBleBackgroundAdvRadioPllenDppiChannel = 1U;
 static constexpr uint8_t kBleBackgroundAdvRadioTxDppiChannel =
@@ -153,7 +155,6 @@ static constexpr uint8_t kBleBackgroundConnRadioRxDppiChannel = 3U;
 static constexpr uint8_t kBleBackgroundAdvLpToPeriBridgeIndex = 0U;
 static constexpr uint8_t kBleBackgroundAdvRadioToLpBridgeIndex = 1U;
 static constexpr uint8_t kBleBackgroundAdvStopEnableBridgeIndex = 2U;
-static constexpr uint8_t kBleBackgroundAdvLatencyBridgeIndex = 3U;
 static constexpr uint8_t kBleBackgroundConnRxBridgeIndex = 4U;
 static constexpr uint8_t kBleBackgroundAdvStopPathGroup = 0U;
 static constexpr uint32_t kBleBackgroundAdvEventWindowUs = 1000U;
@@ -190,6 +191,30 @@ static constexpr IRQn_Type kBleBackgroundGrtcIrq = GRTC_0_IRQn;
 #endif
 static constexpr IRQn_Type kBleBackgroundClockIrq = CLOCK_POWER_IRQn;
 xiao_nrf54l15::BleRadio* volatile g_bleBackgroundRadio = nullptr;
+
+static inline void bleDetachRadioRestartAutomation(NRF_RADIO_Type* radio) {
+  if (radio == nullptr) {
+    return;
+  }
+  radio->SHORTS = 0U;
+  radio->SUBSCRIBE_TXEN = 0U;
+  radio->SUBSCRIBE_RXEN = 0U;
+  radio->SUBSCRIBE_START = 0U;
+  radio->SUBSCRIBE_STOP = 0U;
+  radio->SUBSCRIBE_DISABLE = 0U;
+  radio->SUBSCRIBE_RSSISTART = 0U;
+  radio->SUBSCRIBE_BCSTART = 0U;
+  radio->SUBSCRIBE_BCSTOP = 0U;
+  radio->SUBSCRIBE_CCASTART = 0U;
+  radio->SUBSCRIBE_CCASTOP = 0U;
+  radio->SUBSCRIBE_EDSTART = 0U;
+  radio->SUBSCRIBE_EDSTOP = 0U;
+  radio->SUBSCRIBE_AUXDATADMASTART = 0U;
+  radio->SUBSCRIBE_AUXDATADMASTOP = 0U;
+  radio->SUBSCRIBE_PLLEN = 0U;
+  radio->SUBSCRIBE_CSTONESSTART = 0U;
+  radio->SUBSCRIBE_SOFTRESET = 0U;
+}
 static volatile uint8_t g_bleIdleWakePending = 0U;
 static volatile uint8_t g_bleIdleWakeArmed = 0U;
 static volatile uint8_t g_bleIdleWakePermitForeground = 0U;
@@ -328,8 +353,56 @@ static inline bool bleBackgroundAdvertisingSetStopPathEnabled(bool enable) {
   return lpDomain.enableChannel(kBleBackgroundAdvLpStopDppiChannel, enable);
 }
 
+static inline bool bleBackgroundAdvertisingSetTxPathEnabled(bool enable) {
+  if (bleDppic30() == nullptr) {
+    return false;
+  }
+
+  Dppic lpDomain(nrf54l15::DPPIC30_BASE);
+  return lpDomain.enableChannel(kBleBackgroundAdvLpTxDppiChannel, enable);
+}
+
+static inline bool bleHfxoReadyForRadio() {
+  return bleHfxoRunning() && NRF_CLOCK->EVENTS_XOTUNED != 0U &&
+         NRF_CLOCK->EVENTS_XOTUNEERROR == 0U &&
+         NRF_CLOCK->EVENTS_XOTUNEFAILED == 0U;
+}
+
+static volatile uint16_t g_fallbackConstlatUsers = 0U;
+
+extern "C" uint8_t __attribute__((weak)) nrf54l15_constlat_acquire(void) {
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  if (g_fallbackConstlatUsers == UINT16_MAX) {
+    __set_PRIMASK(primask);
+    return 0U;
+  }
+  if (g_fallbackConstlatUsers == 0U) {
+    NRF_POWER->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
+    __DSB();
+    __ISB();
+  }
+  ++g_fallbackConstlatUsers;
+  __set_PRIMASK(primask);
+  return 1U;
+}
+
+extern "C" void __attribute__((weak)) nrf54l15_constlat_release(void) {
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  if (g_fallbackConstlatUsers > 0U) {
+    --g_fallbackConstlatUsers;
+    if (g_fallbackConstlatUsers == 0U) {
+      NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+      __DSB();
+      __ISB();
+    }
+  }
+  __set_PRIMASK(primask);
+}
+
 extern "C" uint8_t __attribute__((weak)) nrf54l15_constlat_users_active(void) {
-  return 0U;
+  return (g_fallbackConstlatUsers != 0U) ? 1U : 0U;
 }
 
 static inline bool bleBackgroundAdvertisingConstlatActive() {
@@ -338,7 +411,7 @@ static inline bool bleBackgroundAdvertisingConstlatActive() {
 
 static inline bool bleBackgroundAdvertisingShouldManageLatency() {
 #if NRF54L15_CLEAN_BLE_BACKGROUND_MANAGED_CONSTLAT != 0
-  return !bleBackgroundAdvertisingConstlatActive();
+  return true;
 #else
   return false;
 #endif
@@ -353,13 +426,10 @@ static inline bool bleBackgroundAdvertisingShouldManageRfPath() {
 }
 
 static inline bool bleBackgroundAdvertisingReleaseManagedLatency(bool managed) {
-  if (!managed || !bleBackgroundAdvertisingConstlatActive()) {
+  if (!managed) {
     return false;
   }
-  if (nrf54l15_constlat_users_active() != 0U) {
-    return false;
-  }
-  NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+  nrf54l15_constlat_release();
   return true;
 }
 
@@ -371,14 +441,13 @@ static inline bool bleBackgroundAdvertisingAssertManagedLatency(bool managed,
   if (!managed) {
     return false;
   }
-  if (bleBackgroundAdvertisingConstlatActive()) {
-    if (alreadyActive != nullptr) {
-      *alreadyActive = true;
-    }
-    return true;
+  if (alreadyActive != nullptr) {
+    *alreadyActive = bleBackgroundAdvertisingConstlatActive();
   }
-  NRF_POWER->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
-  return bleBackgroundAdvertisingConstlatActive();
+  // Ownership follows the counted acquire result. CONSTLATSTAT can lag the
+  // task by peripheral clock cycles and is diagnostic only; treating that lag
+  // as an acquire failure would leak the newly incremented shared lease.
+  return nrf54l15_constlat_acquire() != 0U;
 }
 
 static inline uint32_t bleBackgroundAdvertisingPacketWindowUs(uint8_t payloadLength) {
@@ -1140,6 +1209,12 @@ static inline void bleBackgroundEnableClockTuneInterrupts() {
   const uint32_t mask = bleBackgroundClockTuneInterruptMask();
   NRF_CLOCK->INTENCLR = mask;
   NRF_CLOCK->INTENSET = mask;
+  bleBackgroundEnableClockIrq();
+}
+
+static inline void bleBackgroundEnableClockQualityInterrupts() {
+  NRF_CLOCK->INTENCLR = bleBackgroundClockTuneInterruptMask();
+  NRF_CLOCK->INTENSET = CLOCK_INTENSET_XOTUNEERROR_Msk;
   bleBackgroundEnableClockIrq();
 }
 

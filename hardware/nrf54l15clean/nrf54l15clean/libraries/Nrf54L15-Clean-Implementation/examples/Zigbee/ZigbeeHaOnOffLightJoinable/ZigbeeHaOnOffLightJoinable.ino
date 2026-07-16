@@ -4,6 +4,7 @@
 #include "nrf54l15_hal.h"
 #include "zigbee_commissioning.h"
 #include "zigbee_persistence.h"
+#include "zigbee_frame_counter.h"
 #include "zigbee_security.h"
 #include "zigbee_stack.h"
 
@@ -140,11 +141,13 @@ namespace {
 static ZigbeeRadio g_radio;
 static ZigbeeHomeAutomationDevice g_device;
 static ZigbeePersistentStateStore g_store;
+static ZigbeeOutgoingFrameCounterAllocator g_outgoingFrameCounters;
+static bool g_persistentSecurityReady = false;
+static bool g_radioReady = false;
 
 static uint8_t g_macSequence = 1U;
 static ZigbeeEndDeviceCommonState g_network{};
 static uint8_t& g_nwkSequence = g_network.nwkSequence;
-static uint32_t& g_nwkSecurityFrameCounter = g_network.nwkSecurityFrameCounter;
 static uint32_t& g_lastInboundSecurityFrameCounter =
     g_network.incomingNwkFrameCounter;
 static uint32_t& g_lastInboundApsFrameCounter =
@@ -324,7 +327,7 @@ void refreshCommissioningState() {
 bool loadInstallCodeLinkKey(uint8_t outKey[16]) {
 #if NRF54L15_CLEAN_ZIGBEE_USE_INSTALL_CODE
   return ZigbeeSecurity::deriveInstallCodeLinkKey(kInstallCode,
-                                                  sizeof(kInstallCode), outKey);
+                                                  sizeof(kInstallCode), outKey, 16U);
 #else
   (void)outKey;
   return false;
@@ -417,7 +420,7 @@ void applyLedState() {
   Gpio::write(kPinUserLed, !ledOn);
 }
 
-void clearActiveNetworkKey() {
+[[maybe_unused]] void clearActiveNetworkKey() {
   memset(g_activeNetworkKey, 0, sizeof(g_activeNetworkKey));
   g_activeNetworkKeySequence = 0U;
   g_haveActiveNetworkKey = false;
@@ -451,11 +454,22 @@ bool persistState() {
     state.bindings[copied++] = bindings[i];
   }
   state.bindingCount = copied;
-  return g_store.save(state);
+  g_outgoingFrameCounters.stampPersistentState(&state);
+  const bool saved = g_store.save(state);
+  if (!saved) {
+    g_persistentSecurityReady = false;
+    g_outgoingFrameCounters.disable(ZigbeeOutgoingCounterDomain::kNwk);
+    g_outgoingFrameCounters.disable(
+        ZigbeeOutgoingCounterDomain::kApsTrustCenter);
+    g_outgoingFrameCounters.disable(
+        ZigbeeOutgoingCounterDomain::kApsTrustCenter);
+  }
+  return saved;
 }
 
 void restoreState() {
-  memset(&g_restoredState, 0, sizeof(g_restoredState));
+  g_restoredState = ZigbeePersistentState{};
+  g_persistentSecurityReady = false;
   g_haveRestoredState = false;
   g_savedOnOffState = false;
   ZigbeeCommissioning::initializeEndDeviceState(&g_network,
@@ -465,13 +479,26 @@ void restoreState() {
                                                 kCoordinatorShort);
 
   ZigbeePersistentState state{};
-  if (g_store.load(&state) && state.ieeeAddress == kIeeeAddress) {
+  const ZigbeePersistentLoadStatus loadStatus =
+      g_store.loadWithStatus(&state);
+  if (loadStatus == ZigbeePersistentLoadStatus::kLive &&
+      state.ieeeAddress == kIeeeAddress) {
     g_restoredState = state;
     g_haveRestoredState = true;
+    g_outgoingFrameCounters.restore(state);
+    g_persistentSecurityReady = true;
     g_savedOnOffState = state.onOffState;
     ZigbeeCommissioning::restoreEndDeviceState(&g_network, state, kIeeeAddress);
+  } else if (loadStatus == ZigbeePersistentLoadStatus::kEmpty ||
+             loadStatus == ZigbeePersistentLoadStatus::kTombstone) {
+    g_persistentSecurityReady = true;
   }
-  if (!g_joined && !g_rejoinPending) {
+  if (g_persistentSecurityReady &&
+      (g_securityEnabled || g_haveActiveNetworkKey) &&
+      !g_outgoingFrameCounters.enabled(ZigbeeOutgoingCounterDomain::kNwk)) {
+    g_persistentSecurityReady = false;
+  }
+  if (g_persistentSecurityReady && !g_joined && !g_rejoinPending) {
     ZigbeeCommissioning::requestNetworkSteering(&g_network);
   }
 
@@ -479,26 +506,34 @@ void restoreState() {
   applyLedState();
 }
 
-void clearJoinState(bool clearStore) {
+bool clearJoinState(bool clearStore) {
   refreshCommissioningState();
   ZigbeeCommissioning::clearEndDeviceState(&g_network, clearStore);
+  if (clearStore) {
+    g_outgoingFrameCounters.disable(ZigbeeOutgoingCounterDomain::kNwk);
+    g_outgoingFrameCounters.disable(
+        ZigbeeOutgoingCounterDomain::kApsTrustCenter);
+  }
   clearPendingApsAck();
   clearRecentInboundAps();
   clearInboundNwkSecurityCounters();
   if (clearStore) {
-    memset(&g_restoredState, 0, sizeof(g_restoredState));
+    g_restoredState = ZigbeePersistentState{};
     g_haveRestoredState = false;
   }
   configureDeviceForCurrentNetwork();
   applyLedState();
+  const bool persistenceOk = clearStore ? g_store.clear() : persistState();
   if (clearStore) {
-    g_store.clear();
-  } else {
-    persistState();
+    g_persistentSecurityReady = persistenceOk;
   }
+  if (clearStore && persistenceOk && !g_radioReady) {
+    g_radioReady = g_radio.begin(g_channel, 8);
+  }
+  return persistenceOk;
 }
 
-ZigbeeCommissioningStartRequest requestCommissioningStart() {
+[[maybe_unused]] ZigbeeCommissioningStartRequest requestCommissioningStart() {
   refreshCommissioningState();
   return ZigbeeCommissioning::requestRejoinOrSteering(&g_network);
 }
@@ -516,7 +551,10 @@ void handleAcceptedLeaveRequest(uint8_t leaveFlags) {
   clearPendingApsAck();
   clearRecentInboundAps();
   if (disposition == ZigbeeAcceptedLeaveDisposition::kPersistRejoin) {
-    persistState();
+    if (!persistState()) {
+      Serial.print("mgmt_leave persistence failed\r\n");
+      return;
+    }
     Serial.print("mgmt_leave accepted rejoin\r\n");
     return;
   }
@@ -528,22 +566,26 @@ void handleAcceptedLeaveRequest(uint8_t leaveFlags) {
 }
 
 void clearPendingApsAck() {
-  memset(g_pendingApsAcks, 0, sizeof(g_pendingApsAcks));
+  for (PendingApsAck& pending : g_pendingApsAcks) {
+    pending = PendingApsAck{};
+  }
 }
 
 void clearPendingApsAckSlot(uint8_t slot) {
   if (slot >= kPendingApsAckSlots) {
     return;
   }
-  memset(&g_pendingApsAcks[slot], 0, sizeof(g_pendingApsAcks[slot]));
+  g_pendingApsAcks[slot] = PendingApsAck{};
 }
 
 void clearRecentInboundAps() {
-  memset(&g_recentInboundAps, 0, sizeof(g_recentInboundAps));
+  g_recentInboundAps = RecentInboundAps{};
 }
 
 void clearInboundNwkSecurityCounters() {
-  memset(g_inboundNwkSecurityCounters, 0, sizeof(g_inboundNwkSecurityCounters));
+  for (InboundNwkSecurityCounter& counter : g_inboundNwkSecurityCounters) {
+    counter = InboundNwkSecurityCounter{};
+  }
 }
 
 bool matchesPendingApsAck(const PendingApsAck& pending,
@@ -614,7 +656,7 @@ void rememberPendingApsAck(uint16_t destinationShort,
   }
 
   PendingApsAck& pending = g_pendingApsAcks[slot];
-  memset(&pending, 0, sizeof(pending));
+  pending = PendingApsAck{};
   pending.active = true;
   pending.destinationShort = destinationShort;
   pending.counter = aps.counter;
@@ -677,7 +719,9 @@ bool isCoordinatorNwkSource(uint16_t sourceShort) {
 
 bool acceptInboundNwkSecurityCounter(uint16_t sourceShort, uint64_t sourceIeee,
                                      uint32_t frameCounter) {
-  if (frameCounter == 0U) {
+  if (frameCounter == 0U ||
+      (g_lastInboundSecurityFrameCounter != 0U &&
+       frameCounter <= g_lastInboundSecurityFrameCounter)) {
     return false;
   }
 
@@ -715,13 +759,6 @@ bool acceptInboundNwkSecurityCounter(uint16_t sourceShort, uint64_t sourceIeee,
     }
   }
 
-  const uint64_t expectedTc = expectedTrustCenterIeee();
-  if (expectedTc != 0U && sourceIeee == expectedTc &&
-      g_lastInboundSecurityFrameCounter != 0U &&
-      frameCounter <= g_lastInboundSecurityFrameCounter) {
-    return false;
-  }
-
   InboundNwkSecurityCounter& entry =
       g_inboundNwkSecurityCounters[(emptySlot != kInboundNwkSecurityCounterSlots)
                                        ? emptySlot
@@ -754,7 +791,11 @@ bool sendNwkCommand(uint16_t destinationShort, const uint8_t* payload,
     ZigbeeNwkSecurityHeader security{};
     security.valid = true;
     security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    security.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!g_outgoingFrameCounters.allocate(
+            ZigbeeOutgoingCounterDomain::kNwk, &g_store,
+            &security.frameCounter)) {
+      return false;
+    }
     security.sourceIeee = kIeeeAddress;
     security.keySequence = g_activeNetworkKeySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, g_activeNetworkKey,
@@ -821,7 +862,11 @@ bool sendApsFrameExtendedWithCounter(
     ZigbeeNwkSecurityHeader security{};
     security.valid = true;
     security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    security.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!g_outgoingFrameCounters.allocate(
+            ZigbeeOutgoingCounterDomain::kNwk, &g_store,
+            &security.frameCounter)) {
+      return false;
+    }
     security.sourceIeee = kIeeeAddress;
     security.keySequence = g_activeNetworkKeySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, g_activeNetworkKey,
@@ -937,7 +982,11 @@ bool sendApsAcknowledgement(uint16_t destinationShort,
     ZigbeeNwkSecurityHeader security{};
     security.valid = true;
     security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    security.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!g_outgoingFrameCounters.allocate(
+            ZigbeeOutgoingCounterDomain::kNwk, &g_store,
+            &security.frameCounter)) {
+      return false;
+    }
     security.sourceIeee = kIeeeAddress;
     security.keySequence = g_activeNetworkKeySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, g_activeNetworkKey,
@@ -1106,10 +1155,16 @@ bool handleApsCommand(const uint8_t* frame, uint8_t length, uint16_t sourceShort
           haveInstallCodeKey, &transportInstall)) {
     ZigbeeCommissioning::applyTransportKeyInstall(&g_network, transportInstall);
     if (transportInstall.activatesNetworkKey) {
+      g_outgoingFrameCounters.resetForNewKey(
+          ZigbeeOutgoingCounterDomain::kNwk);
+    }
+    if (transportInstall.activatesNetworkKey) {
       g_lastInboundSecurityFrameCounter = 0U;
       clearInboundNwkSecurityCounters();
     }
-    persistState();
+    if (!persistState()) {
+      return false;
+    }
     if (transportInstall.stagesAlternateKey) {
       Serial.print("transport_key_update seq=");
     } else if (transportInstall.refreshesAlternateKey) {
@@ -1159,7 +1214,9 @@ bool handleApsCommand(const uint8_t* frame, uint8_t length, uint16_t sourceShort
         kZigbeeApsUpdateDeviceStatusStandardSecureRejoin) {
       configureDeviceForCurrentNetwork();
       applyLedState();
-      persistState();
+    }
+    if (!persistState()) {
+      return false;
     }
     Serial.print("update_device short=0x");
     Serial.print(updateDevice.updateDevice.deviceShort, HEX);
@@ -1180,11 +1237,15 @@ bool handleApsCommand(const uint8_t* frame, uint8_t length, uint16_t sourceShort
           g_network, sourceShort, securedSourceIeee, nwkSecured, false, frame,
           length, installCodeKey, haveInstallCodeKey, &switchKey)) {
     ZigbeeCommissioning::applySwitchKey(&g_network, switchKey);
+    g_outgoingFrameCounters.resetForNewKey(
+        ZigbeeOutgoingCounterDomain::kNwk);
     g_lastInboundSecurityFrameCounter = 0U;
     clearInboundNwkSecurityCounters();
     configureDeviceForCurrentNetwork();
     applyLedState();
-    persistState();
+    if (!persistState()) {
+      return false;
+    }
     Serial.print("switch_key seq=");
     Serial.print(g_activeNetworkKeySequence);
     Serial.print(" ctr=");
@@ -1213,11 +1274,11 @@ bool handleApsCommand(const uint8_t* frame, uint8_t length, uint16_t sourceShort
   return false;
 }
 
-bool activeScan(ScanResult* outResult) {
+[[maybe_unused]] bool activeScan(ScanResult* outResult) {
   if (outResult == nullptr) {
     return false;
   }
-  memset(outResult, 0, sizeof(*outResult));
+  *outResult = ScanResult{};
   refreshCommissioningState();
   ZigbeeBeaconCandidate candidate{};
   if (!ZigbeeCommissioning::activeScan(g_radio, &g_macSequence, &g_network,
@@ -1234,7 +1295,7 @@ bool activeScan(ScanResult* outResult) {
   return true;
 }
 
-bool waitForAssociationResponse(uint16_t* outAssignedShort) {
+[[maybe_unused]] bool waitForAssociationResponse(uint16_t* outAssignedShort) {
   if (outAssignedShort == nullptr) {
     return false;
   }
@@ -1285,30 +1346,30 @@ bool performJoin() {
   armInterviewGraceWindow();
   configureDeviceForCurrentNetwork();
   applyLedState();
-  persistState();
-  return true;
+  return persistState();
 }
 
 bool performSecureRejoin() {
   refreshCommissioningState();
+  uint32_t secureRejoinFrameCounter = 0U;
+  if (!g_outgoingFrameCounters.allocate(
+          ZigbeeOutgoingCounterDomain::kNwk, &g_store,
+          &secureRejoinFrameCounter)) {
+    return false;
+  }
   if (!ZigbeeCommissioning::performSecureRejoin(
           g_radio, &g_macSequence, kIeeeAddress,
-          kSleepyEndDeviceCapability, &g_network)) {
+          kSleepyEndDeviceCapability, &g_network, secureRejoinFrameCounter)) {
     return false;
   }
   armInterviewGraceWindow();
   configureDeviceForCurrentNetwork();
   applyLedState();
-  persistState();
-  return true;
+  return persistState();
 }
 
 void processIncomingFrame(const ZigbeeFrame& frame) {
   const uint32_t nowMs = millis();
-  const bool awaitingTrustCenter =
-      !g_haveActiveNetworkKey &&
-      (g_network.state == ZigbeeCommissioningState::kWaitingTransportKey ||
-       g_network.state == ZigbeeCommissioningState::kWaitingUpdateDevice);
   ZigbeeDataFrameView macData{};
   if (!ZigbeeRadio::parseDataFrameShort(frame.psdu, frame.length, &macData) ||
       !macData.valid || macData.panId != g_panId ||
@@ -1343,22 +1404,6 @@ void processIncomingFrame(const ZigbeeFrame& frame) {
         return;
       }
     }
-    if (!nwkValid) {
-      ZigbeeNetworkFrame plainNwk{};
-      const bool plainValid = ZigbeeCodec::parseNwkFrame(
-          macData.payload, macData.payloadLength, &plainNwk);
-      if (plainValid) {
-        const bool trustedPlainSource =
-            plainNwk.sourceShort == 0x0000U ||
-            (g_parentShort != 0U && plainNwk.sourceShort == g_parentShort) ||
-            (g_network.coordinatorShort != 0U &&
-             plainNwk.sourceShort == g_network.coordinatorShort);
-        if (trustedPlainSource) {
-          nwk = plainNwk;
-          nwkValid = true;
-        }
-      }
-    }
   }
   if (!nwkValid && !requireSecuredNwk) {
     nwkValid =
@@ -1368,10 +1413,26 @@ void processIncomingFrame(const ZigbeeFrame& frame) {
     return;
   }
   if (security.valid) {
-    const uint64_t expectedTc = expectedTrustCenterIeee();
-    if (expectedTc != 0U && security.sourceIeee == expectedTc) {
-      g_lastInboundSecurityFrameCounter = security.frameCounter;
+    // This example accepts only its parent/coordinator as NWK sources. Keep a
+    // durable high-water mark for every accepted secured frame so resetting
+    // cannot reopen the in-memory per-source replay window.
+    g_lastInboundSecurityFrameCounter = security.frameCounter;
+    if (!persistState()) {
+      return;
     }
+  }
+
+  if (!security.valid) {
+    const bool commissioningCommandExpected =
+        !g_haveActiveNetworkKey &&
+        ZigbeeCommissioning::waitingForJoinSecurityMaterial(g_network) &&
+        nwk.frameType == ZigbeeNwkFrameType::kData;
+    if (!commissioningCommandExpected) {
+      return;
+    }
+    (void)handleApsCommand(nwk.payload, nwk.payloadLength, nwk.sourceShort,
+                           0U, false);
+    return;
   }
 
   if (nwk.frameType == ZigbeeNwkFrameType::kCommand) {
@@ -1650,6 +1711,13 @@ void maybeReceiveDirectInterviewTraffic(uint32_t nowMs) {
 void handleSerialCommands() {
   while (Serial.available() > 0) {
     const int ch = Serial.read();
+    if ((!g_persistentSecurityReady || !g_radioReady) && ch != 'c' &&
+        ch != 's') {
+      if (ch != '\r' && ch != '\n') {
+        Serial.print("persistence blocked; use c to clear or s for status\r\n");
+      }
+      continue;
+    }
     if (ch == 't') {
       g_savedOnOffState = !g_device.onOff();
       g_device.setOnOff(g_savedOnOffState);
@@ -1675,8 +1743,9 @@ void handleSerialCommands() {
         Serial.print("commissioning request ignored\r\n");
       }
     } else if (ch == 'c') {
-      clearJoinState(true);
-      Serial.print("state cleared\r\n");
+      const bool cleared = clearJoinState(true);
+      Serial.print(cleared ? "state cleared\r\n"
+                           : "state clear failed\r\n");
     } else if (ch == 's') {
       Serial.print("state joined=");
       Serial.print(g_joined ? "yes" : "no");
@@ -1724,10 +1793,18 @@ void setup() {
   }
 
   Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
-  g_store.begin("zbjoinlt");
+  const bool storeOpen = g_store.begin("zbjoinlt");
   restoreState();
+  if (!storeOpen) {
+    g_persistentSecurityReady = false;
+  }
 
-  const bool ok = g_radio.begin(g_channel, 8);
+  g_radioReady =
+      g_persistentSecurityReady && g_radio.begin(g_channel, 8);
+  const bool ok = g_radioReady;
+  if (!g_persistentSecurityReady) {
+    Serial.print("persistence journal blocked; use c to clear\r\n");
+  }
   Serial.print("\r\nZigbeeHaOnOffLightJoinable start\r\n");
   Serial.print("radio=");
   Serial.print(ok ? "OK" : "FAIL");
@@ -1744,13 +1821,17 @@ void setup() {
   }
   Serial.print("serial commands: t=toggle r=report s=status j=rejoin c=clear\r\n");
 
-  if (g_joined) {
+  if (g_radioReady && g_joined) {
     g_radio.setChannel(g_channel);
   }
 }
 
 void loop() {
   handleSerialCommands();
+  if (!g_persistentSecurityReady || !g_radioReady) {
+    delay(10);
+    return;
+  }
 
   const uint32_t now = millis();
   if (g_network.state != g_lastLoggedCommissionState ||

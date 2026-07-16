@@ -1,9 +1,86 @@
 #pragma once
 
+#include "zigbee_feature.h"
+
+#if !NRF54L15_CLEAN_ZIGBEE_AVAILABLE
+#error "Zigbee stack support is disabled in the selected board options"
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
 namespace xiao_nrf54l15 {
+
+constexpr uint8_t kZigbeeCodecMaximumOutputLength = 127U;
+
+template <typename T>
+struct ZigbeeRemoveReference {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeRemoveReference<T&> {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeRemoveReference<T&&> {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeRemoveCv {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeRemoveCv<const T> {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeRemoveCv<volatile T> {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeRemoveCv<const volatile T> {
+  using Type = T;
+};
+
+template <typename T>
+struct ZigbeeOutputCapacity;
+
+template <size_t N>
+struct ZigbeeOutputCapacity<uint8_t[N]> {
+  static constexpr uint8_t value = static_cast<uint8_t>(
+      N > static_cast<size_t>(kZigbeeCodecMaximumOutputLength)
+          ? kZigbeeCodecMaximumOutputLength
+          : N);
+};
+
+// Deprecated compatibility path for callers that erase an array's extent.
+// A raw pointer carries no capacity; new code must call the overload with an
+// explicit outCapacity. The legacy signature is retained for source
+// compatibility but fails closed instead of guessing a writable extent.
+template <>
+struct [[deprecated("pass an explicit Zigbee output capacity")]]
+    ZigbeeOutputCapacity<uint8_t*> {
+#if defined(NRF54L15_CLEAN_ZIGBEE_REQUIRE_EXPLICIT_OUTPUT_CAPACITY)
+  // Deliberately no value: repository validation enables this macro to prove
+  // that core code and shipped examples never depend on the legacy fallback.
+#else
+  // Unknown pointer extent must fail closed in the capacity-bearing overload.
+  static constexpr uint8_t value = 0U;
+#endif
+};
+
+template <typename Output>
+constexpr uint8_t zigbeeOutputCapacity() {
+  return ZigbeeOutputCapacity<
+      typename ZigbeeRemoveCv<
+          typename ZigbeeRemoveReference<Output>::Type>::Type>::value;
+}
 
 constexpr uint16_t kZigbeeProfileZdo = 0x0000U;
 constexpr uint16_t kZigbeeProfileHomeAutomation = 0x0104U;
@@ -86,6 +163,13 @@ constexpr uint8_t kZigbeeApsCommandUpdateDevice = 0x06U;
 constexpr uint8_t kZigbeeApsCommandSwitchKey = 0x09U;
 constexpr uint8_t kZigbeeApsTransportKeyStandardNetworkKey = 0x01U;
 constexpr uint8_t kZigbeeApsUpdateDeviceStatusStandardSecureRejoin = 0x00U;
+constexpr uint8_t kZigbeeApsUpdateDeviceStatusStandardUnsecuredJoin = 0x01U;
+constexpr uint8_t kZigbeeApsUpdateDeviceStatusDeviceLeft = 0x02U;
+constexpr uint8_t kZigbeeApsUpdateDeviceStatusStandardTrustCenterRejoin = 0x03U;
+
+constexpr bool zigbeeApsUpdateDeviceStatusIsValid(uint8_t status) {
+  return status <= kZigbeeApsUpdateDeviceStatusStandardTrustCenterRejoin;
+}
 
 constexpr uint8_t kZigbeeNwkCommandRejoinRequest = 0x06U;
 constexpr uint8_t kZigbeeNwkCommandRejoinResponse = 0x07U;
@@ -656,6 +740,7 @@ struct ZigbeeResolvedBindingDestination {
 
 static constexpr uint8_t kZigbeeMaxNeighborTableEntries = 8U;
 static constexpr uint8_t kZigbeeMaxRoutingTableEntries = 8U;
+static constexpr uint8_t kZigbeeNwkMaximumDepth = 15U;
 
 struct ZigbeeNeighborTableEntry {
   bool used = false;
@@ -663,7 +748,11 @@ struct ZigbeeNeighborTableEntry {
   uint64_t ieeeAddress = 0U;
   uint16_t networkAddress = 0xFFFFU;
   ZigbeeLogicalType deviceType = ZigbeeLogicalType::kEndDevice;
+  // Management_Lqi has explicit "unknown" encodings that are not logical
+  // device types or Boolean values.
+  bool deviceTypeUnknown = false;
   bool rxOnWhenIdle = false;
+  bool rxOnWhenIdleUnknown = false;
   ZigbeeNeighborRelationship relationship =
       ZigbeeNeighborRelationship::kNoneOfAbove;
   ZigbeePermitJoinState permitJoin = ZigbeePermitJoinState::kUnknown;
@@ -675,6 +764,7 @@ struct ZigbeeRoutingTableEntry {
   bool used = false;
   uint16_t destinationAddress = 0xFFFFU;
   ZigbeeRouteStatus status = ZigbeeRouteStatus::kInactive;
+  bool memoryConstrained = false;
   bool manyToOne = false;
   bool routeRecordRequired = false;
   uint16_t nextHopAddress = 0xFFFFU;
@@ -703,136 +793,193 @@ struct ZigbeeHomeAutomationConfig {
   ZigbeeRoutingTableEntry routes[kZigbeeMaxRoutingTableEntries] = {};
 };
 
+#define NRF54_ZIGBEE_EXPAND_ARGUMENTS(...) __VA_ARGS__
+#define NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(NAME, PARAMETERS, ARGUMENTS,      \
+                                            OUTPUT_NAME)                     \
+  static bool NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS PARAMETERS,                \
+                   uint8_t* OUTPUT_NAME, uint8_t outCapacity,                \
+                   uint8_t* outLength);                                      \
+  template <typename ZigbeeOutput>                                           \
+  static bool NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS PARAMETERS,                \
+                   ZigbeeOutput&& OUTPUT_NAME, uint8_t* outLength) {         \
+    return NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS ARGUMENTS, OUTPUT_NAME,        \
+                zigbeeOutputCapacity<ZigbeeOutput>(), outLength);            \
+  }
+
+#define NRF54_ZIGBEE_DECLARE_OUTPUT_METHOD(NAME, PARAMETERS, ARGUMENTS,       \
+                                           OUTPUT_NAME)                      \
+  bool NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS PARAMETERS, uint8_t* OUTPUT_NAME,  \
+            uint8_t outCapacity, uint8_t* outLength);                        \
+  template <typename ZigbeeOutput>                                           \
+  bool NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS PARAMETERS,                       \
+            ZigbeeOutput&& OUTPUT_NAME, uint8_t* outLength) {                \
+    return NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS ARGUMENTS, OUTPUT_NAME,        \
+                zigbeeOutputCapacity<ZigbeeOutput>(), outLength);            \
+  }
+
+#define NRF54_ZIGBEE_DECLARE_CONST_OUTPUT_METHOD(NAME, PARAMETERS, ARGUMENTS, \
+                                                 OUTPUT_NAME)                \
+  bool NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS PARAMETERS, uint8_t* OUTPUT_NAME,  \
+            uint8_t outCapacity, uint8_t* outLength) const;                  \
+  template <typename ZigbeeOutput>                                           \
+  bool NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS PARAMETERS,                       \
+            ZigbeeOutput&& OUTPUT_NAME, uint8_t* outLength) const {          \
+    return NAME(NRF54_ZIGBEE_EXPAND_ARGUMENTS ARGUMENTS, OUTPUT_NAME,        \
+                zigbeeOutputCapacity<ZigbeeOutput>(), outLength);            \
+  }
+
 class ZigbeeCodec {
  public:
-  static bool buildMacFrame(const ZigbeeMacFrame& frame, const uint8_t* payload,
-                            uint8_t payloadLength, uint8_t* outFrame,
-                            uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildMacFrame,
+      (const ZigbeeMacFrame& frame, const uint8_t* payload,
+       uint8_t payloadLength),
+      (frame, payload, payloadLength), outFrame)
   static bool parseMacFrame(const uint8_t* frame, uint8_t length,
                             ZigbeeMacFrame* outFrame);
-  static bool buildAssociationRequest(uint8_t sequence, uint16_t panId,
-                                      uint16_t coordinatorShort,
-                                      uint64_t deviceExtended,
-                                      uint8_t capabilityInformation,
-                                      uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildAssociationRequest,
+      (uint8_t sequence, uint16_t panId, uint16_t coordinatorShort,
+       uint64_t deviceExtended, uint8_t capabilityInformation),
+      (sequence, panId, coordinatorShort, deviceExtended,
+       capabilityInformation),
+      outFrame)
   static bool parseAssociationRequest(
       const uint8_t* frame, uint8_t length,
       ZigbeeMacAssociationRequestView* outView);
-  static bool buildAssociationResponse(uint8_t sequence, uint16_t panId,
-                                       uint64_t destinationExtended,
-                                       uint16_t coordinatorShort,
-                                       uint16_t assignedShort, uint8_t status,
-                                       uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildAssociationResponse,
+      (uint8_t sequence, uint16_t panId, uint64_t destinationExtended,
+       uint16_t coordinatorShort, uint16_t assignedShort, uint8_t status),
+      (sequence, panId, destinationExtended, coordinatorShort, assignedShort,
+       status),
+      outFrame)
   static bool parseAssociationResponse(
       const uint8_t* frame, uint8_t length,
       ZigbeeMacAssociationResponseView* outView);
-  static bool buildOrphanNotification(uint8_t sequence,
-                                      uint64_t deviceExtended,
-                                      uint8_t* outFrame,
-                                      uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildOrphanNotification,
+      (uint8_t sequence, uint64_t deviceExtended),
+      (sequence, deviceExtended), outFrame)
   static bool parseOrphanNotification(
       const uint8_t* frame, uint8_t length,
       ZigbeeMacOrphanNotificationView* outView);
-  static bool buildCoordinatorRealignment(uint8_t sequence, uint16_t panId,
-                                          uint16_t coordinatorShort,
-                                          uint8_t channel,
-                                          uint16_t assignedShort,
-                                          uint64_t destinationExtended,
-                                          uint8_t* outFrame,
-                                          uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildCoordinatorRealignment,
+      (uint8_t sequence, uint16_t panId, uint16_t coordinatorShort,
+       uint8_t channel, uint16_t assignedShort,
+       uint64_t destinationExtended),
+      (sequence, panId, coordinatorShort, channel, assignedShort,
+       destinationExtended),
+      outFrame)
   static bool parseCoordinatorRealignment(
       const uint8_t* frame, uint8_t length,
       ZigbeeMacCoordinatorRealignmentView* outView);
-  static bool buildBeaconFrame(uint8_t sequence, uint16_t panId,
-                               uint16_t coordinatorShort,
-                               const ZigbeeMacBeaconPayload& payload,
-                               uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildBeaconFrame,
+      (uint8_t sequence, uint16_t panId, uint16_t coordinatorShort,
+       const ZigbeeMacBeaconPayload& payload),
+      (sequence, panId, coordinatorShort, payload), outFrame)
   static bool parseBeaconFrame(const uint8_t* frame, uint8_t length,
                                ZigbeeMacBeaconView* outView);
-  static bool buildBeaconRequest(uint8_t sequence, uint8_t* outFrame,
-                                 uint8_t* outLength);
-  static bool buildDataRequest(uint8_t sequence, uint16_t panId,
-                               uint16_t coordinatorShort,
-                               uint64_t deviceExtended, uint8_t* outFrame,
-                               uint8_t* outLength);
-  static bool buildDataRequestShort(uint8_t sequence, uint16_t panId,
-                                    uint16_t coordinatorShort,
-                                    uint16_t deviceShort, uint8_t* outFrame,
-                                    uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(buildBeaconRequest, (uint8_t sequence),
+                                      (sequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDataRequest,
+      (uint8_t sequence, uint16_t panId, uint16_t coordinatorShort,
+       uint64_t deviceExtended),
+      (sequence, panId, coordinatorShort, deviceExtended), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDataRequestShort,
+      (uint8_t sequence, uint16_t panId, uint16_t coordinatorShort,
+       uint16_t deviceShort),
+      (sequence, panId, coordinatorShort, deviceShort), outFrame)
 
-  static bool buildNwkFrame(const ZigbeeNetworkFrame& frame,
-                            const uint8_t* payload, uint8_t payloadLength,
-                            uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildNwkFrame,
+      (const ZigbeeNetworkFrame& frame, const uint8_t* payload,
+       uint8_t payloadLength),
+      (frame, payload, payloadLength), outFrame)
   static bool parseNwkFrame(const uint8_t* frame, uint8_t length,
                             ZigbeeNetworkFrame* outFrame);
-  static bool buildNwkRejoinRequestCommand(uint8_t capabilityInformation,
-                                           uint8_t* outFrame,
-                                           uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildNwkRejoinRequestCommand, (uint8_t capabilityInformation),
+      (capabilityInformation), outFrame)
   static bool parseNwkRejoinRequestCommand(
       const uint8_t* frame, uint8_t length,
       ZigbeeNwkRejoinRequest* outRequest);
-  static bool buildNwkRejoinResponseCommand(uint16_t networkAddress,
-                                            uint8_t status,
-                                            uint8_t* outFrame,
-                                            uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildNwkRejoinResponseCommand,
+      (uint16_t networkAddress, uint8_t status), (networkAddress, status),
+      outFrame)
   static bool parseNwkRejoinResponseCommand(
       const uint8_t* frame, uint8_t length,
       ZigbeeNwkRejoinResponse* outResponse);
-  static bool buildNwkEndDeviceTimeoutRequestCommand(
-      uint8_t requestedTimeout, uint8_t endDeviceConfiguration,
-      uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildNwkEndDeviceTimeoutRequestCommand,
+      (uint8_t requestedTimeout, uint8_t endDeviceConfiguration),
+      (requestedTimeout, endDeviceConfiguration), outFrame)
   static bool parseNwkEndDeviceTimeoutRequestCommand(
       const uint8_t* frame, uint8_t length,
       ZigbeeNwkEndDeviceTimeoutRequest* outRequest);
-  static bool buildNwkEndDeviceTimeoutResponseCommand(
-      uint8_t status, uint8_t parentInformation, uint8_t* outFrame,
-      uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildNwkEndDeviceTimeoutResponseCommand,
+      (uint8_t status, uint8_t parentInformation),
+      (status, parentInformation), outFrame)
   static bool parseNwkEndDeviceTimeoutResponseCommand(
       const uint8_t* frame, uint8_t length,
       ZigbeeNwkEndDeviceTimeoutResponse* outResponse);
 
-  static bool buildApsDataFrame(const ZigbeeApsDataFrame& frame,
-                                const uint8_t* payload, uint8_t payloadLength,
-                                uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsDataFrame,
+      (const ZigbeeApsDataFrame& frame, const uint8_t* payload,
+       uint8_t payloadLength),
+      (frame, payload, payloadLength), outFrame)
   static bool parseApsDataFrame(const uint8_t* frame, uint8_t length,
                                 ZigbeeApsDataFrame* outFrame);
-  static bool buildApsCommandFrame(const ZigbeeApsCommandFrame& frame,
-                                   const uint8_t* payload,
-                                   uint8_t payloadLength, uint8_t* outFrame,
-                                   uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsCommandFrame,
+      (const ZigbeeApsCommandFrame& frame, const uint8_t* payload,
+       uint8_t payloadLength),
+      (frame, payload, payloadLength), outFrame)
   static bool parseApsCommandFrame(const uint8_t* frame, uint8_t length,
                                    ZigbeeApsCommandFrame* outFrame);
-  static bool buildApsAcknowledgementFrame(
-      const ZigbeeApsAcknowledgementFrame& frame, uint8_t* outFrame,
-      uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsAcknowledgementFrame,
+      (const ZigbeeApsAcknowledgementFrame& frame), (frame), outFrame)
   static bool parseApsAcknowledgementFrame(
       const uint8_t* frame, uint8_t length,
       ZigbeeApsAcknowledgementFrame* outFrame);
-  static bool buildApsDataAcknowledgement(const ZigbeeApsDataFrame& request,
-                                          uint8_t* outFrame,
-                                          uint8_t* outLength);
-  static bool buildApsTransportKeyCommand(const ZigbeeApsTransportKey& key,
-                                          uint8_t counter, uint8_t* outFrame,
-                                          uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsDataAcknowledgement, (const ZigbeeApsDataFrame& request),
+      (request), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsTransportKeyCommand,
+      (const ZigbeeApsTransportKey& key, uint8_t counter), (key, counter),
+      outFrame)
   static bool parseApsTransportKeyCommand(const uint8_t* frame, uint8_t length,
                                           ZigbeeApsTransportKey* outKey,
                                           uint8_t* outCounter);
-  static bool buildApsUpdateDeviceCommand(const ZigbeeApsUpdateDevice& device,
-                                          uint8_t counter, uint8_t* outFrame,
-                                          uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsUpdateDeviceCommand,
+      (const ZigbeeApsUpdateDevice& device, uint8_t counter),
+      (device, counter), outFrame)
   static bool parseApsUpdateDeviceCommand(const uint8_t* frame, uint8_t length,
                                           ZigbeeApsUpdateDevice* outDevice,
                                           uint8_t* outCounter);
-  static bool buildApsSwitchKeyCommand(const ZigbeeApsSwitchKey& key,
-                                       uint8_t counter, uint8_t* outFrame,
-                                       uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildApsSwitchKeyCommand,
+      (const ZigbeeApsSwitchKey& key, uint8_t counter), (key, counter),
+      outFrame)
   static bool parseApsSwitchKeyCommand(const uint8_t* frame, uint8_t length,
                                        ZigbeeApsSwitchKey* outKey,
                                        uint8_t* outCounter);
 
-  static bool buildZclFrame(const ZigbeeZclFrame& frame,
-                            const uint8_t* payload, uint8_t payloadLength,
-                            uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZclFrame,
+      (const ZigbeeZclFrame& frame, const uint8_t* payload,
+       uint8_t payloadLength),
+      (frame, payload, payloadLength), outFrame)
   static bool parseZclFrame(const uint8_t* frame, uint8_t length,
                             ZigbeeZclFrame* outFrame);
 
@@ -840,22 +987,33 @@ class ZigbeeCodec {
                                          uint16_t* outAttributeIds,
                                          uint8_t maxAttributeIds,
                                          uint8_t* outCount);
-  static bool buildReadAttributesRequest(const uint16_t* attributeIds,
-                                         uint8_t attributeCount,
-                                         uint8_t transactionSequence,
-                                         uint8_t* outFrame,
-                                         uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildReadAttributesRequest,
+      (const uint16_t* attributeIds, uint8_t attributeCount,
+       uint8_t transactionSequence),
+      (attributeIds, attributeCount, transactionSequence), outFrame)
   static bool parseReadAttributesResponse(
       const uint8_t* payload, uint8_t length,
       ZigbeeReadAttributeRecord* outRecords, uint8_t maxRecords,
       uint8_t* outCount);
   static bool buildWriteAttributesRequest(
       const ZigbeeWriteAttributeRecord* records, uint8_t recordCount,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength,
-      bool noResponse = false);
-  static bool buildWriteAttributesUndividedRequest(
+      uint8_t transactionSequence, uint8_t* outFrame, uint8_t outCapacity,
+      uint8_t* outLength, bool noResponse = false);
+  template <typename ZigbeeOutput>
+  static bool buildWriteAttributesRequest(
       const ZigbeeWriteAttributeRecord* records, uint8_t recordCount,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
+      uint8_t transactionSequence, ZigbeeOutput&& outFrame,
+      uint8_t* outLength, bool noResponse = false) {
+    return buildWriteAttributesRequest(
+        records, recordCount, transactionSequence, outFrame,
+        zigbeeOutputCapacity<ZigbeeOutput>(), outLength, noResponse);
+  }
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildWriteAttributesUndividedRequest,
+      (const ZigbeeWriteAttributeRecord* records, uint8_t recordCount,
+       uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
   static bool parseWriteAttributesResponse(
       const uint8_t* payload, uint8_t length,
       ZigbeeWriteAttributeStatusRecord* outRecords, uint8_t maxRecords,
@@ -864,16 +1022,16 @@ class ZigbeeCodec {
                                              uint8_t length,
                                              uint16_t* outStartAttributeId,
                                              uint8_t* outMaxAttributeIds);
-  static bool buildDiscoverAttributesRequest(uint16_t startAttributeId,
-                                             uint8_t maxAttributeIds,
-                                             uint8_t transactionSequence,
-                                             uint8_t* outFrame,
-                                             uint8_t* outLength);
-  static bool buildDiscoverAttributesExtendedRequest(uint16_t startAttributeId,
-                                                     uint8_t maxAttributeIds,
-                                                     uint8_t transactionSequence,
-                                                     uint8_t* outFrame,
-                                                     uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverAttributesRequest,
+      (uint16_t startAttributeId, uint8_t maxAttributeIds,
+       uint8_t transactionSequence),
+      (startAttributeId, maxAttributeIds, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverAttributesExtendedRequest,
+      (uint16_t startAttributeId, uint8_t maxAttributeIds,
+       uint8_t transactionSequence),
+      (startAttributeId, maxAttributeIds, transactionSequence), outFrame)
   static bool parseDiscoverAttributesResponse(
       const uint8_t* payload, uint8_t length, bool* outDiscoveryComplete,
       ZigbeeDiscoveredAttributeRecord* outRecords, uint8_t maxRecords,
@@ -886,12 +1044,16 @@ class ZigbeeCodec {
                                            uint8_t length,
                                            uint8_t* outStartCommandId,
                                            uint8_t* outMaxCommandIds);
-  static bool buildDiscoverCommandsReceivedRequest(
-      uint8_t startCommandId, uint8_t maxCommandIds,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
-  static bool buildDiscoverCommandsGeneratedRequest(
-      uint8_t startCommandId, uint8_t maxCommandIds,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverCommandsReceivedRequest,
+      (uint8_t startCommandId, uint8_t maxCommandIds,
+       uint8_t transactionSequence),
+      (startCommandId, maxCommandIds, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverCommandsGeneratedRequest,
+      (uint8_t startCommandId, uint8_t maxCommandIds,
+       uint8_t transactionSequence),
+      (startCommandId, maxCommandIds, transactionSequence), outFrame)
   static bool parseDiscoverCommandsResponse(const uint8_t* payload,
                                             uint8_t length,
                                             bool* outDiscoveryComplete,
@@ -902,10 +1064,11 @@ class ZigbeeCodec {
       const uint8_t* payload, uint8_t length,
       ZigbeeReportingConfiguration* outConfigurations,
       uint8_t maxConfigurations, uint8_t* outCount);
-  static bool buildConfigureReportingRequest(
-      const ZigbeeReportingConfiguration* configurations,
-      uint8_t configurationCount, uint8_t transactionSequence,
-      uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildConfigureReportingRequest,
+      (const ZigbeeReportingConfiguration* configurations,
+       uint8_t configurationCount, uint8_t transactionSequence),
+      (configurations, configurationCount, transactionSequence), outFrame)
   static bool parseConfigureReportingResponse(
       const uint8_t* payload, uint8_t length,
       ZigbeeConfigureReportingStatusRecord* outRecords, uint8_t maxRecords,
@@ -914,9 +1077,11 @@ class ZigbeeCodec {
       const uint8_t* payload, uint8_t length,
       ZigbeeReadReportingConfigurationRecord* outRecords, uint8_t maxRecords,
       uint8_t* outCount);
-  static bool buildReadReportingConfigurationRequest(
-      const ZigbeeReadReportingConfigurationRecord* records, uint8_t recordCount,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildReadReportingConfigurationRequest,
+      (const ZigbeeReadReportingConfigurationRecord* records,
+       uint8_t recordCount, uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
   static bool parseReadReportingConfigurationResponse(
       const uint8_t* payload, uint8_t length,
       ZigbeeReadReportingConfigurationResponseRecord* outRecords,
@@ -924,105 +1089,134 @@ class ZigbeeCodec {
   static bool parseAttributeReport(const uint8_t* payload, uint8_t length,
                                    ZigbeeAttributeReportRecord* outRecords,
                                    uint8_t maxRecords, uint8_t* outCount);
-  static bool buildReadAttributesResponse(
-      const ZigbeeReadAttributeRecord* records, uint8_t recordCount,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
-  static bool buildWriteAttributesResponse(
-      const ZigbeeWriteAttributeStatusRecord* records, uint8_t recordCount,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
-  static bool buildDiscoverAttributesResponse(
-      const ZigbeeDiscoveredAttributeRecord* records, uint8_t recordCount,
-      bool discoveryComplete, uint8_t transactionSequence, uint8_t* outFrame,
-      uint8_t* outLength);
-  static bool buildDiscoverAttributesExtendedResponse(
-      const ZigbeeDiscoveredExtendedAttributeRecord* records,
-      uint8_t recordCount, bool discoveryComplete, uint8_t transactionSequence,
-      uint8_t* outFrame, uint8_t* outLength);
-  static bool buildDiscoverCommandsReceivedResponse(
-      const uint8_t* commandIds, uint8_t commandCount, bool discoveryComplete,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
-  static bool buildDiscoverCommandsGeneratedResponse(
-      const uint8_t* commandIds, uint8_t commandCount, bool discoveryComplete,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
-  static bool buildConfigureReportingResponse(
-      const ZigbeeConfigureReportingStatusRecord* records, uint8_t recordCount,
-      uint8_t transactionSequence, uint8_t* outFrame, uint8_t* outLength);
-  static bool buildReadReportingConfigurationResponse(
-      const ZigbeeReadReportingConfigurationResponseRecord* records,
-      uint8_t recordCount, uint8_t transactionSequence, uint8_t* outFrame,
-      uint8_t* outLength);
-  static bool buildAttributeReport(const ZigbeeAttributeReportRecord* records,
-                                   uint8_t recordCount,
-                                   uint8_t transactionSequence,
-                                   uint8_t* outFrame, uint8_t* outLength);
-  static bool buildDefaultResponse(uint8_t transactionSequence,
-                                   bool directionToClient, uint8_t commandId,
-                                   uint8_t status, uint8_t* outFrame,
-                                   uint8_t* outLength);
-  static bool buildZdoNetworkAddressRequest(uint8_t transactionSequence,
-                                            uint64_t ieeeAddressOfInterest,
-                                            bool requestExtendedResponse,
-                                            uint8_t startIndex,
-                                            uint8_t* outPayload,
-                                            uint8_t* outLength);
-  static bool buildZdoIeeeAddressRequest(uint8_t transactionSequence,
-                                         uint16_t nwkAddressOfInterest,
-                                         bool requestExtendedResponse,
-                                         uint8_t startIndex,
-                                         uint8_t* outPayload,
-                                         uint8_t* outLength);
-  static bool buildZdoNodeDescriptorRequest(uint8_t transactionSequence,
-                                            uint16_t nwkAddressOfInterest,
-                                            uint8_t* outPayload,
-                                            uint8_t* outLength);
-  static bool buildZdoPowerDescriptorRequest(uint8_t transactionSequence,
-                                             uint16_t nwkAddressOfInterest,
-                                             uint8_t* outPayload,
-                                             uint8_t* outLength);
-  static bool buildZdoActiveEndpointsRequest(uint8_t transactionSequence,
-                                             uint16_t nwkAddressOfInterest,
-                                             uint8_t* outPayload,
-                                             uint8_t* outLength);
-  static bool buildZdoSimpleDescriptorRequest(uint8_t transactionSequence,
-                                              uint16_t nwkAddressOfInterest,
-                                              uint8_t endpoint,
-                                              uint8_t* outPayload,
-                                              uint8_t* outLength);
-  static bool buildZdoMatchDescriptorRequest(
-      uint8_t transactionSequence, uint16_t nwkAddressOfInterest,
-      uint16_t profileId, const uint16_t* inputClusters,
-      uint8_t inputClusterCount, const uint16_t* outputClusters,
-      uint8_t outputClusterCount, uint8_t* outPayload, uint8_t* outLength);
-  static bool buildZdoBindRequest(uint8_t transactionSequence,
-                                  uint64_t sourceIeeeAddress,
-                                  uint8_t sourceEndpoint, uint16_t clusterId,
-                                  ZigbeeBindingAddressMode destinationMode,
-                                  uint16_t destinationGroup,
-                                  uint64_t destinationIeeeAddress,
-                                  uint8_t destinationEndpoint,
-                                  uint8_t* outPayload, uint8_t* outLength);
-  static bool buildZdoUnbindRequest(uint8_t transactionSequence,
-                                    uint64_t sourceIeeeAddress,
-                                    uint8_t sourceEndpoint,
-                                    uint16_t clusterId,
-                                    ZigbeeBindingAddressMode destinationMode,
-                                    uint16_t destinationGroup,
-                                    uint64_t destinationIeeeAddress,
-                                    uint8_t destinationEndpoint,
-                                    uint8_t* outPayload, uint8_t* outLength);
-  static bool buildZdoMgmtLeaveRequest(uint8_t transactionSequence,
-                                       uint64_t deviceIeeeAddress,
-                                       uint8_t flags, uint8_t* outPayload,
-                                       uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildReadAttributesResponse,
+      (const ZigbeeReadAttributeRecord* records, uint8_t recordCount,
+       uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildWriteAttributesResponse,
+      (const ZigbeeWriteAttributeStatusRecord* records, uint8_t recordCount,
+       uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverAttributesResponse,
+      (const ZigbeeDiscoveredAttributeRecord* records, uint8_t recordCount,
+       bool discoveryComplete, uint8_t transactionSequence),
+      (records, recordCount, discoveryComplete, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverAttributesExtendedResponse,
+      (const ZigbeeDiscoveredExtendedAttributeRecord* records,
+       uint8_t recordCount, bool discoveryComplete,
+       uint8_t transactionSequence),
+      (records, recordCount, discoveryComplete, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverCommandsReceivedResponse,
+      (const uint8_t* commandIds, uint8_t commandCount,
+       bool discoveryComplete, uint8_t transactionSequence),
+      (commandIds, commandCount, discoveryComplete, transactionSequence),
+      outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDiscoverCommandsGeneratedResponse,
+      (const uint8_t* commandIds, uint8_t commandCount,
+       bool discoveryComplete, uint8_t transactionSequence),
+      (commandIds, commandCount, discoveryComplete, transactionSequence),
+      outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildConfigureReportingResponse,
+      (const ZigbeeConfigureReportingStatusRecord* records,
+       uint8_t recordCount, uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildReadReportingConfigurationResponse,
+      (const ZigbeeReadReportingConfigurationResponseRecord* records,
+       uint8_t recordCount, uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildAttributeReport,
+      (const ZigbeeAttributeReportRecord* records, uint8_t recordCount,
+       uint8_t transactionSequence),
+      (records, recordCount, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildDefaultResponse,
+      (uint8_t transactionSequence, bool directionToClient,
+       uint8_t commandId, uint8_t status),
+      (transactionSequence, directionToClient, commandId, status), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoNetworkAddressRequest,
+      (uint8_t transactionSequence, uint64_t ieeeAddressOfInterest,
+       bool requestExtendedResponse, uint8_t startIndex),
+      (transactionSequence, ieeeAddressOfInterest, requestExtendedResponse,
+       startIndex),
+      outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoIeeeAddressRequest,
+      (uint8_t transactionSequence, uint16_t nwkAddressOfInterest,
+       bool requestExtendedResponse, uint8_t startIndex),
+      (transactionSequence, nwkAddressOfInterest, requestExtendedResponse,
+       startIndex),
+      outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoNodeDescriptorRequest,
+      (uint8_t transactionSequence, uint16_t nwkAddressOfInterest),
+      (transactionSequence, nwkAddressOfInterest), outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoPowerDescriptorRequest,
+      (uint8_t transactionSequence, uint16_t nwkAddressOfInterest),
+      (transactionSequence, nwkAddressOfInterest), outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoActiveEndpointsRequest,
+      (uint8_t transactionSequence, uint16_t nwkAddressOfInterest),
+      (transactionSequence, nwkAddressOfInterest), outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoSimpleDescriptorRequest,
+      (uint8_t transactionSequence, uint16_t nwkAddressOfInterest,
+       uint8_t endpoint),
+      (transactionSequence, nwkAddressOfInterest, endpoint), outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoMatchDescriptorRequest,
+      (uint8_t transactionSequence, uint16_t nwkAddressOfInterest,
+       uint16_t profileId, const uint16_t* inputClusters,
+       uint8_t inputClusterCount, const uint16_t* outputClusters,
+       uint8_t outputClusterCount),
+      (transactionSequence, nwkAddressOfInterest, profileId, inputClusters,
+       inputClusterCount, outputClusters, outputClusterCount),
+      outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoBindRequest,
+      (uint8_t transactionSequence, uint64_t sourceIeeeAddress,
+       uint8_t sourceEndpoint, uint16_t clusterId,
+       ZigbeeBindingAddressMode destinationMode, uint16_t destinationGroup,
+       uint64_t destinationIeeeAddress, uint8_t destinationEndpoint),
+      (transactionSequence, sourceIeeeAddress, sourceEndpoint, clusterId,
+       destinationMode, destinationGroup, destinationIeeeAddress,
+       destinationEndpoint),
+      outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoUnbindRequest,
+      (uint8_t transactionSequence, uint64_t sourceIeeeAddress,
+       uint8_t sourceEndpoint, uint16_t clusterId,
+       ZigbeeBindingAddressMode destinationMode, uint16_t destinationGroup,
+       uint64_t destinationIeeeAddress, uint8_t destinationEndpoint),
+      (transactionSequence, sourceIeeeAddress, sourceEndpoint, clusterId,
+       destinationMode, destinationGroup, destinationIeeeAddress,
+       destinationEndpoint),
+      outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoMgmtLeaveRequest,
+      (uint8_t transactionSequence, uint64_t deviceIeeeAddress,
+       uint8_t flags),
+      (transactionSequence, deviceIeeeAddress, flags), outPayload)
   static bool parseZdoMgmtLeaveRequest(const uint8_t* payload, uint8_t length,
                                        uint8_t* outTransactionSequence,
                                        uint64_t* outDeviceIeeeAddress,
                                        uint8_t* outFlags);
-  static bool buildZdoMgmtPermitJoinRequest(uint8_t transactionSequence,
-                                            uint8_t permitDurationSeconds,
-                                            bool trustCenterSignificance,
-                                            uint8_t* outPayload,
-                                            uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER(
+      buildZdoMgmtPermitJoinRequest,
+      (uint8_t transactionSequence, uint8_t permitDurationSeconds,
+       bool trustCenterSignificance),
+      (transactionSequence, permitDurationSeconds, trustCenterSignificance),
+      outPayload)
   static bool parseZdoMgmtPermitJoinRequest(
       const uint8_t* payload, uint8_t length, uint8_t* outTransactionSequence,
       uint8_t* outPermitDurationSeconds,
@@ -1115,22 +1309,28 @@ class ZigbeeHomeAutomationDevice {
   uint8_t macCapabilityFlags() const;
   const ZigbeeHomeAutomationConfig& config() const;
 
-  bool handleZdoRequest(uint16_t clusterId, const uint8_t* request,
-                        uint8_t requestLength, uint16_t* outResponseClusterId,
-                        uint8_t* outPayload, uint8_t* outLength);
-  bool handleZclRequest(uint16_t clusterId, const uint8_t* request,
-                        uint8_t requestLength, uint8_t* outFrame,
-                        uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_OUTPUT_METHOD(
+      handleZdoRequest,
+      (uint16_t clusterId, const uint8_t* request, uint8_t requestLength,
+       uint16_t* outResponseClusterId),
+      (clusterId, request, requestLength, outResponseClusterId), outPayload)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_METHOD(
+      handleZclRequest,
+      (uint16_t clusterId, const uint8_t* request, uint8_t requestLength),
+      (clusterId, request, requestLength), outFrame)
   bool configureReporting(uint16_t clusterId, uint16_t attributeId,
                           ZigbeeZclDataType dataType,
                           uint16_t minimumIntervalSeconds,
                           uint16_t maximumIntervalSeconds,
                           uint32_t reportableChange = 0U);
-  bool buildAttributeReport(uint16_t clusterId, uint8_t transactionSequence,
-                            uint8_t* outFrame, uint8_t* outLength) const;
-  bool buildDueAttributeReport(uint32_t nowMs, uint8_t transactionSequence,
-                               uint16_t* outClusterId, uint8_t* outFrame,
-                               uint8_t* outLength);
+  NRF54_ZIGBEE_DECLARE_CONST_OUTPUT_METHOD(
+      buildAttributeReport,
+      (uint16_t clusterId, uint8_t transactionSequence),
+      (clusterId, transactionSequence), outFrame)
+  NRF54_ZIGBEE_DECLARE_OUTPUT_METHOD(
+      buildDueAttributeReport,
+      (uint32_t nowMs, uint8_t transactionSequence, uint16_t* outClusterId),
+      (nowMs, transactionSequence, outClusterId), outFrame)
   bool commitDueAttributeReport(uint32_t nowMs);
   void discardDueAttributeReport();
   uint8_t reportingConfigurationCount() const;
@@ -1163,14 +1363,16 @@ class ZigbeeHomeAutomationDevice {
   bool removeRoutingTableEntry(uint8_t index);
   uint8_t routingTableCount() const;
   const ZigbeeRoutingTableEntry* routingTableEntries() const;
-  bool buildMgmtLqiResponse(uint8_t transactionSequence, uint8_t startIndex,
-                            const ZigbeeNeighborTableEntry* entries,
-                            uint8_t entryCount, uint8_t* outPayload,
-                            uint8_t* outLength) const;
-  bool buildMgmtRtgResponse(uint8_t transactionSequence, uint8_t startIndex,
-                            const ZigbeeRoutingTableEntry* entries,
-                            uint8_t entryCount, uint8_t* outPayload,
-                            uint8_t* outLength) const;
+  NRF54_ZIGBEE_DECLARE_CONST_OUTPUT_METHOD(
+      buildMgmtLqiResponse,
+      (uint8_t transactionSequence, uint8_t startIndex,
+       const ZigbeeNeighborTableEntry* entries, uint8_t entryCount),
+      (transactionSequence, startIndex, entries, entryCount), outPayload)
+  NRF54_ZIGBEE_DECLARE_CONST_OUTPUT_METHOD(
+      buildMgmtRtgResponse,
+      (uint8_t transactionSequence, uint8_t startIndex,
+       const ZigbeeRoutingTableEntry* entries, uint8_t entryCount),
+      (transactionSequence, startIndex, entries, entryCount), outPayload)
   bool isInGroup(uint16_t groupId) const;
   bool leaveRequested() const;
   uint8_t leaveRequestFlags() const;
@@ -1178,10 +1380,38 @@ class ZigbeeHomeAutomationDevice {
   bool consumeLeaveRequest();
   bool consumeLeaveRequest(uint8_t* outFlags);
 
-  bool buildDeviceAnnounce(uint8_t transactionSequence, uint8_t* outPayload,
-                           uint8_t* outLength) const;
+  NRF54_ZIGBEE_DECLARE_CONST_OUTPUT_METHOD(
+      buildDeviceAnnounce, (uint8_t transactionSequence),
+      (transactionSequence), outPayload)
 
  private:
+  bool handleZdoRequestUnchecked(
+      uint16_t clusterId, const uint8_t* request, uint8_t requestLength,
+      uint16_t* outResponseClusterId, uint8_t* outPayload,
+      uint8_t* outLength);
+  bool handleZclRequestUnchecked(uint16_t clusterId, const uint8_t* request,
+                                 uint8_t requestLength, uint8_t* outFrame,
+                                 uint8_t* outLength);
+  bool buildAttributeReportUnchecked(uint16_t clusterId,
+                                     uint8_t transactionSequence,
+                                     uint8_t* outFrame,
+                                     uint8_t* outLength) const;
+  bool buildDueAttributeReportUnchecked(uint32_t nowMs,
+                                        uint8_t transactionSequence,
+                                        uint16_t* outClusterId,
+                                        uint8_t* outFrame,
+                                        uint8_t* outLength);
+  bool buildMgmtLqiResponseUnchecked(
+      uint8_t transactionSequence, uint8_t startIndex,
+      const ZigbeeNeighborTableEntry* entries, uint8_t entryCount,
+      uint8_t* outPayload, uint8_t* outLength) const;
+  bool buildMgmtRtgResponseUnchecked(
+      uint8_t transactionSequence, uint8_t startIndex,
+      const ZigbeeRoutingTableEntry* entries, uint8_t entryCount,
+      uint8_t* outPayload, uint8_t* outLength) const;
+  bool buildDeviceAnnounceUnchecked(uint8_t transactionSequence,
+                                    uint8_t* outPayload,
+                                    uint8_t* outLength) const;
   bool buildNodeDescriptorResponse(uint8_t transactionSequence,
                                    uint16_t requestNwkAddress,
                                    uint8_t* outPayload,
@@ -1288,5 +1518,10 @@ class ZigbeeHomeAutomationDevice {
   bool leaveRequested_ = false;
   uint8_t leaveRequestFlags_ = 0U;
 };
+
+#undef NRF54_ZIGBEE_DECLARE_CONST_OUTPUT_METHOD
+#undef NRF54_ZIGBEE_DECLARE_OUTPUT_METHOD
+#undef NRF54_ZIGBEE_DECLARE_OUTPUT_BUILDER
+#undef NRF54_ZIGBEE_EXPAND_ARGUMENTS
 
 }  // namespace xiao_nrf54l15

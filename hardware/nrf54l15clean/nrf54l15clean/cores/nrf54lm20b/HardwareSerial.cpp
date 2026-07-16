@@ -255,7 +255,38 @@ static constexpr uint32_t kUarteRxInterruptMask =
 static constexpr uint32_t kUarteTxInterruptMask =
     UARTE_INTENCLR_TXSTOPPED_Msk |
     UARTE_INTENCLR_DMATXBUSERROR_Msk;
-static uint8_t g_ownedConstlatUsers = 0U;
+static volatile uint16_t g_sharedConstlatUsers = 0U;
+
+extern "C" uint8_t nrf54l15_constlat_acquire(void) {
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (g_sharedConstlatUsers == UINT16_MAX) {
+        __set_PRIMASK(primask);
+        return 0U;
+    }
+    if (g_sharedConstlatUsers == 0U) {
+        NRF_POWER->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
+        __DSB();
+        __ISB();
+    }
+    ++g_sharedConstlatUsers;
+    __set_PRIMASK(primask);
+    return 1U;
+}
+
+extern "C" void nrf54l15_constlat_release(void) {
+    const uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (g_sharedConstlatUsers > 0U) {
+        --g_sharedConstlatUsers;
+        if (g_sharedConstlatUsers == 0U) {
+            NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+            __DSB();
+            __ISB();
+        }
+    }
+    __set_PRIMASK(primask);
+}
 
 extern "C" void nrf54l15_wire_handle_shared_irq(const NRF_TWIM_Type* twim);
 
@@ -998,19 +1029,7 @@ void HardwareSerial::requestConstlatIfNeeded() {
         return;
     }
 
-    if (g_ownedConstlatUsers != 0U) {
-        ++g_ownedConstlatUsers;
-        _constlatOwned = true;
-        return;
-    }
-
-    if ((NRF_POWER->CONSTLATSTAT & POWER_CONSTLATSTAT_STATUS_Msk) != 0U) {
-        return;
-    }
-
-    NRF_POWER->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
-    g_ownedConstlatUsers = 1U;
-    _constlatOwned = true;
+    _constlatOwned = nrf54l15_constlat_acquire() != 0U;
 }
 
 void HardwareSerial::releaseConstlatIfNeeded() {
@@ -1018,12 +1037,7 @@ void HardwareSerial::releaseConstlatIfNeeded() {
         return;
     }
 
-    if (g_ownedConstlatUsers > 0U) {
-        --g_ownedConstlatUsers;
-    }
-    if (g_ownedConstlatUsers == 0U) {
-        NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
-    }
+    nrf54l15_constlat_release();
     _constlatOwned = false;
 }
 
@@ -1199,13 +1213,13 @@ bool HardwareSerial::quiesceForSystemOff(uint32_t spinLimit) {
 }
 
 extern "C" void nrf54l15_serial_prepare_idle_sleep(void) {
-    if (g_ownedConstlatUsers != 0U) {
+    if (g_sharedConstlatUsers != 0U) {
         NRF_POWER->TASKS_CONSTLAT = POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
     }
 }
 
 extern "C" uint8_t nrf54l15_constlat_users_active(void) {
-    return (g_ownedConstlatUsers != 0U) ? 1U : 0U;
+    return (g_sharedConstlatUsers != 0U) ? 1U : 0U;
 }
 
 static constexpr uint8_t kSerialPinDisconnected = 0xFFU;

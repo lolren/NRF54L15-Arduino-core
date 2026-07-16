@@ -89,6 +89,7 @@ class BleCsControllerRuntime {
   uint8_t packetHead_ = 0U;
   uint8_t packetTail_ = 0U;
   uint8_t packetCount_ = 0U;
+  uint32_t radioOwnershipToken_ = 0U;
   bool active_ = false;
   bool testRunning_ = false;
   bool testComplete_ = false;

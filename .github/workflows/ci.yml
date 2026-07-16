@@ -76,15 +76,15 @@ jobs:
           - sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Runtime/RuntimePeripheralPinRemap
             options: clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeePingInitiator
-            options: clean_ble=off
+            options: clean_zigbee=on,clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeePongResponder
-            options: clean_ble=off
+            options: clean_zigbee=on,clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeCoordinator
-            options: clean_ble=off
+            options: clean_zigbee=on,clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeEndDevice
-            options: clean_ble=off
+            options: clean_zigbee=on,clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeRouter
-            options: clean_ble=off
+            options: clean_zigbee=on,clean_ble=off
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadCoreStageProbe
             options: clean_thread=stage
           - sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Thread/OpenThreadPlatformSkeletonProbe
@@ -257,6 +257,42 @@ jobs:
       - name: Core I/O sanitizer and vector contracts
         run: python3 ./scripts/test_core_io_regressions.py
 
+      - name: Zigbee codec and authenticated-security regressions
+        run: python3 ./scripts/test_zigbee_codec_security_regressions.py
+
+      - name: Zigbee output-capacity and atomicity contracts
+        run: python3 ./scripts/test_zigbee_codec_capacity_contracts.py
+
+      - name: Zigbee plaintext rejection and frame-counter hardening
+        run: python3 ./scripts/test_zigbee_security_hardening.py
+
+      - name: Zigbee compile-time feature-gate contracts
+        run: python3 ./scripts/test_zigbee_feature_gate.py
+
+      - name: Zigbee power-fail-safe persistence contracts
+        run: python3 ./scripts/test_zigbee_persistence_journal.py
+
+      - name: Zigbee Trust Center persistence and key contracts
+        run: python3 ./scripts/test_zigbee_coordinator_security_contracts.py
+
+      - name: Zigbee radio, clock, and silicon-errata contracts
+        run: python3 ./scripts/test_zigbee_radio_hardware_contracts.py
+
+      - name: Exclusive RADIO arbiter ownership contracts
+        run: python3 ./scripts/test_exclusive_radio_arbiter_contracts.py
+
+      - name: Zigbee hardware-validator result contracts
+        run: python3 ./scripts/test_zigbee_validation_contracts.py
+
+      - name: BLE background connection handoff contracts
+        run: python3 ./scripts/test_ble_background_connection_handoff.py
+
+      - name: BLE connection and encryption regression contracts
+        run: python3 ./scripts/test_ble_connection_regression_contracts.py
+
+      - name: BLE controller-state contracts
+        run: python3 ./scripts/test_ble_controller_state.py
+
       - name: Bluefruit client, HID, signed-write, and DFU contracts
         run: python3 ./scripts/test_bluefruit_client_contracts.py
 
@@ -360,8 +396,20 @@ jobs:
             options: clean_thread=stage,clean_matter=stage
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Matter/MatterPaseCryptoTest
           - board: xiao_nrf54l15
-            options: clean_ble=off
+            options: clean_zigbee=on,clean_ble=off
             sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/ZigbeeCoordinator
+          - board: xiao_nrf54l15
+            options: clean_zigbee=on,clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/Coordinator/ZigbeeCoordinatorBasic
+          - board: xiao_nrf54lm20b
+            options: clean_zigbee=on,clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/Coordinator/ZigbeeCoordinatorBasic
+          - board: xiao_nrf54l15
+            options: clean_zigbee=on,clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/LowPower/ZigbeeSleepyClimateSensor15s
+          - board: xiao_nrf54lm20b
+            options: clean_zigbee=on,clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/Lights/ZigbeeHaOnOffPorchLight
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -390,6 +438,49 @@ jobs:
             "${GITHUB_WORKSPACE}/${{ matrix.sketch }}" 2>&1 | tee "${build_log}"
           if grep -Fq "warning:" "${build_log}"; then
             echo "Compiler warnings are not allowed in audit-contract builds."
+            grep -F "warning:" "${build_log}"
+            exit 1
+          fi
+
+  zigbee-strict-capacity-compiles:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: xiao_nrf54l15
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/Coordinator/ZigbeeHaCoordinatorJoinDemo
+          - board: xiao_nrf54lm20b
+            sketch: hardware/nrf54l15clean/nrf54l15clean/libraries/Nrf54L15-Clean-Implementation/examples/Zigbee/Lights/ZigbeeHaOnOffPorchLight
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2
+
+      - name: Install compiler dependency
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:mbed_nano
+
+      - name: Register isolated local core
+        run: |
+          mkdir -p "${HOME}/Arduino/hardware/localnrf54"
+          ln -sfn "${GITHUB_WORKSPACE}/hardware/nrf54l15clean/nrf54l15clean" \
+            "${HOME}/Arduino/hardware/localnrf54/nrf54l15clean"
+
+      - name: Compile with explicit output capacities required
+        run: |
+          set -o pipefail
+          build_log="${RUNNER_TEMP}/zigbee-strict-capacity.log"
+          arduino-cli compile \
+            --warnings all \
+            --fqbn "localnrf54:nrf54l15clean:${{ matrix.board }}:clean_zigbee=on,clean_ble=off" \
+            --build-property "build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=1 -DNRF54L15_CLEAN_ZIGBEE_REQUIRE_EXPLICIT_OUTPUT_CAPACITY=1" \
+            "${GITHUB_WORKSPACE}/${{ matrix.sketch }}" 2>&1 | tee "${build_log}"
+          if grep -Fq "warning:" "${build_log}"; then
+            echo "Compiler warnings are not allowed in strict Zigbee builds."
             grep -F "warning:" "${build_log}"
             exit 1
           fi

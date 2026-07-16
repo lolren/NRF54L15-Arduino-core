@@ -265,6 +265,13 @@ class ZigbeeCommissioning {
                                   uint64_t localIeee,
                                   uint8_t capabilityInformation,
                                   ZigbeeEndDeviceCommonState* state);
+  // Security-preserving overload. The caller must obtain frameCounter from a
+  // ZigbeeOutgoingFrameCounterAllocator before entering this operation.
+  static bool performSecureRejoin(ZigbeeRadio& radio, uint8_t* ioMacSequence,
+                                  uint64_t localIeee,
+                                  uint8_t capabilityInformation,
+                                  ZigbeeEndDeviceCommonState* state,
+                                  uint32_t frameCounter);
   static bool acceptTransportKeyCommand(
       const ZigbeeEndDeviceCommonState& state, uint64_t localIeee,
       uint16_t sourceShort, uint64_t securedSourceIeee, bool nwkSecured,

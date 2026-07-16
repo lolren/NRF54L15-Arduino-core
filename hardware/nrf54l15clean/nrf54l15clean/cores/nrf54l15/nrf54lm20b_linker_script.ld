@@ -3,8 +3,9 @@
  *
  * Memory Layout (no FLPR co-processor, all RAM for CPUAPP):
  * - RRAM:  2036 KB total (0x00000000 - 0x001FD000)
+ *   - 4 KB reserved for the Zigbee crash-safe journal
  *   - 8 KB reserved at the top for multibond and legacy persistence
- *   - 2028 KB usable for code/rodata/data loads
+ *   - 2024 KB usable for code/rodata/data loads
  * - RAM: application range 0x20000000 - 0x2007FD40 (523584 bytes)
  *   - 0x2007FD40 and above is reserved for VPR saved context and ProtectedRAM
  *   - The top 4 KB of application RAM is reserved for the CPUAPP stack
@@ -18,7 +19,8 @@ ENTRY(Reset_Handler)
 
 MEMORY
 {
-    FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x1FB000
+    FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x1FA000
+    FLASH_ZIGBEE (r) : ORIGIN = 0x001FA000, LENGTH = 0x1000
     FLASH_BOND_DB (r) : ORIGIN = 0x001FB000, LENGTH = 0x1000
     FLASH_BOND (r)  : ORIGIN = 0x001FC000, LENGTH = 0x1000
     RAM (rwx)       : ORIGIN = 0x20000000, LENGTH = 0x7FD40
@@ -90,6 +92,18 @@ SECTIONS
         *(.rodata*)
         . = ALIGN(4);
     } >FLASH
+
+    .zigbee_storage ORIGIN(FLASH_ZIGBEE) (NOLOAD) :
+    {
+        . = ALIGN(16);
+        _szigbee_storage = .;
+        KEEP(*(.zigbee_storage))
+        KEEP(*(.zigbee_storage*))
+        . = ALIGN(16);
+        _ezigbee_storage = .;
+    } >FLASH_ZIGBEE
+    ASSERT(SIZEOF(.zigbee_storage) <= 0x1000,
+           "Zigbee persistence exceeds its dedicated 4 KB page")
 
     .bond_db_storage ORIGIN(FLASH_BOND_DB) (NOLOAD) :
     {

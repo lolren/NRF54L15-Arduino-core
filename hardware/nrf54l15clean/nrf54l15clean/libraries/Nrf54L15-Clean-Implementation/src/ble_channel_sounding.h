@@ -1305,6 +1305,11 @@ struct BleCsPeerResultMetadata {
 class BleChannelSoundingRadio {
  public:
   explicit BleChannelSoundingRadio(uint32_t radioBase = nrf54l15::RADIO_BASE);
+  ~BleChannelSoundingRadio();
+  BleChannelSoundingRadio(const BleChannelSoundingRadio&) = delete;
+  BleChannelSoundingRadio& operator=(const BleChannelSoundingRadio&) = delete;
+  BleChannelSoundingRadio(BleChannelSoundingRadio&&) = delete;
+  BleChannelSoundingRadio& operator=(BleChannelSoundingRadio&&) = delete;
 
   bool begin(const BleCsConfig& config = BleCsConfig());
   void end();
@@ -1638,9 +1643,11 @@ class BleChannelSoundingRadio {
   uint8_t makeCteInfo() const;
 
   NRF_RADIO_Type* radio_;
+  uint32_t radioOwnershipToken_;
   PowerManager power_;
   BleCsConfig config_;
   bool initialized_;
+  bool hfxoOwned_;
   alignas(4) uint8_t txPacket_[3U + 255U];
   alignas(4) uint8_t rxPacket_[3U + 255U];
   alignas(4) uint8_t dfePacket_[512U];

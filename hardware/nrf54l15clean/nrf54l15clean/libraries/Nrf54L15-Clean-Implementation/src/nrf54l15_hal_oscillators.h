@@ -121,17 +121,19 @@ class Oscillators {
     writeReg(kEventsPllStarted, 0);
     if (source == HfclkSource::kHfxo) {
       writeReg(kEventsXoStarted, 0);
-      startHfxo();
     }
     // PLLSTART is a keep-running request, not a runtime frequency change.
+    // nRF54L anomaly 39 requires it before XOSTART.
     startPll();
+    if (source == HfclkSource::kHfxo) startHfxo();
   }
 
   inline static void stopHfclk() {
     const HfclkSource source = requestedHfclkSource();
     if (!hfclkSourceSupported(source)) return;
-    stopPll();
+    // Pair anomaly-39 shutdown in the required XOSTOP, PLLSTOP order.
     if (source == HfclkSource::kHfxo) stopHfxo();
+    stopPll();
   }
 
   inline static bool hfclkStarted(bool clear = true) {

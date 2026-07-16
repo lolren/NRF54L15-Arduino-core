@@ -10,6 +10,8 @@ from pathlib import Path
 
 import serial
 
+from zigbee_validation_common import default_output_dir, write_boolean_summary
+
 
 def _pump_serial(ser, sink, path, stop_flag):
     with open(path, "w", buffering=1) as handle:
@@ -149,7 +151,9 @@ def main():
     parser.add_argument("--target-ieee", default="0xd0acf9feff59226e")
     parser.add_argument("--permit-join-entity", default="switch.zigbee2mqtt_bridge_permit_join")
     parser.add_argument("--timeout-s", type=int, default=150)
-    parser.add_argument("--outdir", default="/home/lolren/Desktop/Nrf54L15/.build/zigbee_sleepy_ha_validation")
+    parser.add_argument(
+        "--outdir", default=default_output_dir("zigbee_sleepy_ha_validation")
+    )
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -279,18 +283,13 @@ def main():
         ),
     }
 
-    with open(summary_file, "w") as handle:
-        for key, value in summary.items():
-            handle.write(f"{key}={str(value).lower()}\n")
-
-    print(summary_file)
-    for key, value in summary.items():
-        print(f"{key}={str(value).lower()}")
+    result = write_boolean_summary(summary_file, summary)
     if after_states:
         print("entities_after:")
         for line in _summarize_entities(after_states):
             print(line)
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

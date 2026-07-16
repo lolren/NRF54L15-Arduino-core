@@ -1,6 +1,7 @@
 BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
     : radio_(reinterpret_cast<NRF_RADIO_Type*>(static_cast<uintptr_t>(radioBase))),
       ficr_(reinterpret_cast<NRF_FICR_Type*>(static_cast<uintptr_t>(ficrBase))),
+      radioOwnershipToken_(0U),
       initialized_(false),
       addressType_(BleAddressType::kRandomStatic),
       localIdentityAddressValid_(false),
@@ -183,6 +184,7 @@ BleRadio::BleRadio(uint32_t radioBase, uint32_t ficrBase)
       backgroundAdvertisingRfPathCollapsed_(false),
       backgroundAdvertisingUseIrqTxKick_(bleBackgroundAdvertisingInitialUseIrqTxKick()),
       backgroundAdvertisingManageLatency_(false),
+      backgroundAdvertisingLatencyLeaseOwned_(false),
       backgroundAdvertisingConstlatHardwareVerified_(false),
       backgroundAdvertisingAwaitingHfxoTuned_(false),
       backgroundAdvertisingChannel_(BleAdvertisingChannel::k37),
@@ -646,14 +648,23 @@ bool BleRadio::beginUnconnectedRadioActivity(uint32_t spinLimit) {
   return ok;
 }
 
-void BleRadio::endUnconnectedRadioActivity() {
+bool BleRadio::endUnconnectedRadioActivity() {
+  if (connected_) {
+    return true;
+  }
+  if (radio_ != nullptr && !rawRadioDisabled(radio_)) {
+    bleDetachRadioRestartAutomation(radio_);
+    radio_->EVENTS_DISABLED = 0U;
+    radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+    if (!waitRadioStateDisabledBudgeted(radio_, 3000U, 120000UL)) {
+      return false;
+    }
+  }
   if (g_ble_unconnected_radio_active != 0U) {
     ++g_ble_unconnected_radio_end_count;
     g_ble_unconnected_radio_last_end_us = bleTimingUs();
-    if (!connected_) {
-      ClockControl::stopHfxo();
-      releaseRfPathForBle();
-    }
+    ClockControl::stopHfxo();
+    releaseRfPathForBle();
     if (!backgroundServicesActive() && NRF_GRTC != nullptr) {
       NRF54L15_GRTC_SYSCOUNTER(NRF_GRTC).ACTIVE =
           (GRTC_SYSCOUNTER_ACTIVE_ACTIVE_NotActive
@@ -661,7 +672,7 @@ void BleRadio::endUnconnectedRadioActivity() {
       __asm volatile("dsb 0xF" ::: "memory");
     }
     g_ble_unconnected_radio_active = 0U;
-  } else if (!connected_) {
+  } else {
     ClockControl::stopHfxo();
     releaseRfPathForBle();
     if (!backgroundServicesActive() && NRF_GRTC != nullptr) {
@@ -671,9 +682,14 @@ void BleRadio::endUnconnectedRadioActivity() {
       __asm volatile("dsb 0xF" ::: "memory");
     }
   }
+  return true;
 }
 
 bool BleRadio::begin(int8_t txPowerDbm) {
+  if (g_bleRadioHardwareQuarantined != 0U || initialized_ ||
+      radioOwnershipToken_ != 0U || radio_ == nullptr) {
+    return false;
+  }
   connected_ = false;
   connectionRole_ = BleConnectionRole::kNone;
   connectionFreshTxAllowed_ = true;
@@ -699,6 +715,20 @@ bool BleRadio::begin(int8_t txPowerDbm) {
   return false;
 #endif
 
+  radioOwnershipToken_ =
+      nrf54l15_acquire_exclusive_radio(Nrf54ExclusiveRadioOwner::kBle);
+  if (radioOwnershipToken_ == 0U) {
+    return false;
+  }
+  const auto failBegin = [this]() {
+    if (rawRadioDisabled(radio_)) {
+      endUnconnectedRadioActivity();
+      (void)releaseExclusiveRadioIfDisabled(Nrf54ExclusiveRadioOwner::kBle,
+                                            &radioOwnershipToken_, radio_);
+    }
+    return false;
+  };
+
   // Observe the current RF switch routing without overriding sketch-managed
   // GPIO state. Tools > Antenna still sets the startup default in initVariant().
   setBoardDesiredAntennaPath(BoardControl::antennaPath());
@@ -707,51 +737,43 @@ bool BleRadio::begin(int8_t txPowerDbm) {
   initBleGrtc();
 
   if (!beginUnconnectedRadioActivity(1500000UL)) {
-    return false;
+    return failBegin();
   }
 
   if (!configureBle1M()) {
-    endUnconnectedRadioActivity();
-    return false;
+    return failBegin();
   }
   if (!setTxPowerDbm(txPowerDbm)) {
-    endUnconnectedRadioActivity();
-    return false;
+    return failBegin();
   }
 
   uint8_t fallbackAddress[6] = {0xC0, 0x54, 0x15, 0x00, 0x00, 0x00};
   if (!loadAddressFromFicr(false)) {
     if (!setDeviceAddress(fallbackAddress, BleAddressType::kRandomStatic)) {
-      endUnconnectedRadioActivity();
-      return false;
+      return failBegin();
     }
   }
 
   if (advDataLen_ == 0U) {
     if (!setAdvertisingName("XIAO-nRF54L15", true)) {
-      endUnconnectedRadioActivity();
-      return false;
+      return failBegin();
     }
   } else if (!buildAdvertisingPacket()) {
-    endUnconnectedRadioActivity();
-    return false;
+    return failBegin();
   }
 
   if (scanRspDataLen_ == 0U) {
     if (!setScanResponseName("XIAO-nRF54L15")) {
-      endUnconnectedRadioActivity();
-      return false;
+      return failBegin();
     }
     scanRspDataAutoDefault_ = true;
   } else if (!buildScanResponsePacket()) {
-    endUnconnectedRadioActivity();
-    return false;
+    return failBegin();
   }
 
   if (gapDeviceNameLen_ == 0U) {
     if (!setGattDeviceName("XIAO-nRF54L15")) {
-      endUnconnectedRadioActivity();
-      return false;
+      return failBegin();
     }
   }
 
@@ -759,13 +781,79 @@ bool BleRadio::begin(int8_t txPowerDbm) {
   // Secure Connections material is generated lazily when an SC pairing flow
   // actually starts. Keeping begin() side-effect free is important for
   // advertising-only / insecure BLE power.
-  endUnconnectedRadioActivity();
+  if (!endUnconnectedRadioActivity()) {
+    return false;
+  }
   initialized_ = true;
   g_activeBleRadio = this;
   return true;
 }
 
+BleRadio::~BleRadio() {
+  if (radioOwnershipToken_ == 0U) {
+    const uint32_t irqState = bleEnterCritical();
+    if (g_activeBleRadio == this) {
+      g_activeBleRadio = nullptr;
+    }
+    if (g_bleBackgroundRadio == this) {
+      g_bleBackgroundRadio = nullptr;
+    }
+    bleExitCritical(irqState);
+    return;
+  }
+  end();
+  if (radioOwnershipToken_ == 0U) {
+    return;
+  }
+
+  // end() deliberately preserves ownership when RADIO never reaches Disabled.
+  // A destructor cannot preserve a pointer to dead storage, so detach the IRQ
+  // owner and quarantine the physical radio and its power leases until reset.
+  bleBackgroundDisableClockIrq();
+  bleBackgroundDisableCompare();
+  bleDisableCompare(kBleBackgroundAdvPrewarmCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvTxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvCleanupCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage1ServiceCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage1TxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage2ServiceCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage2TxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvFinalCleanupCompareChannel, true);
+  bleDisableCompare(kBleBackgroundConnPrewarmCompareChannel, true);
+  bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+  bleBackgroundAdvertisingConfigureRandomSource(false);
+  (void)configureBackgroundAdvertisingHardware(false);
+  (void)configureBackgroundConnectionHardware(false);
+  bleDetachRadioRestartAutomation(radio_);
+  const uint32_t irqState = bleEnterCritical();
+  if (g_activeBleRadio == this) {
+    g_activeBleRadio = nullptr;
+  }
+  if (g_bleBackgroundRadio == this) {
+    g_bleBackgroundRadio = nullptr;
+  }
+  g_bleBackgroundPendSvPending = 0U;
+  blePendSvClearPending();
+  g_bleRadioHardwareQuarantined = 1U;
+  bleExitCritical(irqState);
+
+  if (radioOwnershipToken_ != 0U) {
+    (void)nrf54l15_quarantine_exclusive_radio(
+        Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_);
+  }
+  nrf54l15_exclusive_radio_fail_stop();
+}
+
 void BleRadio::end() {
+  if (radioOwnershipToken_ == 0U) {
+    connected_ = false;
+    initialized_ = false;
+    return;
+  }
+  if (!nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_)) {
+    return;
+  }
   if (radio_ == nullptr) {
     connected_ = false;
     stopBackgroundAdvertising();
@@ -780,13 +868,56 @@ void BleRadio::end() {
     if (g_activeBleRadio == this) {
       g_activeBleRadio = nullptr;
     }
+    if (g_bleBackgroundRadio == this) {
+      g_bleBackgroundRadio = nullptr;
+    }
     endUnconnectedRadioActivity();
+    (void)releaseExclusiveRadioIfDisabled(Nrf54ExclusiveRadioOwner::kBle,
+                                          &radioOwnershipToken_, radio_);
     return;
   }
 
-  radio_->SHORTS = 0U;
+  // Make every asynchronous source inert before proving RADIO Disabled.
+  // Power/HFXO/CONSTLAT ownership is intentionally retained until that proof.
+  bleBackgroundDisableClockIrq();
+  bleBackgroundAdvertisingConfigureRandomSource(false);
+  const uint32_t teardownIrqState = bleEnterCritical();
+  backgroundAdvertisingEnabled_ = false;
+  backgroundAdvertisingArmed_ = false;
+  backgroundAdvertisingInProgress_ = false;
+  backgroundAdvertisingDue_ = false;
+  backgroundAdvertisingAwaitingHfxoTuned_ = false;
+  backgroundConnectionServiceEnabled_ = false;
+  backgroundConnectionServiceArmed_ = false;
+  backgroundConnectionServiceInProgress_ = false;
+  backgroundConnectionServiceDue_ = false;
+  backgroundConnectionEventWakeArmed_ = false;
+  bleDisableCompare(kBleBackgroundAdvPrewarmCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvTxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvCleanupCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage1ServiceCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage1TxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage2ServiceCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvStage2TxCompareChannel, true);
+  bleDisableCompare(kBleBackgroundAdvFinalCleanupCompareChannel, true);
+  bleDisableCompare(kBleBackgroundConnPrewarmCompareChannel, true);
+  bleDisableCompare(kBleBackgroundConnRxCompareChannel, true);
+  (void)configureBackgroundAdvertisingHardware(false);
+  (void)configureBackgroundConnectionHardware(false);
+  g_bleBackgroundPendSvPending = 0U;
+  blePendSvClearPending();
+  NVIC->ICPR[static_cast<uint32_t>(kBleBackgroundGrtcIrq) >> 5U] =
+      (1UL << (static_cast<uint32_t>(kBleBackgroundGrtcIrq) & 0x1FUL));
+  bleExitCritical(teardownIrqState);
+
+  bleDetachRadioRestartAutomation(radio_);
+  radio_->EVENTS_DISABLED = 0U;
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-  waitDisabled(120000UL);
+  if (!waitRadioStateDisabledBudgeted(radio_, 0U, 120000UL)) {
+    // Keep the owner, connection state, HFXO, RF path, and any shared latency
+    // lease intact. A later end() call may retry the hardware quiesce.
+    return;
+  }
   clearRadioCoreEvents(radio_);
   connected_ = false;
   stopBackgroundAdvertising();
@@ -798,14 +929,32 @@ void BleRadio::end() {
   clearChannelSoundingLlControlState();
   clearQueuedConnectionEvents();
   clearCustomGattConnectionState();
+  const uint32_t irqState = bleEnterCritical();
+  deferredConnectionEventHead_ = 0U;
+  deferredConnectionEventTail_ = 0U;
+  deferredConnectionEventCount_ = 0U;
+  deferredGattWriteHead_ = 0U;
+  deferredGattWriteTail_ = 0U;
+  deferredGattWriteCount_ = 0U;
+  deferredTraceHead_ = 0U;
+  deferredTraceTail_ = 0U;
+  deferredTraceCount_ = 0U;
   if (g_activeBleRadio == this) {
     g_activeBleRadio = nullptr;
   }
+  if (g_bleBackgroundRadio == this) {
+    g_bleBackgroundRadio = nullptr;
+  }
+  bleExitCritical(irqState);
   endUnconnectedRadioActivity();
+  (void)releaseExclusiveRadioIfDisabled(Nrf54ExclusiveRadioOwner::kBle,
+                                        &radioOwnershipToken_, radio_);
 }
 
 bool BleRadio::setTxPowerDbm(int8_t dbm) {
-  if (radio_ == nullptr) {
+  if (radio_ == nullptr ||
+      !nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_)) {
     return false;
   }
   txPowerDbm_ = dbm;
@@ -816,6 +965,10 @@ bool BleRadio::setTxPowerDbm(int8_t dbm) {
 }
 
 bool BleRadio::selectExternalAntenna(bool external) {
+  if (!nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kBle, radioOwnershipToken_)) {
+    return false;
+  }
   if (!Gpio::configure(kPinRfSwitchCtl, GpioDirection::kOutput,
                        GpioPull::kDisabled)) {
     return false;

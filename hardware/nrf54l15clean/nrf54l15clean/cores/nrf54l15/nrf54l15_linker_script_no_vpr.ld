@@ -3,8 +3,9 @@
  *
  * Memory Layout:
  * - RRAM:  1524 KB total (0x00000000 - 0x0017D000)
+ *   - 4 KB reserved for the Zigbee crash-safe journal
  *   - 8 KB reserved at the top for multibond and legacy persistence
- *   - 1516 KB usable for code/rodata/data loads
+ *   - 1512 KB usable for code/rodata/data loads
  * - RAM:   256 KB total (0x20000000 - 0x20040000)
  *   - top 512 B reserved for the existing saved-context window
  *   - no CPUAPP<->VPR transport windows are reserved
@@ -19,7 +20,8 @@ ENTRY(Reset_Handler)
 /* Memory Regions */
 MEMORY
 {
-    FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x17B000
+    FLASH (rx)      : ORIGIN = 0x00000000, LENGTH = 0x17A000
+    FLASH_ZIGBEE (r) : ORIGIN = 0x0017A000, LENGTH = 0x1000
     FLASH_BOND_DB (r) : ORIGIN = 0x0017B000, LENGTH = 0x1000
     FLASH_BOND (r)  : ORIGIN = 0x0017C000, LENGTH = 0x1000
     RAM (rwx)       : ORIGIN = 0x20000000, LENGTH = 0x3FE00
@@ -109,6 +111,18 @@ SECTIONS
         *(.rodata*)              /* .rodata* sections */
         . = ALIGN(4);
     } >FLASH
+
+    .zigbee_storage ORIGIN(FLASH_ZIGBEE) (NOLOAD) :
+    {
+        . = ALIGN(16);
+        _szigbee_storage = .;
+        KEEP(*(.zigbee_storage))
+        KEEP(*(.zigbee_storage*))
+        . = ALIGN(16);
+        _ezigbee_storage = .;
+    } >FLASH_ZIGBEE
+    ASSERT(SIZEOF(.zigbee_storage) <= 0x1000,
+           "Zigbee persistence exceeds its dedicated 4 KB page")
 
     .bond_db_storage ORIGIN(FLASH_BOND_DB) (NOLOAD) :
     {

@@ -48,6 +48,33 @@ constexpr size_t kMinimumControllerPbrChannels = 4U;
 constexpr size_t kMinimumControllerRttPairs = 3U;
 constexpr float kMinimumControllerPbrSpanHz = 10000000.0f;
 constexpr float kMaximumControllerPbrResidualVariance = 0.50f;
+
+bool channelSoundingHfxoRunning() {
+  return ((NRF_CLOCK->XO.STAT & CLOCK_XO_STAT_STATE_Msk) >>
+          CLOCK_XO_STAT_STATE_Pos) == CLOCK_XO_STAT_STATE_Running;
+}
+
+bool channelSoundingRadioDisabled(const NRF_RADIO_Type* radio) {
+  return radio == nullptr ||
+         (((radio->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos) ==
+          RADIO_STATE_STATE_Disabled);
+}
+
+bool releaseRawCsRadioOwnershipIfDisabled(uint32_t* token,
+                                          NRF_RADIO_Type* radio) {
+  if (token == nullptr || *token == 0U) {
+    return true;
+  }
+  if (!channelSoundingRadioDisabled(radio) ||
+      !nrf54l15_scrub_owned_radio_dma(
+          Nrf54ExclusiveRadioOwner::kRawChannelSounding, *token, radio) ||
+      !nrf54l15_release_exclusive_radio(
+          Nrf54ExclusiveRadioOwner::kRawChannelSounding, *token)) {
+    return false;
+  }
+  *token = 0U;
+  return true;
+}
 constexpr uint8_t kCsChmapLen = 10U;
 constexpr uint8_t kAntennaId1 = 0x1U;
 constexpr uint8_t kAntennaId2 = 0x2U;
@@ -1014,6 +1041,30 @@ bool waitForFlag(volatile uint32_t* flag, uint32_t budgetUs) {
   return (*flag != 0U);
 }
 
+bool stopAndDisableAuxDataDma(NRF_RADIO_Type* radio, uint32_t budgetUs) {
+  if (radio == nullptr) {
+    return false;
+  }
+  const bool enabled = radio->AUXDATADMA[0].ENABLE != 0U ||
+                       radio->AUXDATADMA[1].ENABLE != 0U;
+  if (enabled && radio->EVENTS_AUXDATADMAEND == 0U) {
+    radio->TASKS_AUXDATADMASTOP =
+        RADIO_TASKS_AUXDATADMASTOP_TASKS_AUXDATADMASTOP_Trigger;
+    if (!waitForFlag(&radio->EVENTS_AUXDATADMAEND, budgetUs)) {
+      return false;
+    }
+  }
+  for (uint8_t i = 0U; i < 2U; ++i) {
+    radio->AUXDATADMA[i].ENABLE =
+        (RADIO_AUXDATADMA_ENABLE_ENABLE_Disabled
+         << RADIO_AUXDATADMA_ENABLE_ENABLE_Pos) &
+        RADIO_AUXDATADMA_ENABLE_ENABLE_Msk;
+    radio->AUXDATA.CNF[i] = 0U;
+  }
+  __DSB();
+  return true;
+}
+
 void waitElapsedMicros(uint32_t waitUs) {
   if (waitUs == 0U) {
     return;
@@ -1059,10 +1110,6 @@ bool waitForRadioDisabled(NRF_RADIO_Type* radio, uint32_t budgetUs) {
   uint8_t divider = kMicrosPollDivider;
   uint32_t spins = kSpinLimit;
   while (spins-- > 0U) {
-    if (radio->EVENTS_DISABLED != 0U) {
-      return true;
-    }
-
     const uint32_t state =
         (radio->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
     if (state == RADIO_STATE_STATE_Disabled) {
@@ -1080,8 +1127,7 @@ bool waitForRadioDisabled(NRF_RADIO_Type* radio, uint32_t budgetUs) {
 
   const uint32_t state =
       (radio->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
-  return (radio->EVENTS_DISABLED != 0U) ||
-         (state == RADIO_STATE_STATE_Disabled);
+  return state == RADIO_STATE_STATE_Disabled;
 }
 
 bool waitForRadioPhyEnd(NRF_RADIO_Type* radio, uint32_t budgetUs) {
@@ -1879,9 +1925,11 @@ static const uint8_t kAntennaPathLut4[24][5] = {
 
 BleChannelSoundingRadio::BleChannelSoundingRadio(uint32_t radioBase)
     : radio_(reinterpret_cast<NRF_RADIO_Type*>(static_cast<uintptr_t>(radioBase))),
+      radioOwnershipToken_(0U),
       power_(),
       config_(),
       initialized_(false),
+      hfxoOwned_(false),
       txPacket_{0},
       rxPacket_{0},
       dfePacket_{0},
@@ -1892,9 +1940,29 @@ BleChannelSoundingRadio::BleChannelSoundingRadio(uint32_t radioBase)
       lastReflectorStatus_(0U),
       lastReflectorTiming_() {}
 
+BleChannelSoundingRadio::~BleChannelSoundingRadio() {
+  if (initialized_ || hfxoOwned_ || radioOwnershipToken_ != 0U) {
+    end();
+  }
+  if (radio_ != nullptr &&
+      ((radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos) !=
+          RADIO_STATE_STATE_Disabled) {
+    power_.quarantineConstantLatencyLease();
+  }
+  if (radioOwnershipToken_ != 0U) {
+    (void)nrf54l15_quarantine_exclusive_radio(
+        Nrf54ExclusiveRadioOwner::kRawChannelSounding,
+        radioOwnershipToken_);
+    nrf54l15_exclusive_radio_fail_stop();
+  }
+}
+
 bool BleChannelSoundingRadio::begin(const BleCsConfig& config) {
   if (radio_ == nullptr) {
     initialized_ = false;
+    return false;
+  }
+  if (initialized_ || radioOwnershipToken_ != 0U) {
     return false;
   }
   if (!validLogicalChannel(config.controlChannel) || config.maxPayloadLength == 0U ||
@@ -1905,17 +1973,47 @@ bool BleChannelSoundingRadio::begin(const BleCsConfig& config) {
     return false;
   }
 
-  config_ = config;
-
-  if (!ClockControl::startHfxo(true, 1500000UL)) {
-    initialized_ = false;
+  radioOwnershipToken_ = nrf54l15_acquire_exclusive_radio(
+      Nrf54ExclusiveRadioOwner::kRawChannelSounding);
+  if (radioOwnershipToken_ == 0U) {
     return false;
   }
 
-  power_.setLatencyMode(PowerLatencyMode::kConstantLatency);
+  config_ = config;
+
+  const bool hfxoWasRunning = channelSoundingHfxoRunning();
+  hfxoOwned_ = hfxoOwned_ || !hfxoWasRunning;
+  if (!ClockControl::startHfxo(true, 1500000UL)) {
+    initialized_ = false;
+    if (hfxoOwned_) {
+      ClockControl::stopHfxo();
+      hfxoOwned_ = false;
+    }
+    (void)releaseRawCsRadioOwnershipIfDisabled(&radioOwnershipToken_, radio_);
+    return false;
+  }
+
+  if (!power_.setLatencyMode(PowerLatencyMode::kConstantLatency)) {
+    initialized_ = false;
+    if (hfxoOwned_) {
+      ClockControl::stopHfxo();
+      hfxoOwned_ = false;
+    }
+    (void)releaseRawCsRadioOwnershipIfDisabled(&radioOwnershipToken_, radio_);
+    return false;
+  }
 
   if (!configureBle2MCommon()) {
     initialized_ = false;
+    if (((radio_->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos) ==
+        RADIO_STATE_STATE_Disabled) {
+      power_.setLatencyMode(PowerLatencyMode::kLowPower);
+      if (hfxoOwned_) {
+        ClockControl::stopHfxo();
+        hfxoOwned_ = false;
+      }
+      (void)releaseRawCsRadioOwnershipIfDisabled(&radioOwnershipToken_, radio_);
+    }
     return false;
   }
 
@@ -1925,17 +2023,40 @@ bool BleChannelSoundingRadio::begin(const BleCsConfig& config) {
 }
 
 void BleChannelSoundingRadio::end() {
+  if (radioOwnershipToken_ == 0U) {
+    initialized_ = false;
+    return;
+  }
+  if (!nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kRawChannelSounding,
+          radioOwnershipToken_)) {
+    return;
+  }
   if (radio_ == nullptr) {
     initialized_ = false;
+    power_.setLatencyMode(PowerLatencyMode::kLowPower);
+    if (hfxoOwned_) {
+      ClockControl::stopHfxo();
+      hfxoOwned_ = false;
+    }
+    (void)releaseRawCsRadioOwnershipIfDisabled(&radioOwnershipToken_, radio_);
     return;
   }
 
   radio_->SHORTS = 0U;
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-  (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
-  clearEvents();
-  power_.setLatencyMode(PowerLatencyMode::kLowPower);
+  const bool disabled = waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
   initialized_ = false;
+  if (disabled) {
+    detachRawRadioAutomation(radio_);
+    clearEvents();
+    power_.setLatencyMode(PowerLatencyMode::kLowPower);
+    if (hfxoOwned_) {
+      ClockControl::stopHfxo();
+      hfxoOwned_ = false;
+    }
+    (void)releaseRawCsRadioOwnershipIfDisabled(&radioOwnershipToken_, radio_);
+  }
 }
 
 bool BleChannelSoundingRadio::initialized() const { return initialized_; }
@@ -9188,7 +9309,9 @@ bool BleChannelSoundingRadio::configureBle2MCommon() {
   radio_->SHORTS = 0U;
   detachRawRadioAutomation(radio_);
   radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-  (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
+  if (!waitForRadioDisabled(radio_, kRadioDisableBudgetUs)) {
+    return false;
+  }
   clearRadioEvents(radio_);
   radio_->TASKS_SOFTRESET = RADIO_TASKS_SOFTRESET_TASKS_SOFTRESET_Trigger;
   detachRawRadioAutomation(radio_);
@@ -9276,7 +9399,10 @@ bool BleChannelSoundingRadio::configureBle2MCommon() {
 }
 
 bool BleChannelSoundingRadio::setLogicalChannel(uint8_t channelIndex) {
-  if (!validLogicalChannel(channelIndex)) {
+  if (radio_ == nullptr || !validLogicalChannel(channelIndex) ||
+      !nrf54l15_exclusive_radio_is_owned_by(
+          Nrf54ExclusiveRadioOwner::kRawChannelSounding,
+          radioOwnershipToken_)) {
     return false;
   }
 
@@ -9511,7 +9637,11 @@ bool BleChannelSoundingRadio::sendFrame(uint8_t logicalChannel,
   const bool endSeen = waitForRadioPhyEnd(radio_, kRadioEndBudgetUs);
   const bool disabled = waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
   radio_->SHORTS = 0U;
-  clearEvents();
+  if (disabled) {
+    clearEvents();
+  } else {
+    initialized_ = false;
+  }
   return endSeen && disabled;
 }
 
@@ -9839,20 +9969,18 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
   radio_->TASKS_RXEN = RADIO_TASKS_RXEN_TASKS_RXEN_Trigger;
 
   if (!waitForCrcDone(radio_, listenWindowUs)) {
+    bool auxStopped = true;
     if (captureRtt) {
-      radio_->TASKS_AUXDATADMASTOP =
-          RADIO_TASKS_AUXDATADMASTOP_TASKS_AUXDATADMASTOP_Trigger;
-      for (uint8_t i = 0U; i < 2U; ++i) {
-        radio_->AUXDATADMA[i].ENABLE =
-            (RADIO_AUXDATADMA_ENABLE_ENABLE_Disabled
-             << RADIO_AUXDATADMA_ENABLE_ENABLE_Pos) &
-            RADIO_AUXDATADMA_ENABLE_ENABLE_Msk;
-        radio_->AUXDATA.CNF[i] = 0U;
-      }
+      auxStopped = stopAndDisableAuxDataDma(radio_, kAuxDataBudgetUs);
     }
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-    (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
+    const bool disabled =
+        waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
     radio_->SHORTS = 0U;
+    if (!disabled || !auxStopped) {
+      initialized_ = false;
+      return false;
+    }
     configureRtt(false, false);
     clearEvents();
     return false;
@@ -9865,9 +9993,24 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
   const int8_t rssiDbm = radioRssiDbm(radio_);
 
   if (!captureTone) {
-    (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
+    if (!waitForRadioDisabled(radio_, kRadioDisableBudgetUs)) {
+      radio_->SHORTS = 0U;
+      initialized_ = false;
+      return false;
+    }
   } else {
-    (void)waitForRadioPhyEnd(radio_, kRadioEndBudgetUs);
+    if (!waitForRadioPhyEnd(radio_, kRadioEndBudgetUs)) {
+      radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
+      if (!waitForRadioDisabled(radio_, kRadioDisableBudgetUs)) {
+        radio_->SHORTS = 0U;
+        initialized_ = false;
+        return false;
+      }
+      radio_->SHORTS = 0U;
+      configureRtt(false, false);
+      clearEvents();
+      return false;
+    }
     if (config_.enableRawDfeCapture) {
       updateDfeCaptureState();
     }
@@ -9906,22 +10049,21 @@ bool BleChannelSoundingRadio::receiveFrame(uint8_t logicalChannel,
     }
 
     radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-    (void)waitForRadioDisabled(radio_, kRadioDisableBudgetUs);
+    if (!waitForRadioDisabled(radio_, kRadioDisableBudgetUs)) {
+      radio_->SHORTS = 0U;
+      initialized_ = false;
+      return false;
+    }
   }
 
   if (captureRtt) {
     (void)waitForFlag(&radio_->EVENTS_AUXDATADMAEND, kAuxDataBudgetUs);
+    if (!stopAndDisableAuxDataDma(radio_, kAuxDataBudgetUs)) {
+      initialized_ = false;
+      return false;
+    }
     if (outRtt != nullptr) {
       captureAuxDataRtt(outRtt);
-    }
-    radio_->TASKS_AUXDATADMASTOP =
-        RADIO_TASKS_AUXDATADMASTOP_TASKS_AUXDATADMASTOP_Trigger;
-    for (uint8_t i = 0U; i < 2U; ++i) {
-      radio_->AUXDATADMA[i].ENABLE =
-          (RADIO_AUXDATADMA_ENABLE_ENABLE_Disabled
-           << RADIO_AUXDATADMA_ENABLE_ENABLE_Pos) &
-          RADIO_AUXDATADMA_ENABLE_ENABLE_Msk;
-      radio_->AUXDATA.CNF[i] = 0U;
     }
   }
 

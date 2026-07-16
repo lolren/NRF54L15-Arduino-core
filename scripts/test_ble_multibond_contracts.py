@@ -120,21 +120,25 @@ def validate_linker_and_board_boundaries() -> None:
     linker_contracts = (
         (
             PLATFORM / "cores/nrf54l15/nrf54l15_linker_script.ld",
+            0x17A000,
             0x17B000,
             0x17C000,
         ),
         (
             PLATFORM / "cores/nrf54l15/nrf54l15_linker_script_no_vpr.ld",
+            0x17A000,
             0x17B000,
             0x17C000,
         ),
         (
             PLATFORM / "cores/nrf54l15/nrf54lm20b_linker_script.ld",
+            0x1FA000,
             0x1FB000,
             0x1FC000,
         ),
         (
             PLATFORM / "cores/nrf54lm20b/nrf54lm20b_linker_script.ld",
+            0x1FA000,
             0x1FB000,
             0x1FC000,
         ),
@@ -147,12 +151,16 @@ def validate_linker_and_board_boundaries() -> None:
         r"\.bond_signing_storage\s+ORIGIN\(FLASH_BOND\)\s*\+\s*0xFC8\s+\(NOLOAD\)",
     )
 
-    for path, multi_origin, legacy_origin in linker_contracts:
+    for path, zigbee_origin, multi_origin, legacy_origin in linker_contracts:
         linker = source(path)
         assert re.search(
-            rf"FLASH\s*\(rx\)\s*:\s*ORIGIN\s*=\s*0x0+0\s*,\s*LENGTH\s*=\s*0x{multi_origin:X}\b",
+            rf"FLASH\s*\(rx\)\s*:\s*ORIGIN\s*=\s*0x0+0\s*,\s*LENGTH\s*=\s*0x{zigbee_origin:X}\b",
             linker,
-        ), f"{path.name}: sketch region must stop at 0x{multi_origin:X}"
+        ), f"{path.name}: sketch region must stop at 0x{zigbee_origin:X}"
+        assert re.search(
+            rf"FLASH_ZIGBEE\s*\([^)]*\)\s*:\s*ORIGIN\s*=\s*0x0*{zigbee_origin:X}\s*,\s*LENGTH\s*=\s*0x1000\b",
+            linker,
+        ), f"{path.name}: missing dedicated 4 KB FLASH_ZIGBEE region"
         assert re.search(
             rf"FLASH_BOND_DB\s*\([^)]*\)\s*:\s*ORIGIN\s*=\s*0x0*{multi_origin:X}\s*,\s*LENGTH\s*=\s*0x1000\b",
             linker,
@@ -165,6 +173,16 @@ def validate_linker_and_board_boundaries() -> None:
             assert re.search(declaration, linker), (
                 f"{path.name}: legacy bond/Preferences/EEPROM offsets changed"
             )
+        require(
+            r"\.zigbee_storage\s+ORIGIN\(FLASH_ZIGBEE\)\s+\(NOLOAD\)",
+            linker,
+            f"{path.name}: .zigbee_storage must be NOLOAD",
+        )
+        require(
+            r"ASSERT\s*\(\s*SIZEOF\s*\(\s*\.zigbee_storage\s*\)\s*<=\s*0x1000",
+            linker,
+            f"{path.name}: .zigbee_storage needs a 4 KB size assertion",
+        )
         require(
             r"\.bond_db_storage\s+ORIGIN\(FLASH_BOND_DB\)\s+\(NOLOAD\)",
             linker,
@@ -185,10 +203,12 @@ def validate_linker_and_board_boundaries() -> None:
         "nrf54l15dk_pca10156",
     )
     for board in l15_boards:
-        assert f"{board}.upload.maximum_size=1552384" in boards, (
-            f"{board}: maximum sketch size must reserve the L15 multibond page"
+        assert f"{board}.upload.maximum_size=1548288" in boards, (
+            f"{board}: maximum sketch size must reserve Zigbee and bond pages"
         )
-    assert "xiao_nrf54lm20b.upload.maximum_size=2076672" in boards
+    assert "xiao_nrf54lm20b.upload.maximum_size=2072576" in boards
+    assert "upload.maximum_size=1552384" not in boards
+    assert "upload.maximum_size=2076672" not in boards
     assert "upload.maximum_size=1556480" not in boards
     assert "upload.maximum_size=2080768" not in boards
 

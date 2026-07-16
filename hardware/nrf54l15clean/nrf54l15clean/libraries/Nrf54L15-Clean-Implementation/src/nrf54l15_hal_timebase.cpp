@@ -498,13 +498,38 @@ bool ClockControl::startHfxo(bool waitForTuned, uint32_t spinLimit) {
       (((clock->XO.STAT & CLOCK_XO_STAT_STATE_Msk) >> CLOCK_XO_STAT_STATE_Pos) ==
        CLOCK_XO_STAT_STATE_Running);
   if (alreadyRunning) {
-    return true;
-  }
+    if (clock->EVENTS_XOTUNED != 0U &&
+        clock->EVENTS_XOTUNEERROR == 0U &&
+        clock->EVENTS_XOTUNEFAILED == 0U) {
+      return true;
+    }
 
-  clock->EVENTS_XOSTARTED = 0U;
-  clock->EVENTS_XOTUNED = 0U;
-  clock->EVENTS_XOTUNEFAILED = 0U;
-  clock->TASKS_XOSTART = CLOCK_TASKS_XOSTART_TASKS_XOSTART_Trigger;
+    // XOTUNED is an event, not a persistent status bit, and another clock
+    // client may have consumed it. Re-establish proof of radio-grade clock
+    // quality with the documented running-XO tune operation. XOTUNE must not
+    // overlap RX or TX; fail closed instead of perturbing an active RADIO.
+    const uint32_t radioState =
+        (NRF_RADIO->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
+    if (radioState != RADIO_STATE_STATE_Disabled) {
+      return false;
+    }
+    clock->EVENTS_XOTUNED = 0U;
+    clock->EVENTS_XOTUNEERROR = 0U;
+    clock->EVENTS_XOTUNEFAILED = 0U;
+    clock->TASKS_XOTUNE = CLOCK_TASKS_XOTUNE_TASKS_XOTUNE_Trigger;
+  } else {
+    clock->EVENTS_XOSTARTED = 0U;
+    clock->EVENTS_XOTUNED = 0U;
+    clock->EVENTS_XOTUNEERROR = 0U;
+    clock->EVENTS_XOTUNEFAILED = 0U;
+
+    // nRF54L anomaly 39 requires the keep-running PLL request to precede
+    // XOSTART. It also guarantees that an asynchronous caller cannot lose the
+    // PLL while the crystal is starting and tuning.
+    clock->TASKS_PLLSTART = CLOCK_TASKS_PLLSTART_TASKS_PLLSTART_Trigger;
+    __DSB();
+    clock->TASKS_XOSTART = CLOCK_TASKS_XOSTART_TASKS_XOSTART_Trigger;
+  }
 
   if (!waitForTuned) {
     return true;
@@ -514,20 +539,38 @@ bool ClockControl::startHfxo(bool waitForTuned, uint32_t spinLimit) {
     spinLimit = 1000000UL;
   }
 
+  uint8_t tuneRetriesRemaining = 1U;
   while (spinLimit-- > 0U) {
-    const bool running =
-        (((clock->XO.STAT & CLOCK_XO_STAT_STATE_Msk) >> CLOCK_XO_STAT_STATE_Pos) ==
-         CLOCK_XO_STAT_STATE_Running);
-    if (running || (clock->EVENTS_XOSTARTED != 0U) || (clock->EVENTS_XOTUNED != 0U)) {
+    // XOSTARTED and XO.STAT=Running are explicitly insufficient for RADIO.
+    // Only XOTUNED indicates that the crystal signal has the required quality.
+    const bool tuned = clock->EVENTS_XOTUNED != 0U;
+    const bool tuneError = clock->EVENTS_XOTUNEERROR != 0U;
+    const bool tuneFailed = clock->EVENTS_XOTUNEFAILED != 0U;
+    if (tuned && !tuneError && !tuneFailed) {
       return true;
     }
-    if (clock->EVENTS_XOTUNEFAILED != 0U) {
+    if (tuneFailed) {
       return false;
+    }
+    if (tuneError) {
+      if (tuneRetriesRemaining == 0U) {
+        return false;
+      }
+      const uint32_t radioState =
+          (NRF_RADIO->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
+      if (radioState != RADIO_STATE_STATE_Disabled) {
+        return false;
+      }
+      clock->EVENTS_XOTUNED = 0U;
+      clock->EVENTS_XOTUNEERROR = 0U;
+      clock->EVENTS_XOTUNEFAILED = 0U;
+      clock->TASKS_XOTUNE = CLOCK_TASKS_XOTUNE_TASKS_XOTUNE_Trigger;
+      __DSB();
+      --tuneRetriesRemaining;
     }
   }
 
-  return (((clock->XO.STAT & CLOCK_XO_STAT_STATE_Msk) >> CLOCK_XO_STAT_STATE_Pos) ==
-          CLOCK_XO_STAT_STATE_Running);
+  return false;
 }
 
 void ClockControl::stopHfxo() {
@@ -536,7 +579,11 @@ void ClockControl::stopHfxo() {
   if (clock == nullptr) {
     return;
   }
+  // nRF54L anomaly 39 requires XOSTOP before releasing the PLL keep-running
+  // request. Keep this ordering paired with startHfxo().
   clock->TASKS_XOSTOP = CLOCK_TASKS_XOSTOP_TASKS_XOSTOP_Trigger;
+  __DSB();
+  clock->TASKS_PLLSTOP = CLOCK_TASKS_PLLSTOP_TASKS_PLLSTOP_Trigger;
 }
 
 bool ClockControl::setCpuFrequency(CpuFrequency frequency) {

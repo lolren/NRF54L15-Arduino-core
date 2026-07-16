@@ -7,6 +7,8 @@ from pathlib import Path
 
 import serial
 
+from zigbee_validation_common import default_output_dir, write_boolean_summary
+
 
 def _pump_serial(ser, sink, path, stop_flag):
     with open(path, "w", buffering=1) as handle:
@@ -96,7 +98,7 @@ def main():
     parser.add_argument("--clear-command", default="c")
     parser.add_argument(
         "--outdir",
-        default="/home/lolren/Desktop/Nrf54L15/.build/zigbee_sleepy_ha_mqtt_validation",
+        default=default_output_dir("zigbee_sleepy_ha_mqtt_validation"),
     )
     args = parser.parse_args()
 
@@ -291,14 +293,10 @@ def main():
         "ha_discovery_seen": ha_discovery_seen,
     }
 
-    with open(summary_file, "w") as handle:
-        for key, value in summary.items():
-            handle.write(f"{key}={str(value).lower()}\n")
-
-    print(summary_file)
-    for key, value in summary.items():
-        print(f"{key}={str(value).lower()}")
+    return write_boolean_summary(
+        summary_file, summary, expected_false={"z2m_interview_failed"}
+    )
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

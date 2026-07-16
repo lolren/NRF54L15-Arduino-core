@@ -6,6 +6,8 @@ from pathlib import Path
 
 import serial
 
+from zigbee_validation_common import default_output_dir, write_boolean_summary
+
 
 def _pump_serial(ser, sink, path, stop_flag):
     with open(path, "w", buffering=1) as handle:
@@ -51,7 +53,7 @@ def main():
     parser.add_argument("--sensor-port", default="/dev/ttyACM0")
     parser.add_argument(
         "--outdir",
-        default="/home/lolren/Desktop/Nrf54L15/.build/zigbee_sleepy_climate_validation",
+        default=default_output_dir("zigbee_sleepy_climate_validation"),
     )
     parser.add_argument("--timeout-s", type=int, default=120)
     parser.add_argument("--expect-sleep-ms", type=int, default=15000)
@@ -188,17 +190,10 @@ def main():
         ),
         "power_report_seen": _cluster_report_seen(coord_text, "0x1"),
         "pending_cleared": "pending=no" in coord_text,
-        "sleep_cycle_logged": expected_sleep in sensor_text,
+        "sleep_cycle_logged": args.expect_sleep_ms <= 0 or expected_sleep in sensor_text,
     }
-
-    with open(summary_file, "w") as handle:
-        for key, value in summary.items():
-            handle.write(f"{key}={str(value).lower()}\n")
-
-    print(summary_file)
-    for key, value in summary.items():
-        print(f"{key}={str(value).lower()}")
+    return write_boolean_summary(summary_file, summary)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

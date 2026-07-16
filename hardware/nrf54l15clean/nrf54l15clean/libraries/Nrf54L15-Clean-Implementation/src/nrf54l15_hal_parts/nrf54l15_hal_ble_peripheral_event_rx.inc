@@ -761,8 +761,10 @@ bool BleRadio::pollConnectionEventInternal(BleConnectionEvent* event,
     radio_->SHORTS = 0U;
     if (!txOk) {
       radio_->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-      (void)waitRadioDisabledBudgeted(radio_, kBleConnDisableWaitUs,
-                                      spinLimit / 2U + 1U);
+      if (!waitRadioDisabledBudgeted(radio_, kBleConnDisableWaitUs,
+                                     spinLimit / 2U + 1U)) {
+        initialized_ = false;
+      }
       return false;
     }
 

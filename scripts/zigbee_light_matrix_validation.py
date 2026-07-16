@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 
-REPO = Path("/home/lolren/Desktop/Nrf54L15/NRF54L15-Clean-Arduino-core")
+REPO = Path(__file__).resolve().parents[1]
 ZIGBEE_EXAMPLES = REPO / (
     "hardware/nrf54l15clean/nrf54l15clean/libraries/"
     "Nrf54L15-Clean-Implementation/examples/Zigbee"
@@ -91,7 +91,7 @@ def main() -> int:
     parser.add_argument("--device-port", default="/dev/ttyACM0")
     parser.add_argument(
         "--outdir",
-        default="/home/lolren/Desktop/Nrf54L15/.build/zigbee_light_matrix_validation",
+        default=str(REPO / ".build" / "zigbee_light_matrix_validation"),
     )
     parser.add_argument(
         "--devices",
@@ -145,7 +145,10 @@ def main() -> int:
             handle.write("\n")
 
     print(outdir / "summary.txt")
-    return 0
+    complete = bool(overall) and all(
+        bool(result) and all(result.values()) for result in overall.values()
+    )
+    return 0 if complete else 1
 
 
 if __name__ == "__main__":

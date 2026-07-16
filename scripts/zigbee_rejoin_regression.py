@@ -13,6 +13,8 @@ from pathlib import Path
 
 import serial
 
+from zigbee_validation_common import default_output_dir
+
 
 class SerialCapture:
   def __init__(self, port: str, baudrate: int, prefix: str) -> None:
@@ -123,7 +125,7 @@ def main() -> int:
   parser.add_argument("--baudrate", type=int, default=115200)
   parser.add_argument(
       "--output-dir",
-      default="/home/lolren/Desktop/Nrf54L15/.build/zigbee_runtime_unified/rejoin_validation_unified",
+      default=default_output_dir("zigbee_runtime_unified/rejoin_validation_unified"),
   )
   args = parser.parse_args()
 

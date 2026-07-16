@@ -3,6 +3,8 @@
 
 #include "nrf54l15_hal.h"
 #include "zigbee_commissioning.h"
+#include "zigbee_frame_counter.h"
+#include "zigbee_persistence.h"
 #include "zigbee_security.h"
 #include "zigbee_stack.h"
 
@@ -163,10 +165,12 @@ using namespace xiao_nrf54l15;
 namespace {
 
 static ZigbeeRadio g_radio;
+static ZigbeePersistentStateStore g_counterStore;
+static ZigbeeOutgoingFrameCounterAllocator g_outgoingFrameCounters;
+static bool g_outgoingFrameCountersReady = false;
+static bool g_radioReady = false;
 static uint8_t g_macSequence = 1U;
 static uint8_t g_nwkSequence = 1U;
-static uint32_t g_nwkSecurityFrameCounter = 1U;
-static uint32_t g_apsTrustCenterFrameCounter = 1U;
 static uint8_t g_apsCounter = 1U;
 static uint8_t g_zclSequence = 1U;
 static uint8_t g_zdoSequence = 1U;
@@ -193,6 +197,11 @@ static uint8_t g_activeNetworkKey[16] = {0xA1U, 0xB2U, 0xC3U, 0xD4U,
 static uint8_t g_alternateNetworkKeySequence = 0U;
 static uint8_t g_alternateNetworkKey[16] = {0U};
 static bool g_haveAlternateNetworkKey = false;
+
+bool persistCoordinatorSecurityState();
+bool initializeCoordinatorFrameCounters();
+bool allocateCoordinatorFrameCounter(ZigbeeOutgoingCounterDomain domain,
+                                     uint32_t* outCounter);
 
 #if NRF54L15_CLEAN_ZIGBEE_TX_DEBUG != 0
 void printLastRadioTransmitDebug(const char* prefix) {
@@ -485,6 +494,159 @@ bool queueNextReportingStep(NodeEntry* node);
 static NodeEntry g_nodes[kMaxNodes] = {};
 static uint16_t g_nextShortAddress = 0x1000U;
 
+bool keyIsAllZero(const uint8_t key[16]) {
+  if (key == nullptr) {
+    return true;
+  }
+  uint8_t combined = 0U;
+  for (uint8_t i = 0U; i < 16U; ++i) {
+    combined = static_cast<uint8_t>(combined | key[i]);
+  }
+  return combined == 0U;
+}
+
+bool persistCoordinatorSecurityState() {
+  ZigbeePersistentState state{};
+  ZigbeePersistentStateStore::initialize(&state);
+  state.channel = kChannel;
+  state.logicalType = static_cast<uint8_t>(ZigbeeLogicalType::kCoordinator);
+  state.panId = kPanId;
+  state.nwkAddress = kCoordinatorShort;
+  state.ieeeAddress = kCoordinatorIeee;
+  state.extendedPanId = kExtendedPanId;
+  memcpy(state.networkKey, g_activeNetworkKey, sizeof(state.networkKey));
+  state.keySequence = g_activeNetworkKeySequence;
+  state.flags = 0x01U | 0x02U | 0x04U;
+  if (g_haveAlternateNetworkKey) {
+    memcpy(state.alternateNetworkKey, g_alternateNetworkKey,
+           sizeof(state.alternateNetworkKey));
+    state.alternateKeySequence = g_alternateNetworkKeySequence;
+    state.flags = static_cast<uint8_t>(state.flags | 0x08U);
+  }
+  for (uint8_t i = 0U; i < kMaxNodes; ++i) {
+    const NodeEntry& node = g_nodes[i];
+    if (!node.used || node.ieeeAddress == 0U || node.shortAddress == 0U ||
+        node.shortAddress == 0xFFFFU ||
+        node.currentNetworkKeySequence == 0U ||
+        node.trustCenterState != TrustCenterNodeState::kJoined) {
+      continue;
+    }
+    ZigbeePersistentPeerSecurityState& peer = state.peerSecurity[i];
+    peer.used = true;
+    peer.ieeeAddress = node.ieeeAddress;
+    peer.shortAddress = node.shortAddress;
+    peer.incomingNwkFrameCounter = node.lastInboundSecurityFrameCounter;
+    peer.networkKeySequence = node.currentNetworkKeySequence;
+  }
+  g_outgoingFrameCounters.stampPersistentState(&state);
+  const bool saved = g_counterStore.save(state);
+  if (!saved) {
+    g_outgoingFrameCountersReady = false;
+  }
+  return saved;
+}
+
+bool initializeCoordinatorFrameCounters() {
+  if (!g_counterStore.begin("zbcoordctr")) {
+    return false;
+  }
+
+  ZigbeePersistentState state{};
+  const ZigbeePersistentLoadStatus status =
+      g_counterStore.loadWithStatus(&state);
+  if (status == ZigbeePersistentLoadStatus::kEmpty ||
+      status == ZigbeePersistentLoadStatus::kTombstone) {
+    CracenRng rng;
+    if (!rng.fill(g_activeNetworkKey, sizeof(g_activeNetworkKey)) ||
+        keyIsAllZero(g_activeNetworkKey)) {
+      memset(g_activeNetworkKey, 0, sizeof(g_activeNetworkKey));
+      return false;
+    }
+    g_activeNetworkKeySequence = 1U;
+    memset(g_alternateNetworkKey, 0, sizeof(g_alternateNetworkKey));
+    g_alternateNetworkKeySequence = 0U;
+    g_haveAlternateNetworkKey = false;
+    g_outgoingFrameCounters.resetForNewKey(
+        ZigbeeOutgoingCounterDomain::kNwk);
+    g_outgoingFrameCounters.resetForNewKey(
+        ZigbeeOutgoingCounterDomain::kApsTrustCenter);
+    return persistCoordinatorSecurityState();
+  }
+  if (status != ZigbeePersistentLoadStatus::kLive ||
+      state.logicalType !=
+          static_cast<uint8_t>(ZigbeeLogicalType::kCoordinator) ||
+      state.channel != kChannel || state.panId != kPanId ||
+      state.nwkAddress != kCoordinatorShort ||
+      state.ieeeAddress != kCoordinatorIeee ||
+      state.extendedPanId != kExtendedPanId ||
+      (state.flags & 0x04U) == 0U || state.keySequence == 0U ||
+      keyIsAllZero(state.networkKey)) {
+    return false;
+  }
+
+  memcpy(g_activeNetworkKey, state.networkKey, sizeof(g_activeNetworkKey));
+  g_activeNetworkKeySequence = state.keySequence;
+  g_haveAlternateNetworkKey = (state.flags & 0x08U) != 0U;
+  if (g_haveAlternateNetworkKey) {
+    if (state.alternateKeySequence == 0U ||
+        state.alternateKeySequence == state.keySequence ||
+        keyIsAllZero(state.alternateNetworkKey)) {
+      return false;
+    }
+    memcpy(g_alternateNetworkKey, state.alternateNetworkKey,
+           sizeof(g_alternateNetworkKey));
+    g_alternateNetworkKeySequence = state.alternateKeySequence;
+  }
+
+  uint16_t nextShort = 0x1000U;
+  for (uint8_t i = 0U; i < kMaxNodes; ++i) {
+    const ZigbeePersistentPeerSecurityState& peer = state.peerSecurity[i];
+    if (!peer.used) {
+      continue;
+    }
+    if (peer.networkKeySequence != g_activeNetworkKeySequence &&
+        (!g_haveAlternateNetworkKey ||
+         peer.networkKeySequence != g_alternateNetworkKeySequence)) {
+      return false;
+    }
+    for (uint8_t earlier = 0U; earlier < i; ++earlier) {
+      if (state.peerSecurity[earlier].used &&
+          (state.peerSecurity[earlier].ieeeAddress == peer.ieeeAddress ||
+           state.peerSecurity[earlier].shortAddress == peer.shortAddress)) {
+        return false;
+      }
+    }
+    NodeEntry& node = g_nodes[i];
+    node = NodeEntry{};
+    node.used = true;
+    node.ieeeAddress = peer.ieeeAddress;
+    node.shortAddress = peer.shortAddress;
+    node.secureNwkSeen = true;
+    node.lastInboundSecurityFrameCounter = peer.incomingNwkFrameCounter;
+    node.currentNetworkKeySequence = peer.networkKeySequence;
+    node.announced = true;
+    node.trustCenterState = TrustCenterNodeState::kJoined;
+    if (peer.shortAddress >= nextShort && peer.shortAddress < 0xFFFEU) {
+      nextShort = static_cast<uint16_t>(peer.shortAddress + 1U);
+    }
+  }
+  g_nextShortAddress = nextShort;
+  g_outgoingFrameCounters.restore(state);
+  return g_outgoingFrameCounters.enabled(ZigbeeOutgoingCounterDomain::kNwk) &&
+         g_outgoingFrameCounters.enabled(
+             ZigbeeOutgoingCounterDomain::kApsTrustCenter);
+}
+
+bool allocateCoordinatorFrameCounter(ZigbeeOutgoingCounterDomain domain,
+                                     uint32_t* outCounter) {
+  if (!g_outgoingFrameCountersReady ||
+      !g_outgoingFrameCounters.allocate(domain, &g_counterStore, outCounter)) {
+    g_outgoingFrameCountersReady = false;
+    return false;
+  }
+  return true;
+}
+
 NodeEntry* findNodeByIeee(uint64_t ieeeAddress) {
   for (uint8_t i = 0U; i < kMaxNodes; ++i) {
     if (g_nodes[i].used && g_nodes[i].ieeeAddress == ieeeAddress) {
@@ -523,7 +685,7 @@ NodeEntry* allocateNode(uint64_t ieeeAddress) {
 
   for (uint8_t i = 0U; i < kMaxNodes; ++i) {
     if (!g_nodes[i].used) {
-      memset(&g_nodes[i], 0, sizeof(g_nodes[i]));
+      g_nodes[i] = NodeEntry{};
       g_nodes[i].used = true;
       g_nodes[i].ieeeAddress = ieeeAddress;
       return &g_nodes[i];
@@ -596,7 +758,7 @@ bool resolveTrustCenterLinkKey(NodeEntry* node, uint8_t outKey[16],
 
   const uint8_t* installCode = findInstallCodeForNode(node->ieeeAddress);
   if (installCode != nullptr &&
-      ZigbeeSecurity::deriveInstallCodeLinkKey(installCode, 18U, outKey)) {
+      ZigbeeSecurity::deriveInstallCodeLinkKey(installCode, 18U, outKey, 16U)) {
     *outMode = ZigbeePreconfiguredKeyMode::kInstallCodeDerived;
     return true;
   }
@@ -604,7 +766,7 @@ bool resolveTrustCenterLinkKey(NodeEntry* node, uint8_t outKey[16],
 #if !NRF54L15_CLEAN_ZIGBEE_ALLOW_WELL_KNOWN_LINK_KEY
   return false;
 #else
-  if (!ZigbeeSecurity::loadZigbeeAlliance09LinkKey(outKey)) {
+  if (!ZigbeeSecurity::loadZigbeeAlliance09LinkKey(outKey, 16U)) {
     return false;
   }
   *outMode = ZigbeePreconfiguredKeyMode::kWellKnown;
@@ -656,7 +818,7 @@ void clearAlternateNetworkKey() {
   g_haveAlternateNetworkKey = false;
 }
 
-bool deriveAlternateNetworkKey() {
+[[maybe_unused]] bool deriveAlternateNetworkKey() {
   if (g_haveAlternateNetworkKey) {
     return true;
   }
@@ -665,18 +827,23 @@ bool deriveAlternateNetworkKey() {
       (g_activeNetworkKeySequence == 0xFFU)
           ? 0x01U
           : static_cast<uint8_t>(g_activeNetworkKeySequence + 1U);
-  for (uint8_t i = 0U; i < sizeof(g_alternateNetworkKey); ++i) {
-    g_alternateNetworkKey[i] =
-        static_cast<uint8_t>(g_activeNetworkKey[i] ^
-                             static_cast<uint8_t>(0x5AU + nextSequence +
-                                                  (i * 3U)));
+  uint8_t candidate[sizeof(g_alternateNetworkKey)] = {0U};
+  CracenRng rng;
+  if (!rng.fill(candidate, sizeof(candidate)) || keyIsAllZero(candidate)) {
+    return false;
   }
-  if (memcmp(g_alternateNetworkKey, g_activeNetworkKey,
-             sizeof(g_alternateNetworkKey)) == 0) {
-    g_alternateNetworkKey[0] ^= 0xA5U;
+  if (memcmp(candidate, g_activeNetworkKey, sizeof(candidate)) == 0) {
+    memset(candidate, 0, sizeof(candidate));
+    return false;
   }
+  memcpy(g_alternateNetworkKey, candidate, sizeof(g_alternateNetworkKey));
+  memset(candidate, 0, sizeof(candidate));
   g_alternateNetworkKeySequence = nextSequence;
   g_haveAlternateNetworkKey = true;
+  if (!persistCoordinatorSecurityState()) {
+    clearAlternateNetworkKey();
+    return false;
+  }
   return true;
 }
 
@@ -697,6 +864,9 @@ void maybePromoteAlternateNetworkKey() {
   memcpy(g_activeNetworkKey, g_alternateNetworkKey, sizeof(g_activeNetworkKey));
   g_activeNetworkKeySequence = g_alternateNetworkKeySequence;
   clearAlternateNetworkKey();
+  g_outgoingFrameCounters.resetForNewKey(
+      ZigbeeOutgoingCounterDomain::kNwk);
+  g_outgoingFrameCountersReady = persistCoordinatorSecurityState();
   Serial.print("nwk_key_promoted seq=");
   Serial.print(g_activeNetworkKeySequence);
   Serial.print("\r\n");
@@ -810,7 +980,7 @@ void clearPendingApsAckSlot(NodeEntry* node, uint8_t slot) {
   if (node == nullptr || slot >= kPendingApsAckSlots) {
     return;
   }
-  memset(&node->pendingApsAcks[slot], 0, sizeof(node->pendingApsAcks[slot]));
+  node->pendingApsAcks[slot] = PendingApsAck{};
 }
 
 bool nodeHasPendingApsAck(const NodeEntry& node) {
@@ -904,7 +1074,7 @@ void clearRecentInboundAps(NodeEntry* node) {
   if (node == nullptr) {
     return;
   }
-  memset(&node->recentInboundAps, 0, sizeof(node->recentInboundAps));
+  node->recentInboundAps = RecentInboundAps{};
 }
 
 void prepareNodeForRetainedRejoin(NodeEntry* node) {
@@ -942,7 +1112,7 @@ void rememberPendingApsAck(NodeEntry* node, const ZigbeeApsDataFrame& aps,
   }
 
   PendingApsAck& pending = node->pendingApsAcks[slot];
-  memset(&pending, 0, sizeof(pending));
+  pending = PendingApsAck{};
   pending.active = true;
   pending.counter = aps.counter;
   pending.clusterId = aps.clusterId;
@@ -1009,9 +1179,12 @@ bool buildNwkCommandPsdu(NodeEntry* node, const uint8_t* payload,
           ? node->currentNetworkKeySequence
           : g_activeNetworkKeySequence;
   const uint8_t* networkKey = keyForSequence(keySequence);
-  const bool useSecurity =
-      (node->secureNwkSeen || node->currentNetworkKeySequence != 0U) &&
-      networkKey != nullptr;
+  const bool securityExpected =
+      node->secureNwkSeen || node->currentNetworkKeySequence != 0U;
+  if (securityExpected && networkKey == nullptr) {
+    return false;
+  }
+  const bool useSecurity = securityExpected;
 
   ZigbeeNetworkFrame nwk{};
   nwk.frameType = ZigbeeNwkFrameType::kCommand;
@@ -1027,7 +1200,11 @@ bool buildNwkCommandPsdu(NodeEntry* node, const uint8_t* payload,
     ZigbeeNwkSecurityHeader security{};
     security.valid = true;
     security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    security.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!allocateCoordinatorFrameCounter(
+            ZigbeeOutgoingCounterDomain::kNwk,
+            &security.frameCounter)) {
+      return false;
+    }
     security.sourceIeee = kCoordinatorIeee;
     security.keySequence = keySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, networkKey,
@@ -1040,7 +1217,6 @@ bool buildNwkCommandPsdu(NodeEntry* node, const uint8_t* payload,
     return false;
   }
 
-  uint8_t psdu[127] = {0U};
   if (!ZigbeeRadio::buildDataFrameShort(g_macSequence++, kPanId,
                                         node->shortAddress, kCoordinatorShort,
                                         nwkFrame, nwkLength, outPsdu,
@@ -1130,8 +1306,12 @@ bool sendApsFrameExtendedWithCounter(uint16_t destinationShort,
           ? node->currentNetworkKeySequence
           : g_activeNetworkKeySequence;
   const uint8_t* networkKey = keyForSequence(keySequence);
-  const bool useSecurity =
-      (node != nullptr && node->secureNwkSeen && networkKey != nullptr);
+  // Application traffic from an established Trust Center is always carried
+  // by a NWK-secured frame, including group delivery.
+  if (networkKey == nullptr) {
+    return false;
+  }
+  const bool useSecurity = true;
 
   ZigbeeApsDataFrame aps{};
   aps.frameType = ZigbeeApsFrameType::kData;
@@ -1174,7 +1354,11 @@ bool sendApsFrameExtendedWithCounter(uint16_t destinationShort,
     ZigbeeNwkSecurityHeader security{};
     security.valid = true;
     security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    security.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!allocateCoordinatorFrameCounter(
+            ZigbeeOutgoingCounterDomain::kNwk,
+            &security.frameCounter)) {
+      return false;
+    }
     security.sourceIeee = kCoordinatorIeee;
     security.keySequence = keySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, networkKey,
@@ -1302,8 +1486,10 @@ bool sendApsAcknowledgement(NodeEntry* node, const ZigbeeApsDataFrame& request) 
           ? node->currentNetworkKeySequence
           : g_activeNetworkKeySequence;
   const uint8_t* networkKey = keyForSequence(keySequence);
-  const bool useSecurity =
-      node->secureNwkSeen && networkKey != nullptr;
+  if (networkKey == nullptr) {
+    return false;
+  }
+  const bool useSecurity = true;
 
   uint8_t apsFrame[127] = {0U};
   uint8_t apsLength = 0U;
@@ -1326,7 +1512,11 @@ bool sendApsAcknowledgement(NodeEntry* node, const ZigbeeApsDataFrame& request) 
     ZigbeeNwkSecurityHeader security{};
     security.valid = true;
     security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    security.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!allocateCoordinatorFrameCounter(
+            ZigbeeOutgoingCounterDomain::kNwk,
+            &security.frameCounter)) {
+      return false;
+    }
     security.sourceIeee = kCoordinatorIeee;
     security.keySequence = keySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, networkKey,
@@ -1364,8 +1554,8 @@ bool sendNwkRejoinResponse(NodeEntry* node, uint8_t status) {
   return sendNwkCommand(node, payload, payloadLength);
 }
 
-bool sendEndDeviceTimeoutResponse(NodeEntry* node, uint8_t status,
-                                  uint8_t parentInformation) {
+[[maybe_unused]] bool sendEndDeviceTimeoutResponse(
+    NodeEntry* node, uint8_t status, uint8_t parentInformation) {
   if (node == nullptr) {
     return false;
   }
@@ -1472,8 +1662,12 @@ bool buildTransportKeyPsdu(NodeEntry* node, uint8_t* outPsdu,
   uint8_t apsLength = 0U;
   ZigbeeApsSecurityHeader security{};
   security.valid = true;
-  security.securityControl = kZigbeeSecurityControlApsEncMic32;
-  security.frameCounter = g_apsTrustCenterFrameCounter++;
+  security.securityControl = kZigbeeSecurityControlApsKeyTransport;
+  if (!allocateCoordinatorFrameCounter(
+          ZigbeeOutgoingCounterDomain::kApsTrustCenter,
+          &security.frameCounter)) {
+    return false;
+  }
   security.sourceIeee = kCoordinatorIeee;
   if (!ZigbeeSecurity::buildSecuredApsTransportKeyCommand(
           transportKey, security, linkKey, g_apsCounter++, apsFrame,
@@ -1492,9 +1686,14 @@ bool buildTransportKeyPsdu(NodeEntry* node, uint8_t* outPsdu,
       (node->currentNetworkKeySequence != 0U) ? node->currentNetworkKeySequence
                                               : g_activeNetworkKeySequence;
   const uint8_t* nwkKey = keyForSequence(nwkKeySequence);
-  nwk.securityEnabled =
-      (node->secureNwkSeen && node->currentNetworkKeySequence != 0U &&
-       nwkKey != nullptr);
+  const bool nwkSecurityExpected = node->currentNetworkKeySequence != 0U;
+  if (nwkSecurityExpected && nwkKey == nullptr) {
+    return false;
+  }
+  // Only the first Transport Key sent to a newly associated child may use an
+  // unsecured NWK frame. Rekey delivery to an established child must not
+  // silently fall back to plaintext.
+  nwk.securityEnabled = nwkSecurityExpected;
   if (outNwkSecurityEnabled != nullptr) {
     *outNwkSecurityEnabled = nwk.securityEnabled;
   }
@@ -1509,7 +1708,11 @@ bool buildTransportKeyPsdu(NodeEntry* node, uint8_t* outPsdu,
     ZigbeeNwkSecurityHeader nwkSecurity{};
     nwkSecurity.valid = true;
     nwkSecurity.securityControl = kZigbeeSecurityControlNwkEncMic32;
-    nwkSecurity.frameCounter = g_nwkSecurityFrameCounter++;
+    if (!allocateCoordinatorFrameCounter(
+            ZigbeeOutgoingCounterDomain::kNwk,
+            &nwkSecurity.frameCounter)) {
+      return false;
+    }
     nwkSecurity.sourceIeee = kCoordinatorIeee;
     nwkSecurity.keySequence = nwkKeySequence;
     if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, nwkSecurity, nwkKey,
@@ -1669,24 +1872,12 @@ bool maybeDeliverPendingDirect(NodeEntry* node, uint32_t nowMs,
 }
 
 bool queueNetworkKeyUpdateRollout() {
-  if (!deriveAlternateNetworkKey()) {
-    return false;
-  }
-
-  bool queuedAny = false;
-  for (uint8_t i = 0U; i < kMaxNodes; ++i) {
-    NodeEntry& node = g_nodes[i];
-    if (!node.used || node.shortAddress == 0U || node.pendingAssociationResponse ||
-        node.pendingTransportKey || node.pendingSwitchKey ||
-        node.pendingSecureRejoin || node.pending.used ||
-        node.currentNetworkKeySequence == 0U ||
-        node.trustCenterState != TrustCenterNodeState::kJoined ||
-        node.currentNetworkKeySequence == g_alternateNetworkKeySequence) {
-      continue;
-    }
-    queuedAny = queuePendingTransportKey(&node, true) || queuedAny;
-  }
-  return queuedAny;
+  // Full Trust Center rotation requires distributing the alternate key to all
+  // children, proving delivery, then broadcasting Switch Key to 0xFFFD under
+  // the old NWK key. The former per-node switch shortcut promoted keys on MAC
+  // success and was not conformant, so fail closed until that state machine is
+  // implemented and certified.
+  return false;
 }
 
 bool sendSwitchKey(NodeEntry* node) {
@@ -1717,7 +1908,11 @@ bool sendSwitchKey(NodeEntry* node) {
   ZigbeeApsSecurityHeader apsSecurity{};
   apsSecurity.valid = true;
   apsSecurity.securityControl = kZigbeeSecurityControlApsEncMic32;
-  apsSecurity.frameCounter = g_apsTrustCenterFrameCounter++;
+  if (!allocateCoordinatorFrameCounter(
+          ZigbeeOutgoingCounterDomain::kApsTrustCenter,
+          &apsSecurity.frameCounter)) {
+    return false;
+  }
   apsSecurity.sourceIeee = kCoordinatorIeee;
   if (!ZigbeeSecurity::buildSecuredApsSwitchKeyCommand(
           switchKey, apsSecurity, linkKey, g_apsCounter++, apsFrame,
@@ -1738,7 +1933,11 @@ bool sendSwitchKey(NodeEntry* node) {
   ZigbeeNwkSecurityHeader security{};
   security.valid = true;
   security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-  security.frameCounter = g_nwkSecurityFrameCounter++;
+  if (!allocateCoordinatorFrameCounter(
+          ZigbeeOutgoingCounterDomain::kNwk,
+          &security.frameCounter)) {
+    return false;
+  }
   security.sourceIeee = kCoordinatorIeee;
   security.keySequence = node->currentNetworkKeySequence;
   if (!ZigbeeSecurity::buildSecuredNwkFrame(nwk, security, currentKey, apsFrame,
@@ -1809,7 +2008,11 @@ bool buildUpdateDevicePsdu(NodeEntry* node, uint8_t* outPsdu,
   ZigbeeApsSecurityHeader apsSecurity{};
   apsSecurity.valid = true;
   apsSecurity.securityControl = kZigbeeSecurityControlApsEncMic32;
-  apsSecurity.frameCounter = g_apsTrustCenterFrameCounter++;
+  if (!allocateCoordinatorFrameCounter(
+          ZigbeeOutgoingCounterDomain::kApsTrustCenter,
+          &apsSecurity.frameCounter)) {
+    return false;
+  }
   apsSecurity.sourceIeee = kCoordinatorIeee;
   if (!ZigbeeSecurity::buildSecuredApsUpdateDeviceCommand(
           updateDevice, apsSecurity, linkKey, g_apsCounter++, apsFrame,
@@ -1833,7 +2036,11 @@ bool buildUpdateDevicePsdu(NodeEntry* node, uint8_t* outPsdu,
   ZigbeeNwkSecurityHeader security{};
   security.valid = true;
   security.securityControl = kZigbeeSecurityControlNwkEncMic32;
-  security.frameCounter = g_nwkSecurityFrameCounter++;
+  if (!allocateCoordinatorFrameCounter(
+          ZigbeeOutgoingCounterDomain::kNwk,
+          &security.frameCounter)) {
+    return false;
+  }
   security.sourceIeee = kCoordinatorIeee;
   const uint8_t keySequence =
       (node->currentNetworkKeySequence != 0U) ? node->currentNetworkKeySequence
@@ -1972,6 +2179,9 @@ bool sendPendingApsFrame(NodeEntry* node) {
         node->lastInboundSecurityFrameCounter = 0U;
         node->trustCenterState = TrustCenterNodeState::kJoined;
       }
+      if (!persistCoordinatorSecurityState()) {
+        return false;
+      }
     }
     return sent;
   }
@@ -1983,6 +2193,9 @@ bool sendPendingApsFrame(NodeEntry* node) {
       node->lastInboundSecurityFrameCounter = 0U;
       node->trustCenterState = TrustCenterNodeState::kJoined;
       maybePromoteAlternateNetworkKey();
+      if (!persistCoordinatorSecurityState()) {
+        return false;
+      }
     }
     return sent;
   }
@@ -3127,9 +3340,30 @@ NodeEntry* firstJoinedNode() {
   return nullptr;
 }
 
-void clearAllNodes() {
-  memset(g_nodes, 0, sizeof(g_nodes));
+bool clearAllNodes() {
+  for (NodeEntry& node : g_nodes) {
+    node = NodeEntry{};
+  }
   clearAlternateNetworkKey();
+  g_nextShortAddress = 0x1000U;
+  return persistCoordinatorSecurityState();
+}
+
+bool factoryResetCoordinatorSecurity() {
+  g_outgoingFrameCountersReady = false;
+  if (!g_counterStore.clear()) {
+    return false;
+  }
+  for (NodeEntry& node : g_nodes) {
+    node = NodeEntry{};
+  }
+  clearAlternateNetworkKey();
+  g_nextShortAddress = 0x1000U;
+  g_outgoingFrameCountersReady = initializeCoordinatorFrameCounters();
+  if (g_outgoingFrameCountersReady && !g_radioReady) {
+    g_radioReady = g_radio.begin(kChannel, 8);
+  }
+  return g_outgoingFrameCountersReady && g_radioReady;
 }
 
 void clearNodeInterviewState(NodeEntry* node) {
@@ -4101,7 +4335,7 @@ void handleZdoFrame(NodeEntry* node, const ZigbeeApsDataFrame& aps) {
       if (node->pendingLeaveWithRejoin) {
         prepareNodeForRetainedRejoin(node);
       } else {
-        memset(node, 0, sizeof(*node));
+        *node = NodeEntry{};
       }
     } else {
       node->pendingLeaveWithRejoin = false;
@@ -4615,16 +4849,17 @@ void processIncomingFrame(const ZigbeeFrame& frame) {
        security.frameCounter <= node->lastInboundSecurityFrameCounter)) {
     return;
   }
-  if (!nwkValid) {
-    nwkValid =
-        ZigbeeCodec::parseNwkFrame(macData.payload, macData.payloadLength, &nwk);
-  }
   if (!nwkValid || !nwk.valid || nwk.destinationShort != kCoordinatorShort) {
     return;
   }
   if (security.valid) {
     node->secureNwkSeen = true;
     node->lastInboundSecurityFrameCounter = security.frameCounter;
+    // Commit the accepted replay counter before sending an ACK or processing
+    // any command. A reset must never make this authenticated frame reusable.
+    if (!persistCoordinatorSecurityState()) {
+      return;
+    }
   }
 
   if (nwk.frameType == ZigbeeNwkFrameType::kCommand) {
@@ -4726,6 +4961,11 @@ void pumpImmediateResponseWindow(uint32_t listenBudgetUs) {
 void handleSerialCommands() {
   while (Serial.available() > 0) {
     const int ch = Serial.read();
+    if ((!g_outgoingFrameCountersReady || !g_radioReady) && ch != 'z' &&
+        ch != 'l') {
+      Serial.print("security storage unavailable; use z=factory_reset\r\n");
+      continue;
+    }
     if (ch == 'b') {
       const bool sent = sendBeacon();
       Serial.print("beacon ");
@@ -4740,8 +4980,12 @@ void handleSerialCommands() {
       Serial.print(kPermitJoinWindowMs);
       Serial.print("\r\n");
     } else if (ch == 'c') {
-      clearAllNodes();
-      Serial.print("nodes cleared\r\n");
+      Serial.print(clearAllNodes() ? "nodes cleared\r\n"
+                                   : "nodes clear FAIL_CLOSED\r\n");
+    } else if (ch == 'z') {
+      Serial.print(factoryResetCoordinatorSecurity()
+                       ? "security factory reset OK\r\n"
+                       : "security factory reset FAIL_CLOSED\r\n");
     } else if (ch == 'x') {
       g_permitJoinEnabled = false;
       g_permitJoinDeadlineMs = 0U;
@@ -4829,14 +5073,8 @@ void handleSerialCommands() {
       Serial.print(queued ? "OK" : "FAIL");
       Serial.print("\r\n");
     } else if (ch == 'k') {
-      const bool queued = queueNetworkKeyUpdateRollout();
-      Serial.print("queue_key_update ");
-      Serial.print(queued ? "OK" : "FAIL");
-      if (g_haveAlternateNetworkKey) {
-        Serial.print(" seq=");
-        Serial.print(g_alternateNetworkKeySequence);
-      }
-      Serial.print("\r\n");
+      (void)queueNetworkKeyUpdateRollout();
+      Serial.print("queue_key_update UNSUPPORTED\r\n");
     } else if (ch == 't' || ch == 'o' || ch == 'f') {
       NodeEntry* node = firstOnOffNode();
       uint8_t commandId = kOnOffCommandToggle;
@@ -4945,10 +5183,14 @@ void setup() {
   Gpio::configure(kPinUserLed, GpioDirection::kOutput, GpioPull::kDisabled);
   Gpio::write(kPinUserLed, true);
 
-  const bool ok = g_radio.begin(kChannel, 8);
+  g_outgoingFrameCountersReady = initializeCoordinatorFrameCounters();
+  g_radioReady =
+      g_outgoingFrameCountersReady && g_radio.begin(kChannel, 8);
   Serial.print("\r\nZigbeeHaCoordinatorJoinDemo start\r\n");
   Serial.print("radio=");
-  Serial.print(ok ? "OK" : "FAIL");
+  Serial.print(g_radioReady ? "OK" : "FAIL");
+  Serial.print(" counters=");
+  Serial.print(g_outgoingFrameCountersReady ? "OK" : "FAIL_CLOSED");
   Serial.print(" channel=");
   Serial.print(kChannel);
   Serial.print(" pan=0x");
@@ -4959,13 +5201,17 @@ void setup() {
   Serial.print(" nwk_seq=");
   Serial.print(g_activeNetworkKeySequence);
   Serial.print("\r\n");
-  Serial.print("serial commands: b=beacon l=list p=permit_join c=clear_nodes x=close_join d=discover i=identify_5s e=identify_discover_attr_ext u=write_identify_5s_undivided j=write_identify_5s_undivided_fail w=write_identify_5s W=write_identify_5s_no_rsp s=identify_query S=identify_stop I=effect_blink R=effect_breathe C=effect_channel v=leave V=leave_rejoin k=key_update t=toggle o=on f=off U=brighter D=dimmer M=mid h/n/B=color_hs A/N=color_temp g=enroll_group O/F/T=group on/off/toggle +/-/m=group level\r\n");
+  Serial.print("serial commands: b=beacon l=list p=permit_join c=clear_nodes z=factory_reset x=close_join d=discover i=identify_5s e=identify_discover_attr_ext u=write_identify_5s_undivided j=write_identify_5s_undivided_fail w=write_identify_5s W=write_identify_5s_no_rsp s=identify_query S=identify_stop I=effect_blink R=effect_breathe C=effect_channel v=leave V=leave_rejoin k=key_update_UNSUPPORTED t=toggle o=on f=off U=brighter D=dimmer M=mid h/n/B=color_hs A/N=color_temp g=enroll_group O/F/T=group on/off/toggle +/-/m=group level\r\n");
   g_permitJoinEnabled = true;
   g_permitJoinDeadlineMs = millis() + kPermitJoinWindowMs;
 }
 
 void loop() {
   handleSerialCommands();
+  if (!g_outgoingFrameCountersReady || !g_radioReady) {
+    delay(10);
+    return;
+  }
   pumpRadio();
 
   const uint32_t now = millis();

@@ -42,6 +42,21 @@ constexpr uint16_t kCsOverrideConfigAccessAddresses = (1U << 5U);
 constexpr uint8_t kCsOverrideParametersLength = 22U;
 constexpr uint32_t kRadioQuiesceSpinLimit = 2000000UL;
 
+bool releaseMpslRadioOwnershipIfQuiesced(uint32_t* token) {
+  if (token == nullptr || *token == 0U) {
+    return true;
+  }
+  if (!nrf54l15_quiesce_owned_radio(
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding, *token,
+          kRadioQuiesceSpinLimit) ||
+      !nrf54l15_release_exclusive_radio(
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding, *token)) {
+    return false;
+  }
+  *token = 0U;
+  return true;
+}
+
 struct MpslClockConfig {
   uint8_t source;
   uint8_t rcCalibrationInterval;
@@ -141,7 +156,8 @@ volatile bool gControllerFault = false;
 bool gSdcInitialized = false;
 uint16_t gControllerMemoryRequired = 0U;
 uint32_t gSavedRramLowPowerConfig = 0U;
-uint8_t gLowLatencyDepth = 0U;
+uint16_t gLowLatencyDepth = 0U;
+bool gLowLatencyOverflowed = false;
 
 uint32_t enterCriticalSection() {
   const uint32_t previous = __get_PRIMASK();
@@ -178,6 +194,14 @@ void configureMpslInterrupts() {
   NVIC_SetPriority(kMpslRadioIrq, kMpslHighPriority);
   NVIC_SetPriority(kMpslClockIrq, kMpslClockPriority);
   NVIC_SetPriority(kMpslLowPriorityIrq, kMpslLowPriority);
+}
+
+void enableMpslInterrupts() {
+  NVIC_EnableIRQ(kMpslTimerIrq);
+  NVIC_EnableIRQ(kMpslRtcIrq);
+  NVIC_EnableIRQ(kMpslRadioIrq);
+  NVIC_EnableIRQ(kMpslClockIrq);
+  NVIC_EnableIRQ(kMpslLowPriorityIrq);
 }
 
 void disableMpslInterrupts() {
@@ -235,63 +259,85 @@ uint16_t hciPacketLength(uint8_t messageType, const uint8_t* packet) {
 
 extern "C" void mpsl_low_latency_acquire_callback(void) {
   const uint32_t previous = enterCriticalSection();
+  if (gLowLatencyOverflowed) {
+    gControllerFault = true;
+    leaveCriticalSection(previous);
+    return;
+  }
   if (gLowLatencyDepth == 0U) {
     gSavedRramLowPowerConfig = NRF_RRAMC->POWER.LOWPOWERCONFIG;
-    NRF_POWER->TASKS_CONSTLAT =
-        POWER_TASKS_CONSTLAT_TASKS_CONSTLAT_Trigger;
+    if (nrf54l15_constlat_acquire() == 0U) {
+      gControllerFault = true;
+      leaveCriticalSection(previous);
+      return;
+    }
     NRF_RRAMC->POWER.LOWPOWERCONFIG =
         (RRAMC_POWER_LOWPOWERCONFIG_MODE_Standby
          << RRAMC_POWER_LOWPOWERCONFIG_MODE_Pos);
   }
-  if (gLowLatencyDepth != 0xFFU) {
+  if (gLowLatencyDepth != UINT16_MAX) {
     ++gLowLatencyDepth;
+  } else {
+    gLowLatencyOverflowed = true;
+    gControllerFault = true;
   }
   leaveCriticalSection(previous);
 }
 
 extern "C" void mpsl_low_latency_release_callback(void) {
   const uint32_t previous = enterCriticalSection();
-  if (gLowLatencyDepth > 0U) {
+  if (!gLowLatencyOverflowed && gLowLatencyDepth > 0U) {
     --gLowLatencyDepth;
-  }
-  if (gLowLatencyDepth == 0U) {
-    NRF_RRAMC->POWER.LOWPOWERCONFIG = gSavedRramLowPowerConfig;
-    NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+    if (gLowLatencyDepth == 0U) {
+      NRF_RRAMC->POWER.LOWPOWERCONFIG = gSavedRramLowPowerConfig;
+      nrf54l15_constlat_release();
+    }
   }
   leaveCriticalSection(previous);
 }
 
 extern "C" void TIMER10_IRQHandler(void) {
-  if (gControllerActive) {
+  if (gControllerActive &&
+      nrf54l15_exclusive_radio_owner() ==
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding) {
     MPSL_IRQ_TIMER0_Handler();
   }
 }
 
 extern "C" void GRTC_3_IRQHandler(void) {
-  if (gControllerActive) {
+  if (gControllerActive &&
+      nrf54l15_exclusive_radio_owner() ==
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding) {
     MPSL_IRQ_RTC0_Handler();
   }
 }
 
 extern "C" void SWI00_IRQHandler(void) {
-  if (gControllerActive) {
+  if (gControllerActive &&
+      nrf54l15_exclusive_radio_owner() ==
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding) {
     gLowPriorityPending = true;
   }
 }
 
 extern "C" void CLOCK_POWER_IRQHandler(void) {
-  if (gControllerActive) {
+  const Nrf54ExclusiveRadioOwner owner = nrf54l15_exclusive_radio_owner();
+  if (gControllerActive &&
+      owner == Nrf54ExclusiveRadioOwner::kMpslChannelSounding) {
     MPSL_IRQ_CLOCK_Handler();
     return;
   }
   NVIC_DisableIRQ(kMpslClockIrq);
-  if (nrf54l15_ble_clock_irq_service != nullptr) {
+  if (owner == Nrf54ExclusiveRadioOwner::kBle &&
+      nrf54l15_ble_clock_irq_service != nullptr) {
     nrf54l15_ble_clock_irq_service();
   }
 }
 
 extern "C" bool nrf54_cs_controller_radio_irq_service(void) {
-  if (!gControllerActive) {
+  if (!gControllerActive ||
+      nrf54l15_exclusive_radio_owner() !=
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding) {
     return false;
   }
   MPSL_IRQ_RADIO_Handler();
@@ -303,7 +349,15 @@ namespace xiao_nrf54l15 {
 BleCsControllerRuntime::BleCsControllerRuntime() = default;
 
 BleCsControllerRuntime::~BleCsControllerRuntime() {
-  (void)end();
+  if (!end() && radioOwnershipToken_ != 0U) {
+    (void)nrf54l15_quarantine_exclusive_radio(
+        Nrf54ExclusiveRadioOwner::kMpslChannelSounding,
+        radioOwnershipToken_);
+    if (gRuntimeOwner == this) {
+      gRuntimeOwner = nullptr;
+    }
+    nrf54l15_exclusive_radio_fail_stop();
+  }
 }
 
 bool BleCsControllerRuntime::begin() {
@@ -318,8 +372,25 @@ bool BleCsControllerRuntime::begin() {
     setError(kErrorRequires128MHz);
     return false;
   }
-  if (!nrf54_hal_quiesce_for_system_off(kRadioQuiesceSpinLimit)) {
+  if (radioOwnershipToken_ != 0U) {
+    setError(kErrorInvalidState);
+    return false;
+  }
+  radioOwnershipToken_ = nrf54l15_acquire_exclusive_radio(
+      Nrf54ExclusiveRadioOwner::kMpslChannelSounding);
+  if (radioOwnershipToken_ == 0U) {
     setError(kErrorRadioBusy);
+    return false;
+  }
+  if (!nrf54l15_quiesce_owned_radio(
+          Nrf54ExclusiveRadioOwner::kMpslChannelSounding,
+          radioOwnershipToken_, kRadioQuiesceSpinLimit)) {
+    setError(kErrorRadioBusy);
+    return false;
+  }
+  if (gLowLatencyOverflowed) {
+    setError(kErrorInvalidState);
+    (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
     return false;
   }
 
@@ -349,15 +420,19 @@ bool BleCsControllerRuntime::begin() {
     setError(result);
     gControllerActive = false;
     gRuntimeOwner = nullptr;
+    disableMpslInterrupts();
+    (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
     return false;
   }
 
   result = mpsl_clock_hfclk_latency_set(kHfClockWorstCaseStartUs);
   if (result != 0) {
     setError(result);
-    mpsl_uninit();
     gControllerActive = false;
+    disableMpslInterrupts();
+    mpsl_uninit();
     gRuntimeOwner = nullptr;
+    (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
     return false;
   }
 
@@ -365,9 +440,11 @@ bool BleCsControllerRuntime::begin() {
     result = sdc_init(controllerFaultHandler);
     if (result != 0) {
       setError(result);
-      mpsl_uninit();
       gControllerActive = false;
+      disableMpslInterrupts();
+      mpsl_uninit();
       gRuntimeOwner = nullptr;
+      (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
       return false;
     }
 
@@ -398,9 +475,11 @@ bool BleCsControllerRuntime::begin() {
     }
     if (result < 0 || static_cast<size_t>(result) > kControllerMemorySize) {
       setError(result < 0 ? result : kErrorControllerMemory);
-      mpsl_uninit();
       gControllerActive = false;
+      disableMpslInterrupts();
+      mpsl_uninit();
       gRuntimeOwner = nullptr;
+      (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
       return false;
     }
     controllerMemoryRequired_ = static_cast<uint16_t>(result);
@@ -416,9 +495,11 @@ bool BleCsControllerRuntime::begin() {
   }
   if (result != 0) {
     setError(result);
-    mpsl_uninit();
     gControllerActive = false;
+    disableMpslInterrupts();
+    mpsl_uninit();
     gRuntimeOwner = nullptr;
+    (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
     return false;
   }
 
@@ -435,19 +516,22 @@ bool BleCsControllerRuntime::begin() {
   }
   if (hciStatus != 0U) {
     setError(static_cast<int32_t>(hciStatus));
-    (void)sdc_disable();
-    mpsl_uninit();
-    disableMpslInterrupts();
+    const int32_t disableResult = sdc_disable();
+    if (disableResult != 0) {
+      setError(disableResult);
+      enableMpslInterrupts();
+      active_ = true;
+      return false;
+    }
     gControllerActive = false;
+    disableMpslInterrupts();
+    mpsl_uninit();
     gRuntimeOwner = nullptr;
+    (void)releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_);
     return false;
   }
 
-  NVIC_EnableIRQ(kMpslTimerIrq);
-  NVIC_EnableIRQ(kMpslRtcIrq);
-  NVIC_EnableIRQ(kMpslRadioIrq);
-  NVIC_EnableIRQ(kMpslClockIrq);
-  NVIC_EnableIRQ(kMpslLowPriorityIrq);
+  enableMpslInterrupts();
   active_ = true;
   return true;
 }
@@ -579,6 +663,9 @@ bool BleCsControllerRuntime::stopTest() {
 
 bool BleCsControllerRuntime::end() {
   if (!active_) {
+    if (!releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_)) {
+      return false;
+    }
     if (gRuntimeOwner == this) {
       gRuntimeOwner = nullptr;
     }
@@ -586,26 +673,35 @@ bool BleCsControllerRuntime::end() {
   }
 
   const int32_t result = sdc_disable();
-  mpsl_uninit();
-  disableMpslInterrupts();
-
-  const uint32_t previous = enterCriticalSection();
-  if (gLowLatencyDepth != 0U) {
-    gLowLatencyDepth = 0U;
-    NRF_RRAMC->POWER.LOWPOWERCONFIG = gSavedRramLowPowerConfig;
-    NRF_POWER->TASKS_LOWPWR = POWER_TASKS_LOWPWR_TASKS_LOWPWR_Trigger;
+  if (result != 0) {
+    setError(result);
+    return false;
   }
   gControllerActive = false;
+  disableMpslInterrupts();
+  mpsl_uninit();
+
+  const uint32_t previous = enterCriticalSection();
+  if (gLowLatencyOverflowed) {
+    // The callback nesting count is no longer representable. Keep CONSTLAT
+    // and the RRAM override latched until reset rather than releasing early.
+    gLowLatencyDepth = 0U;
+  } else if (gLowLatencyDepth != 0U) {
+    gLowLatencyDepth = 0U;
+    NRF_RRAMC->POWER.LOWPOWERCONFIG = gSavedRramLowPowerConfig;
+    nrf54l15_constlat_release();
+  }
   gLowPriorityPending = false;
   gHciPending = false;
   leaveCriticalSection(previous);
 
   active_ = false;
   testRunning_ = false;
-  gRuntimeOwner = nullptr;
-  if (result != 0) {
-    setError(result);
+  if (!releaseMpslRadioOwnershipIfQuiesced(&radioOwnershipToken_)) {
     return false;
+  }
+  if (gRuntimeOwner == this) {
+    gRuntimeOwner = nullptr;
   }
   return true;
 }

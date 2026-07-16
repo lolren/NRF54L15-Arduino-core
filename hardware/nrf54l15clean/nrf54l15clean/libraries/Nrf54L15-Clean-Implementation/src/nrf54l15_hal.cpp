@@ -33,6 +33,67 @@ xiao_nrf54l15::Pwm* g_activePwm20 = nullptr;
 xiao_nrf54l15::Pwm* g_activePwm21 = nullptr;
 xiao_nrf54l15::Pwm* g_activePwm22 = nullptr;
 xiao_nrf54l15::ZigbeeRadio* g_activeZigbeeRadioIrq = nullptr;
+volatile uint8_t g_exclusiveRadioOwner =
+    static_cast<uint8_t>(Nrf54ExclusiveRadioOwner::kNone);
+volatile uint8_t g_exclusiveRadioQuarantined = 0U;
+volatile uint32_t g_exclusiveRadioGeneration = 0U;
+volatile uint32_t g_exclusiveRadioToken = 0U;
+
+bool validExclusiveRadioOwner(Nrf54ExclusiveRadioOwner owner) {
+  const uint8_t value = static_cast<uint8_t>(owner);
+  return value >= static_cast<uint8_t>(Nrf54ExclusiveRadioOwner::kBle) &&
+         value <=
+             static_cast<uint8_t>(
+                 Nrf54ExclusiveRadioOwner::kMpslChannelSounding);
+}
+
+bool scrubRadioDmaPointersIfDisabled(NRF_RADIO_Type* radio) {
+  if (radio == nullptr) {
+    return true;
+  }
+  const uint32_t state =
+      (radio->STATE & RADIO_STATE_STATE_Msk) >> RADIO_STATE_STATE_Pos;
+  if (state != RADIO_STATE_STATE_Disabled) {
+    return false;
+  }
+
+  const bool auxDmaEnabled = radio->AUXDATADMA[0].ENABLE != 0U ||
+                             radio->AUXDATADMA[1].ENABLE != 0U;
+  if (auxDmaEnabled && radio->EVENTS_AUXDATADMAEND == 0U) {
+    // AUX acquisition has its own EasyDMA completion event; RADIO Disabled is
+    // not documented as proof that this transaction has stopped. Do not clear
+    // owner-backed pointers until AUXDATADMAEND acknowledges STOP.
+    radio->TASKS_AUXDATADMASTOP =
+        RADIO_TASKS_AUXDATADMASTOP_TASKS_AUXDATADMASTOP_Trigger;
+    uint32_t spins = 200000UL;
+    while (radio->EVENTS_AUXDATADMAEND == 0U && spins-- != 0U) {
+      __NOP();
+    }
+    if (radio->EVENTS_AUXDATADMAEND == 0U) {
+      return false;
+    }
+  }
+  __DSB();
+  for (uint8_t index = 0U; index < 2U; ++index) {
+    radio->AUXDATADMA[index].ENABLE = 0U;
+    radio->AUXDATADMA[index].PTR = 0U;
+    radio->AUXDATADMA[index].MAXCNT = 0U;
+  }
+  radio->DFEPACKET.PTR = 0U;
+  radio->DFEPACKET.MAXCNT = 0U;
+  radio->PACKETPTR = 0U;
+  radio->EVENTS_AUXDATADMAEND = 0U;
+  __DSB();
+
+  return radio->PACKETPTR == 0U && radio->DFEPACKET.PTR == 0U &&
+         radio->DFEPACKET.MAXCNT == 0U &&
+         radio->AUXDATADMA[0].ENABLE == 0U &&
+         radio->AUXDATADMA[0].PTR == 0U &&
+         radio->AUXDATADMA[0].MAXCNT == 0U &&
+         radio->AUXDATADMA[1].ENABLE == 0U &&
+         radio->AUXDATADMA[1].PTR == 0U &&
+         radio->AUXDATADMA[1].MAXCNT == 0U;
+}
 
 xiao_nrf54l15::Pwm** pwmActiveSlotForBase(uint32_t base) {
   switch (base) {
@@ -59,6 +120,102 @@ int32_t pwmIrqNumberForBase(uint32_t base) {
       return -1;
   }
 }
+}
+
+uint32_t nrf54l15_acquire_exclusive_radio(Nrf54ExclusiveRadioOwner owner) {
+  if (!validExclusiveRadioOwner(owner)) {
+    return 0U;
+  }
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  uint32_t token = 0U;
+  if (g_exclusiveRadioOwner ==
+          static_cast<uint8_t>(Nrf54ExclusiveRadioOwner::kNone) &&
+      g_exclusiveRadioQuarantined == 0U) {
+    // Never recycle a generation token. An ancient stale owner must not
+    // become valid again after UINT32 wrap; reset is the only recovery.
+    if (g_exclusiveRadioGeneration == UINT32_MAX) {
+      g_exclusiveRadioQuarantined = 1U;
+    } else {
+      ++g_exclusiveRadioGeneration;
+      token = g_exclusiveRadioGeneration;
+      g_exclusiveRadioToken = token;
+      g_exclusiveRadioOwner = static_cast<uint8_t>(owner);
+    }
+  }
+  __set_PRIMASK(primask);
+  return token;
+}
+
+bool nrf54l15_release_exclusive_radio(Nrf54ExclusiveRadioOwner owner,
+                                      uint32_t token) {
+  if (owner == Nrf54ExclusiveRadioOwner::kNone || token == 0U) {
+    return false;
+  }
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  const bool matches =
+      g_exclusiveRadioQuarantined == 0U &&
+      g_exclusiveRadioOwner == static_cast<uint8_t>(owner) &&
+      g_exclusiveRadioToken == token;
+  if (matches) {
+    g_exclusiveRadioToken = 0U;
+    g_exclusiveRadioOwner =
+        static_cast<uint8_t>(Nrf54ExclusiveRadioOwner::kNone);
+  }
+  __set_PRIMASK(primask);
+  return matches;
+}
+
+bool nrf54l15_quarantine_exclusive_radio(Nrf54ExclusiveRadioOwner owner,
+                                         uint32_t token) {
+  if (owner == Nrf54ExclusiveRadioOwner::kNone || token == 0U) {
+    return false;
+  }
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  const bool matches =
+      g_exclusiveRadioOwner == static_cast<uint8_t>(owner) &&
+      g_exclusiveRadioToken == token;
+  if (matches) {
+    g_exclusiveRadioQuarantined = 1U;
+  }
+  __set_PRIMASK(primask);
+  return matches;
+}
+
+bool nrf54l15_exclusive_radio_is_owned_by(Nrf54ExclusiveRadioOwner owner,
+                                          uint32_t token) {
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  const bool matches = token != 0U &&
+                       g_exclusiveRadioOwner == static_cast<uint8_t>(owner) &&
+                       g_exclusiveRadioToken == token;
+  __set_PRIMASK(primask);
+  return matches;
+}
+
+Nrf54ExclusiveRadioOwner nrf54l15_exclusive_radio_owner() {
+  const uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  const Nrf54ExclusiveRadioOwner owner =
+      static_cast<Nrf54ExclusiveRadioOwner>(g_exclusiveRadioOwner);
+  __set_PRIMASK(primask);
+  return owner;
+}
+
+bool nrf54l15_scrub_owned_radio_dma(Nrf54ExclusiveRadioOwner owner,
+                                    uint32_t token, NRF_RADIO_Type* radio) {
+  return nrf54l15_exclusive_radio_is_owned_by(owner, token) &&
+         scrubRadioDmaPointersIfDisabled(radio);
+}
+
+[[noreturn]] void nrf54l15_exclusive_radio_fail_stop() {
+  __disable_irq();
+  NVIC_SystemReset();
+  while (true) {
+    __WFE();
+  }
 }
 
 
@@ -126,17 +283,13 @@ bool quiesceSharedRadioForSystemOff(uint32_t spinLimit) {
   if (!disabled) {
     radio->EVENTS_DISABLED = 0U;
     radio->TASKS_DISABLE = RADIO_TASKS_DISABLE_TASKS_DISABLE_Trigger;
-    disabled = waitRadioDisabledBudgeted(radio, 0U, spinLimit);
+    // EVENTS_DISABLED is sticky. Only STATE proves that no EasyDMA transfer or
+    // shortcut-triggered RADIO operation can still be using the pointers below.
+    disabled = waitRadioStateDisabledBudgeted(radio, 0U, spinLimit);
   }
   if (!disabled) return false;
 
-  radio->AUXDATADMA[0].ENABLE = 0U;
-  radio->AUXDATADMA[0].PTR = 0U;
-  radio->AUXDATADMA[0].MAXCNT = 0U;
-  radio->AUXDATADMA[1].ENABLE = 0U;
-  radio->AUXDATADMA[1].PTR = 0U;
-  radio->AUXDATADMA[1].MAXCNT = 0U;
-  radio->PACKETPTR = 0U;
+  if (!scrubRadioDmaPointersIfDisabled(radio)) return false;
   clearRadioCoreEvents(radio);
   return true;
 }
@@ -176,6 +329,12 @@ void clearUnownedBleBackgroundGrtcCompares() {
 
 }  // namespace
 
+bool nrf54l15_quiesce_owned_radio(Nrf54ExclusiveRadioOwner owner,
+                                  uint32_t token, uint32_t spinLimit) {
+  return nrf54l15_exclusive_radio_is_owned_by(owner, token) &&
+         quiesceSharedRadioForSystemOff(spinLimit);
+}
+
 extern "C" void nrf54l15_secp256r1_cooperate_hook(void) {
   if (g_activeBleRadio != nullptr) {
     ++g_activeBleRadio->smpSecureConnectionsCooperateHookCount_;
@@ -197,18 +356,23 @@ extern "C" void nrf54l15_secp256r1_cooperate_hook(void) {
 extern "C" bool nrf54_hal_quiesce_for_system_off(uint32_t spinLimit) {
   bool ok = true;
 
+  const Nrf54ExclusiveRadioOwner owner = nrf54l15_exclusive_radio_owner();
   xiao_nrf54l15::BleRadio* const activeBle = g_activeBleRadio;
   xiao_nrf54l15::BleRadio* const backgroundBle = g_bleBackgroundRadio;
-  if (activeBle != nullptr) {
-    activeBle->end();
-  }
-  if (backgroundBle != nullptr && backgroundBle != activeBle) {
-    backgroundBle->end();
-  }
-  if (g_activeZigbeeRadioIrq != nullptr) {
+  if (owner == Nrf54ExclusiveRadioOwner::kBle) {
+    if (activeBle != nullptr) {
+      activeBle->end();
+    }
+    if (backgroundBle != nullptr && backgroundBle != activeBle) {
+      backgroundBle->end();
+    }
+  } else if (owner == Nrf54ExclusiveRadioOwner::kZigbee802154 &&
+             g_activeZigbeeRadioIrq != nullptr) {
     g_activeZigbeeRadioIrq->end();
   }
-  if (!quiesceSharedRadioForSystemOff(spinLimit)) {
+  if (nrf54l15_exclusive_radio_owner() !=
+          Nrf54ExclusiveRadioOwner::kNone ||
+      !quiesceSharedRadioForSystemOff(spinLimit)) {
     ok = false;
   }
 
@@ -269,15 +433,22 @@ extern "C" void nrf54l15_ble_grtc_irq_service(void) {
 }
 
 extern "C" void RADIO_0_IRQHandler(void) {
-  if (nrf54_cs_controller_radio_irq_service != nullptr &&
-      nrf54_cs_controller_radio_irq_service()) {
+  const Nrf54ExclusiveRadioOwner owner = nrf54l15_exclusive_radio_owner();
+  if (owner == Nrf54ExclusiveRadioOwner::kMpslChannelSounding) {
+    if (nrf54_cs_controller_radio_irq_service != nullptr) {
+      (void)nrf54_cs_controller_radio_irq_service();
+    }
     return;
   }
-  if (g_activeZigbeeRadioIrq != nullptr &&
-      g_activeZigbeeRadioIrq->serviceBufferedReceiveIrq()) {
+  if (owner == Nrf54ExclusiveRadioOwner::kZigbee802154) {
+    if (g_activeZigbeeRadioIrq != nullptr) {
+      (void)g_activeZigbeeRadioIrq->serviceBufferedReceiveIrq();
+    }
     return;
   }
-  bleScanSleepWaitHandleRadioIrq(NRF_RADIO);
+  if (owner == Nrf54ExclusiveRadioOwner::kBle) {
+    bleScanSleepWaitHandleRadioIrq(NRF_RADIO);
+  }
 }
 
 extern "C" void nrf54l15_pwm20_irq_service(void) {
