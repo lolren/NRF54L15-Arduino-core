@@ -293,6 +293,9 @@ jobs:
       - name: BLE controller-state contracts
         run: python3 ./scripts/test_ble_controller_state.py
 
+      - name: Wire scanner address-probe contracts
+        run: python3 ./scripts/test_wire_address_probe_contracts.py
+
       - name: Bluefruit client, HID, signed-write, and DFU contracts
         run: python3 ./scripts/test_bluefruit_client_contracts.py
 
@@ -371,6 +374,12 @@ jobs:
           - board: xiao_nrf54lm20b
             options: cpu_freq=128m
             sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Power/SystemOffWakeDiag
+          - board: xiao_nrf54l15
+            options: clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Wire/WireScanner
+          - board: xiao_nrf54lm20b
+            options: clean_ble=off
+            sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Wire/WireScanner
           - board: nrf54l15dk_pca10156
             options: clean_serial=header
             sketch: hardware/nrf54l15clean/nrf54l15clean/examples/Serial/SerialDualBaudRemapProbe
