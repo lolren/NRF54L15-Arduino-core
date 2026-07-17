@@ -59,9 +59,25 @@ try {
     $mock = Join-Path $temp "fake_nrf_ocd.cmd"
     $mockLog = Join-Path $temp "nrf_ocd.log"
     $mockMark = Join-Path $temp "first_load_failed"
-    @'
+@'
 @echo off
 echo %*>>"%MOCK_NRF_LOG%"
+if /I "%1"=="list" (
+  if /I "%MOCK_NRF_LIST_MODE%"=="mixed" (
+    echo   #   Probe/Board                                          Unique ID    Target
+    echo --------------------------------------------------------------------------------
+    echo   0   Seeed Studio XIAO nrf54 CMSIS-DAP                  761FDE87     nrf54l15
+    echo   1   Seeed Studio XIAO nRF54LM20A CMSIS-DAP             3377B9D6     nrf54lm20a
+  )
+  if /I "%MOCK_NRF_LIST_MODE%"=="two_l15" (
+    echo   #   Probe/Board                                          Unique ID    Target
+    echo --------------------------------------------------------------------------------
+    echo   0   Seeed Studio XIAO nrf54 CMSIS-DAP                  761FDE87     nrf54l15
+    echo   1   Seeed Studio XIAO nrf54 CMSIS-DAP                  A1B2C3D4     nrf54l15
+  )
+  if not "%MOCK_NRF_LIST_EXIT%"=="" exit /b %MOCK_NRF_LIST_EXIT%
+  exit /b 0
+)
 if "%MOCK_NRF_ALWAYS_FAIL%"=="1" exit /b 23
 echo %* | findstr /C:"write 0xE000EDF0 00005FA0" >nul
 if not errorlevel 1 if "%MOCK_NRF_DETACH_FAIL%"=="1" exit /b 29
@@ -79,6 +95,8 @@ exit /b 0
     $env:MOCK_NRF_MARK = $mockMark
     $env:MOCK_NRF_ALWAYS_FAIL = "0"
     $env:MOCK_NRF_DETACH_FAIL = "0"
+    $env:MOCK_NRF_LIST_MODE = ""
+    $env:MOCK_NRF_LIST_EXIT = ""
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -File (Join-Path $tools "upload_windows.ps1") `
         -HexPath $hex -Port "COM42" -Target "nrf54l" `
@@ -113,8 +131,73 @@ exit /b 0
     $global:LASTEXITCODE = 0
     Assert-Equal $failedExitCode 23 "native upload final failure propagation"
     $failedCalls = @(Get-Content -LiteralPath $mockLog)
-    Assert-Equal $failedCalls.Count 2 "failed upload attempt count"
+    $failedLoadCalls = @($failedCalls | Where-Object { $_ -match " load " })
+    Assert-Equal $failedLoadCalls.Count 2 "failed upload attempt count"
     Write-Host "PASS Windows native upload failure propagation"
+
+    Remove-Item -LiteralPath $mockMark, $mockLog -Force -ErrorAction SilentlyContinue
+    $env:MOCK_NRF_ALWAYS_FAIL = "0"
+    $env:MOCK_NRF_LIST_MODE = "mixed"
+    & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File (Join-Path $tools "upload_windows.ps1") `
+        -HexPath $hex -Port "COM404" -Target "nrf54lm20a" `
+        -NrfOcd $mock -RetryDelayMs 0
+    Assert-Equal $LASTEXITCODE 0 "target-matched UID upload exit"
+    $uidCalls = @(Get-Content -LiteralPath $mockLog)
+    $uidTransferCalls = @($uidCalls | Where-Object {
+        $_ -match " load " -or $_ -match "write 0xE000EDF0 00005FA0"
+    })
+    Assert-Equal $uidTransferCalls.Count 3 "target-matched UID transfer calls"
+    Assert-Equal @($uidTransferCalls | Where-Object {
+        $_ -match "-u 3377B9D6" -and $_ -notmatch "-p "
+    }).Count 3 "target-matched UID selector"
+    Write-Host "PASS Windows upload bypasses a stale COM port with the matching UID"
+
+    Remove-Item -LiteralPath $mockMark, $mockLog -Force -ErrorAction SilentlyContinue
+    $env:MOCK_NRF_LIST_MODE = "two_l15"
+    & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File (Join-Path $tools "upload_windows.ps1") `
+        -HexPath $hex -Port "COM42" -Target "nrf54l" `
+        -NrfOcd $mock -RetryDelayMs 0
+    Assert-Equal $LASTEXITCODE 0 "ambiguous target port fallback exit"
+    $portCalls = @(Get-Content -LiteralPath $mockLog)
+    $portTransferCalls = @($portCalls | Where-Object {
+        $_ -match " load " -or $_ -match "write 0xE000EDF0 00005FA0"
+    })
+    Assert-Equal @($portTransferCalls | Where-Object {
+        $_ -match "-p COM42" -and $_ -notmatch "-u "
+    }).Count 3 "ambiguous target port selector"
+    Write-Host "PASS Windows upload uses the port for multiple matching probes"
+
+    Remove-Item -LiteralPath $mockMark, $mockLog -Force -ErrorAction SilentlyContinue
+    & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File (Join-Path $tools "upload_windows.ps1") `
+        -HexPath $hex -Target "nrf54l15" `
+        -NrfOcd $mock -RetryDelayMs 0
+    $ambiguousExitCode = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    if ($ambiguousExitCode -eq 0) {
+        throw "ambiguous target without a selector unexpectedly succeeded"
+    }
+    $ambiguousCalls = @(Get-Content -LiteralPath $mockLog)
+    Assert-Equal @($ambiguousCalls | Where-Object { $_ -match " load " }).Count 0 `
+        "ambiguous target load count"
+    Write-Host "PASS Windows upload refuses to guess between matching probes"
+
+    Remove-Item -LiteralPath $mockLog -Force -ErrorAction SilentlyContinue
+    & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File (Join-Path $tools "upload_windows.ps1") `
+        -HexPath $hex -Target "nrf54l15" -Uid "A1B2C3D4" `
+        -NrfOcd $mock -RetryDelayMs 0
+    Assert-Equal $LASTEXITCODE 0 "explicit UID upload exit"
+    $explicitCalls = @(Get-Content -LiteralPath $mockLog)
+    Assert-Equal @($explicitCalls | Where-Object { $_ -eq "list" }).Count 0 `
+        "explicit UID enumeration count"
+    Assert-Equal @($explicitCalls | Where-Object {
+        ($_ -match " load " -or $_ -match "write 0xE000EDF0 00005FA0") -and
+        $_ -match "-u A1B2C3D4"
+    }).Count 3 "explicit UID transfer selector"
+    Write-Host "PASS Windows upload honors an explicit UID without enumeration"
 }
 finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue

@@ -1672,8 +1672,10 @@ void maybeSendBootReports(uint32_t nowMs) {
   if (!g_joined || !g_bootReportsPending) {
     return;
   }
-  if ((nowMs - g_bootMs) <
-      static_cast<uint32_t>(NRF54L15_CLEAN_ZIGBEE_BOOT_REPORT_DELAY_MS)) {
+  const uint32_t bootReportDelayMs =
+      static_cast<uint32_t>(NRF54L15_CLEAN_ZIGBEE_BOOT_REPORT_DELAY_MS);
+  if (bootReportDelayMs != 0U &&
+      (nowMs - g_bootMs) < bootReportDelayMs) {
     return;
   }
 

@@ -38,7 +38,7 @@ or production-ready**:
 | **Channel Sounding** | Experimental two-board controller-backed LE CS Test; not connected-ACL Channel Sounding, calibrated ranging, cross-vendor interoperability, or a qualification claim |
 
 The Thread and Matter entries describe the experimental platform work included
-in `1.0.5`; those menu targets remain explicitly outside the stable feature
+in `1.0.6`; those menu targets remain explicitly outside the stable feature
 claim.
 
 These boundaries keep the stable claims precise: unfinished protocol examples
@@ -283,7 +283,7 @@ Install the stable release from the normal Boards Manager feed shown above, or
 request the exact version with Arduino CLI:
 
 ```bash
-arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.5"
+arduino-cli core install "nrf54l15clean:nrf54l15clean@1.0.6"
 ```
 
 - Controller-backed Bluetooth LE Channel Sounding Test is now available through

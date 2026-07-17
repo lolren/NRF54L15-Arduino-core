@@ -212,6 +212,7 @@ class PlatformRecipeTests(unittest.TestCase):
         self.assertIn("powershell", pattern.lower())
         self.assertIn("upload_windows.ps1", pattern)
         self.assertIn('-HexPath "{build.path}/{build.project_name}.hex"', pattern)
+        self.assertIn('-Uid "{upload.uid}"', pattern)
         self.assertNotIn("{tools.python3", pattern)
         self.assertNotIn("upload.py", pattern)
 

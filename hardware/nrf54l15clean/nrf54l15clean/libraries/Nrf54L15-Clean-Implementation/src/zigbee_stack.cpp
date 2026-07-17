@@ -4877,6 +4877,14 @@ NRF54_ZIGBEE_DEFINE_OUTPUT_BUILDER(
 #undef NRF54_ZIGBEE_EXPAND_ARGUMENTS
 #undef NRF54_ZIGBEE_DEFINE_OUTPUT_BUILDER
 
+namespace {
+
+void resetHomeAutomationConfig(ZigbeeHomeAutomationConfig* config) {
+  *config = ZigbeeHomeAutomationConfig{};
+}
+
+}  // namespace
+
 ZigbeeHomeAutomationDevice::ZigbeeHomeAutomationDevice()
     : config_(),
       onOffLightInputClusters_{kZigbeeClusterBasic, kZigbeeClusterIdentify,
@@ -4931,7 +4939,7 @@ bool ZigbeeHomeAutomationDevice::configureOnOffLight(
     return false;
   }
 
-  config_ = ZigbeeHomeAutomationConfig{};
+  resetHomeAutomationConfig(&config_);
   for (ZigbeeReportingConfiguration& reporting : reporting_) {
     reporting = ZigbeeReportingConfiguration{};
   }
@@ -4991,7 +4999,7 @@ bool ZigbeeHomeAutomationDevice::configureOnOffLightSwitch(
     return false;
   }
 
-  config_ = ZigbeeHomeAutomationConfig{};
+  resetHomeAutomationConfig(&config_);
   for (ZigbeeReportingConfiguration& reporting : reporting_) {
     reporting = ZigbeeReportingConfiguration{};
   }
@@ -5055,7 +5063,7 @@ bool ZigbeeHomeAutomationDevice::configureDimmableLight(
     return false;
   }
 
-  config_ = ZigbeeHomeAutomationConfig{};
+  resetHomeAutomationConfig(&config_);
   for (ZigbeeReportingConfiguration& reporting : reporting_) {
     reporting = ZigbeeReportingConfiguration{};
   }
@@ -5174,7 +5182,7 @@ bool ZigbeeHomeAutomationDevice::configureTemperatureSensor(
     return false;
   }
 
-  config_ = ZigbeeHomeAutomationConfig{};
+  resetHomeAutomationConfig(&config_);
   for (ZigbeeReportingConfiguration& reporting : reporting_) {
     reporting = ZigbeeReportingConfiguration{};
   }

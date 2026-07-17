@@ -1,5 +1,5 @@
 name=nRF54L15 Boards
-version=1.0.5
+version=1.0.6
 category=Arduino
 
 # Python launcher for upload helper.
@@ -89,7 +89,7 @@ tools.nrf54upload.cmd.path={tools.nrf54upload.path}/upload.py
 tools.nrf54ocd.path={runtime.platform.path}/tools
 tools.nrf54ocd.cmd.path={tools.nrf54ocd.path}/nrf_ocd
 tools.nrf54ocd.upload.pattern="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54upload.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "nrf_ocd" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
-tools.nrf54ocd.upload.pattern.windows=powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{runtime.platform.path}/tools/upload_windows.ps1" -HexPath "{build.path}/{build.project_name}.hex" -Port "{serial.port}" -Target "{upload.target}"
+tools.nrf54ocd.upload.pattern.windows=powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{runtime.platform.path}/tools/upload_windows.ps1" -HexPath "{build.path}/{build.project_name}.hex" -Port "{serial.port}" -Target "{upload.target}" -Uid "{upload.uid}"
 # macOS does not have a bundled nrf_ocd binary yet, so keep the recovery uploader there.
 tools.nrf54ocd.upload.pattern.macosx="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54upload.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "pyocd" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
 
