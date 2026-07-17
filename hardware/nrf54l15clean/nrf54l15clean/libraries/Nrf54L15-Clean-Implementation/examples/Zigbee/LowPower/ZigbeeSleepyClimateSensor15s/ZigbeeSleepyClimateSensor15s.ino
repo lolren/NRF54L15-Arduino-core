@@ -1672,12 +1672,14 @@ void maybeSendBootReports(uint32_t nowMs) {
   if (!g_joined || !g_bootReportsPending) {
     return;
   }
-  const uint32_t bootReportDelayMs =
-      static_cast<uint32_t>(NRF54L15_CLEAN_ZIGBEE_BOOT_REPORT_DELAY_MS);
-  if (bootReportDelayMs != 0U &&
-      (nowMs - g_bootMs) < bootReportDelayMs) {
+#if NRF54L15_CLEAN_ZIGBEE_BOOT_REPORT_DELAY_MS > 0UL
+  if ((nowMs - g_bootMs) <
+      static_cast<uint32_t>(NRF54L15_CLEAN_ZIGBEE_BOOT_REPORT_DELAY_MS)) {
     return;
   }
+#else
+  (void)nowMs;
+#endif
 
   bool tempOk = g_bootTempReported;
   bool humidityOk = g_bootHumidityReported;
