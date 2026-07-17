@@ -129,7 +129,7 @@ private:
     uint32_t getFrequencyValue(uint32_t clockHz);
 };
 
-// Global SPI instance on the XIAO header pins (D8/D9/D10), SPIM23, 8 MHz max.
+// Global SPI instance on the XIAO header pins (D8/D9/D10), SPIM21, 8 MHz max.
 extern SPIClass SPI;
 // Dedicated HS-SPI/QSPI pads on the onboard flash bus, SPIM00, 32 MHz max.
 extern SPIClass SPI_HS;

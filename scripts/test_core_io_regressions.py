@@ -1211,6 +1211,13 @@ def validate_no_generated_uf2_artifacts() -> None:
 
 def validate_spi_contracts() -> None:
     source = (PLATFORM / "cores/nrf54lm20b/SPI.cpp").read_text(encoding="utf-8")
+    header = (PLATFORM / "cores/nrf54lm20b/SPI.h").read_text(encoding="utf-8")
+    assert (
+        "SPIClass SPI(NRF_SPIM21, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK, PIN_SPI_SS);"
+        in source
+    )
+    assert "SPIClass SPI(NRF_SPIM23" not in source
+    assert "D8/D9/D10), SPIM21, 8 MHz max." in header
     begin_transaction = function_body(
         source, "void SPIClass::beginTransaction(SPISettings settings)"
     )
@@ -1219,7 +1226,7 @@ def validate_spi_contracts() -> None:
         begin_transaction.index("applySettings()")
     )
     assert "_inTransaction = false;" in begin_transaction
-    print("PASS nrf54lm20b SPI beginTransaction route-failure guard")
+    print("PASS nrf54lm20b SPIM21 header route and beginTransaction guard")
 
 
 def validate_system_off_wake_contracts() -> None:

@@ -12,6 +12,10 @@ WIRE_SOURCES = (
     CORE / "nrf54l15/Wire.cpp",
     CORE / "nrf54lm20b/Wire.cpp",
 )
+SCANNER = (
+    ROOT
+    / "hardware/nrf54l15clean/nrf54l15clean/examples/Wire/WireScanner/WireScanner.ino"
+)
 
 
 def function_body(text: str, signature: str) -> str:
@@ -165,9 +169,27 @@ def test_zero_length_probe_source() -> None:
     print("PASS L15 and LM20A zero-length Wire probes force a real, non-writing address phase")
 
 
+def test_dual_bus_scanner_source() -> None:
+    scanner = SCANNER.read_text(encoding="utf-8")
+    for token in (
+        "static void scanBus(TwoWire& bus, const char* name, uint8_t sda, uint8_t scl)",
+        "digitalRead(sda) == LOW || digitalRead(scl) == LOW",
+        'scanBus(Wire, "Wire", SDA, SCL)',
+        'scanBus(Wire1, "Wire1", SDA1, SCL1)',
+        "BoardControl::setImuMicEnabled(true)",
+        "pinMode(PIN_IMU_CS, OUTPUT)",
+        "digitalWrite(PIN_IMU_CS, HIGH)",
+        "ARDUINO_XIAO_NRF54L15_CLEAN",
+    ):
+        assert token in scanner, f"WireScanner board-aware contract missing: {token}"
+    assert scanner.count("BoardControl::setImuMicEnabled(true)") == 2
+    print("PASS WireScanner powers Sense rails, selects LM20A I2C mode, and scans both buses")
+
+
 def main() -> None:
     test_error_mapping_model()
     test_zero_length_probe_source()
+    test_dual_bus_scanner_source()
     print("PASS all Wire address-probe contracts")
 
 
