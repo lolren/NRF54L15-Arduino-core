@@ -1,6 +1,6 @@
 # nRF OCD Corresponding Source
 
-The platform's Linux `tools/nrf_ocd` executable is nRF OCD `v0.3.3`. It was
+The platform's Linux `tools/nrf_ocd` executable is nRF OCD `v0.3.6`. It was
 built from nRF OCD source and statically linked with libusb `1.0.27`. Most nRF
 OCD code is project-owned MIT work; the target, flash-algorithm, and USB
 transport portions identified in
@@ -10,13 +10,14 @@ recipients can inspect, modify, and relink the complete work.
 
 | File | Role | SHA-256 |
 |---|---|---|
-| `../nrf_ocd` | Distributed Linux x86-64 executable | `b5ed26567cf4fe5b9f3d9ea24c3f483029121539c521168e271a0f76a86dbe48` |
-| `open-nrf-ocd-v0.3.3-compliance-source.tar.gz` | `v0.3.3` application source with redistribution-only license and attribution metadata | `8de82fa7270fda04c2c1bfdcbc70672891af0a5ebb98d1bf3b97124c58542959` |
+| `../nrf_ocd` | Distributed Linux x86-64 executable | `187bda5de37518ce29d07f63b4ae5a3fcc579782ff657e79a7cdffc82e7164f4` |
+| `open-nrf-ocd-v0.3.6-source.tar.gz` | Exact application source from the annotated `v0.3.6` release tag | `da4b7416d618f41a28de0a5db6092e3625e23d0a974118d105372b4979830491` |
 | `libusb-1.0.27.tar.bz2` | Corresponding libusb source | `ffaa41d741a8a3bee244ac8e54a72ea05bf2879663c098c82fc5757853441575` |
 
-The application archive records commit `9e2ce3a1ba480c43cbb5f6b43a3d0acc47d83c92`
-as its executable-code baseline. Its added headers, license files, and removal
-of stale build output do not alter executable C statements.
+The application archive records commit
+`73cd60678e6b05438706288a64225aceeeeae90e` and contains the exact source used
+for the published `v0.3.6` binaries, including quiet post-reset teardown,
+bounded SWD transfer recovery, and their regression tests.
 
 Project-owned nRF OCD portions are provided under the adjacent
 [MIT license](nrf_ocd-MIT.txt). The identified pyOCD-derived portions use the

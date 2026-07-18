@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Optional, List, Set, Dict, Tuple
+from typing import Optional, List, Dict, Tuple
 
 CMSIS_DAP_VENDOR_ID = "2886"
 CMSIS_DAP_PRODUCT_IDS = ("0066", "0068")  # L15=0066, LM20A=0068
@@ -36,7 +36,7 @@ DEFAULT_UF2_LABELS = (
     "DAPLINK",
 )
 UF2_MARKER_FILES = ("INFO_UF2.TXT", "CURRENT.UF2", "INDEX.HTM")
-OPEN_NRF_OCD_RELEASE = "v0.3.3"
+OPEN_NRF_OCD_RELEASE = "v0.3.6"
 OPEN_NRF_OCD_RELEASE_BASE_URL = (
     "https://github.com/lolren/open-nrf-ocd/releases/download"
 )
@@ -1352,37 +1352,26 @@ def detect_nrf_ocd_command(
     if override:
         return shlex.split(override)
 
-    candidates: List[Path] = []
-    candidate_names = set(open_nrf_ocd_candidate_names())
-    search_roots: List[Path] = []
+    # The platform archive ships nrf_ocd beside this wrapper. Select that exact
+    # release binary before looking at caches so an older installed core cannot
+    # win merely because its path is shorter.
+    search_roots = [Path(__file__).resolve().parent]
+    search_roots.extend(open_nrf_ocd_cache_roots(host_tools_path))
     if host_tools_path is not None:
         search_roots.append(host_tools_path)
-    search_roots.append(Path(__file__).resolve().parent)
-    search_roots.append(
-        Path.home() / ".arduino15" / "packages" / "nrf54l15clean" / "tools"
-    )
-    search_roots.extend(open_nrf_ocd_cache_roots(host_tools_path))
 
-    seen: Set[str] = set()
+    seen = set()
     for root in search_roots:
-        if not root.is_dir():
+        root_key = str(root)
+        if root_key in seen:
             continue
-        try:
-            for item in root.rglob("*"):
-                if item.name not in candidate_names or not item.is_file():
-                    continue
-                item_key = str(item)
-                if item_key in seen:
-                    continue
-                seen.add(item_key)
-                candidates.append(item)
-        except OSError:
-            continue
-
-    if candidates:
-        candidates.sort(key=lambda path: (path.name != "nrf_ocd" and path.name != "nrf_ocd.exe", len(str(path))))
-        make_executable_if_needed(candidates[0])
-        return [str(candidates[0])]
+        seen.add(root_key)
+        for name in open_nrf_ocd_candidate_names():
+            candidate = root / name
+            if not candidate.is_file():
+                continue
+            make_executable_if_needed(candidate)
+            return [str(candidate)]
 
     if allow_download:
         return ensure_open_nrf_ocd_release_binary(host_tools_path)
@@ -1430,7 +1419,10 @@ def upload_nrf_ocd(
                 sys.stdout.buffer.flush()
         proc.stdout.close()
         rc = proc.wait()
-        if rc != 0 and looks_like_nrf_ocd_transport_error("".join(captured_output)):
+        # Some nrf_ocd versions report a CMSIS-DAP teardown failure while
+        # still exiting successfully. Do not turn that transport error into a
+        # clean Arduino upload result; let the caller run its pyOCD fallback.
+        if looks_like_nrf_ocd_transport_error("".join(captured_output)):
             return NRF_OCD_TRANSPORT_FALLBACK
         return rc
     except subprocess.TimeoutExpired:

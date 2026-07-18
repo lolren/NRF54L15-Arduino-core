@@ -45,6 +45,71 @@ def result(returncode: int) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(["pyocd", "erase"], returncode, "", "")
 
 
+class NrfOcdTransportTests(unittest.TestCase):
+    def test_bundled_binary_wins_over_shorter_old_cache_path(self):
+        executable_name = "nrf_ocd.exe" if sys.platform.startswith("win") else "nrf_ocd"
+        with tempfile.TemporaryDirectory(prefix="nrf54-ocd-selection-") as directory:
+            root = Path(directory)
+            script_dir = root / "current-release-with-a-deliberately-long-path" / "tools"
+            script_dir.mkdir(parents=True)
+            bundled = script_dir / executable_name
+            bundled.touch()
+
+            old_cache = root / "old"
+            old_cache.mkdir()
+            (old_cache / executable_name).touch()
+
+            with (
+                mock.patch.object(UPLOAD, "__file__", str(script_dir / "upload.py")),
+                mock.patch.dict(
+                    os.environ,
+                    {"NRF54_NRF_OCD": "", "OPEN_NRF_OCD": ""},
+                ),
+            ):
+                actual = UPLOAD.detect_nrf_ocd_command(
+                    host_tools_path=old_cache,
+                    allow_download=False,
+                )
+
+        self.assertEqual(actual, [str(bundled)])
+
+    def test_environment_override_wins_over_bundled_binary(self):
+        with tempfile.TemporaryDirectory(prefix="nrf54-ocd-override-") as directory:
+            script_dir = Path(directory)
+            (script_dir / "nrf_ocd").touch()
+            with (
+                mock.patch.object(UPLOAD, "__file__", str(script_dir / "upload.py")),
+                mock.patch.dict(
+                    os.environ,
+                    {"NRF54_NRF_OCD": "/custom/nrf_ocd --probe exact"},
+                    clear=False,
+                ),
+            ):
+                actual = UPLOAD.detect_nrf_ocd_command(allow_download=False)
+
+        self.assertEqual(actual, ["/custom/nrf_ocd", "--probe", "exact"])
+
+    def test_zero_exit_transport_error_requests_pyocd_fallback(self):
+        fake_nrf_ocd = [
+            sys.executable,
+            "-c",
+            (
+                "print('08:10:55 ERROR cmsis_dap.c:54 bulk write failed "
+                "for cmd 0x03: I/O error', flush=True)"
+            ),
+        ]
+
+        actual = UPLOAD.upload_nrf_ocd(
+            "fixture.hex",
+            "nrf54lm20a",
+            "140EBF71",
+            nrf_ocd_cmd=fake_nrf_ocd,
+        )
+
+        self.assertEqual(actual, UPLOAD.NRF_OCD_TRANSPORT_FALLBACK)
+        self.assertNotEqual(actual, 0)
+
+
 class ProtectedTargetRecoveryTests(unittest.TestCase):
     @mock.patch.object(UPLOAD, "time")
     @mock.patch.object(UPLOAD, "recover_target")
@@ -212,7 +277,11 @@ class PlatformRecipeTests(unittest.TestCase):
         self.assertIn("powershell", pattern.lower())
         self.assertIn("upload_windows.ps1", pattern)
         self.assertIn('-HexPath "{build.path}/{build.project_name}.hex"', pattern)
-        self.assertIn('-Uid "{upload.uid}"', pattern)
+        # Every shipped board leaves upload.uid empty. Passing it through the
+        # native command line renders `-Uid ""`, which powershell.exe treats as
+        # a missing parameter argument before upload_windows.ps1 can run.
+        self.assertNotIn("-Uid", pattern)
+        self.assertNotIn("{upload.uid}", pattern)
         self.assertNotIn("{tools.python3", pattern)
         self.assertNotIn("upload.py", pattern)
 
