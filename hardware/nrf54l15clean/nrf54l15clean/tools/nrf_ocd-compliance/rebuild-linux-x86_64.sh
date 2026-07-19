@@ -11,7 +11,7 @@ BUILD="$WORK/libusb-build"
 
 rm -rf "$APP" "$LIBUSB" "$PREFIX" "$BUILD"
 mkdir -p "$APP" "$BUILD"
-tar -xzf "$ROOT/open-nrf-ocd-v0.3.6-source.tar.gz" -C "$APP" --strip-components=1
+tar -xzf "$ROOT/open-nrf-ocd-v0.3.7-source.tar.gz" -C "$APP" --strip-components=1
 tar -xjf "$ROOT/libusb-1.0.27.tar.bz2" -C "$WORK"
 
 read -r -a CC_COMMAND <<< "${NRF_OCD_CC:-cc}"

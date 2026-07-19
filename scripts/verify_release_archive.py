@@ -102,10 +102,10 @@ FEATURE_BUILDS = (
 LOCAL_PACKAGER = "localnrf54"
 DECLARED_COMPILER_VERSION = "7-2017q4"
 REQUIRED_ARCHIVE_SHA256 = {
-    "tools/nrf_ocd": "187bda5de37518ce29d07f63b4ae5a3fcc579782ff657e79a7cdffc82e7164f4",
-    "tools/nrf_ocd.exe": "415d69df1f40c4299dc95dd53d81407d129c07c91694ef0037e6ac59a6363523",
-    "tools/nrf_ocd-compliance/open-nrf-ocd-v0.3.6-source.tar.gz":
-        "da4b7416d618f41a28de0a5db6092e3625e23d0a974118d105372b4979830491",
+    "tools/nrf_ocd": "9013a6ad6a1bae2788750470502c863b3dfd4ff321f442e2f36c846deacfb31c",
+    "tools/nrf_ocd.exe": "b741631742104e32e339e6e12a295f2460fc4392ad59b0bb809e3efe84293619",
+    "tools/nrf_ocd-compliance/open-nrf-ocd-v0.3.7-source.tar.gz":
+        "b1130ef1b05df1b2cd656189d2f5c7333e86b86055c03ed86ab380b00e405b95",
     "tools/nrf_ocd-compliance/libusb-1.0.27.tar.bz2":
         "ffaa41d741a8a3bee244ac8e54a72ea05bf2879663c098c82fc5757853441575",
 }
@@ -254,7 +254,7 @@ def main() -> int:
             platform / "tools/nrf_ocd-compliance/nrf_ocd-MIT.txt",
             platform / "tools/nrf_ocd-compliance/nrf_ocd-THIRD_PARTY_NOTICES.md",
             platform / "tools/nrf_ocd-compliance/README.md",
-            platform / "tools/nrf_ocd-compliance/open-nrf-ocd-v0.3.6-source.tar.gz",
+            platform / "tools/nrf_ocd-compliance/open-nrf-ocd-v0.3.7-source.tar.gz",
             platform / "tools/nrf_ocd-compliance/libusb-1.0.27.tar.bz2",
             platform / "tools/nrf_ocd-compliance/rebuild-linux-x86_64.sh",
             platform / "tools/nrf54l15hosttools/1.1.3/LICENSE",
@@ -337,7 +337,7 @@ def main() -> int:
             nrf_ocd_compliance / "README.md",
             (
                 "nRF OCD Corresponding Source",
-                "open-nrf-ocd-v0.3.6-source.tar.gz",
+                "open-nrf-ocd-v0.3.7-source.tar.gz",
                 "rebuild-linux-x86_64.sh",
             ),
         )
@@ -491,7 +491,7 @@ def main() -> int:
 
         verify_nrf_ocd_source_notices(
             platform
-            / "tools/nrf_ocd-compliance/open-nrf-ocd-v0.3.6-source.tar.gz"
+            / "tools/nrf_ocd-compliance/open-nrf-ocd-v0.3.7-source.tar.gz"
         )
         redistributed_wheels = sorted(platform.rglob("*.whl"))
         if redistributed_wheels:
