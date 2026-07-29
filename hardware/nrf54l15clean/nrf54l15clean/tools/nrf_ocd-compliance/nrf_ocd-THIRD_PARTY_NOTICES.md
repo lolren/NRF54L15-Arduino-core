@@ -6,7 +6,7 @@ terms below.
 
 ## pyOCD
 
-The following nRF OCD `v0.3.7` source paths contain material adapted from or
+The following nRF OCD `v0.3.8` source paths contain material adapted from or
 behavior directly derived from pyOCD `0.44.1`:
 
 - `src/flash_algo_nrf54l.c`

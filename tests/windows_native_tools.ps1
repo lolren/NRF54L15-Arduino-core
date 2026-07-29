@@ -79,8 +79,6 @@ if /I "%1"=="list" (
   exit /b 0
 )
 if "%MOCK_NRF_ALWAYS_FAIL%"=="1" exit /b 23
-echo %* | findstr /C:"write 0xE000EDF0 00005FA0" >nul
-if not errorlevel 1 if "%MOCK_NRF_DETACH_FAIL%"=="1" exit /b 29
 echo %* | findstr /C:" load " >nul
 if not errorlevel 1 if not exist "%MOCK_NRF_MARK%" (
   type nul >"%MOCK_NRF_MARK%"
@@ -94,7 +92,6 @@ exit /b 0
     $env:MOCK_NRF_LOG = $mockLog
     $env:MOCK_NRF_MARK = $mockMark
     $env:MOCK_NRF_ALWAYS_FAIL = "0"
-    $env:MOCK_NRF_DETACH_FAIL = "0"
     $env:MOCK_NRF_LIST_MODE = ""
     $env:MOCK_NRF_LIST_EXIT = ""
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
@@ -104,25 +101,16 @@ exit /b 0
     Assert-Equal $LASTEXITCODE 0 "native upload wrapper exit"
     $calls = @(Get-Content -LiteralPath $mockLog)
     $loadCalls = @($calls | Where-Object { $_ -match " load " })
-    $detachCalls = @($calls | Where-Object { $_ -match "write 0xE000EDF0 00005FA0" })
     $aliasedCalls = @($calls | Where-Object { $_ -match "-t nrf54l15" })
     Assert-Equal $loadCalls.Count 2 "erase/load attempts"
-    Assert-Equal $detachCalls.Count 1 "debug detach"
-    Assert-Equal $aliasedCalls.Count 3 "target alias mapping"
-    Write-Host "PASS Windows native upload retry and detach"
-
-    Remove-Item -LiteralPath $mockLog -Force
-    $env:MOCK_NRF_DETACH_FAIL = "1"
-    & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
-        -File (Join-Path $tools "upload_windows.ps1") `
-        -HexPath $hex -Port "COM42" -Target "nrf54lm20a" `
-        -NrfOcd $mock -RetryDelayMs 0
-    Assert-Equal $LASTEXITCODE 0 "successful flash with detach warning"
-    Write-Host "PASS Windows detach warning preserves upload success"
+    Assert-Equal $aliasedCalls.Count 2 "target alias mapping"
+    Assert-Equal @($calls | Where-Object {
+        $_ -ne "list" -and $_ -notmatch " load "
+    }).Count 0 "post-reset command count"
+    Write-Host "PASS Windows native upload retry and command-free teardown"
 
     Remove-Item -LiteralPath $mockMark, $mockLog -Force
     $env:MOCK_NRF_ALWAYS_FAIL = "1"
-    $env:MOCK_NRF_DETACH_FAIL = "0"
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -File (Join-Path $tools "upload_windows.ps1") `
         -HexPath $hex -Port "COM42" -Target "nrf54lm20a" `
@@ -144,13 +132,11 @@ exit /b 0
         -NrfOcd $mock -RetryDelayMs 0
     Assert-Equal $LASTEXITCODE 0 "target-matched UID upload exit"
     $uidCalls = @(Get-Content -LiteralPath $mockLog)
-    $uidTransferCalls = @($uidCalls | Where-Object {
-        $_ -match " load " -or $_ -match "write 0xE000EDF0 00005FA0"
-    })
-    Assert-Equal $uidTransferCalls.Count 3 "target-matched UID transfer calls"
+    $uidTransferCalls = @($uidCalls | Where-Object { $_ -match " load " })
+    Assert-Equal $uidTransferCalls.Count 2 "target-matched UID transfer calls"
     Assert-Equal @($uidTransferCalls | Where-Object {
         $_ -match "-u 3377B9D6" -and $_ -notmatch "-p "
-    }).Count 3 "target-matched UID selector"
+    }).Count 2 "target-matched UID selector"
     Write-Host "PASS Windows upload bypasses a stale COM port with the matching UID"
 
     Remove-Item -LiteralPath $mockMark, $mockLog -Force -ErrorAction SilentlyContinue
@@ -161,12 +147,10 @@ exit /b 0
         -NrfOcd $mock -RetryDelayMs 0
     Assert-Equal $LASTEXITCODE 0 "ambiguous target port fallback exit"
     $portCalls = @(Get-Content -LiteralPath $mockLog)
-    $portTransferCalls = @($portCalls | Where-Object {
-        $_ -match " load " -or $_ -match "write 0xE000EDF0 00005FA0"
-    })
+    $portTransferCalls = @($portCalls | Where-Object { $_ -match " load " })
     Assert-Equal @($portTransferCalls | Where-Object {
         $_ -match "-p COM42" -and $_ -notmatch "-u "
-    }).Count 3 "ambiguous target port selector"
+    }).Count 2 "ambiguous target port selector"
     Write-Host "PASS Windows upload uses the port for multiple matching probes"
 
     Remove-Item -LiteralPath $mockMark, $mockLog -Force -ErrorAction SilentlyContinue
@@ -194,9 +178,8 @@ exit /b 0
     Assert-Equal @($explicitCalls | Where-Object { $_ -eq "list" }).Count 0 `
         "explicit UID enumeration count"
     Assert-Equal @($explicitCalls | Where-Object {
-        ($_ -match " load " -or $_ -match "write 0xE000EDF0 00005FA0") -and
-        $_ -match "-u A1B2C3D4"
-    }).Count 3 "explicit UID transfer selector"
+        $_ -match " load " -and $_ -match "-u A1B2C3D4"
+    }).Count 2 "explicit UID transfer selector"
     Write-Host "PASS Windows upload honors an explicit UID without enumeration"
 }
 finally {

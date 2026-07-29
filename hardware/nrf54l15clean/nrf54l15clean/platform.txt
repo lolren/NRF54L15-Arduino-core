@@ -1,5 +1,5 @@
 name=nRF54L15 Boards
-version=1.0.8
+version=1.0.9
 category=Arduino
 
 # Python launcher for upload helper.
@@ -88,12 +88,16 @@ tools.nrf54upload.cmd.path={tools.nrf54upload.path}/upload.py
 # transport failures can fall back to pyOCD recovery automatically.
 tools.nrf54ocd.path={runtime.platform.path}/tools
 tools.nrf54ocd.cmd.path={tools.nrf54ocd.path}/nrf_ocd
+tools.nrf54ocd.upload.params.verbose=
+tools.nrf54ocd.upload.params.quiet=
 tools.nrf54ocd.upload.pattern="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54upload.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "nrf_ocd" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
 tools.nrf54ocd.upload.pattern.windows=powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{runtime.platform.path}/tools/upload_windows.ps1" -HexPath "{build.path}/{build.project_name}.hex" -Port "{serial.port}" -Target "{upload.target}"
 # macOS does not have a bundled nrf_ocd binary yet, so keep the recovery uploader there.
 tools.nrf54ocd.upload.pattern.macosx="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54upload.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "pyocd" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
 
 # Explicit recovery uploader. This intentionally stays Python-based on every OS.
+tools.nrf54upload.upload.params.verbose=
+tools.nrf54upload.upload.params.quiet=
 tools.nrf54upload.upload.pattern="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54upload.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "{upload.runner}" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
 
 tools.nrf54uf2.path={runtime.platform.path}/tools/uf2
@@ -104,6 +108,8 @@ tools.nrf54uf2.uf2conv.path={tools.nrf54uf2.path}/uf2conv.py
 # uploads, with the selected programmer supplying the runner explicitly.
 tools.nrf54program.path={runtime.platform.path}/tools
 tools.nrf54program.cmd.path={tools.nrf54program.path}/upload.py
+tools.nrf54program.program.params.verbose=
+tools.nrf54program.program.params.quiet=
 tools.nrf54program.program.pattern="{tools.python3.cmd}" {tools.python3.args} "{tools.nrf54program.cmd.path}" --hex "{build.path}/{build.project_name}.hex" --uf2 "{build.path}/{build.project_name}.uf2" --port "{serial.port}" --runner "pyocd" --target "{upload.target}" --uid "{upload.uid}" --openocd-script "{upload.openocd_script}" --openocd-speed "{upload.openocd_speed}" --openocd-bin "{upload.openocd_bin}" --host-tools-path "{runtime.tools.nrf54l15hosttools.path}" --uf2-drive "{upload.uf2_drive}" --uf2-labels "{upload.uf2_labels}" --uf2-timeout "{upload.uf2_timeout}" --pyocd-safe "{upload.pyocd_safe}"
 
 # LM20A pyOCD target support is registered at upload time via

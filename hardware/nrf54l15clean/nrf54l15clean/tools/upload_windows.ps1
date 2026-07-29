@@ -124,20 +124,5 @@ if ($flashExitCode -ne 0) {
     exit $flashExitCode
 }
 
-# nrf_ocd reset leaves C_DEBUGEN asserted on some CMSIS-DAP firmware. Make the
-# last debug access clear DHCSR so subsequent System OFF calls use real hardware
-# behavior instead of debugger emulation. Bytes are little-endian 0xA05F0000.
-$detachArgs = @($selectorArgs + @(
-    "-t", $Target, "write", "0xE000EDF0", "00005FA0"
-))
-& $NrfOcd @detachArgs
-$detachExitCode = $LASTEXITCODE
-if ($detachExitCode -ne 0) {
-    Write-Warning (
-        "Firmware was written successfully, but the best-effort debugger " +
-        "detach returned exit code $detachExitCode"
-    )
-}
-
 Write-Host "Upload complete"
 exit 0

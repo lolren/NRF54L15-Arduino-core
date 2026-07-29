@@ -272,6 +272,20 @@ class PlatformRecipeTests(unittest.TestCase):
             if separator:
                 cls.properties[key] = value
 
+    def test_legacy_ide_verbosity_properties_are_defined_as_no_ops(self):
+        property_names = (
+            "tools.nrf54ocd.upload.params.verbose",
+            "tools.nrf54ocd.upload.params.quiet",
+            "tools.nrf54upload.upload.params.verbose",
+            "tools.nrf54upload.upload.params.quiet",
+            "tools.nrf54program.program.params.verbose",
+            "tools.nrf54program.program.params.quiet",
+        )
+        for property_name in property_names:
+            with self.subTest(property=property_name):
+                self.assertIn(property_name, self.properties)
+                self.assertEqual("", self.properties[property_name])
+
     def test_windows_native_upload_routes_through_recovery_wrapper(self):
         pattern = self.properties["tools.nrf54ocd.upload.pattern.windows"]
         self.assertIn("powershell", pattern.lower())
@@ -284,6 +298,12 @@ class PlatformRecipeTests(unittest.TestCase):
         self.assertNotIn("{upload.uid}", pattern)
         self.assertNotIn("{tools.python3", pattern)
         self.assertNotIn("upload.py", pattern)
+
+    def test_windows_native_upload_stops_after_the_resetting_load(self):
+        source = (PLATFORM_TOOLS / "upload_windows.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("0xE000EDF0", source)
+        self.assertNotIn("$detachArgs", source)
+        self.assertNotIn("$detachExitCode", source)
 
     def test_uf2_recipe_runs_the_real_emitter(self):
         pattern = self.properties["recipe.objcopy.uf2.pattern"]
@@ -361,6 +381,60 @@ class PlatformRecipeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output)
             self.assertIn("--runner pyocd", output.replace('"', ""))
             self.assertNotIn("{programmer.", output)
+
+    @unittest.skipUnless(
+        shutil.which("arduino-cli") and Path("/bin/echo").is_file(),
+        "Arduino CLI expansion test requires arduino-cli and /bin/echo",
+    )
+    def test_arduino_cli_expands_default_upload_in_quiet_and_verbose_modes(self):
+        with tempfile.TemporaryDirectory(prefix="nrf54-upload-test-") as directory:
+            root = Path(directory)
+            user = root / "user"
+            data = root / "data"
+            downloads = root / "downloads"
+            hardware = user / "hardware" / "localnrf54"
+            hardware.mkdir(parents=True)
+            data.mkdir()
+            downloads.mkdir()
+            (hardware / "nrf54l15clean").symlink_to(
+                UPLOAD_PATH.parents[1], target_is_directory=True
+            )
+            config = root / "arduino-cli.yaml"
+            config.write_text(
+                "directories:\n"
+                f"  data: {data}\n"
+                f"  downloads: {downloads}\n"
+                f"  user: {user}\n",
+                encoding="utf-8",
+            )
+            image = root / "RecipeProbe.ino.hex"
+            image.write_text(":00000001FF\n", encoding="ascii")
+            command = [
+                "arduino-cli",
+                "upload",
+                "--config-file",
+                str(config),
+                "--fqbn",
+                "localnrf54:nrf54l15clean:xiao_nrf54l15",
+                "--input-file",
+                str(image),
+                "-p",
+                "/dev/null",
+                "--upload-property",
+                "tools.python3.cmd=/bin/echo",
+            ]
+
+            for verbose_args in ([], ["-v"]):
+                with self.subTest(verbose=bool(verbose_args)):
+                    completed = subprocess.run(
+                        [*command, *verbose_args],
+                        capture_output=True,
+                        text=True,
+                    )
+                    output = completed.stdout + completed.stderr
+                    self.assertEqual(0, completed.returncode, output)
+                    self.assertIn("--runner nrf_ocd", output.replace('"', ""))
+                    self.assertNotIn("{upload.verbose}", output)
 
     def test_uf2_emitter_produces_valid_blocks(self):
         with tempfile.TemporaryDirectory(prefix="nrf54-uf2-test-") as directory:
