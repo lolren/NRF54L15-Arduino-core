@@ -67,6 +67,7 @@ private:
     bool drainTxForShutdown();
     size_t writeBlocking(const uint8_t* buffer, size_t size, bool waitStopped = false);
     bool usesBridgePins() const;
+    bool ensureBridgeActive();
     void commitRxBytes(const uint8_t* data, uint32_t amount);
     void flushPartialRxDma(uintptr_t base);
     bool usesP2Pins() const;
@@ -85,6 +86,11 @@ private:
     uint8_t _txPin;
     uint8_t _rxPin;
     bool _configured;
+    // A XIAO nRF54L15 USB bridge is powered from VBUS only. When the board is
+    // battery-powered, begin() defers bridge activation so its I/O remains a
+    // no-op until a host opens the bridge.
+    bool _bridgeDeferred;
+    bool _bridgeActivationInProgress;
     bool _constlatOwned;
     bool _lastShutdownClean;
     unsigned long _baud;

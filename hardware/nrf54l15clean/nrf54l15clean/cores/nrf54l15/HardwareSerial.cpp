@@ -114,6 +114,56 @@ static void configure_pin_input(uint8_t port, uint8_t pin, bool pullup) {
     gpio->PIN_CNF[pin] = cnf;
 }
 
+static void configure_pin_high_z(uint8_t port, uint8_t pin) {
+    NRF_GPIO_Type* gpio = gpio_for_port(port);
+    if (gpio == nullptr) {
+        return;
+    }
+    const uint32_t bit = (1UL << pin);
+    gpio->DIRCLR = bit;
+
+    uint32_t cnf = gpio->PIN_CNF[pin];
+    cnf &= ~(GPIO_PIN_CNF_DIR_Msk |
+             GPIO_PIN_CNF_INPUT_Msk |
+             GPIO_PIN_CNF_PULL_Msk |
+             GPIO_PIN_CNF_SENSE_Msk);
+    cnf |= (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos);
+    cnf |= GPIO_PIN_CNF_INPUT_Disconnect;
+    cnf |= GPIO_PIN_CNF_PULL_Disabled;
+    cnf |= GPIO_PIN_CNF_SENSE_Disabled;
+    gpio->PIN_CNF[pin] = cnf;
+}
+
+static bool bridge_uart_is_present(uint8_t port, uint8_t rxPin) {
+    NRF_GPIO_Type* gpio = gpio_for_port(port);
+    if (gpio == nullptr) {
+        return false;
+    }
+
+    const uint32_t bit = (1UL << rxPin);
+    gpio->DIRCLR = bit;
+
+    // The SAMD11 UART TX line is high while idle when its USB-side 3V3 rail
+    // is up. With USB removed, the bridge is unpowered and the nRF pulldown
+    // keeps this line low. This probe prevents the nRF TX pin from driving an
+    // unpowered SAMD11 input through its protection diode.
+    uint32_t cnf = gpio->PIN_CNF[rxPin];
+    cnf &= ~(GPIO_PIN_CNF_DIR_Msk |
+             GPIO_PIN_CNF_INPUT_Msk |
+             GPIO_PIN_CNF_PULL_Msk |
+             GPIO_PIN_CNF_SENSE_Msk);
+    cnf |= (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos);
+    cnf |= GPIO_PIN_CNF_INPUT_Connect;
+    cnf |= GPIO_PIN_CNF_PULL_Pulldown;
+    cnf |= GPIO_PIN_CNF_SENSE_Disabled;
+    gpio->PIN_CNF[rxPin] = cnf;
+
+    for (volatile uint32_t settle = 0U; settle < 32U; ++settle) {
+        __asm volatile("nop");
+    }
+    return (gpio->IN & bit) != 0U;
+}
+
 /* Convert baud rate to the nearest supported UARTE BAUDRATE preset.
  * The nRF54L15 UARTE exposes fixed presets rather than a general divisor.
  */
@@ -412,6 +462,8 @@ HardwareSerial::HardwareSerial(NRF_UARTE_Type* uart, uint8_t txPin, uint8_t rxPi
       _txPin(txPin),
       _rxPin(rxPin),
       _configured(false),
+      _bridgeDeferred(false),
+      _bridgeActivationInProgress(false),
       _constlatOwned(false),
       _lastShutdownClean(true),
       _baud(9600UL),
@@ -468,12 +520,30 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
     if (_configured) {
         end();
     }
+    _bridgeDeferred = false;
 
     uint8_t txPort = 0, tx = 0, rxPort = 0, rx = 0;
     if (!decode_pin(_txPin, &txPort, &tx) || !decode_pin(_rxPin, &rxPort, &rx) ||
         !uart_route_valid(_uart, txPort, tx, rxPort, rx)) {
         return;
     }
+
+#if defined(NRF54L15_CLEAN_SERIAL_BRIDGE_AUTO)
+    if (usesBridgePins() && !_bridgeActivationInProgress &&
+        !bridge_uart_is_present(rxPort, rx)) {
+        // Keep both nets harmless while the USB-only SAMD11 bridge is absent.
+        // A later Serial I/O call retries this probe after the host opens the
+        // bridge, so USB serial does not depend on an early boot probe.
+        // In particular, do not make the nRF TX pin an output into an
+        // unpowered SAMD11 RX pin.
+        configure_pin_high_z(txPort, tx);
+        configure_pin_high_z(rxPort, rx);
+        _baud = baud;
+        _config = config;
+        _bridgeDeferred = true;
+        return;
+    }
+#endif
 
     release_nfc_pads_for_gpio(txPort, tx, rxPort, rx);
     configure_pin_output(txPort, tx, true);
@@ -514,6 +584,8 @@ void HardwareSerial::begin(unsigned long baud, uint16_t config) {
     _txDmaCount = 0U;
     _txDmaRunning = false;
     _configured = true;
+    _bridgeDeferred = false;
+    _bridgeActivationInProgress = false;
 
     IRQn_Type irqn = Reset_IRQn;
     if (uart_try_irqn_for_instance(_uart, &irqn)) {
@@ -563,6 +635,15 @@ void HardwareSerial::end() {
     reg32(base + U_PSEL_CTS) = kPselDisconnected;
     reg32(base + U_PSEL_RTS) = kPselDisconnected;
 
+    uint8_t txPort = 0U;
+    uint8_t tx = 0U;
+    uint8_t rxPort = 0U;
+    uint8_t rx = 0U;
+    if (decode_pin(_txPin, &txPort, &tx) && decode_pin(_rxPin, &rxPort, &rx)) {
+        configure_pin_high_z(txPort, tx);
+        configure_pin_high_z(rxPort, rx);
+    }
+
     IRQn_Type irqn = Reset_IRQn;
     if (uart_try_irqn_for_instance(_uart, &irqn)) {
         HardwareSerial*& owner = uart_owner_slot(_uart);
@@ -582,6 +663,8 @@ void HardwareSerial::end() {
     _txCount = 0U;
     _txDmaCount = 0U;
     _txDmaRunning = false;
+    _bridgeDeferred = false;
+    _bridgeActivationInProgress = false;
     releaseConstlatIfNeeded();
 }
 
@@ -1013,6 +1096,26 @@ bool HardwareSerial::usesBridgePins() const {
     return usesPins(PIN_SAMD11_RX, PIN_SAMD11_TX);
 }
 
+bool HardwareSerial::ensureBridgeActive() {
+    if (_configured || !_bridgeDeferred || _uart == nullptr || !usesBridgePins()) {
+        return _configured;
+    }
+
+    uint8_t txPort = 0U;
+    uint8_t tx = 0U;
+    uint8_t rxPort = 0U;
+    uint8_t rx = 0U;
+    if (!decode_pin(_txPin, &txPort, &tx) || !decode_pin(_rxPin, &rxPort, &rx) ||
+        !bridge_uart_is_present(rxPort, rx)) {
+        return false;
+    }
+
+    _bridgeActivationInProgress = true;
+    begin(_baud, _config);
+    _bridgeActivationInProgress = false;
+    return _configured;
+}
+
 void HardwareSerial::handleIrq() {
     if (_uart != nullptr) {
         processTxDmaEvents(reinterpret_cast<uintptr_t>(_uart));
@@ -1049,11 +1152,17 @@ void HardwareSerial::releaseConstlatIfNeeded() {
 }
 
 int HardwareSerial::available() {
+    if (!_configured && !ensureBridgeActive()) {
+        return 0;
+    }
     serviceRxDma();
     return static_cast<int>(_rxCount);
 }
 
 int HardwareSerial::availableForWrite() {
+    if (!_configured && !ensureBridgeActive()) {
+        return 0;
+    }
     serviceTxDma();
     const uint32_t primask = __get_PRIMASK();
     __disable_irq();
@@ -1063,6 +1172,9 @@ int HardwareSerial::availableForWrite() {
 }
 
 int HardwareSerial::read() {
+    if (!_configured && !ensureBridgeActive()) {
+        return -1;
+    }
     serviceRxDma();
     const uint32_t primask = __get_PRIMASK();
     __disable_irq();
@@ -1080,6 +1192,9 @@ int HardwareSerial::read() {
 }
 
 int HardwareSerial::peek() {
+    if (!_configured && !ensureBridgeActive()) {
+        return -1;
+    }
     serviceRxDma();
     const uint32_t primask = __get_PRIMASK();
     __disable_irq();
@@ -1093,7 +1208,10 @@ int HardwareSerial::peek() {
 }
 
 void HardwareSerial::flush() {
-    if (!_configured || _uart == nullptr) {
+    if (!_configured && !ensureBridgeActive()) {
+        return;
+    }
+    if (_uart == nullptr) {
         return;
     }
 
@@ -1118,7 +1236,10 @@ size_t HardwareSerial::write(uint8_t value) {
 }
 
 size_t HardwareSerial::write(const uint8_t* buffer, size_t size) {
-    if (!_configured || _uart == nullptr) {
+    if (!_configured && !ensureBridgeActive()) {
+        return 0U;
+    }
+    if (_uart == nullptr) {
         return 0U;
     }
     if (buffer == nullptr || size == 0U) {
@@ -1193,7 +1314,7 @@ size_t HardwareSerial::write(const uint8_t* buffer, size_t size) {
 }
 
 HardwareSerial::operator bool() const {
-    return _configured && (_uart != nullptr);
+    return (_configured && (_uart != nullptr)) || _bridgeDeferred;
 }
 
 

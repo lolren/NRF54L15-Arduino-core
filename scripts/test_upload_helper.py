@@ -286,6 +286,20 @@ class PlatformRecipeTests(unittest.TestCase):
                 self.assertIn(property_name, self.properties)
                 self.assertEqual("", self.properties[property_name])
 
+    def test_python_recipes_do_not_depend_on_legacy_unresolved_tool_properties(self):
+        recipe_keys = (
+            "recipe.hooks.prebuild.1.pattern",
+            "recipe.objcopy.uf2.pattern",
+            "tools.nrf54ocd.upload.pattern",
+            "tools.nrf54ocd.upload.pattern.macosx",
+            "tools.nrf54upload.upload.pattern",
+            "tools.nrf54program.program.pattern",
+        )
+        for recipe_key in recipe_keys:
+            with self.subTest(recipe=recipe_key):
+                self.assertNotIn("{tools.python3", self.properties[recipe_key])
+                self.assertIn("python3", self.properties[recipe_key])
+
     def test_windows_native_upload_routes_through_recovery_wrapper(self):
         pattern = self.properties["tools.nrf54ocd.upload.pattern.windows"]
         self.assertIn("powershell", pattern.lower())
@@ -339,10 +353,15 @@ class PlatformRecipeTests(unittest.TestCase):
             user = root / "user"
             data = root / "data"
             downloads = root / "downloads"
+            fake_bin = root / "bin"
             hardware = user / "hardware" / "localnrf54"
             hardware.mkdir(parents=True)
             data.mkdir()
             downloads.mkdir()
+            fake_bin.mkdir()
+            fake_python = fake_bin / "python3"
+            fake_python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+            fake_python.chmod(0o755)
             (hardware / "nrf54l15clean").symlink_to(
                 UPLOAD_PATH.parents[1], target_is_directory=True
             )
@@ -370,12 +389,14 @@ class PlatformRecipeTests(unittest.TestCase):
                     str(image),
                     "-p",
                     "/dev/null",
-                    "--upload-property",
-                    "tools.python3.cmd=/bin/echo",
                     "-v",
                 ],
                 capture_output=True,
                 text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                },
             )
             output = completed.stdout + completed.stderr
             self.assertEqual(completed.returncode, 0, output)
@@ -392,10 +413,15 @@ class PlatformRecipeTests(unittest.TestCase):
             user = root / "user"
             data = root / "data"
             downloads = root / "downloads"
+            fake_bin = root / "bin"
             hardware = user / "hardware" / "localnrf54"
             hardware.mkdir(parents=True)
             data.mkdir()
             downloads.mkdir()
+            fake_bin.mkdir()
+            fake_python = fake_bin / "python3"
+            fake_python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+            fake_python.chmod(0o755)
             (hardware / "nrf54l15clean").symlink_to(
                 UPLOAD_PATH.parents[1], target_is_directory=True
             )
@@ -420,8 +446,6 @@ class PlatformRecipeTests(unittest.TestCase):
                 str(image),
                 "-p",
                 "/dev/null",
-                "--upload-property",
-                "tools.python3.cmd=/bin/echo",
             ]
 
             for verbose_args in ([], ["-v"]):
@@ -430,10 +454,14 @@ class PlatformRecipeTests(unittest.TestCase):
                         [*command, *verbose_args],
                         capture_output=True,
                         text=True,
+                        env={
+                            **os.environ,
+                            "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                        },
                     )
                     output = completed.stdout + completed.stderr
                     self.assertEqual(0, completed.returncode, output)
-                    self.assertIn("--runner nrf_ocd", output.replace('"', ""))
+                    self.assertRegex(output.replace('"', ""), r"--runner\s+nrf_ocd")
                     self.assertNotIn("{upload.verbose}", output)
 
     def test_uf2_emitter_produces_valid_blocks(self):

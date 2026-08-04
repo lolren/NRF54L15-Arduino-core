@@ -283,6 +283,11 @@ def validate_hardware_serial_contracts() -> None:
         digital_source = (PLATFORM / "cores" / chip / "wiring_digital.c").read_text(
             encoding="utf-8"
         )
+        if chip == "nrf54l15":
+            assert "NRF54L15_CLEAN_SERIAL_BRIDGE_AUTO" in source
+            assert "bridge_uart_is_present" in source
+            assert "configure_pin_high_z(txPort, tx);" in source
+            assert "_bridgeDeferred" in source
         digital_nfc_body = function_body(
             digital_source, "static void release_nfc_pad_for_gpio("
         )

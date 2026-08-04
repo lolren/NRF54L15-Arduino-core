@@ -58,7 +58,7 @@ xiao_nrf54l15.build.zigbee_flags=-DNRF54L15_CLEAN_ZIGBEE_ENABLED=0 -DNRF54L15_CL
 xiao_nrf54l15.build.zigbee_channel_flags=
 xiao_nrf54l15.build.zigbee_pan_flags=
 xiao_nrf54l15.build.antenna_flags=
-xiao_nrf54l15.build.serial_flags=
+xiao_nrf54l15.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_BRIDGE_AUTO
 
 xiao_nrf54l15.menu.cpu_freq.64m=64 MHz (Default)
 xiao_nrf54l15.menu.cpu_freq.64m.build.f_cpu=64000000L
@@ -120,6 +120,15 @@ xiao_nrf54l15.menu.clean_antenna.ceramic.build.antenna_flags=
 
 xiao_nrf54l15.menu.clean_antenna.external=External U.FL
 xiao_nrf54l15.menu.clean_antenna.external.build.antenna_flags=-DNRF54L15_CLEAN_ANTENNA_EXTERNAL
+
+xiao_nrf54l15.menu.clean_serial.auto=USB bridge when powered (Default)
+xiao_nrf54l15.menu.clean_serial.auto.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_BRIDGE_AUTO
+
+xiao_nrf54l15.menu.clean_serial.header=Header UART on D6/D7
+xiao_nrf54l15.menu.clean_serial.header.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_ROUTE_HEADER
+
+xiao_nrf54l15.menu.clean_serial.disabled=GPIO on USB bridge pads (Serial disabled)
+xiao_nrf54l15.menu.clean_serial.disabled.build.serial_flags=-DNRF54L15_CLEAN_SERIAL_DISABLED
 
 xiao_nrf54l15.menu.clean_upload.auto=nRF OCD Native (Default)
 xiao_nrf54l15.menu.clean_upload.auto.upload.tool=nrf54ocd

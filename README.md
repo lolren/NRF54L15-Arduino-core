@@ -144,6 +144,11 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
    output is missing, verify **Tools -> Serial Routing** and close other programs
    that own the port.
 
+On the XIAO nRF54L15, the default **USB bridge when powered** route keeps the
+SAMD11 bridge pins high-impedance until the host opens the serial bridge. This
+allows BLE sketches to boot safely from battery; choose **Header UART** when a
+physical D6/D7 UART is required.
+
 Recommended first examples:
 
 | Goal | Arduino example |

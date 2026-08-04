@@ -1209,5 +1209,7 @@ qualification remain separate release activities.
 
 - This is a polling/service style HAL for Arduino runtime compatibility.
 - `Timer::service()` and `Gpiote::service()` should be called frequently from `loop()`.
-- For XIAO nRF54L15 USB serial bridge path (`Tools -> Serial Routing -> USB bridge on Serial`),
-  set Serial Monitor baud to the same value used in `Serial.begin(...)`.
+- For XIAO nRF54L15 USB serial bridge path (`Tools -> Serial Routing -> USB bridge when powered`),
+  set Serial Monitor baud to the same value used in `Serial.begin(...)`. The
+  bridge route remains high-impedance until the host opens it, so battery-only
+  BLE boot does not drive the USB-only SAMD11.
