@@ -300,6 +300,30 @@ class PlatformRecipeTests(unittest.TestCase):
                 self.assertNotIn("{tools.python3", self.properties[recipe_key])
                 self.assertIn("python3", self.properties[recipe_key])
 
+    def test_python_recipes_use_runtime_platform_paths_for_arduino_ide_1(self):
+        recipe_keys = (
+            "recipe.objcopy.uf2.pattern",
+            "recipe.objcopy.uf2.pattern.windows",
+            "tools.nrf54ocd.upload.pattern",
+            "tools.nrf54ocd.upload.pattern.macosx",
+            "tools.nrf54upload.upload.pattern",
+            "tools.nrf54program.program.pattern",
+        )
+        for recipe_key in recipe_keys:
+            with self.subTest(recipe=recipe_key):
+                pattern = self.properties[recipe_key]
+                self.assertNotIn("{tools.", pattern)
+                self.assertIn("{runtime.platform.path}/tools/", pattern)
+
+        self.assertEqual(
+            self.properties["tools.nrf54upload.cmd.path"],
+            "{runtime.platform.path}/tools/upload.py",
+        )
+        self.assertEqual(
+            self.properties["tools.nrf54program.cmd.path"],
+            "{runtime.platform.path}/tools/upload.py",
+        )
+
     def test_windows_native_upload_routes_through_recovery_wrapper(self):
         pattern = self.properties["tools.nrf54ocd.upload.pattern.windows"]
         self.assertIn("powershell", pattern.lower())
@@ -321,7 +345,7 @@ class PlatformRecipeTests(unittest.TestCase):
 
     def test_uf2_recipe_runs_the_real_emitter(self):
         pattern = self.properties["recipe.objcopy.uf2.pattern"]
-        self.assertIn("{tools.nrf54uf2.cmd.path}", pattern)
+        self.assertIn("{runtime.platform.path}/tools/uf2/uf2_emit.py", pattern)
         self.assertIn('--input "{build.path}/{build.project_name}.hex"', pattern)
         self.assertIn('--output "{build.path}/{build.project_name}.uf2"', pattern)
 
@@ -462,6 +486,9 @@ class PlatformRecipeTests(unittest.TestCase):
                     output = completed.stdout + completed.stderr
                     self.assertEqual(0, completed.returncode, output)
                     self.assertRegex(output.replace('"', ""), r"--runner\s+nrf_ocd")
+                    self.assertIn("/tools/upload.py", output)
+                    self.assertNotIn("{tools.", output)
+                    self.assertNotIn("--openocd-bin", output)
                     self.assertNotIn("{upload.verbose}", output)
 
     def test_uf2_emitter_produces_valid_blocks(self):
