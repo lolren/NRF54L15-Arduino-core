@@ -4,6 +4,7 @@
 import importlib.util
 import io
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -24,6 +25,7 @@ UPLOAD_PATH = (
     / "upload.py"
 )
 PLATFORM_PATH = UPLOAD_PATH.parents[1] / "platform.txt"
+BOARDS_PATH = PLATFORM_PATH.with_name("boards.txt")
 PLATFORM_TOOLS = UPLOAD_PATH.parent
 HOST_TOOLS = ROOT / "tools" / "board_manager" / "nrf54l15hosttools"
 LEGACY_HOST_TOOLS = PLATFORM_TOOLS / "nrf54l15hosttools" / "1.1.3"
@@ -271,6 +273,16 @@ class PlatformRecipeTests(unittest.TestCase):
             key, separator, value = raw_line.partition("=")
             if separator:
                 cls.properties[key] = value
+        cls.board_properties = {}
+        for raw_line in BOARDS_PATH.read_text(encoding="utf-8").splitlines():
+            key, separator, value = raw_line.partition("=")
+            if separator:
+                cls.board_properties[key] = value
+        cls.board_ids = sorted(
+            key.removesuffix(".name")
+            for key in cls.board_properties
+            if key.endswith(".name")
+        )
 
     def test_legacy_ide_verbosity_properties_are_defined_as_no_ops(self):
         property_names = (
@@ -323,6 +335,50 @@ class PlatformRecipeTests(unittest.TestCase):
             self.properties["tools.nrf54program.cmd.path"],
             "{runtime.platform.path}/tools/upload.py",
         )
+
+    def test_upload_recipe_properties_are_board_scoped_for_arduino_ide_1(self):
+        recipe_keys = (
+            "tools.nrf54ocd.upload.pattern",
+            "tools.nrf54ocd.upload.pattern.macosx",
+            "tools.nrf54upload.upload.pattern",
+            "tools.nrf54program.program.pattern",
+        )
+        upload_properties = set()
+        for recipe_key in recipe_keys:
+            upload_properties.update(
+                re.findall(r"\{upload\.([^}]+)\}", self.properties[recipe_key])
+            )
+
+        self.assertEqual(
+            {
+                "runner",
+                "target",
+                "uid",
+                "openocd_script",
+                "openocd_speed",
+                "uf2_drive",
+                "uf2_labels",
+                "uf2_timeout",
+                "pyocd_safe",
+            },
+            upload_properties,
+        )
+        self.assertGreater(len(self.board_ids), 0)
+        for board_id in self.board_ids:
+            with self.subTest(board=board_id):
+                for upload_property in upload_properties:
+                    self.assertIn(
+                        f"{board_id}.upload.{upload_property}",
+                        self.board_properties,
+                    )
+                self.assertEqual(
+                    self.board_properties[f"{board_id}.upload.uf2_timeout"],
+                    self.properties["upload.uf2_timeout"],
+                )
+                self.assertEqual(
+                    self.board_properties[f"{board_id}.upload.uf2_labels"],
+                    self.properties["upload.uf2_labels"],
+                )
 
     def test_windows_native_upload_routes_through_recovery_wrapper(self):
         pattern = self.properties["tools.nrf54ocd.upload.pattern.windows"]
@@ -426,6 +482,7 @@ class PlatformRecipeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output)
             self.assertIn("--runner pyocd", output.replace('"', ""))
             self.assertNotIn("{programmer.", output)
+            self.assertNotIn("{upload.", output)
 
     @unittest.skipUnless(
         shutil.which("arduino-cli") and Path("/bin/echo").is_file(),
@@ -488,6 +545,8 @@ class PlatformRecipeTests(unittest.TestCase):
                     self.assertRegex(output.replace('"', ""), r"--runner\s+nrf_ocd")
                     self.assertIn("/tools/upload.py", output)
                     self.assertNotIn("{tools.", output)
+                    self.assertNotIn("{upload.", output)
+                    self.assertRegex(output.replace('"', ""), r"--uf2-timeout\s+12")
                     self.assertNotIn("--openocd-bin", output)
                     self.assertNotIn("{upload.verbose}", output)
 
