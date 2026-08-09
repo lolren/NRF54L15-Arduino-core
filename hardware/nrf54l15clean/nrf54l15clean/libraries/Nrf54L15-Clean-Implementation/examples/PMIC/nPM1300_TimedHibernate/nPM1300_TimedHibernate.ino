@@ -7,7 +7,8 @@
  *
  * Current measurement notes:
  * - Measure from the VBAT/battery pads, not through USB.
- * - USB/SAMD/debug wiring can dominate the current reading.
+ * - USB/VBUS must be disconnected before PMIC Hibernate entry; the helper
+ *   returns false while VBUS is present.
  * - Wake is a cold boot after the PMIC timer expires.
  */
 

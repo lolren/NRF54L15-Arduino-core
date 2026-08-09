@@ -158,7 +158,10 @@ int32_t npm1300_read_ibat_ma(void);
 int32_t npm1300_read_vsys_mv(void);
 int32_t npm1300_read_vbus_mv(void);
 
-/* Ultra-low power modes. */
+/* Ultra-low power modes.
+ * nPM1300 Ship/Hibernate require USB/VBUS to be disconnected. Timed
+ * hibernate returns false while VBUS is present.
+ */
 #define NPM1300_HIBERNATE_TIMER_PRESCALE_MS 16UL
 #define NPM1300_HIBERNATE_TIMER_MAX_MS      268435440UL
 

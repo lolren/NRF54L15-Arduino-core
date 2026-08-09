@@ -139,13 +139,8 @@ constexpr uint8_t kLedModeHost = 2U;
 constexpr uint8_t kLedOffsetMode = 0x00U;
 constexpr uint8_t kLedOffsetSet = 0x03U;
 constexpr uint8_t kLedOffsetClr = 0x04U;
-constexpr uint8_t kTimerOffsetStart = 0x00U;
-constexpr uint8_t kTimerOffsetTargetStrobe = 0x03U;
-constexpr uint8_t kTimerOffsetConfig = 0x05U;
-constexpr uint8_t kTimerOffsetTargetHigh = 0x08U;
-constexpr uint8_t kTimerOffsetTargetMid = 0x09U;
-constexpr uint8_t kTimerOffsetTargetLow = 0x0AU;
-constexpr uint8_t kTimerConfigWakeupTimer16Ms = 0x04U;
+constexpr uint8_t kTimerOffsetLoad = 0x03U;
+constexpr uint8_t kTimerOffsetTarget = 0x08U;
 constexpr uint8_t kShipOffsetShip = 0x02U;
 constexpr uint8_t kShipOffsetHibernate = 0x00U;
 constexpr uint8_t kAdcMaxBatch = 6U;
@@ -622,6 +617,12 @@ bool npm1300_charger_status(uint8_t* s) { return npm1300_read_reg(NPM1300_BASE_C
 bool npm1300_charger_error(uint8_t* e) { return npm1300_read_reg(NPM1300_BASE_CHARGER, kChargerOffsetError, e); }
 bool npm1300_vbus_status(uint8_t* s) { return npm1300_read_reg(NPM1300_BASE_VBUS, kVbusOffsetStatus, s); }
 
+static bool npm1300_vbus_absent_for_ship_hibernate(void) {
+    uint8_t status = 0U;
+    return npm1300_vbus_status(&status) &&
+           ((status & NPM1300_VBUS_STATUS_PRESENT) == 0U);
+}
+
 bool npm1300_vbus_set_input_current_limit_ma(uint16_t ma) {
     const uint8_t code = vbus_input_limit_code_from_ma(ma);
     const uint16_t actualMa = vbus_input_limit_code_to_ma(code);
@@ -668,9 +669,15 @@ int32_t npm1300_read_vbus_mv(void) {
 }
 
 bool npm1300_enter_ship_mode(void) {
+    if (!npm1300_vbus_absent_for_ship_hibernate()) {
+        return false;
+    }
     return npm1300_write_reg(NPM1300_BASE_SHIP, kShipOffsetShip, 1U);
 }
 bool npm1300_enter_hibernate(void) {
+    if (!npm1300_vbus_absent_for_ship_hibernate()) {
+        return false;
+    }
     return npm1300_write_reg(NPM1300_BASE_SHIP, kShipOffsetHibernate, 1U);
 }
 
@@ -686,21 +693,30 @@ bool npm1300_configure_hibernate_timer_ms(uint32_t delay_ms) {
         return false;
     }
 
-    return npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetHigh,
-                             static_cast<uint8_t>((ticks >> 16U) & 0xFFU)) &&
-           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetMid,
-                             static_cast<uint8_t>((ticks >> 8U) & 0xFFU)) &&
-           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetLow,
-                             static_cast<uint8_t>(ticks & 0xFFU)) &&
-           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetTargetStrobe, 1U) &&
-           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetConfig,
-                             kTimerConfigWakeupTimer16Ms) &&
-           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetStart, 1U);
+    const uint8_t target[] = {
+        static_cast<uint8_t>((ticks >> 16U) & 0xFFU),
+        static_cast<uint8_t>((ticks >> 8U) & 0xFFU),
+        static_cast<uint8_t>(ticks & 0xFFU),
+    };
+
+    return npm1300_write_burst(NPM1300_BASE_TIMER, kTimerOffsetTarget,
+                               target, sizeof(target)) &&
+           npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetLoad, 1U);
 }
 
 bool npm1300_enter_timed_hibernate_ms(uint32_t delay_ms) {
-    return npm1300_configure_hibernate_timer_ms(delay_ms) &&
-           npm1300_enter_hibernate();
+    if (!npm1300_vbus_absent_for_ship_hibernate()) {
+        return false;
+    }
+
+    if (!npm1300_configure_hibernate_timer_ms(delay_ms)) {
+        return false;
+    }
+
+    // Nordic's nPM13xx driver waits after TIMERTARGETSTROBE so the PMIC
+    // latches the wake-up timer before TASKENTERHIBERNATE is written.
+    delay(1);
+    return npm1300_enter_hibernate();
 }
 
 bool npm1300_enter_hibernate_after_ms(uint32_t delay_ms) {

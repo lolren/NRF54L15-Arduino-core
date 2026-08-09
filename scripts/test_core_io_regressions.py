@@ -1586,6 +1586,35 @@ def validate_xiao_low_power_board_contracts() -> None:
     ).read_text(encoding="utf-8")
     npm_sleep = function_body(npm_source, "bool npm1300_prepare_for_sleep(")
     assert "kAdcOffsetIbatEnable, 0U" in npm_sleep
+    npm_timer = function_body(
+        npm_source, "bool npm1300_configure_hibernate_timer_ms("
+    )
+    assert "kTimerOffsetTarget = 0x08U" in npm_source
+    assert "kTimerOffsetLoad = 0x03U" in npm_source
+    assert "npm1300_write_burst(NPM1300_BASE_TIMER, kTimerOffsetTarget" in npm_timer
+    assert "npm1300_write_reg(NPM1300_BASE_TIMER, kTimerOffsetLoad, 1U)" in npm_timer
+    assert "kTimerOffsetConfig" not in npm_source
+    assert "kTimerOffsetStart" not in npm_source
+    npm_vbus_absent = function_body(
+        npm_source, "static bool npm1300_vbus_absent_for_ship_hibernate("
+    )
+    assert "npm1300_vbus_status(&status)" in npm_vbus_absent
+    assert "NPM1300_VBUS_STATUS_PRESENT" in npm_vbus_absent
+    npm_ship = function_body(npm_source, "bool npm1300_enter_ship_mode(")
+    npm_hibernate = function_body(npm_source, "bool npm1300_enter_hibernate(")
+    assert "npm1300_vbus_absent_for_ship_hibernate()" in npm_ship
+    assert "npm1300_vbus_absent_for_ship_hibernate()" in npm_hibernate
+    npm_timed_hibernate = function_body(
+        npm_source, "bool npm1300_enter_timed_hibernate_ms("
+    )
+    assert "npm1300_vbus_absent_for_ship_hibernate()" in npm_timed_hibernate
+    assert "delay(1);" in npm_timed_hibernate
+    assert npm_timed_hibernate.index("npm1300_configure_hibernate_timer_ms") < (
+        npm_timed_hibernate.index("delay(1);")
+    )
+    assert npm_timed_hibernate.index("delay(1);") < (
+        npm_timed_hibernate.index("npm1300_enter_hibernate()")
+    )
     npm_bus_end = function_body(npm_source, "void pmic_bus_end()")
     assert "GPIO_PIN_CNF_INPUT_Disconnect" in npm_bus_end
     system_off_prepare = function_body(
