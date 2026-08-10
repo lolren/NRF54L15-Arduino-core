@@ -702,9 +702,9 @@ static uint32_t systemOffMinimumLatencyUs(void)
            kSystemOffMinimumLatencyGuardUs;
 }
 
-static uint32_t clampSystemOffDelayUs(uint32_t delayUs)
+static uint64_t clampSystemOffDelayUs(uint64_t delayUs)
 {
-    const uint32_t minimumLatencyUs = systemOffMinimumLatencyUs();
+    const uint64_t minimumLatencyUs = systemOffMinimumLatencyUs();
     if (delayUs < minimumLatencyUs) {
         return minimumLatencyUs;
     }
@@ -799,7 +799,7 @@ typedef enum {
     kSystemOffWakeCompareFired = 3U
 } system_off_wake_program_status_t;
 
-static system_off_wake_program_status_t programSystemOffWakeUs(uint32_t delayUs)
+static system_off_wake_program_status_t programSystemOffWakeUs(uint64_t delayUs)
 {
     NRF_GRTC_Type* const grtc = NRF_GRTC;
     delayUs = clampSystemOffDelayUs(delayUs);
@@ -822,7 +822,7 @@ static system_off_wake_program_status_t programSystemOffWakeUs(uint32_t delayUs)
     }
 
     const uint32_t minimumLatencyUs = systemOffMinimumLatencyUs();
-    uint32_t wakeDelayUs = delayUs;
+    uint64_t wakeDelayUs = delayUs;
 
     for (uint8_t attempt = 0U; attempt < 2U; ++attempt) {
         ensureGrtcReady(grtc);
@@ -859,7 +859,7 @@ static system_off_wake_program_status_t programSystemOffWakeUs(uint32_t delayUs)
         grtc->CC[wakeChannel].CCEN =
             (GRTC_CC_CCEN_ACTIVE_Disable << GRTC_CC_CCEN_ACTIVE_Pos);
         grtc->EVENTS_COMPARE[wakeChannel] = 0U;
-        if (wakeDelayUs > UINT32_MAX - minimumLatencyUs) {
+        if (wakeDelayUs > UINT64_MAX - minimumLatencyUs) {
             return kSystemOffWakeCompareFired;
         }
         wakeDelayUs += minimumLatencyUs;
@@ -989,11 +989,11 @@ static bool clearResetReasonsForSystemOff(void)
 
 static void enterSystemOffInternal(bool disableRamRetention,
                                    bool timedWake,
-                                   uint32_t delayUs) __attribute__((noreturn));
+                                   uint64_t delayUs) __attribute__((noreturn));
 
 static void enterSystemOffInternal(bool disableRamRetention,
                                    bool timedWake,
-    uint32_t delayUs)
+    uint64_t delayUs)
 {
     clearSystemOffAbortDiagnostic();
     __asm volatile("cpsid i" ::: "memory");
@@ -1066,26 +1066,22 @@ void nrf54_core_system_off_timed_us(uint32_t delayUs,
     enterSystemOffInternal(disableRamRetention != 0U, true, delayUs);
 }
 
-static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
+static void enterTimedSystemOff(bool disableRamRetention, uint64_t delayUs)
     __attribute__((noreturn));
 
-static void enterTimedSystemOff(bool disableRamRetention, uint32_t delayUs)
+static void enterTimedSystemOff(bool disableRamRetention, uint64_t delayUs)
 {
     enterSystemOffInternal(disableRamRetention, true, delayUs);
 }
 
-static uint32_t systemOffDelayMsToUs(unsigned long ms)
+static uint64_t systemOffDelayMsToUs(unsigned long ms)
 {
-    uint32_t delayMs = (uint32_t)ms;
-    if (delayMs > (0xFFFFFFFFUL / 1000UL)) {
-        delayMs = 0xFFFFFFFFUL / 1000UL;
-    }
-    return delayMs * 1000UL;
+    return (uint64_t)ms * 1000ULL;
 }
 
-static void enterSystemOffWakeReset(uint32_t delayUs) __attribute__((noreturn));
+static void enterSystemOffWakeReset(uint64_t delayUs) __attribute__((noreturn));
 
-static void enterSystemOffWakeReset(uint32_t delayUs)
+static void enterSystemOffWakeReset(uint64_t delayUs)
 {
     enterSystemOffInternal(true, true, delayUs);
 }

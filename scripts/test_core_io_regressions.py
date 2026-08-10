@@ -1581,9 +1581,52 @@ def validate_xiao_low_power_board_contracts() -> None:
     assert "XiaoQspiFlash.prepareForSleep()" in qspi_end
     assert "XiaoQspiFlash.end()" not in qspi_end
 
+    hal_source = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/src/nrf54l15_hal.cpp"
+    ).read_text(encoding="utf-8")
+    assert (
+        "constexpr uint32_t kCanonicalClearedEasyDmaPointer = 0x20000000UL;"
+        in hal_source
+    )
+    dma_pointer_cleared = function_body(
+        hal_source, "bool radioDmaPointerIsCleared(uint32_t pointer)"
+    )
+    assert re.sub(r"\s+", "", dma_pointer_cleared) == (
+        "returnpointer==0U||"
+        "pointer==kCanonicalClearedEasyDmaPointer;"
+    )
+    radio_dma_scrub = function_body(
+        hal_source, "bool scrubRadioDmaPointersIfDisabled("
+    )
+    for pointer in (
+        "radio->PACKETPTR",
+        "radio->DFEPACKET.PTR",
+        "radio->AUXDATADMA[0].PTR",
+        "radio->AUXDATADMA[1].PTR",
+    ):
+        assert f"radioDmaPointerIsCleared({pointer})" in radio_dma_scrub
+        assert f"{pointer} == 0U" not in radio_dma_scrub
+
     npm_source = (
         PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src/npm1300.cpp"
     ).read_text(encoding="utf-8")
+    npm_header = (
+        PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src/npm1300.h"
+    ).read_text(encoding="utf-8")
+    npm_timed_example = (
+        PLATFORM
+        / "libraries/Nrf54L15-Clean-Implementation/examples/PMIC/"
+        "nPM1300_TimedHibernate/nPM1300_TimedHibernate.ino"
+    ).read_text(encoding="utf-8")
+    assert (
+        "#define NPM1300_HIBERNATE_TIMER_MAX_MS      268435440UL"
+        in npm_header
+    )
+    assert "nRF54 GRTC System OFF while" in npm_header
+    assert "returns false while VBUS is present" not in npm_header
+    assert "nRF54 GRTC System OFF wake-reset path" in npm_timed_example
+    assert "returns false while VBUS is present" not in npm_timed_example
     npm_sleep = function_body(npm_source, "bool npm1300_prepare_for_sleep(")
     assert "kAdcOffsetIbatEnable, 0U" in npm_sleep
     npm_timer = function_body(
@@ -1607,7 +1650,20 @@ def validate_xiao_low_power_board_contracts() -> None:
     npm_timed_hibernate = function_body(
         npm_source, "bool npm1300_enter_timed_hibernate_ms("
     )
-    assert "npm1300_vbus_absent_for_ship_hibernate()" in npm_timed_hibernate
+    assert "delay_ms > NPM1300_HIBERNATE_TIMER_MAX_MS" in npm_timed_hibernate
+    assert "npm1300_vbus_status(&vbusStatus)" in npm_timed_hibernate
+    assert "NPM1300_VBUS_STATUS_PRESENT" in npm_timed_hibernate
+    assert "systemOffWakeReset(delay_ms);" in npm_timed_hibernate
+    assert "npm1300_vbus_absent_for_ship_hibernate()" not in npm_timed_hibernate
+    assert npm_timed_hibernate.index(
+        "delay_ms > NPM1300_HIBERNATE_TIMER_MAX_MS"
+    ) < npm_timed_hibernate.index("npm1300_vbus_status(&vbusStatus)")
+    assert npm_timed_hibernate.index("npm1300_vbus_status(&vbusStatus)") < (
+        npm_timed_hibernate.index("systemOffWakeReset(delay_ms);")
+    )
+    assert npm_timed_hibernate.index("systemOffWakeReset(delay_ms);") < (
+        npm_timed_hibernate.index("npm1300_configure_hibernate_timer_ms")
+    )
     assert "delay(1);" in npm_timed_hibernate
     assert npm_timed_hibernate.index("npm1300_configure_hibernate_timer_ms") < (
         npm_timed_hibernate.index("delay(1);")

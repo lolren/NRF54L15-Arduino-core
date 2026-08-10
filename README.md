@@ -751,7 +751,7 @@ PMIC-controlled cold-boot path; it is not interchangeable with a returning
 | Continue after a timed idle | `delayLowPowerIdle(ms)` or normal low-power `delay(ms)` | Returns to the next statement |
 | Lowest CPU System OFF with retained RAM banks | `delaySystemOff(ms)` | Cold reset; explicitly retained `.noinit` state may survive |
 | System OFF without RAM retention | `delaySystemOffNoRetention(ms)` | Cold reset |
-| Lowest timed LM20A board sleep | `npm1300_enter_timed_hibernate_ms(ms)` | PMIC restores power and the board cold-boots |
+| Timed LM20A cold boot (lowest-current path on VBAT) | `npm1300_enter_timed_hibernate_ms(ms)` | PMIC wake on VBAT or GRTC System OFF wake on USB; both cold-reset |
 
 For reproducible measurements, power from VBAT through a PPK2/Joulescope/Otii,
 disconnect USB/VBUS, close serial/debug sessions, keep voltage and temperature
@@ -811,7 +811,7 @@ Examples:
 
 - `npm1300_charger_set_current(ma)` sets the battery charge-current target and now also updates the nPM1300 VBUS input-current limiter so the default 100 mA input limit does not throttle higher charge currents.
 - `npm1300_vbus_set_input_current_limit_ma(ma)` and `npm1300_vbus_get_input_current_limit_ma()` expose the VBUS limiter directly. This limit is the allowed USB/VBUS input draw, not the measured battery charge or discharge current.
-- `npm1300_enter_timed_hibernate_ms(ms)` programs the nPM1300 hibernate wake timer and enters PMIC hibernate mode. On XIAO nRF54LM20A this is the lowest-current timed sleep path; wake is a cold boot after the PMIC restores power. The nPM1300 requires VBUS to be absent before Ship/Hibernate entry, so this helper returns `false` while USB/VBUS is present; test it from VBAT/battery power with USB/debug disconnected.
+- `npm1300_enter_timed_hibernate_ms(ms)` provides one timed cold-boot API for either supply path. With VBUS absent it programs the nPM1300 wake timer and enters true PMIC Hibernate, the lowest-current LM20A path. With USB/VBUS present it uses nRF54 GRTC System OFF because the nPM1300 requires VBUS to be disconnected before Hibernate entry. Both paths accept 1 through `NPM1300_HIBERNATE_TIMER_MAX_MS`, normally do not return after successful entry, and restart from `setup()` on wake. Disconnect USB/debug wiring and power from VBAT when measuring the sub-uA PMIC path.
 - Use `File > Examples > Nrf54L15-Clean-Implementation > PMIC > nPM1300_ChargerControl` or `File > Examples > Power > nPM1300_BatteryCurrent` to compare `IBAT` with the configured `VBUS_ILIM`.
 
 ---

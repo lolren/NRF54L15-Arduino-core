@@ -1,15 +1,18 @@
 /*
  * nPM1300 Timed Hibernate
  *
- * XIAO nRF54LM20A PMIC hibernate example. This programs the nPM1300 wake
- * timer, then asks the PMIC to enter hibernate mode. On a battery/PPK2 supply
- * this is the sub-uA path reported by msfujino's test sketch.
+ * XIAO nRF54LM20A timed cold-boot example.
+ * - On battery/VBAT, the helper programs the nPM1300 wake timer and enters
+ *   true PMIC Hibernate.
+ * - On USB/VBUS, where the PMIC cannot enter Hibernate, the helper uses the
+ *   nRF54 GRTC System OFF wake-reset path.
  *
  * Current measurement notes:
- * - Measure from the VBAT/battery pads, not through USB.
- * - USB/VBUS must be disconnected before PMIC Hibernate entry; the helper
- *   returns false while VBUS is present.
- * - Wake is a cold boot after the PMIC timer expires.
+ * - To measure the lowest-current PMIC path, supply the VBAT/battery pads and
+ *   disconnect USB/VBUS plus debug wiring.
+ * - The USB fallback keeps the board's USB power path active and is not the
+ *   sub-uA PMIC Hibernate measurement case.
+ * - Both successful paths wake by cold boot and restart setup().
  */
 
 #include <Arduino.h>
@@ -36,8 +39,8 @@ void setup() {
   delay(2000);
 
   if (!npm1300_enter_timed_hibernate_ms(kHibernateMs)) {
-    // PMIC not present or timer setup failed. Blink fast so the failure is
-    // visible without requiring Serial while measuring current.
+    // Invalid delay, PMIC status read, or timer setup failed. Blink fast so
+    // the failure is visible without requiring Serial while measuring current.
     while (true) {
       digitalWrite(LED_BUILTIN, LOW);
       delay(50);

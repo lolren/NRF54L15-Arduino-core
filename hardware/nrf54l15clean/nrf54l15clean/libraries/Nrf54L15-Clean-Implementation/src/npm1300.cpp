@@ -705,8 +705,20 @@ bool npm1300_configure_hibernate_timer_ms(uint32_t delay_ms) {
 }
 
 bool npm1300_enter_timed_hibernate_ms(uint32_t delay_ms) {
-    if (!npm1300_vbus_absent_for_ship_hibernate()) {
+    if (delay_ms == 0UL || delay_ms > NPM1300_HIBERNATE_TIMER_MAX_MS) {
         return false;
+    }
+
+    uint8_t vbusStatus = 0U;
+    if (!npm1300_vbus_status(&vbusStatus)) {
+        return false;
+    }
+
+    if ((vbusStatus & NPM1300_VBUS_STATUS_PRESENT) != 0U) {
+        // nPM1300 Hibernate requires VBUS to be absent, and VBUS is itself a
+        // PMIC wake source. Use the SoC's timed System OFF cold-reset path
+        // while USB is powering the board.
+        systemOffWakeReset(delay_ms);
     }
 
     if (!npm1300_configure_hibernate_timer_ms(delay_ms)) {

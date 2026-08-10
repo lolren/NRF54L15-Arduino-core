@@ -39,6 +39,16 @@ volatile uint8_t g_exclusiveRadioQuarantined = 0U;
 volatile uint32_t g_exclusiveRadioGeneration = 0U;
 volatile uint32_t g_exclusiveRadioToken = 0U;
 
+// LM20A RADIO EasyDMA pointer registers canonicalize a zero write to SRAM
+// base. Accept only the documented zero and that observed cleared readback;
+// the ENABLE and MAXCNT postconditions below remain independently required.
+constexpr uint32_t kCanonicalClearedEasyDmaPointer = 0x20000000UL;
+
+bool radioDmaPointerIsCleared(uint32_t pointer) {
+  return pointer == 0U ||
+         pointer == kCanonicalClearedEasyDmaPointer;
+}
+
 bool validExclusiveRadioOwner(Nrf54ExclusiveRadioOwner owner) {
   const uint8_t value = static_cast<uint8_t>(owner);
   return value >= static_cast<uint8_t>(Nrf54ExclusiveRadioOwner::kBle) &&
@@ -85,13 +95,14 @@ bool scrubRadioDmaPointersIfDisabled(NRF_RADIO_Type* radio) {
   radio->EVENTS_AUXDATADMAEND = 0U;
   __DSB();
 
-  return radio->PACKETPTR == 0U && radio->DFEPACKET.PTR == 0U &&
+  return radioDmaPointerIsCleared(radio->PACKETPTR) &&
+         radioDmaPointerIsCleared(radio->DFEPACKET.PTR) &&
          radio->DFEPACKET.MAXCNT == 0U &&
          radio->AUXDATADMA[0].ENABLE == 0U &&
-         radio->AUXDATADMA[0].PTR == 0U &&
+         radioDmaPointerIsCleared(radio->AUXDATADMA[0].PTR) &&
          radio->AUXDATADMA[0].MAXCNT == 0U &&
          radio->AUXDATADMA[1].ENABLE == 0U &&
-         radio->AUXDATADMA[1].PTR == 0U &&
+         radioDmaPointerIsCleared(radio->AUXDATADMA[1].PTR) &&
          radio->AUXDATADMA[1].MAXCNT == 0U;
 }
 

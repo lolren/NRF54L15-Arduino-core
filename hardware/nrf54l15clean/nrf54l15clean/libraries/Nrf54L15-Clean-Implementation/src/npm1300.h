@@ -159,8 +159,12 @@ int32_t npm1300_read_vsys_mv(void);
 int32_t npm1300_read_vbus_mv(void);
 
 /* Ultra-low power modes.
- * nPM1300 Ship/Hibernate require USB/VBUS to be disconnected. Timed
- * hibernate returns false while VBUS is present.
+ * Plain nPM1300 Ship/Hibernate require USB/VBUS to be disconnected.
+ * Timed hibernate selects the lowest valid cold-reset path automatically:
+ * nPM1300 Hibernate while VBUS is absent, or nRF54 GRTC System OFF while
+ * VBUS is present. A successful timed entry normally does not return; wake
+ * restarts the sketch from setup(). Returns false when the request cannot be
+ * armed. Both paths accept the range below.
  */
 #define NPM1300_HIBERNATE_TIMER_PRESCALE_MS 16UL
 #define NPM1300_HIBERNATE_TIMER_MAX_MS      268435440UL
