@@ -753,6 +753,12 @@ PMIC-controlled cold-boot path; it is not interchangeable with a returning
 | System OFF without RAM retention | `delaySystemOffNoRetention(ms)` | Cold reset |
 | Timed LM20A cold boot (lowest-current path on VBAT) | `npm1300_enter_timed_hibernate_ms(ms)` | PMIC wake on VBAT or GRTC System OFF wake on USB; both cold-reset |
 
+Before entering System OFF, send any device-specific sleep command required by
+external I2C or SPI peripherals. The core quiesces its own controllers, but it
+cannot infer how an attached sensor should enter its lowest-power state. Also
+ensure that configured GPIO wake inputs are inactive before entry; an already
+asserted wake level legitimately restarts the board immediately.
+
 For reproducible measurements, power from VBAT through a PPK2/Joulescope/Otii,
 disconnect USB/VBUS, close serial/debug sessions, keep voltage and temperature
 constant, wait for the board to settle, and record both average and peak current

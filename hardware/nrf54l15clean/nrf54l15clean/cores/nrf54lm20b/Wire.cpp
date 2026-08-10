@@ -803,6 +803,7 @@ bool TwoWire::quiesceForSystemOff(uint32_t spinLimit) {
     }
 
     const uintptr_t base = reinterpret_cast<uintptr_t>(_twim);
+    const bool controllerWasIdle = !_targetRegistered && !_pendingRepeatedStart;
     reg32(base + T_INTENCLR) = T_TWIS_INT_MASK;
     reg32(base + T_EVENTS_STOPPED) = 0U;
     reg32(base + T_TASKS_STOP) = 1U;
@@ -812,7 +813,11 @@ bool TwoWire::quiesceForSystemOff(uint32_t spinLimit) {
     }
     const bool stopped = reg32(base + T_EVENTS_STOPPED) != 0U;
     end();
-    return stopped && !_initialized && reg32(base + T_ENABLE) == T_ENABLE_DISABLED;
+    // An idle TWIM does not emit STOPPED for a STOP task on nRF54L15. Its
+    // synchronous controller API has no DMA in flight unless a repeated start
+    // is pending; target mode still requires the explicit STOPPED proof.
+    return (stopped || controllerWasIdle) && !_initialized &&
+           reg32(base + T_ENABLE) == T_ENABLE_DISABLED;
 }
 
 extern "C" bool nrf54_core_quiesce_wire_for_system_off(uint32_t spin_limit) {

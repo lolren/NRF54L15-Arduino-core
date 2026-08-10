@@ -1239,6 +1239,9 @@ def validate_system_off_wake_contracts() -> None:
         source = (PLATFORM / "cores" / chip / "wiring_time.c").read_text(
             encoding="utf-8"
         )
+        wire_source = (PLATFORM / "cores" / chip / "Wire.cpp").read_text(
+            encoding="utf-8"
+        )
         arm_body = function_body(
             source, "static void armSystemOffWakeCompare("
         )
@@ -1253,6 +1256,9 @@ def validate_system_off_wake_contracts() -> None:
         )
         program_body = function_body(
             source, "static system_off_wake_program_status_t programSystemOffWakeUs("
+        )
+        wire_quiesce_body = function_body(
+            wire_source, "bool TwoWire::quiesceForSystemOff(uint32_t spinLimit)"
         )
         assert "uint64_t wakeTimestampUs" in source
         assert "CCADD" not in arm_body
@@ -1299,6 +1305,17 @@ def validate_system_off_wake_contracts() -> None:
         assert wfi_index < fallback_index
         assert fallback_index < (
             systemoff_entry_body.index("resetAfterSystemOffEvent();", fallback_index)
+        )
+        assert (
+            "const bool controllerWasIdle = !_targetRegistered && "
+            "!_pendingRepeatedStart;" in wire_quiesce_body
+        )
+        assert "(stopped || controllerWasIdle)" in wire_quiesce_body
+        assert wire_quiesce_body.index("const bool controllerWasIdle") < (
+            wire_quiesce_body.index("reg32(base + T_TASKS_STOP) = 1U;")
+        )
+        assert wire_quiesce_body.index("end();") < (
+            wire_quiesce_body.index("(stopped || controllerWasIdle)")
         )
         print(f"PASS {chip} timed SYSTEMOFF absolute GRTC compare/channel contract")
 
