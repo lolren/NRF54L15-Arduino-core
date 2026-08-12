@@ -2,10 +2,12 @@
 """Arduino upload helper for XIAO nRF54L15 Zephyr-based core.
 
 This wrapper keeps Arduino upload integration cross-platform while relying on
-pyOCD for CMSIS-DAP flashing.
+pyOCD for CMSIS-DAP flashing and explicitly selected experimental J-Link
+flashing.
 """
 
 import argparse
+import json
 import os
 import platform
 import re
@@ -349,6 +351,49 @@ def normalize_uid(requested_uid: Optional[str]) -> Optional[str]:
     if not cleaned:
         return None
     return cleaned
+
+def normalize_pyocd_probe_type(requested: Optional[str]) -> Optional[str]:
+    if unresolved_property(requested):
+        return None
+
+    normalized = re.sub(r"[^a-z0-9]+", "", requested.strip().lower())
+    aliases = {
+        "cmsis": "cmsisdap",
+        "cmsisdap": "cmsisdap",
+        "jlink": "jlink",
+    }
+    probe_type = aliases.get(normalized)
+    if probe_type is None:
+        raise ValueError(
+            f"unsupported pyOCD probe type '{requested}'; expected cmsisdap or jlink"
+        )
+    return probe_type
+
+def qualify_pyocd_probe_uid(
+    requested_uid: Optional[str], probe_type: Optional[str]
+) -> Optional[str]:
+    """Bind pyOCD selection to one probe plug-in without changing raw IDs."""
+    probe_type = normalize_pyocd_probe_type(probe_type)
+    uid = normalize_uid(requested_uid)
+
+    if uid is not None and ":" in uid:
+        prefix, suffix = uid.split(":", 1)
+        normalized_prefix = normalize_pyocd_probe_type(prefix)
+        if probe_type is not None and normalized_prefix != probe_type:
+            raise ValueError(
+                f"probe UID '{uid}' conflicts with selected {probe_type} transport"
+            )
+        probe_type = normalized_prefix
+        uid = normalize_uid(suffix)
+
+    # The SEGGER API and pyOCD represent J-Link serial numbers without the
+    # leading zeroes sometimes exposed by the associated VCOM USB descriptor.
+    if probe_type == "jlink" and uid is not None and uid.isdecimal():
+        uid = uid.lstrip("0") or "0"
+
+    if probe_type is None:
+        return uid
+    return f"{probe_type}:{uid or ''}"
 
 def bundled_import_path(host_tools_path: Optional[Path]) -> Optional[Path]:
     site_dir = bundled_pyocd_site_path(pyocd_tool_root(host_tools_path))
@@ -818,11 +863,15 @@ def looks_like_no_probe_error(result: subprocess.CompletedProcess) -> bool:
         "no available debug probes",
         "unable to open cmsis-dap device",
         "unable to find a matching cmsis-dap device",
+        "unable to open jlink dll",
+        "could not find jlink probe",
+        "failed to open dll",
     )
     return any(token in details for token in indicators)
 
 def force_nrf54l_unlock_workaround(
-    pyocd_cmd: List[str], target: str, uid: Optional[str], safe_mode: bool = False
+    pyocd_cmd: List[str], target: str, uid: Optional[str], safe_mode: bool = False,
+    probe_type: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     if target.strip().lower() not in ("nrf54l", "nrf54lm20a"):
         return subprocess.CompletedProcess(
@@ -858,6 +907,7 @@ def force_nrf54l_unlock_workaround(
         cmd.extend(["-N", "-O", "auto_unlock=false", "-x", script_path])
         cmd = append_uid(cmd, uid)
         cmd = append_pyocd_safe_options(cmd, safe_mode)
+        cmd = append_pyocd_probe_options(cmd, probe_type)
         result = run(cmd, timeout=pyocd_timeout_seconds())
         print_result(result)
         return result
@@ -898,6 +948,68 @@ def print_linux_probe_permission_hint(
         f"HINT: {host_setup_hint(host_tools_path, purpose='udev')}",
         file=sys.stderr,
     )
+
+def print_jlink_probe_hint(result: subprocess.CompletedProcess) -> None:
+    if not looks_like_no_probe_error(result):
+        return
+    print(
+        "HINT: Install the official SEGGER J-Link Software and Documentation Pack, "
+        "reconnect the probe, and confirm that `pyocd list --probes` shows it.",
+        file=sys.stderr,
+    )
+    print(
+        "HINT: J-Link upload is experimental and has not yet been validated on "
+        "maintainer hardware.",
+        file=sys.stderr,
+    )
+
+def discover_jlink_probe_uids(pyocd_cmd: List[str]) -> List[str]:
+    """Return J-Link serials from pyOCD's machine-readable probe inventory."""
+    inventory = run([*pyocd_cmd, "json", "--probes"], timeout=15.0)
+    if inventory.returncode != 0:
+        return []
+    try:
+        payload = json.loads(inventory.stdout or "{}")
+    except (TypeError, ValueError):
+        return []
+    if payload.get("status") != 0:
+        return []
+
+    discovered: List[str] = []
+    for probe in payload.get("boards", []):
+        vendor = str(probe.get("vendor_name") or "").strip().casefold()
+        product = str(probe.get("product_name") or probe.get("info") or "")
+        if vendor != "segger" or "j-link" not in product.casefold():
+            continue
+        uid = normalize_uid(str(probe.get("unique_id") or ""))
+        if uid is not None and uid not in discovered:
+            discovered.append(uid)
+    return discovered
+
+def select_jlink_probe_uid(pyocd_cmd: List[str]) -> Tuple[Optional[str], bool]:
+    """Select one J-Link without allowing pyOCD's interactive probe picker."""
+    probes = discover_jlink_probe_uids(pyocd_cmd)
+    if len(probes) <= 1:
+        return (probes[0] if probes else None), False
+
+    print("ERROR: Multiple J-Link probes are connected:", file=sys.stderr)
+    for uid in probes:
+        print(f"  {uid}", file=sys.stderr)
+    print(
+        "HINT: Set NRF54L15_JLINK_UID to the intended J-Link serial number and retry.",
+        file=sys.stderr,
+    )
+    return None, True
+
+def report_missing_jlink_probe() -> None:
+    print("ERROR: No J-Link probe was found by pyOCD.", file=sys.stderr)
+    result = subprocess.CompletedProcess(
+        ["pyocd", "json", "--probes"],
+        1,
+        "",
+        "No connected debug probe matches unique ID 'jlink:'",
+    )
+    print_jlink_probe_hint(result)
 
 def preflight_linux_probe_access(
     port: Optional[str], host_tools_path: Optional[Path] = None
@@ -942,6 +1054,22 @@ def preflight_linux_probe_access(
 def append_uid(cmd: List[str], uid: Optional[str]) -> List[str]:
     if uid:
         cmd.extend(["-u", uid])
+    return cmd
+
+def append_pyocd_probe_options(
+    cmd: List[str], probe_type: Optional[str]
+) -> List[str]:
+    if normalize_pyocd_probe_type(probe_type) == "jlink":
+        # Do not let pyOCD turn the J-Link target supply on and then off. The
+        # board or user-provided target supply remains authoritative.
+        cmd.extend(
+            [
+                "-O",
+                "jlink.power=false",
+                "-O",
+                "jlink.non_interactive=true",
+            ]
+        )
     return cmd
 
 def append_connect_mode(cmd: List[str], connect_mode: Optional[str]) -> List[str]:
@@ -1017,7 +1145,8 @@ def maybe_wait_before_retry(attempt: int, retries: int, retry_delay: float) -> N
 
 def flash_hex(
     pyocd_cmd: List[str], target: str, uid: Optional[str], hex_path: str,
-    *, auto_unlock: bool = True, connect_mode: Optional[str] = None, safe_mode: bool = False
+    *, auto_unlock: bool = True, connect_mode: Optional[str] = None,
+    safe_mode: bool = False, probe_type: Optional[str] = None
 ) -> subprocess.CompletedProcess:
     cmd = [*pyocd_cmd, "load"]
     cmd = append_pyocd_target_script(cmd, target)
@@ -1025,16 +1154,23 @@ def flash_hex(
     cmd = append_uid(cmd, uid)
     cmd = append_connect_mode(cmd, connect_mode)
     cmd = append_pyocd_safe_options(cmd, safe_mode)
+    cmd = append_pyocd_probe_options(cmd, probe_type)
     if not auto_unlock:
         cmd.extend(["-O", "auto_unlock=false"])
-    cmd.extend([hex_path, "--format", "hex", "--no-reset"])
+    cmd.extend([hex_path, "--format", "hex"])
+    # Existing CMSIS-DAP recovery performs a separate, transport-aware reset.
+    # The J-Link path must remain inside pyOCD, so let a successful load reset
+    # the target before pyOCD closes the J-Link session.
+    if normalize_pyocd_probe_type(probe_type) != "jlink":
+        cmd.append("--no-reset")
     result = run(cmd, timeout=pyocd_timeout_seconds())
     print_result(result)
     return result
 
 def recover_target(
     pyocd_cmd: List[str], target: str, uid: Optional[str], *,
-    connect_mode: Optional[str] = None, safe_mode: bool = False
+    connect_mode: Optional[str] = None, safe_mode: bool = False,
+    probe_type: Optional[str] = None
 ) -> subprocess.CompletedProcess:
     print("Detected protected target; attempting chip erase and retry...")
     cmd = [*pyocd_cmd, "erase"]
@@ -1043,6 +1179,7 @@ def recover_target(
     cmd = append_uid(cmd, uid)
     cmd = append_connect_mode(cmd, connect_mode)
     cmd = append_pyocd_safe_options(cmd, safe_mode)
+    cmd = append_pyocd_probe_options(cmd, probe_type)
     result = run(cmd, timeout=pyocd_timeout_seconds())
     print_result(result)
     return result
@@ -1050,7 +1187,8 @@ def recover_target(
 def recover_target_with_retries(
     pyocd_cmd: List[str], target: str, uid: Optional[str], *,
     connect_mode: Optional[str] = None, safe_mode: bool = False,
-    attempts: int = 2, retry_delay: float = 1.0
+    attempts: int = 2, retry_delay: float = 1.0,
+    probe_type: Optional[str] = None
 ) -> subprocess.CompletedProcess:
     """Retry CTRL-AP recovery because the first erase can drop the probe link."""
     attempts = max(1, attempts)
@@ -1065,6 +1203,7 @@ def recover_target_with_retries(
             uid,
             connect_mode=connect_mode,
             safe_mode=safe_mode,
+            probe_type=probe_type,
         )
         if result.returncode == 0:
             break
@@ -1100,6 +1239,7 @@ def upload_pyocd(
     host_tools_path: Optional[Path] = None,
     safe_mode: bool = False,
     port: Optional[str] = None,
+    probe_type: Optional[str] = None,
 ) -> int:
     pyocd_cmd = pyocd_cmd if pyocd_cmd is not None else detect_pyocd_command(host_tools_path)
     if pyocd_cmd is None:
@@ -1107,10 +1247,37 @@ def upload_pyocd(
         print(f"HINT: {host_setup_hint(host_tools_path, purpose='python')}", file=sys.stderr)
         return 3
 
-    uid = normalize_uid(requested_uid)
+    try:
+        probe_type = normalize_pyocd_probe_type(probe_type)
+        raw_uid = normalize_uid(requested_uid)
+        uid = qualify_pyocd_probe_uid(raw_uid, probe_type)
+        if uid is not None and ":" in uid:
+            raw_uid = normalize_uid(uid.split(":", 1)[1])
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 4
+
+    if probe_type == "jlink":
+        # VM safe mode contains CMSIS-DAP-only options and intentionally skips
+        # reset. Neither behavior belongs on the explicitly selected J-Link
+        # transport.
+        safe_mode = False
+        if raw_uid is None:
+            discovered_uid, ambiguous = select_jlink_probe_uid(pyocd_cmd)
+            if ambiguous:
+                return 8
+            if discovered_uid is None:
+                report_missing_jlink_probe()
+                return 6
+            raw_uid = discovered_uid
+            uid = qualify_pyocd_probe_uid(raw_uid, probe_type)
 
     print(f"Flashing {hex_path}")
-    print(f"Runner: pyocd")
+    print(
+        "Runner: pyocd"
+        + (" (J-Link experimental)" if probe_type == "jlink" else "")
+    )
+    print(f"Probe type: {probe_type or 'auto'}")
     print(f"Probe UID: {uid or 'auto-select'}")
     print(f"Retries: {retries}")
     if safe_mode:
@@ -1139,6 +1306,7 @@ def upload_pyocd(
             hex_path,
             connect_mode=connect_mode,
             safe_mode=safe_mode,
+            probe_type=probe_type,
         )
         if load_result.returncode != 0 and looks_like_locked_target(load_result):
             erase_result = recover_target_with_retries(
@@ -1148,6 +1316,7 @@ def upload_pyocd(
                 connect_mode=connect_mode,
                 safe_mode=safe_mode,
                 retry_delay=retry_delay,
+                probe_type=probe_type,
             )
             if erase_result.returncode == 0:
                 load_result = flash_hex(
@@ -1157,6 +1326,7 @@ def upload_pyocd(
                     hex_path,
                     connect_mode=connect_mode,
                     safe_mode=safe_mode,
+                    probe_type=probe_type,
                 )
             elif looks_like_nrf54l_mass_erase_timeout(erase_result):
                 workaround_result = force_nrf54l_unlock_workaround(
@@ -1164,6 +1334,7 @@ def upload_pyocd(
                     target,
                     uid,
                     safe_mode=safe_mode,
+                    probe_type=probe_type,
                 )
                 if workaround_result.returncode == 0:
                     load_result = flash_hex(
@@ -1174,6 +1345,7 @@ def upload_pyocd(
                         auto_unlock=False,
                         connect_mode=connect_mode,
                         safe_mode=safe_mode,
+                        probe_type=probe_type,
                     )
 
         if (
@@ -1184,10 +1356,19 @@ def upload_pyocd(
         ):
             print(
                 f"Inferred probe UID '{uid}' did not match an accessible debug probe; "
-                "retrying with auto-select...",
+                f"retrying with {probe_type or 'any'} probe auto-select...",
                 file=sys.stderr,
             )
-            uid = None
+            raw_uid = None
+            if probe_type == "jlink":
+                discovered_uid, ambiguous = select_jlink_probe_uid(pyocd_cmd)
+                if ambiguous:
+                    return 8
+                if discovered_uid is None:
+                    report_missing_jlink_probe()
+                    return 6
+                raw_uid = discovered_uid
+            uid = qualify_pyocd_probe_uid(raw_uid, probe_type)
             allow_uid_fallback = False
             load_result = flash_hex(
                 pyocd_cmd,
@@ -1196,6 +1377,7 @@ def upload_pyocd(
                 hex_path,
                 connect_mode=connect_mode,
                 safe_mode=safe_mode,
+                probe_type=probe_type,
             )
 
         if load_result.returncode == 0:
@@ -1203,8 +1385,15 @@ def upload_pyocd(
         maybe_wait_before_retry(attempt, retries, retry_delay)
 
     if load_result.returncode != 0:
-        print_linux_probe_permission_hint(load_result, host_tools_path)
+        if probe_type == "jlink":
+            print_jlink_probe_hint(load_result)
+        else:
+            print_linux_probe_permission_hint(load_result, host_tools_path)
         return load_result.returncode
+
+    if probe_type == "jlink":
+        print("J-Link target reset: completed by pyOCD")
+        return 0
 
     if safe_mode:
         print(
@@ -1224,8 +1413,8 @@ def upload_pyocd(
             if ocd_tgt in ("nrf54l",):
                 ocd_tgt = "nrf54l15"
             reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "reset"]
-            if uid:
-                reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-u", uid, "reset"]
+            if raw_uid:
+                reset_cmd = [*nrf_ocd, "-t", ocd_tgt, "-u", raw_uid, "reset"]
             elif port:
                 reset_cmd = [*nrf_ocd, "-p", port, "-t", ocd_tgt, "reset"]
             result = subprocess.run(reset_cmd, timeout=15.0, capture_output=True, text=True)
@@ -1451,6 +1640,11 @@ def main() -> int:
         help="Upload runner: uf2, auto, pyocd, or nrf_ocd",
     )
     parser.add_argument(
+        "--probe-type",
+        default="auto",
+        help="Restrict pyOCD to cmsisdap or experimental jlink probes",
+    )
+    parser.add_argument(
         "--openocd-script",
         default="",
         help="OpenOCD target config script path",
@@ -1507,7 +1701,16 @@ def main() -> int:
     args = parser.parse_args()
     requested_runner = args.runner.strip().lower()
     host_tools_path = normalize_tools_path(args.host_tools_path)
+
+    try:
+        pyocd_probe_type = normalize_pyocd_probe_type(args.probe_type)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 4
+
     explicit_uid = normalize_uid(args.uid)
+    if pyocd_probe_type == "jlink" and explicit_uid is None:
+        explicit_uid = normalize_uid(os.environ.get("NRF54L15_JLINK_UID"))
     inferred_uid = infer_uid_from_port(args.port, host_tools_path) if explicit_uid is None else None
     selected_uid = explicit_uid if explicit_uid is not None else inferred_uid
     allow_inferred_uid_fallback = explicit_uid is None and inferred_uid is not None
@@ -1536,7 +1739,8 @@ def main() -> int:
         )
     if runner == "pyocd":
         if (
-            sys.platform.startswith("win")
+            pyocd_probe_type != "jlink"
+            and sys.platform.startswith("win")
             and explicit_uid is None
             and selected_uid is None
             and len(matching_cmsis_dap_serial_ports(host_tools_path)) > 1
@@ -1553,7 +1757,10 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 8
-        if preflight_linux_probe_access(args.port, host_tools_path):
+        if (
+            pyocd_probe_type != "jlink"
+            and preflight_linux_probe_access(args.port, host_tools_path)
+        ):
             return 7
         if detect_pyocd_command(host_tools_path) is None:
             if install_pyocd(host_tools_path):
@@ -1571,6 +1778,7 @@ def main() -> int:
             host_tools_path=host_tools_path,
             safe_mode=pyocd_safe_mode,
             port=args.port,
+            probe_type=pyocd_probe_type,
         )
 
     elif runner == "nrf_ocd":
@@ -1604,6 +1812,7 @@ def main() -> int:
                 host_tools_path=host_tools_path,
                 safe_mode=True,
                 port=args.port,
+                probe_type=pyocd_probe_type,
             )
         elif nrf_rc == -1:
             print("nrf_ocd not found (please install or choose pyOCD)", file=sys.stderr)
@@ -1611,7 +1820,7 @@ def main() -> int:
         print(f"ERROR: Unsupported runner: {runner}", file=sys.stderr)
         return 4
 
-    if rc != 0 and not tried_nrf_ocd:
+    if rc != 0 and not tried_nrf_ocd and pyocd_probe_type != "jlink":
         # Final fallback: try nrf_ocd
         nrf_rc = upload_nrf_ocd(
             args.hex,

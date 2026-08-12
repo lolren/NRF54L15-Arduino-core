@@ -3,3 +3,9 @@ pyocd.communication=serial
 pyocd.protocol=cmsis-dap
 pyocd.program.tool=nrf54program
 pyocd.program.tool.default=nrf54program
+
+jlink.name=J-Link via pyOCD (Experimental)
+jlink.communication=usb
+jlink.protocol=jlink
+jlink.program.tool=nrf54jlinkprogram
+jlink.program.tool.default=nrf54jlinkprogram

@@ -165,7 +165,10 @@ Current Sense examples:
 
 ## Tools Menu Options
 
-- Upload method: nRF OCD Native / pyOCD Recovery / UF2 Bootloader (manual optional)
+- Upload method: nRF OCD Native / pyOCD Recovery / J-Link via pyOCD
+  (experimental, external SEGGER driver required) / UF2 Bootloader (manual optional)
+- Standalone J-Link without VCOM: select the experimental J-Link programmer and
+  use **Upload Using Programmer**; this path does not require a serial port
 - BLE support: On / Off
 - BLE trace: Off / On
 - Zigbee support: On / Off

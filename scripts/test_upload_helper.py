@@ -112,6 +112,141 @@ class NrfOcdTransportTests(unittest.TestCase):
         self.assertNotEqual(actual, 0)
 
 
+class JLinkUploadTests(unittest.TestCase):
+    def test_jlink_uid_is_plugin_bound_and_leading_zeroes_are_removed(self):
+        self.assertEqual(
+            UPLOAD.qualify_pyocd_probe_uid("000960177309", "jlink"),
+            "jlink:960177309",
+        )
+        self.assertEqual(
+            UPLOAD.qualify_pyocd_probe_uid(None, "jlink"),
+            "jlink:",
+        )
+
+    def test_conflicting_probe_prefix_is_rejected(self):
+        with self.assertRaises(ValueError):
+            UPLOAD.qualify_pyocd_probe_uid("cmsisdap:probe", "jlink")
+
+    @mock.patch.object(UPLOAD, "run")
+    def test_discovery_uses_only_segger_jlink_inventory_entries(self, run):
+        run.return_value = subprocess.CompletedProcess(
+            ["pyocd", "json", "--probes"],
+            0,
+            (
+                '{"status":0,"boards":['
+                '{"vendor_name":"SEGGER","product_name":"J-Link Plus",'
+                '"unique_id":"960177309"},'
+                '{"vendor_name":"Arm","product_name":"DAPLink CMSIS-DAP",'
+                '"unique_id":"cmsis"}]}'
+            ),
+            "",
+        )
+
+        self.assertEqual(
+            UPLOAD.discover_jlink_probe_uids(["pyocd"]), ["960177309"]
+        )
+
+    @mock.patch.object(UPLOAD, "discover_jlink_probe_uids")
+    def test_multiple_jlinks_fail_without_interactive_selection(self, discover):
+        discover.return_value = ["111", "222"]
+        stderr = io.StringIO()
+        with mock.patch.object(UPLOAD.sys, "stderr", stderr):
+            selected, ambiguous = UPLOAD.select_jlink_probe_uid(["pyocd"])
+
+        self.assertIsNone(selected)
+        self.assertTrue(ambiguous)
+        self.assertIn("NRF54L15_JLINK_UID", stderr.getvalue())
+
+    @mock.patch.object(UPLOAD, "run")
+    def test_jlink_load_disables_power_control_and_resets_in_pyocd(self, run):
+        run.return_value = subprocess.CompletedProcess(["pyocd", "load"], 0, "", "")
+
+        completed = UPLOAD.flash_hex(
+            ["pyocd"],
+            "nrf54l",
+            "jlink:960177309",
+            "fixture.hex",
+            probe_type="jlink",
+        )
+
+        self.assertEqual(completed.returncode, 0)
+        command = run.call_args.args[0]
+        self.assertIn("jlink:960177309", command)
+        self.assertIn("jlink.power=false", command)
+        self.assertIn("jlink.non_interactive=true", command)
+        self.assertNotIn("--no-reset", command)
+
+    @mock.patch.object(UPLOAD, "run")
+    def test_cmsis_dap_load_keeps_existing_no_reset_path(self, run):
+        run.return_value = subprocess.CompletedProcess(["pyocd", "load"], 0, "", "")
+
+        UPLOAD.flash_hex(
+            ["pyocd"],
+            "nrf54l",
+            "cmsisdap:E91217E8",
+            "fixture.hex",
+            probe_type="cmsisdap",
+        )
+
+        command = run.call_args.args[0]
+        self.assertIn("--no-reset", command)
+        self.assertNotIn("jlink.power=false", command)
+
+    @mock.patch.object(UPLOAD, "detect_nrf_ocd_command")
+    @mock.patch.object(UPLOAD, "flash_hex")
+    def test_successful_jlink_upload_never_calls_nrf_ocd(self, flash, detect_nrf_ocd):
+        flash.return_value = subprocess.CompletedProcess(["pyocd", "load"], 0, "", "")
+
+        completed = UPLOAD.upload_pyocd(
+            "fixture.hex",
+            "nrf54l",
+            "000960177309",
+            retries=1,
+            retry_delay=0,
+            pyocd_cmd=["pyocd"],
+            safe_mode=True,
+            probe_type="jlink",
+        )
+
+        self.assertEqual(completed, 0)
+        self.assertEqual(flash.call_args.args[2], "jlink:960177309")
+        self.assertFalse(flash.call_args.kwargs["safe_mode"])
+        self.assertEqual(flash.call_args.kwargs["probe_type"], "jlink")
+        detect_nrf_ocd.assert_not_called()
+
+    @mock.patch.object(UPLOAD, "flash_hex")
+    @mock.patch.object(UPLOAD, "select_jlink_probe_uid", return_value=(None, False))
+    def test_missing_auto_selected_jlink_fails_before_flash(self, _select, flash):
+        stderr = io.StringIO()
+        with mock.patch.object(UPLOAD.sys, "stderr", stderr):
+            completed = UPLOAD.upload_pyocd(
+                "fixture.hex",
+                "nrf54l",
+                None,
+                retries=1,
+                retry_delay=0,
+                pyocd_cmd=["pyocd"],
+                probe_type="jlink",
+            )
+
+        self.assertEqual(completed, 6)
+        flash.assert_not_called()
+        self.assertIn("No J-Link probe", stderr.getvalue())
+
+    def test_missing_jlink_hint_requires_official_driver_and_hardware_test(self):
+        failed = subprocess.CompletedProcess(
+            ["pyocd", "load"], 1, "", "No connected debug probe matches unique ID 'jlink:'"
+        )
+        stderr = io.StringIO()
+        with mock.patch.object(UPLOAD.sys, "stderr", stderr):
+            UPLOAD.print_jlink_probe_hint(failed)
+
+        details = stderr.getvalue()
+        self.assertIn("official SEGGER J-Link Software", details)
+        self.assertIn("pyocd list --probes", details)
+        self.assertIn("not yet been validated on maintainer hardware", details)
+
+
 class ProtectedTargetRecoveryTests(unittest.TestCase):
     @mock.patch.object(UPLOAD, "time")
     @mock.patch.object(UPLOAD, "recover_target")
@@ -292,6 +427,8 @@ class PlatformRecipeTests(unittest.TestCase):
             "tools.nrf54upload.upload.params.quiet",
             "tools.nrf54program.program.params.verbose",
             "tools.nrf54program.program.params.quiet",
+            "tools.nrf54jlinkprogram.program.params.verbose",
+            "tools.nrf54jlinkprogram.program.params.quiet",
         )
         for property_name in property_names:
             with self.subTest(property=property_name):
@@ -306,6 +443,7 @@ class PlatformRecipeTests(unittest.TestCase):
             "tools.nrf54ocd.upload.pattern.macosx",
             "tools.nrf54upload.upload.pattern",
             "tools.nrf54program.program.pattern",
+            "tools.nrf54jlinkprogram.program.pattern",
         )
         for recipe_key in recipe_keys:
             with self.subTest(recipe=recipe_key):
@@ -320,6 +458,7 @@ class PlatformRecipeTests(unittest.TestCase):
             "tools.nrf54ocd.upload.pattern.macosx",
             "tools.nrf54upload.upload.pattern",
             "tools.nrf54program.program.pattern",
+            "tools.nrf54jlinkprogram.program.pattern",
         )
         for recipe_key in recipe_keys:
             with self.subTest(recipe=recipe_key):
@@ -335,6 +474,10 @@ class PlatformRecipeTests(unittest.TestCase):
             self.properties["tools.nrf54program.cmd.path"],
             "{runtime.platform.path}/tools/upload.py",
         )
+        self.assertEqual(
+            self.properties["tools.nrf54jlinkprogram.cmd.path"],
+            "{runtime.platform.path}/tools/upload.py",
+        )
 
     def test_upload_recipe_properties_are_board_scoped_for_arduino_ide_1(self):
         recipe_keys = (
@@ -342,6 +485,7 @@ class PlatformRecipeTests(unittest.TestCase):
             "tools.nrf54ocd.upload.pattern.macosx",
             "tools.nrf54upload.upload.pattern",
             "tools.nrf54program.program.pattern",
+            "tools.nrf54jlinkprogram.program.pattern",
         )
         upload_properties = set()
         for recipe_key in recipe_keys:
@@ -360,6 +504,7 @@ class PlatformRecipeTests(unittest.TestCase):
                 "uf2_labels",
                 "uf2_timeout",
                 "pyocd_safe",
+                "probe_type",
             },
             upload_properties,
         )
@@ -378,6 +523,35 @@ class PlatformRecipeTests(unittest.TestCase):
                 self.assertEqual(
                     self.board_properties[f"{board_id}.upload.uf2_labels"],
                     self.properties["upload.uf2_labels"],
+                )
+
+    def test_every_board_exposes_fail_closed_experimental_jlink_upload(self):
+        for board_id in self.board_ids:
+            prefix = f"{board_id}.menu.clean_upload.jlink"
+            with self.subTest(board=board_id):
+                self.assertEqual(
+                    self.board_properties[prefix],
+                    "J-Link via pyOCD (Experimental)",
+                )
+                self.assertEqual(
+                    self.board_properties[f"{prefix}.upload.runner"], "pyocd"
+                )
+                self.assertEqual(
+                    self.board_properties[f"{prefix}.upload.tool.default"],
+                    "nrf54upload",
+                )
+                self.assertEqual(
+                    self.board_properties[f"{prefix}.upload.protocol"], "default"
+                )
+                self.assertEqual(
+                    self.board_properties[f"{prefix}.upload.probe_type"], "jlink"
+                )
+                self.assertEqual(
+                    self.board_properties[f"{prefix}.upload.pyocd_safe"], "false"
+                )
+                self.assertEqual(
+                    self.board_properties[f"{board_id}.upload.probe_type"],
+                    "cmsisdap",
                 )
 
     def test_windows_native_upload_routes_through_recovery_wrapper(self):
@@ -422,6 +596,12 @@ class PlatformRecipeTests(unittest.TestCase):
         pattern = self.properties["tools.nrf54program.program.pattern"]
         self.assertIn('--runner "pyocd"', pattern)
         self.assertNotIn("{programmer.", pattern)
+
+        jlink_pattern = self.properties["tools.nrf54jlinkprogram.program.pattern"]
+        self.assertIn('--runner "pyocd"', jlink_pattern)
+        self.assertIn('--probe-type "jlink"', jlink_pattern)
+        self.assertNotIn("--port", jlink_pattern)
+        self.assertNotIn("{programmer.", jlink_pattern)
 
     @unittest.skipUnless(
         shutil.which("arduino-cli") and Path("/bin/echo").is_file(),
@@ -482,6 +662,35 @@ class PlatformRecipeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, output)
             self.assertIn("--runner pyocd", output.replace('"', ""))
             self.assertNotIn("{programmer.", output)
+            self.assertNotIn("{upload.", output)
+
+            completed = subprocess.run(
+                [
+                    "arduino-cli",
+                    "upload",
+                    "--config-file",
+                    str(config),
+                    "--fqbn",
+                    "localnrf54:nrf54l15clean:xiao_nrf54l15",
+                    "-P",
+                    "jlink",
+                    "--input-file",
+                    str(image),
+                    "-v",
+                ],
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                },
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(completed.returncode, 0, output)
+            normalized = output.replace('"', "")
+            self.assertRegex(normalized, r"--runner\s+pyocd")
+            self.assertRegex(normalized, r"--probe-type\s+jlink")
+            self.assertNotIn("--port", normalized)
             self.assertNotIn("{upload.", output)
 
     @unittest.skipUnless(
@@ -549,6 +758,23 @@ class PlatformRecipeTests(unittest.TestCase):
                     self.assertRegex(output.replace('"', ""), r"--uf2-timeout\s+12")
                     self.assertNotIn("--openocd-bin", output)
                     self.assertNotIn("{upload.verbose}", output)
+
+            completed = subprocess.run(
+                [*command, "--board-options", "clean_upload=jlink", "-v"],
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                },
+            )
+            output = completed.stdout + completed.stderr
+            self.assertEqual(0, completed.returncode, output)
+            normalized = output.replace('"', "")
+            self.assertRegex(normalized, r"--runner\s+pyocd")
+            self.assertRegex(normalized, r"--probe-type\s+jlink")
+            self.assertNotIn("{upload.", output)
+
 
     def test_uf2_emitter_produces_valid_blocks(self):
         with tempfile.TemporaryDirectory(prefix="nrf54-uf2-test-") as directory:

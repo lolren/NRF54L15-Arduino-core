@@ -86,7 +86,7 @@ https://raw.githubusercontent.com/lolren/nrf54-arduino-core/main/package_nrf54l1
 
 Add this URL in **Arduino IDE → Preferences → Additional Boards Manager URLs**, then install **nRF54L15 Boards** from the Boards Manager.
 
-Normal uploads use the bundled native [**nRF OCD**](https://github.com/lolren/open-nrf-ocd) tool on Linux and Windows, so Windows does not need a separate Python install just to upload. If native upload fails, switch **Tools -> Upload Method** to **pyOCD Recovery**; its first setup installs pinned dependencies into the packaged tool-local runtime and requires access to the configured Python package index.
+Normal uploads use the bundled native [**nRF OCD**](https://github.com/lolren/open-nrf-ocd) tool on Linux and Windows, so Windows does not need a separate Python install just to upload. If native upload fails, switch **Tools -> Upload Method** to **pyOCD Recovery**; its first setup installs pinned dependencies into the packaged tool-local runtime and requires access to the configured Python package index. **J-Link via pyOCD (Experimental)** is also available after installing SEGGER's official J-Link driver package; this path has software-only coverage and still needs user hardware validation.
 
 ### Arduino CLI Install And Updates
 
@@ -139,7 +139,8 @@ arduino-cli core upgrade nrf54l15clean:nrf54l15clean
    an example explicitly requires it, including the Channel Sounding pair.
 4. Start with one of the examples below and click **Upload**. The default native
    nRF OCD uploader selects the connected CMSIS-DAP probe; the recovery uploader
-   is available from **Tools -> Upload Method**.
+   is available from **Tools -> Upload Method**. Select **J-Link via pyOCD
+   (Experimental)** only when using an onboard or standalone SEGGER J-Link.
 5. Open the Serial Monitor at the baud rate selected by the sketch. If serial
    output is missing, verify **Tools -> Serial Routing** and close other programs
    that own the port.
@@ -193,6 +194,35 @@ When two boards are attached, select the target explicitly with the port or UID
 reported by `arduino-cli board list` or `pyocd list`. Disable experimental
 Thread, Matter, or Zigbee build options unless the sketch actually uses them;
 this reduces compile/link surface and makes the intended runtime clear.
+
+### Experimental J-Link upload
+
+Install the official [SEGGER J-Link Software and Documentation
+Pack](https://www.segger.com/downloads/jlink/) first, reconnect the debugger,
+and confirm that `pyocd list --probes` reports a J-Link. Then select **Tools ->
+Upload Method -> J-Link via pyOCD (Experimental)**. The Nordic nRF54L15 DK's
+onboard J-Link and a standalone J-Link are both intended to work.
+
+If a standalone J-Link does not expose a serial/VCOM port, select **Tools ->
+Programmer -> J-Link via pyOCD (Experimental)** and use **Sketch -> Upload Using
+Programmer**. This programmer route does not require a fabricated serial port.
+The equivalent CLI invocation is:
+
+```bash
+arduino-cli upload -b nrf54l15clean:nrf54l15clean:nrf54l15dk_pca10156 \
+  -P jlink /path/to/sketch
+```
+
+When multiple J-Links are connected, set `NRF54L15_JLINK_UID` to the intended
+SEGGER serial number. The uploader refuses interactive or cross-transport
+auto-selection in that situation.
+
+This mode restricts pyOCD discovery to the J-Link plug-in, leaves target-power
+control disabled, and does not fall back to another attached debug probe. It
+uses pyOCD's nRF54 target support rather than adding the proprietary J-Link
+transport to `open-nrf-ocd`. It has not yet been flashed on maintainer J-Link
+hardware, so please report the J-Link model, operating system, and complete
+upload output if it fails.
 
 ### Sketch Compatibility
 
@@ -935,6 +965,15 @@ analogWrite(D1, 128);
   functions are unavailable for PWM output.
 
 ## Troubleshooting
+
+### Experimental J-Link upload cannot find a probe
+
+Run `pyocd list --probes`. If no SEGGER probe appears, install or update the
+official J-Link driver package and reconnect the probe. The pyOCD Python package
+contains the J-Link plug-in, but it cannot communicate with hardware without
+SEGGER's host driver/library. Do not select the J-Link upload method for the
+XIAO's normal CMSIS-DAP bridge. For a standalone model without VCOM, use
+**Sketch -> Upload Using Programmer** with the experimental J-Link programmer.
 
 ### Linux: Upload fails with "hidraw access denied"
 
