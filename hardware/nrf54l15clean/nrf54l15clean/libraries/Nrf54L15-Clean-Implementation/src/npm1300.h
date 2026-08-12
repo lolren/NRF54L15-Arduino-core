@@ -113,12 +113,35 @@ bool npm1300_sensor_power_enable(bool enable);  /* compatibility alias */
 /* Stop optional PMIC measurement loads before MCU sleep. */
 bool npm1300_prepare_for_sleep(void);
 
-/* Buck regulators. */
+/* XIAO nRF54LM20A buck wiring.
+ *
+ * BUCK1 is not connected on this board. BUCK2 is the fixed 3.3 V VSYS_3V3
+ * system rail; it powers both the nRF54LM20A and the SAMD11 USB/debug bridge.
+ * Converter mode may be tuned through the board-aware helpers below, but the
+ * system rail must not be disabled or moved away from its strapped voltage.
+ */
+#define NPM1300_SYSTEM_BUCK_VOLTAGE_MV 3300U
+
 bool npm1300_buck1_enable(bool enable);
 bool npm1300_buck1_set_voltage(uint16_t mv);
 bool npm1300_buck1_is_enabled(void);
-bool npm1300_buck2_enable(bool enable);
-bool npm1300_buck2_set_voltage(uint16_t mv);
+
+/* Legacy raw BUCK2 mutators are retained for source compatibility.
+ * By default, disable requests and all voltage mutations fail closed without
+ * writing the PMIC. Defining NPM1300_ENABLE_UNSAFE_SYSTEM_RAIL_CONTROL for the
+ * complete core build restores the old raw behavior and can remove both MCU
+ * and upload-probe power; normal applications must not enable it.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define NPM1300_DEPRECATED(message) __attribute__((deprecated(message)))
+#else
+#define NPM1300_DEPRECATED(message)
+#endif
+
+bool npm1300_buck2_enable(bool enable)
+    NPM1300_DEPRECATED("BUCK2 is the XIAO system rail; disable requests are blocked");
+bool npm1300_buck2_set_voltage(uint16_t mv)
+    NPM1300_DEPRECATED("BUCK2 is the fixed XIAO system rail; voltage changes are blocked");
 bool npm1300_buck2_is_enabled(void);
 
 /* Buck mode control (applies to both BUCK1 and BUCK2).
@@ -132,6 +155,12 @@ bool npm1300_buck2_is_enabled(void);
 
 bool npm1300_buck1_set_mode(uint8_t mode);
 bool npm1300_buck2_set_mode(uint8_t mode);
+
+/* Preferred board-aware access to the fixed BUCK2 system rail. */
+bool npm1300_system_buck_is_enabled(void);
+bool npm1300_system_buck_set_mode(uint8_t mode);
+
+#undef NPM1300_DEPRECATED
 
 /* Battery charger and status. */
 bool npm1300_charger_enable(bool enable);

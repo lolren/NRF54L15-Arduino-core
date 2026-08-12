@@ -964,6 +964,25 @@ groups                       # verify you're in plugdev group
 
 If USB device is root-only, the udev rule didn't trigger. Replug the board or run `sudo udevadm trigger`.
 
+### XIAO nRF54LM20A disappeared after BUCK2 control
+
+On core versions through `1.0.15`, `npm1300_buck2_enable(false)` can turn off
+the `VSYS_3V3` rail that powers both the nRF54LM20A and its SAMD11 USB/debug
+bridge. Version `1.0.16` and later block this request and BUCK2 voltage changes
+by default.
+
+To recover an affected board, disconnect both USB and the battery so the PMIC
+fully loses power, then reconnect USB. If the battery cannot be disconnected,
+connect only the paired back pads `TP21` (`SHPHLD`) and `TP22` (GND) for
+more than 10 seconds while the board is powered. This requests the nPM1300
+whole-system power cycle and restores the strapped 3.3 V BUCK2 state.
+
+If the installed sketch disables BUCK2 again at startup, hold the nRF54 RESET
+button while restoring PMIC power, select **Tools -> Upload Method -> pyOCD
+Recovery**, and replace the sketch using its connect-under-reset path. The
+[official Seeed schematic](https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_Schematic.pdf)
+identifies the paired pads. Do not bridge any other test pads.
+
 ---
 
 ## Documentation

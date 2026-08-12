@@ -24,7 +24,7 @@ void setup() {
   // nPM1300 state survives MCU reset. Clear loads left by a previous sensor or
   // battery-measurement sketch so each current run starts from the same state.
   (void)npm1300_imu_mic_power_enable(false);
-  (void)npm1300_buck1_set_mode(NPM1300_BUCK_MODE_AUTO);
+  (void)npm1300_system_buck_set_mode(NPM1300_BUCK_MODE_AUTO);
   (void)npm1300_prepare_for_sleep();
 #endif
 }

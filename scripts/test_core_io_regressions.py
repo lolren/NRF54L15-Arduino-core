@@ -1631,6 +1631,19 @@ def validate_xiao_low_power_board_contracts() -> None:
     npm_header = (
         PLATFORM / "libraries/Nrf54L15-Clean-Implementation/src/npm1300.h"
     ).read_text(encoding="utf-8")
+    buck_examples = [
+        (
+            PLATFORM
+            / "libraries/Nrf54L15-Clean-Implementation/examples/PMIC"
+            / name
+            / f"{name}.ino"
+        ).read_text(encoding="utf-8")
+        for name in (
+            "nPM1300_BuckAutoLowPower",
+            "nPM1300_BuckHystereticLowPower",
+            "nPM1300_BuckPWMLowPower",
+        )
+    ]
     npm_timed_example = (
         PLATFORM
         / "libraries/Nrf54L15-Clean-Implementation/examples/PMIC/"
@@ -1642,6 +1655,27 @@ def validate_xiao_low_power_board_contracts() -> None:
     )
     assert "nRF54 GRTC System OFF while" in npm_header
     assert "returns false while VBUS is present" not in npm_header
+    assert "BUCK2 is the fixed 3.3 V VSYS_3V3" in npm_header
+    assert "NPM1300_ENABLE_UNSAFE_SYSTEM_RAIL_CONTROL" in npm_header
+    npm_buck2_enable = function_body(
+        npm_source, "bool npm1300_buck2_enable("
+    )
+    assert "if (!e) return false;" in npm_buck2_enable
+    assert "return buck_enable(1, true);" in npm_buck2_enable
+    npm_buck2_voltage = function_body(
+        npm_source, "bool npm1300_buck2_set_voltage("
+    )
+    assert "(void)mv;" in npm_buck2_voltage
+    assert "return false;" in npm_buck2_voltage
+    npm_system_buck_mode = function_body(
+        npm_source, "bool npm1300_system_buck_set_mode("
+    )
+    assert "m > NPM1300_BUCK_MODE_FORCE_HYST" in npm_system_buck_mode
+    assert "return buck_set_mode(1, m);" in npm_system_buck_mode
+    for example in buck_examples:
+        assert "npm1300_system_buck_set_mode(" in example
+        assert "npm1300_buck1_" not in example
+        assert "XIAO nRF54LM20B" not in example
     assert "nRF54 GRTC System OFF wake-reset path" in npm_timed_example
     assert "returns false while VBUS is present" not in npm_timed_example
     npm_sleep = function_body(npm_source, "bool npm1300_prepare_for_sleep(")
@@ -1713,7 +1747,7 @@ def validate_xiao_low_power_board_contracts() -> None:
     delay_probes = [path.read_text(encoding="utf-8") for path in delay_probe_paths]
     assert delay_probes[0] == delay_probes[1], "delay-current probe copies diverged"
     assert "npm1300_imu_mic_power_enable(false)" in delay_probes[0]
-    assert "npm1300_buck1_set_mode(NPM1300_BUCK_MODE_AUTO)" in delay_probes[0]
+    assert "npm1300_system_buck_set_mode(NPM1300_BUCK_MODE_AUTO)" in delay_probes[0]
     assert "npm1300_prepare_for_sleep()" in delay_probes[0]
 
     system_off_probe = (
@@ -1721,7 +1755,7 @@ def validate_xiao_low_power_board_contracts() -> None:
         / "libraries/Nrf54L15-Clean-Implementation/examples/LowPower/LowPowerZephyrParityBlink/LowPowerZephyrParityBlink.ino"
     ).read_text(encoding="utf-8")
     assert "npm1300_imu_mic_power_enable(false)" in system_off_probe
-    assert "npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST)" in system_off_probe
+    assert "npm1300_system_buck_set_mode(NPM1300_BUCK_MODE_FORCE_HYST)" in system_off_probe
     assert "npm1300_prepare_for_sleep()" in system_off_probe
     print("PASS LM20A LFXO, oscillator-load, QSPI, and PMIC sleep contracts")
 

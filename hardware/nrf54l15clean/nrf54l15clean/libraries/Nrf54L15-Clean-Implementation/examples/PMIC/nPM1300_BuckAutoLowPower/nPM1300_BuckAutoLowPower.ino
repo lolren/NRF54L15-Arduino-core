@@ -1,13 +1,13 @@
 /*
  * nPM1300 Buck AUTO Mode + Low-Power Blink
  *
- * BUCK1 in AUTO mode (default): hysteretic at light load, PWM at heavy load.
- * Best balance for most use cases.  ~25-30 µA sleep current.
+ * The board's BUCK2 system rail in AUTO mode (default): hysteretic at light
+ * load, PWM at heavy load. Best balance for most use cases.
  *
  * Blink:  5 ms LED on every 2 seconds via SYSTEM OFF wake.
- * LED:    P1.22 (red) active-low on XIAO nRF54LM20B.
+ * LED:    P1.22 (red) active-low on XIAO nRF54LM20A.
  *
- * HARDWARE: XIAO nRF54LM20B on battery power.
+ * HARDWARE: XIAO nRF54LM20A on battery power.
  *           Remove USB before measuring current.
  */
 
@@ -22,9 +22,8 @@ void setup() {
     NRF_P1->DIRSET = (1UL << 22);
     NRF_P1->OUTSET = (1UL << 22);
 
-    // Enable BUCK1 in AUTO mode
-    npm1300_buck1_enable(true);
-    npm1300_buck1_set_mode(NPM1300_BUCK_MODE_AUTO);
+    // Keep the fixed 3.3 V system buck in its default AUTO mode.
+    npm1300_system_buck_set_mode(NPM1300_BUCK_MODE_AUTO);
 }
 
 void loop() {

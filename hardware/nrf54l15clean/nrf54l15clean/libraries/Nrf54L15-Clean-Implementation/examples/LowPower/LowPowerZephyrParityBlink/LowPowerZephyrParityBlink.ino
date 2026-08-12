@@ -99,7 +99,7 @@ void setup() {
     // loads left by sensor, battery-current, or forced-PWM examples before
     // taking a floor measurement.
     (void)npm1300_imu_mic_power_enable(false);
-    (void)npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
+    (void)npm1300_system_buck_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
     (void)npm1300_prepare_for_sleep();
 #endif
   }
@@ -114,7 +114,7 @@ void loop() {
 #if defined(NRF54LM20_FAMILY)
   // These writes are safe to repeat and keep each cycle measurement-ready.
   (void)npm1300_imu_mic_power_enable(false);
-  (void)npm1300_buck1_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
+  (void)npm1300_system_buck_set_mode(NPM1300_BUCK_MODE_FORCE_HYST);
   (void)npm1300_prepare_for_sleep();
 #endif
   gPower.systemOffTimedWakeUsNoRetention(kSystemOffUs);

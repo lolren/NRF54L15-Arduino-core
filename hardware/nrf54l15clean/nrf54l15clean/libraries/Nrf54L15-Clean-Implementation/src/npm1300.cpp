@@ -563,11 +563,32 @@ bool npm1300_prepare_for_sleep(void) {
 bool npm1300_buck1_enable(bool e) { return buck_enable(0, e); }
 bool npm1300_buck1_set_voltage(uint16_t mv) { return buck_set_voltage(0, mv); }
 bool npm1300_buck1_is_enabled(void) { return buck_is_enabled(0); }
-bool npm1300_buck2_enable(bool e) { return buck_enable(1, e); }
-bool npm1300_buck2_set_voltage(uint16_t mv) { return buck_set_voltage(1, mv); }
-bool npm1300_buck2_is_enabled(void) { return buck_is_enabled(1); }
+bool npm1300_buck2_enable(bool e) {
+#if defined(NPM1300_ENABLE_UNSAFE_SYSTEM_RAIL_CONTROL)
+    return buck_enable(1, e);
+#else
+    // BUCK2 is VSYS_3V3. Disabling it also removes the SAMD11 upload path.
+    if (!e) return false;
+    return buck_enable(1, true);
+#endif
+}
+bool npm1300_buck2_set_voltage(uint16_t mv) {
+#if defined(NPM1300_ENABLE_UNSAFE_SYSTEM_RAIL_CONTROL)
+    return buck_set_voltage(1, mv);
+#else
+    // Even a valid nPM1300 voltage is unsafe for this board's fixed rail.
+    (void)mv;
+    return false;
+#endif
+}
+bool npm1300_system_buck_is_enabled(void) { return buck_is_enabled(1); }
+bool npm1300_system_buck_set_mode(uint8_t m) {
+    if (m > NPM1300_BUCK_MODE_FORCE_HYST) return false;
+    return buck_set_mode(1, m);
+}
+bool npm1300_buck2_is_enabled(void) { return npm1300_system_buck_is_enabled(); }
 bool npm1300_buck1_set_mode(uint8_t m) { return buck_set_mode(0, m); }
-bool npm1300_buck2_set_mode(uint8_t m) { return buck_set_mode(1, m); }
+bool npm1300_buck2_set_mode(uint8_t m) { return npm1300_system_buck_set_mode(m); }
 
 bool npm1300_charger_enable(bool e) {
     if (e) {
